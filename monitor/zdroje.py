@@ -12,7 +12,6 @@ import io
 import json
 import logging
 import re
-import socket
 import time
 import urllib.error
 import urllib.request
@@ -35,6 +34,13 @@ class ZdrojVysledek:
     domeny: set = field(default_factory=set)
     registratori: dict = field(default_factory=dict)
     popis: str = ""
+    # True = zdroj vrací ÚPLNÝ seznam všech domén daného TLD (SK-NIC,
+    # otevřená data). Při prvním běhu se takový seznam bere jako výchozí
+    # stav a nehlásí se, jinak by report obsahoval celý registr.
+    # False = zdroj vrací jen výřez (nové registrace, ověřené varianty),
+    # takový výsledek se hlásí hned od prvního běhu.
+    uplny_seznam: bool = True
+    nazev: str = ""
 
 
 def _platna_domena(nazev: str, tld: str) -> bool:
@@ -157,8 +163,8 @@ class SkNic:
                 "V souboru SK-NIC se nepodařilo najít žádnou doménu. "
                 "Formát se možná změnil; první řádky: %r" % ukazka
             )
-        return ZdrojVysledek(tld="sk", domeny=domeny,
-                             registratori=registratori, popis=popis)
+        return ZdrojVysledek(tld="sk", domeny=domeny, registratori=registratori,
+                             popis=popis, uplny_seznam=True, nazev="SK-NIC")
 
 
 class CzNicOpenData:
@@ -207,12 +213,106 @@ class CzNicOpenData:
                 "V souboru .cz se nepodařilo najít žádnou doménu. "
                 "První řádky: %r" % ukazka
             )
-        return ZdrojVysledek(tld="cz", domeny=domeny,
-                             registratori=registratori, popis=popis)
+        return ZdrojVysledek(tld="cz", domeny=domeny, registratori=registratori,
+                             popis=popis, uplny_seznam=True,
+                             nazev="CZ.NIC otevřená data")
 
 
 # ---------------------------------------------------------------------------
-# Záložní zdroj pro .cz: kontrola kandidátních jmen přes oficiální RDAP
+# Feed nově registrovaných domén (NRD) - funguje pro .cz i .sk
+# ---------------------------------------------------------------------------
+
+# Pět oken po sedmi dnech pokrývá klouzavých 35 dnů. Stahují se vždy všechna:
+# naplnění jednotlivých oken je nepravidelné a opožděné dávky by jinak unikly.
+NRD_OKNA = ("nrd7", "nrd14-8", "nrd21-15", "nrd28-22", "nrd35-29")
+NRD_ZAKLAD = "https://raw.githubusercontent.com/hagezi/nrd/main/domains/%s.txt"
+NRD_POKRYTI_DNU = 35
+
+
+class NrdFeed:
+    """Seznamy nově registrovaných domén (hagezi/nrd, data Stamus Labs).
+
+    Registr .cz hromadný seznam domén neposkytuje, takže nové registrace
+    se zjišťují z tohoto veřejného feedu. Soubory jsou velké (desítky MB),
+    proto se čtou proudově po řádcích a rovnou filtrují na požadované TLD.
+
+    Pokrytí není úplné - feed zachytí zhruba polovinu nových .cz registrací,
+    viz navrh.md. Proto se kombinuje s dalšími zdroji.
+    """
+
+    def __init__(self, tlds=("cz",), zaklad=NRD_ZAKLAD, okna=NRD_OKNA,
+                 offline_soubory=None):
+        self.tlds = tuple(tlds)
+        self.zaklad = zaklad
+        self.okna = tuple(okna)
+        self.offline_soubory = offline_soubory
+        self._mezipamet = {}          # {tld: set(domény)} - sdíleno mezi TLD
+
+    def _radky(self):
+        """Vydá řádky ze všech oken; jedno nedostupné okno běh nezastaví."""
+        if self.offline_soubory:
+            for cesta in self.offline_soubory:
+                with open(cesta, encoding="utf-8", errors="replace") as f:
+                    for radek in f:
+                        yield radek
+            return
+        uspesna = 0
+        for okno in self.okna:
+            url = self.zaklad % okno
+            try:
+                log.info("Stahuji feed nových domén: %s", okno)
+                text = _stahni_url(url, "utf-8")
+            except ChybaZdroje as chyba:
+                log.warning("Okno %s se nepodařilo stáhnout: %s", okno, chyba)
+                continue
+            uspesna += 1
+            for radek in text.splitlines():
+                yield radek
+        if not uspesna:
+            raise ChybaZdroje(
+                "Nepodařilo se stáhnout žádné okno feedu nových domén. "
+                "Zkontroluj připojení k internetu, případně firemní proxy."
+            )
+
+    def _nacti(self):
+        if self._mezipamet:
+            return
+        nalezene = {tld: set() for tld in self.tlds}
+        pripony = {"." + tld: tld for tld in self.tlds}
+        for radek in self._radky():
+            radek = radek.strip().lower()
+            if not radek or radek.startswith("#"):
+                continue
+            for pripona, tld in pripony.items():
+                if radek.endswith(pripona):
+                    # Feed může výjimečně obsahovat subdoménu; monitorujeme
+                    # jen doménu 2. řádu, na tu se název zkrátí.
+                    casti = radek.split(".")
+                    if len(casti) >= 2:
+                        domena = ".".join(casti[-2:])
+                        if _platna_domena(domena, tld):
+                            nalezene[tld].add(domena)
+                    break
+        self._mezipamet = nalezene
+        for tld, domeny in nalezene.items():
+            log.info("Feed nových domén: %d domén .%s", len(domeny), tld)
+
+    def vysledek_pro(self, tld: str) -> ZdrojVysledek:
+        self._nacti()
+        return ZdrojVysledek(
+            tld=tld,
+            domeny=self._mezipamet.get(tld, set()),
+            popis="feed nově registrovaných domén (%d dnů zpětně)" % NRD_POKRYTI_DNU,
+            uplny_seznam=False,
+            nazev="NRD feed",
+        )
+
+    def stahni(self) -> ZdrojVysledek:
+        return self.vysledek_pro(self.tlds[0])
+
+
+# ---------------------------------------------------------------------------
+# Doplňkový zdroj pro .cz: kontrola kandidátních jmen přes oficiální RDAP
 # ---------------------------------------------------------------------------
 
 def generuj_kandidaty(slovo: str, pripony_predpony, limit: int):
@@ -256,23 +356,29 @@ def generuj_kandidaty(slovo: str, pripony_predpony, limit: int):
     return vysledek
 
 
-class CzRdapFallback:
-    """Záložní zdroj: ověřuje kandidátní .cz jména přes rdap.nic.cz.
+class CzRdap:
+    """Ověřuje kandidátní .cz jména přes oficiální rdap.nic.cz.
 
-    Nejprve levný DNS předfiltr (socket.getaddrinfo), potvrzení jen u
-    jmen, která v DNS existují - šetří oficiální RDAP rozhraní. Omezení:
-    nezachytí klíčové slovo uvnitř delšího názvu ani registrované, ale
-    nedelegované domény; viz navrh.md.
+    RDAP registru CZ.NIC umí odpovědět jen na dotaz "existuje TATO doména"
+    (vyhledávací endpointy vracejí 501), takže se jména musí předem
+    vygenerovat z klíčových slov. Tím zdroj doplňuje NRD feed: najde
+    i doménu, která je zaregistrovaná a odstavená, jen ji musíme uhodnout.
+
+    Záměrně BEZ předfiltru přes DNS: zaparkovaná squatterská doména často
+    nemá žádný A záznam, a právě ta nás zajímá nejvíc.
+
+    CZ.NIC má od 11/2024 limit 1 dotaz/s na IP adresu; výchozí prodleva
+    je proto 1,2 s. Při stovkách kandidátů běh trvá jednotky minut.
     """
 
     RDAP_URL = "https://rdap.nic.cz/domain/%s"
 
     def __init__(self, konfigurace_slov, pripony_predpony, max_na_slovo=200,
-                 prodleva=1.0):
+                 prodleva=1.2):
         self.konfigurace_slov = konfigurace_slov
         self.pripony_predpony = pripony_predpony
         self.max_na_slovo = max_na_slovo
-        self.prodleva = prodleva
+        self.prodleva = max(float(prodleva), 1.1)
 
     def stahni(self) -> ZdrojVysledek:
         kandidati = set()
@@ -281,32 +387,39 @@ class CzRdapFallback:
                                            self.pripony_predpony,
                                            self.max_na_slovo):
                 kandidati.add(label + ".cz")
-        log.info("RDAP fallback: %d kandidátních jmen, spouštím DNS předfiltr",
-                 len(kandidati))
-        v_dns = {d for d in sorted(kandidati) if self._existuje_v_dns(d)}
-        log.info("V DNS nalezeno %d jmen, ověřuji přes rdap.nic.cz "
-                 "(prodleva %.1f s mezi dotazy)", len(v_dns), self.prodleva)
+        odhad = len(kandidati) * self.prodleva / 60.0
+        log.info("RDAP: ověřuji %d kandidátních jmen přes rdap.nic.cz "
+                 "(prodleva %.1f s, odhad %.0f min)",
+                 len(kandidati), self.prodleva, odhad)
         registrovane = set()
-        for domena in sorted(v_dns):
-            if self._rdap_registrovana(domena):
+        selhani = 0
+        for poradi, domena in enumerate(sorted(kandidati), 1):
+            stav = self._rdap_registrovana(domena)
+            if stav is None:
+                selhani += 1
+                if selhani >= 10 and selhani == poradi:
+                    raise ChybaZdroje(
+                        "Prvních %d dotazů na rdap.nic.cz selhalo - služba je "
+                        "nedostupná nebo blokovaná (firemní proxy?)." % selhani
+                    )
+            elif stav:
                 registrovane.add(domena)
+            if poradi % 50 == 0:
+                log.info("RDAP: %d/%d ověřeno, zatím %d registrovaných",
+                         poradi, len(kandidati), len(registrovane))
             time.sleep(self.prodleva)
         return ZdrojVysledek(
             tld="cz", domeny=registrovane,
-            popis="RDAP fallback (kontrola %d kandidátních jmen)" % len(kandidati),
+            popis="RDAP CZ.NIC (ověřeno %d kandidátních jmen)" % len(kandidati),
+            uplny_seznam=False, nazev="RDAP",
         )
 
-    @staticmethod
-    def _existuje_v_dns(domena: str) -> bool:
-        try:
-            socket.getaddrinfo(domena, None)
-            return True
-        except socket.gaierror:
-            return False
-        except OSError:
-            return False
+    def _rdap_registrovana(self, domena: str):
+        """True = registrovaná, False = volná, None = dotaz selhal.
 
-    def _rdap_registrovana(self, domena: str) -> bool:
+        Rozlišení None je důležité: sériové selhání znamená nedostupnou
+        službu, ne hromadu volných domén.
+        """
         pozadavek = urllib.request.Request(
             self.RDAP_URL % domena,
             headers={"User-Agent": UZIVATELSKY_AGENT, "Accept": "application/rdap+json"},
@@ -318,8 +431,12 @@ class CzRdapFallback:
         except urllib.error.HTTPError as chyba:
             if chyba.code == 404:
                 return False
-            log.warning("RDAP dotaz na %s vrátil %s", domena, chyba.code)
-            return False
+            if chyba.code == 429:
+                log.warning("RDAP hlásí překročení limitu, zpomaluji.")
+                time.sleep(5)
+            else:
+                log.warning("RDAP dotaz na %s vrátil %s", domena, chyba.code)
+            return None
         except (urllib.error.URLError, OSError, ValueError) as chyba:
             log.warning("RDAP dotaz na %s selhal: %s", domena, chyba)
-            return False
+            return None

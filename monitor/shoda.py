@@ -7,11 +7,29 @@ klíčová slova v tomto pořadí (první zásah vyhrává):
 2. diakritika/IDN      - shoda po převodu punycode (xn--...) a odstranění diakritiky
 3. vložená pomlčka     - shoda po odstranění pomlček (s-koda -> skoda)
 4. záměna znaků        - shoda po normalizaci vizuálně podobných znaků (sk0da -> skoda)
-5. překlep             - Levenshteinova vzdálenost 1-2 v klouzavém okně
+5. překlep             - Levenshteinova vzdálenost 1-2, ukotvená na hranici tokenu
+
+Body 1-4 jsou "vysoká shoda" (jistota), bod 5 je "možný překlep" (podnět
+k prohlédnutí) - report je zobrazuje odděleně.
+
+Ukotvení překlepů: čeština je plná slov ve vzdálenosti 1 od běžných značek
+("skoda" vs "skola", příjmení na -ková), takže volné klouzavé okno dělá
+drtivou většinu nálezů nepoužitelnou. Fuzzy shoda se proto uznává jen tam,
+kde okno začíná na hranici tokenu - na začátku názvu nebo za pomlčkou.
+Na reálných datech to snížilo počet nálezů z 28 na 5, aniž zmizel jediný
+skutečný zásah.
 """
 
 from dataclasses import dataclass
 import unicodedata
+
+# Běžná česká slova, která leží blízko obvyklých značek. Když se jimi
+# překlepové okno přesně trefí, nález se potlačí. Uživatel může seznam
+# rozšířit v config.json (klíč "stoplist").
+VYCHOZI_STOPLIST = frozenset({
+    "skola", "skoly", "soda", "sklo", "skoro", "znam", "banka", "sport",
+    "servis", "sluzba", "salon", "studio", "media", "moda", "auto",
+})
 
 # Vizuálně podobné znaky a "leet speak" záměny. Vícepísmenné záměny se
 # aplikují před jednopísmennými (rn vypadá jako m, vv jako w). Mapa se
@@ -33,6 +51,7 @@ class Nalez:
     domena: str
     slovo: str
     typ: str
+    jistota: str = "vysoká"        # "vysoká" | "možný překlep"
 
 
 def odstran_diakritiku(text: str) -> str:
@@ -102,20 +121,42 @@ def max_vzdalenost_pro(slovo: str) -> int:
     return 2
 
 
-def preklep_v_textu(slovo: str, text: str, max_vzdalenost: int):
-    """Najde v textu klouzavé okno s nejmenší vzdáleností od slova.
+def hranice_tokenu(text: str):
+    """Pozice, na kterých smí začínat překlepové okno.
+
+    Začátek názvu a každá pozice hned za pomlčkou. Squatter píše značku
+    na začátku názvu nebo jako samostatný token (`skoda-dily`, `moje-skoda`);
+    shoda uprostřed slova je skoro vždy náhoda (`autoskola`, `mikulaskova`).
+    """
+    return [0] + [i + 1 for i, znak in enumerate(text) if znak == "-"]
+
+
+def preklep_v_textu(slovo: str, text: str, max_vzdalenost: int,
+                    stoplist=VYCHOZI_STOPLIST):
+    """Najde překlepovou shodu ukotvenou na hranici tokenu.
 
     Vrací nejmenší nalezenou vzdálenost 1..max_vzdalenost, jinak None
-    (vzdálenost 0 by byla přesná shoda, tu řeší dřívější kroky).
+    (vzdálenost 0 by byla přesná shoda, tu řeší dřívější kroky). Okno,
+    které se přesně trefí do slova ze stoplistu, se ignoruje.
     """
     if max_vzdalenost <= 0:
         return None
     nejlepsi = None
-    for delka in range(len(slovo) - max_vzdalenost, len(slovo) + max_vzdalenost + 1):
-        if delka <= 0 or delka > len(text):
+    for zacatek in hranice_tokenu(text):
+        # Token = úsek mezi pomlčkami, v němž okno začíná. Stoplist se
+        # porovnává i s ním, aby zápis běžného slova ("skola") potlačil
+        # nález i tam, kde se okno trefí jen do jeho části.
+        konec_tokenu = text.find("-", zacatek)
+        token = text[zacatek:konec_tokenu if konec_tokenu >= 0 else len(text)]
+        if token in stoplist:
             continue
-        for zacatek in range(len(text) - delka + 1):
+        for delka in range(len(slovo) - max_vzdalenost,
+                           len(slovo) + max_vzdalenost + 1):
+            if delka <= 0 or zacatek + delka > len(text):
+                continue
             okno = text[zacatek:zacatek + delka]
+            if okno in stoplist:
+                continue
             vzdalenost = levenshtein_do(slovo, okno, max_vzdalenost)
             if vzdalenost is not None and vzdalenost > 0:
                 if nejlepsi is None or vzdalenost < nejlepsi:
@@ -147,7 +188,8 @@ def normalizuj_slovo(slovo: str) -> str:
     return odstran_diakritiku(slovo.lower().strip())
 
 
-def najdi_shody_domeny(domena: str, slova, ignorovat=frozenset()):
+def najdi_shody_domeny(domena: str, slova, ignorovat=frozenset(),
+                       stoplist=VYCHOZI_STOPLIST):
     """Vyhodnotí jednu doménu proti všem klíčovým slovům.
 
     slova: iterable dvojic (normalizované_slovo, preklepy_zapnuty: bool)
@@ -163,6 +205,7 @@ def najdi_shody_domeny(domena: str, slova, ignorovat=frozenset()):
         if not slovo:
             continue
         zasah = None
+        jistota = "vysoká"
         for text, typ in varianty:
             if slovo in text:
                 zasah = typ
@@ -170,20 +213,25 @@ def najdi_shody_domeny(domena: str, slova, ignorovat=frozenset()):
         if zasah is None and leet_normalizuj(slovo) in leet_label:
             zasah = "záměna znaků"
         if zasah is None and preklepy:
-            vzdalenost = preklep_v_textu(slovo, norm, max_vzdalenost_pro(slovo))
+            vzdalenost = preklep_v_textu(slovo, norm, max_vzdalenost_pro(slovo),
+                                         stoplist)
             if vzdalenost is not None:
                 zasah = "překlep (vzdálenost %d)" % vzdalenost
+                jistota = "možný překlep"
         if zasah is not None:
-            nalezy.append(Nalez(domena=domena, slovo=slovo, typ=zasah))
+            nalezy.append(Nalez(domena=domena, slovo=slovo, typ=zasah,
+                                jistota=jistota))
     return nalezy
 
 
-def najdi_shody(domeny, konfigurace_slov, ignorovat=()):
+def najdi_shody(domeny, konfigurace_slov, ignorovat=(), stoplist=None):
     """Projde kolekci domén a vrátí všechny nálezy.
 
     konfigurace_slov: seznam slovníků {"slovo": ..., "preklepy": bool}
     (formát config.json). Slova se normalizují stejně jako domény, takže
     klíčové slovo smí obsahovat diakritiku.
+    stoplist: doplňková česká slova potlačující překlepové nálezy;
+    vždy se sjednotí s VYCHOZI_STOPLIST.
     """
     slova = []
     for polozka in konfigurace_slov:
@@ -191,7 +239,10 @@ def najdi_shody(domeny, konfigurace_slov, ignorovat=()):
         if slovo:
             slova.append((slovo, bool(polozka.get("preklepy", True))))
     ignorovat_mnozina = frozenset(d.lower().strip() for d in ignorovat)
+    uplny_stoplist = VYCHOZI_STOPLIST | frozenset(
+        normalizuj_slovo(s) for s in (stoplist or ()) if s)
     vysledek = []
     for domena in domeny:
-        vysledek.extend(najdi_shody_domeny(domena, slova, ignorovat_mnozina))
+        vysledek.extend(najdi_shody_domeny(domena, slova, ignorovat_mnozina,
+                                           uplny_stoplist))
     return vysledek

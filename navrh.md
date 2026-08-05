@@ -33,41 +33,87 @@ registrovaných .sk domén**, volně ke stažení bez registrace:
 To je ideální zdroj: oficiální, úplný a zadarmo. Měsíční srovnání dvou stažení dá přesnou
 množinu nově registrovaných domén.
 
-### 2.2 Doména .cz – k doověření při prvním spuštění
+### 2.2 Doména .cz – seznam neexistuje
 
-CZ.NIC provozuje otevřená data a statistické rozhraní (stats.nic.cz), to však poskytuje
-**agregované statistiky**, nikoli jmenný seznam. Zda CZ.NIC aktuálně publikuje i hromadný
-**seznam registrovaných domén** ke stažení, se z prostředí, kde tento návrh vznikal, nepodařilo
-ověřit (web nic.cz blokoval automatizovaný přístup). Proto je zdroj pro .cz řešen konfigurovatelně
-a návrh počítá s těmito variantami v tomto pořadí:
+CZ.NIC hromadný seznam registrovaných domén **nezveřejňuje a záměrně neposkytuje**:
 
-1. **Otevřená data CZ.NIC** – při prvním spuštění ověřit na `https://www.nic.cz/` (sekce
-   Otevřená data) a v Národním katalogu otevřených dat `https://data.gov.cz/` (hledat
-   „CZ.NIC“). Pokud soubor existuje, stačí jeho URL vložit do `config.json` – aplikace si
-   s běžnými formáty (prostý seznam, CSV) poradí automaticky.
-2. **Dotaz na CZ.NIC** – pokud otevřený seznam neexistuje, požádat o přístup k datům
-   (podpora@nic.cz); CZ.NIC historicky poskytuje data registru na základě smlouvy
-   (např. pro výzkum či oprávněný zájem – ochrana ochranných známek je legitimní důvod).
-3. **Záložní režim RDAP (zabudovaný v aplikaci)** – aplikace vygeneruje z klíčových slov
-   **kandidátní názvy** (slovo samotné, s předponami/příponami, s pomlčkami a překlepové
-   varianty), levně je předfiltruje přes DNS a existující jména ověří přes oficiální rozhraní
-   `rdap.nic.cz` (šetrně, s prodlevou mezi dotazy). Nová jména mezi měsíci = nové registrace.
-   *Omezení:* nezachytí klíčové slovo uvnitř delšího názvu (`autoskoda-plzen.cz`) ani
-   registrované, ale nedelegované domény.
-4. **Neoficiální agregátory** (zonefiles.io, domains-monitor.com apod.) – existují, ale jsou
-   placené a neoficiální; v souladu se zadáním jen jako poslední možnost, návrh je nevyužívá.
+- Zóna `.cz` bývala dostupná smluvně (AXFR); v roce 2011 správní rada CZ.NIC
+  všechny smlouvy vypověděla a nařídila zlikvidovat archivy (kauza KRAXNET).
+- Technický obchvat přes DNSSEC zone-walking zavřelo nasazení **NSEC3**.
+- RDAP registru umí jen dotaz na konkrétní jméno – vyhledávací endpointy podle
+  RFC 9082 vracejí **HTTP 501 Not Implemented** (ověřeno ve zdrojovém kódu
+  `CZ-NIC/fred-rdap`).
+- DNS crawler CZ.NIC tato data má, ale politika výslovně vylučuje jejich
+  poskytnutí třetím stranám; `stats.nic.cz` i Domain Report jsou jen agregace.
+- Průzkum GitHubu potvrdil totéž: katalogizační projekty (`jschauma/tld-zoneinfo`,
+  `jschauma/zonecount`) vedou `.cz` jako „name count only“, zatímco `.sk` jako
+  skutečný seznam jmen. Žádný veřejný projekt seznam `.cz` domén nemá.
+
+Monitoring `.cz` proto stojí na dvou zdrojích, které se navzájem doplňují:
+
+**a) Feed nově registrovaných domén** – projekt
+[hagezi/nrd](https://github.com/hagezi/nrd) (data Stamus Labs Open NRD)
+publikuje seznamy nově registrovaných domén včetně `.cz`, bez klíče
+a registrace:
+
+```
+https://raw.githubusercontent.com/hagezi/nrd/main/domains/nrd7.txt
+                                                        nrd14-8.txt
+                                                        nrd21-15.txt
+                                                        nrd28-22.txt
+                                                        nrd35-29.txt
+```
+
+Pět oken pokrývá klouzavých **35 dnů**. Ověřeno 5. 8. 2026: `nrd7` obsahuje
+5 331 `.cz` domén, granularita je doména 2. řádu, aktualizace denní,
+dlouho registrované domény (`seznam.cz`, `alza.cz`, `nic.cz`) v seznamu nejsou.
+Feed pokrývá i `.sk` (4 126 domén za 14 dnů), proto se používá pro obě TLD.
+
+*Omezení:* ~526 nových `.cz` denně oproti reálným ~850–1 000, tedy zhruba
+**50–60 % pokrytí**, a jednotlivá okna jsou naplněná nepravidelně. Proto se
+vždy stahuje všech pět oken a výsledek se porovnává s vlastní historií.
+
+**b) RDAP CZ.NIC** – pro každé klíčové slovo se vygenerují překlepové varianty
+a ověří se dotazem `https://rdap.nic.cz/domain/<jméno>`. Najde i doménu
+zaregistrovanou bez webu, kterou feed nezachytí. Limit registru je od 11/2024
+1 dotaz/s na IP, prodleva je proto 1,2 s.
+
+**Prověřeno a zamítnuto:** crt.sh (Certificate Transparency) – od 7/2026 zrušil
+hledání podřetězce a snížil limit na 5 dotazů/min; Domains Project
+(`tb0hdan/domains`) – 7,3 mil. `.cz` jmen, ale poslední aktualizace 10/2023
+a jde o crawl, ne registrace; Tranco/Majestic – jen TOP 1 mil.; whoisds.com –
+pouze gTLD; NSEC3 zone-walking – vyloučeno, zátěž kritické infrastruktury
+a porušení podmínek CZ.NIC.
+
+**Oficiální cesta k datům:** písemná žádost s úředně ověřeným podpisem nebo
+datovou schránkou (`h4axdn8`), s odůvodněním účelu; CZ.NIC může zpoplatnit
+i odmítnout. Data z registru poskytuje soudům a rozhodcům v ADR sporu – pro
+majitele značky tedy vede cesta přes zahájení sporu, ne přes žádost o dataset.
 
 ### 2.3 Princip detekce nových domén
 
-Každý měsíc se stáhne úplný aktuální seznam (snapshot) a porovná se s uloženým snapshotem
-z minulého běhu: **nové domény = aktuální množina − minulá množina**. První běh nemá s čím
-porovnávat, proto vytvoří **výchozí stav** – report všech *už existujících* domén odpovídajících
-klíčovým slovům (užitečné samo o sobě: ukáže současnou situaci kolem značky).
+Aplikace si vede **trvalou evidenci všech domén, které kdy viděla** (tabulka
+`videne_domeny`). Za novou se považuje doména, která v evidenci ještě není –
+bez ohledu na to, který zdroj ji nahlásil a jak dlouhá byla mezera mezi běhy.
+Výsledky jednotlivých zdrojů se prostě sjednotí.
 
-Známé omezení: doména zaregistrovaná a zase zrušená mezi dvěma běhy unikne. Pro měsíční
-monitoring značky je to přijatelné; kdo chce jemnější rozlišení, přepne v `config.json`
-klíč `obdobi` na `tydne` či `denne` – běhy, značky reportů i úloha plánovače se
-přizpůsobí automaticky.
+Tenhle přístup je odolnější než porovnávání dvou snapshotů: zdroje mají různou
+povahu (úplný seznam × výřez posledních 35 dnů × ověřená jména), různá období
+běhů nevadí a vynechaný běh nic nerozbije.
+
+První běh s úplným seznamem (`.sk`) přirozeně označí za nové všechny domény
+registru. Report se v takovém případě označí jako **výchozí stav** – je to
+užitečný vstupní audit toho, co kolem značky existuje už teď.
+
+Známá omezení:
+
+- Feed nových domén sahá **35 dnů zpět**. Při delší pauze mezi běhy část
+  registrací unikne – aplikace na to upozorní v logu. Proto je doporučená
+  frekvence měsíčně (`obdobi` lze přepnout i na `tydne`/`denne`).
+- Doména zaregistrovaná a zrušená mezi dvěma běhy může uniknout, pokud ji
+  nezachytí ani feed.
+- Feed pokrývá zhruba polovinu nových `.cz` registrací (viz 2.2); RDAP vrstva
+  tuto mezeru zmenšuje jen pro předvídané varianty.
 
 ## 3. Detekce shody s klíčovými slovy
 
@@ -82,8 +128,23 @@ vyhodnocují se v tomto pořadí:
 | záměna znaků (leet/homoglyfy) | `sk0da-dily.cz` (0↔o, 1↔i↔l, rn↔m, vv↔w…) |
 | překlep (Levenshteinova vzdálenost) | `skooda-eshop.cz` |
 
-Ochrana proti falešným poplachům:
+Ochrana proti falešným poplachům – **čeština je tu hlavní problém**. Test na
+reálných datech ukázal, že volné klouzavé okno dělá pro slovo „skoda“ 28 nálezů,
+z nichž drtivá většina jsou náhody: `autoskola-schejbal.cz`, `vecerniskola.cz`,
+`chorvatskoapartmany.cz`, `mikulaskova.cz`, `evahruskova.cz` (škola, autoškola,
+Chorvatsko, příjmení na -ková). Opatření:
 
+- **Ukotvení na hranici tokenu** – překlepová shoda se uzná jen tam, kde okno
+  začíná na začátku názvu nebo za pomlčkou. Squatter píše značku na začátek
+  (`skoda-dily`, `moje-skoda`); shoda uprostřed slova je skoro vždy náhoda.
+  Na stejných datech to snížilo počet nálezů **z 28 na 5**, aniž zmizel jediný
+  skutečný zásah (`raifeisenbank.cz` i `eznam.cz` prošly).
+- **Stoplist** běžných českých slov (`skola`, `soda`, `sklo`, `servis`…),
+  rozšiřitelný uživatelem v okně aplikace. Porovnává se s celým tokenem
+  i s nalezeným oknem.
+- **Rozdělení reportu** na „vysoká shoda“ (přesná / IDN / pomlčka / záměna znaků)
+  a „možné překlepy“ – právník tak nejdřív čte spolehlivou část a fuzzy nálezy
+  bere jako podnět k prohlédnutí.
 - překlepy se vyhodnocují až od **5 znaků** délky slova (vzdálenost 1), od 8 znaků vzdálenost 2,
 - překlepy lze **vypnout u jednotlivého slova** (`"preklepy": false` v config.json),
 - **whitelist** `ignorovat_domeny` potlačí známé neškodné domény (např. vlastní),

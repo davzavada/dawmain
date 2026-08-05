@@ -1,0 +1,20 @@
+# Title: Newly Registered Domains (NRD)
+# Description: Domains from 7 days ago to yesterday (the last day)
+# Homepage: https://github.com/hagezi/nrd
+# Last modified: 05 Aug 2026 05:59 UTC
+# Number of entries: 14
+#
+0-123movies.com
+novaskoda.cz
+sk0da-dily.cz
+autoskola-schejbal.cz
+mikulaskova.cz
+chorvatskoapartmany.cz
+vecerniskola.cz
+raifeisenbank.cz
+eznam.cz
+www.podivny-zaznam.cz
+skodabratislava.sk
+jaroslavskoda.sk
+example.org
+neco.co.uk

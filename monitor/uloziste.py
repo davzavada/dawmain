@@ -33,9 +33,21 @@ CREATE TABLE IF NOT EXISTS nalezy (
     domena TEXT NOT NULL,
     slovo TEXT NOT NULL,
     typ TEXT NOT NULL,
+    jistota TEXT NOT NULL DEFAULT 'vysoká',
+    zdroj TEXT,
     registrator TEXT,
     UNIQUE (obdobi, domena, slovo)
 );
+-- Trvalá evidence všech domén, které aplikace kdy viděla. Díky ní je
+-- "nová doména" definovaná jako "dosud neviděná", nezávisle na tom, jak
+-- dlouhá je mezera mezi běhy a kolik zdrojů ji nahlásilo.
+CREATE TABLE IF NOT EXISTS videne_domeny (
+    domena TEXT PRIMARY KEY,
+    tld TEXT NOT NULL,
+    prvni_obdobi TEXT NOT NULL,
+    zdroj TEXT
+);
+CREATE INDEX IF NOT EXISTS videne_tld ON videne_domeny (tld);
 """
 
 
@@ -111,28 +123,81 @@ class Uloziste:
             "SELECT DISTINCT obdobi FROM behy ORDER BY obdobi DESC"
         )]
 
+    # -- evidence viděných domén --------------------------------------------
+
+    def zna_tld(self, tld: str) -> bool:
+        """Proběhl už pro toto TLD nějaký běh? (rozhoduje o výchozím stavu)"""
+        radek = self.spojeni.execute(
+            "SELECT 1 FROM videne_domeny WHERE tld = ? LIMIT 1", (tld,)
+        ).fetchone()
+        return radek is not None
+
+    def rozdel_na_nove(self, domeny, tld: str):
+        """Vrátí podmnožinu domén, které v evidenci ještě nejsou."""
+        if not domeny:
+            return set()
+        znamé = set()
+        seznam = list(domeny)
+        # SQLite má limit na počet parametrů dotazu, ptáme se po dávkách.
+        for i in range(0, len(seznam), 500):
+            davka = seznam[i:i + 500]
+            otazniky = ",".join("?" * len(davka))
+            znamé.update(r[0] for r in self.spojeni.execute(
+                "SELECT domena FROM videne_domeny WHERE domena IN (%s)" % otazniky,
+                davka,
+            ))
+        return {d for d in seznam if d not in znamé}
+
+    def zaznamenej_videne(self, domeny, tld: str, obdobi: str, zdroj: str):
+        with self.spojeni:
+            self.spojeni.executemany(
+                "INSERT OR IGNORE INTO videne_domeny "
+                "(domena, tld, prvni_obdobi, zdroj) VALUES (?, ?, ?, ?)",
+                [(d, tld, obdobi, zdroj) for d in domeny],
+            )
+
+    def pocet_videnych(self, tld: str) -> int:
+        return self.spojeni.execute(
+            "SELECT COUNT(*) FROM videne_domeny WHERE tld = ?", (tld,)
+        ).fetchone()[0]
+
+    def posledni_beh_pred(self, obdobi: str, tld: str):
+        """Datum spuštění posledního běhu před daným obdobím (nebo None)."""
+        radek = self.spojeni.execute(
+            "SELECT spusteno FROM behy WHERE tld = ? AND obdobi < ? "
+            "ORDER BY obdobi DESC LIMIT 1", (tld, obdobi)
+        ).fetchone()
+        return radek[0] if radek else None
+
     # -- nálezy -------------------------------------------------------------
 
-    def uloz_nalezy(self, obdobi: str, tld: str, nalezy, registratori):
+    def uloz_nalezy(self, obdobi: str, tld: str, nalezy, registratori,
+                    zdroje_domen=None):
+        zdroje_domen = zdroje_domen or {}
         with self.spojeni:
             self.spojeni.execute(
                 "DELETE FROM nalezy WHERE obdobi = ? AND tld = ?", (obdobi, tld)
             )
             self.spojeni.executemany(
-                "INSERT OR IGNORE INTO nalezy (obdobi, tld, domena, slovo, typ, registrator) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT OR IGNORE INTO nalezy "
+                "(obdobi, tld, domena, slovo, typ, jistota, zdroj, registrator) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 [
-                    (obdobi, tld, n.domena, n.slovo, n.typ,
-                     registratori.get(n.domena))
+                    (obdobi, tld, n.domena, n.slovo, n.typ, n.jistota,
+                     zdroje_domen.get(n.domena), registratori.get(n.domena))
                     for n in nalezy
                 ],
             )
 
-    def nalezy_obdobi(self, obdobi: str):
+    def nalezy_obdobi(self, obdobi: str, jistota=None):
+        dotaz = ("SELECT slovo, domena, tld, typ, registrator, jistota, zdroj "
+                 "FROM nalezy WHERE obdobi = ?")
+        parametry = [obdobi]
+        if jistota is not None:
+            dotaz += " AND jistota = ?"
+            parametry.append(jistota)
         return self.spojeni.execute(
-            "SELECT slovo, domena, tld, typ, registrator FROM nalezy "
-            "WHERE obdobi = ? ORDER BY slovo, tld, domena", (obdobi,)
-        ).fetchall()
+            dotaz + " ORDER BY slovo, tld, domena", parametry).fetchall()
 
     def pocty_nalezu(self):
         """{období: počet nálezů} pro přehledovou stránku."""

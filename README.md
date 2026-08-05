@@ -76,6 +76,19 @@ py monitoring-domen.pyz odeber-slovo skoda           odebere slovo
   slov je vypni volbou `--bez-preklepu` (méně falešných poplachů).
 - Známé neškodné domény (třeba vlastní) přidej do `ignorovat_domeny`
   v `config.json`.
+- Běžná česká slova, která se náhodou trefí do překlepu (`skola` vs `skoda`),
+  patří do pole **Nehlásit jako překlep** v okně aplikace (`stoplist`
+  v `config.json`).
+
+### Jak číst report
+
+Report je rozdělený na dvě části:
+
+- **Vysoká shoda** – klíčové slovo je v názvu obsažené přímo nebo jen jinak
+  zapsané (diakritika, pomlčka, záměna podobných znaků). Tyhle projdi vždy.
+- **Možné překlepy** – název se liší o jeden až dva znaky. Sem spadají
+  skutečné typosquaty (`raifeisenbank.cz`, `eznam.cz`), ale i náhodné shody
+  s běžnými slovy. Co je neškodné, přidej do stoplistu nebo ignorovaných domén.
 
 ## Období monitoringu
 
@@ -96,24 +109,39 @@ přepočítání už proběhlého období přidej `--znovu`.
 - `reporty\<značka>.html` – report za období, `reporty\index.html` – přehled,
 - `data\` – stažené snapshoty seznamů (gzip), databáze běhů a `monitor.log`.
 
-## Zdroj dat pro .cz
+## Odkud se berou data
 
-Seznam `.sk` domén poskytuje SK-NIC přímo (nastaveno předem). U `.cz` je
-potřeba při prvním zprovoznění doplnit adresu souboru se seznamem domén
-z otevřených dat CZ.NIC:
+| TLD | Zdroje |
+|---|---|
+| **.sk** | úplný seznam SK-NIC + feed nově registrovaných domén |
+| **.cz** | feed nově registrovaných domén + ověření překlepových variant přes RDAP CZ.NIC |
 
-1. Otevři <https://www.nic.cz/> (sekce **Otevřená data**), případně
-   národní katalog <https://data.gov.cz/> a vyhledej „CZ.NIC“.
-2. Najdi dataset se **seznamem registrovaných domén** a zkopíruj přímý odkaz
-   na datový soubor (CSV/TXT) do `config.json` → `zdroje.cz.urls`.
-3. Ověř příkazem `over-zdroje`.
+**Proč u .cz není seznam.** CZ.NIC – na rozdíl od SK-NIC – hromadný seznam
+registrovaných domén nezveřejňuje. Veřejný je jen dotaz na *konkrétní* doménu
+(RDAP/WHOIS); vyhledávací rozhraní registru vrací `501 Not Implemented`.
+Není to opomenutí: smluvní přístup k zóně CZ.NIC v roce 2011 zrušil a technický
+obchvat zavřel nasazením NSEC3. Podrobně v [navrh.md](navrh.md).
 
-Pokud CZ.NIC hromadný seznam nenabízí, nastav v `config.json`
-`zdroje.cz.rezim` na `"rdap"` – aplikace pak nové registrace zjišťuje
-kontrolou kandidátních jmen (slovo + předpony/přípony + překlepy) přes
-oficiální rozhraní `rdap.nic.cz`. Tento režim nezachytí klíčové slovo
-uvnitř delších názvů; podrobnosti v [navrh.md](navrh.md). Další možnost je
-požádat CZ.NIC o poskytnutí dat (podpora@nic.cz).
+Proto se `.cz` skládá ze dvou zdrojů, které se doplňují:
+
+- **feed nově registrovaných domén** ([hagezi/nrd](https://github.com/hagezi/nrd),
+  data Stamus Labs) – pokrývá klouzavých **35 dnů** a najde i doménu, jejíž
+  jméno bychom neuhodli (`autoskoda-plzen.cz`). Zachytí zhruba polovinu nových
+  `.cz` registrací.
+- **RDAP CZ.NIC** – ověří vygenerované překlepové varianty klíčových slov;
+  najde i doménu zaregistrovanou „do šuplíku“ bez webu. Kvůli limitu registru
+  (1 dotaz/s) trvá tahle část jednotky minut.
+
+Kdyby CZ.NIC seznam někdy poskytl, stačí jeho adresu vložit v GUI do pole
+**Seznam .cz z URL** (nebo v `config.json` do `zdroje.cz.urls`) – zapojí se
+automaticky. Požádat lze na `podpora@nic.cz` nebo datovou schránkou `h4axdn8`.
+
+### Jak často spouštět
+
+Aplikace si pamatuje každou doménu, kterou kdy viděla, a hlásí jen dosud
+neviděné – nevadí tedy, když běh vyjde na 28 nebo 33 dnů, ani když jeden
+vynecháš. Jediné omezení: **feed sahá 35 dnů zpět**, takže při delší pauze
+část registrací unikne. Aplikace na to v takovém případě upozorní v logu.
 
 ## Řešení potíží
 

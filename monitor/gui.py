@@ -104,20 +104,37 @@ class Okno(tk.Tk):
         self.cas = ttk.Entry(ram_beh, width=7)
         self.cas.grid(row=0, column=5, sticky="w", padx=(4, 0))
 
-        # zdroj .cz
-        ram_cz = ttk.LabelFrame(hlavni, text="Zdroj dat pro .cz (viz README)",
-                                padding=8)
-        ram_cz.pack(fill="x", pady=(8, 0))
-        ttk.Label(ram_cz, text="URL seznamu domén:").grid(row=0, column=0,
-                                                          sticky="w")
-        self.cz_url = ttk.Entry(ram_cz)
-        self.cz_url.grid(row=0, column=1, sticky="ew", padx=(4, 0))
-        ram_cz.columnconfigure(1, weight=1)
-        self.cz_rdap = tk.BooleanVar(value=False)
+        # zdroje dat
+        ram_zdroje = ttk.LabelFrame(hlavni, text="Zdroje dat", padding=8)
+        ram_zdroje.pack(fill="x", pady=(8, 0))
+        self.zdroj_nrd = tk.BooleanVar(value=True)
+        self.zdroj_rdap = tk.BooleanVar(value=True)
+        self.zdroj_sknic = tk.BooleanVar(value=True)
         ttk.Checkbutton(
-            ram_cz, variable=self.cz_rdap,
-            text="záložní režim RDAP (bez seznamu; jen kandidátní jména)",
-        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
+            ram_zdroje, variable=self.zdroj_nrd,
+            text="feed nově registrovaných domén – .cz i .sk (35 dnů zpětně)",
+        ).grid(row=0, column=0, columnspan=2, sticky="w")
+        ttk.Checkbutton(
+            ram_zdroje, variable=self.zdroj_rdap,
+            text="RDAP CZ.NIC – ověří překlepové varianty (.cz, pomalejší)",
+        ).grid(row=1, column=0, columnspan=2, sticky="w")
+        ttk.Checkbutton(
+            ram_zdroje, variable=self.zdroj_sknic,
+            text="úplný seznam SK-NIC (.sk)",
+        ).grid(row=2, column=0, columnspan=2, sticky="w")
+        ttk.Label(ram_zdroje, text="Seznam .cz z URL (nepovinné):").grid(
+            row=3, column=0, sticky="w", pady=(6, 0))
+        self.cz_url = ttk.Entry(ram_zdroje)
+        self.cz_url.grid(row=3, column=1, sticky="ew", padx=(4, 0), pady=(6, 0))
+        ram_zdroje.columnconfigure(1, weight=1)
+
+        # slova potlačující falešné poplachy
+        ram_stop = ttk.LabelFrame(
+            hlavni, text="Nehlásit jako překlep (běžná slova, oddělená čárkou)",
+            padding=8)
+        ram_stop.pack(fill="x", pady=(8, 0))
+        self.stoplist = ttk.Entry(ram_stop)
+        self.stoplist.pack(fill="x")
 
         # akce
         ram_akce = ttk.Frame(hlavni)
@@ -159,11 +176,16 @@ class Okno(tk.Tk):
         self.cas.delete(0, "end")
         self.cas.insert(0, str(plan.get("cas", "09:30")))
         cz = cfg.get("zdroje", {}).get("cz", {})
+        sk = cfg.get("zdroje", {}).get("sk", {})
         urls = [u for u in cz.get("urls", []) if u]
         self.cz_url.delete(0, "end")
         if urls:
             self.cz_url.insert(0, urls[0])
-        self.cz_rdap.set(cz.get("rezim", "auto") == "rdap")
+        self.zdroj_rdap.set(cz.get("rdap", True))
+        self.zdroj_sknic.set(sk.get("seznam", True))
+        self.zdroj_nrd.set(cz.get("nrd", True) or sk.get("nrd", True))
+        self.stoplist.delete(0, "end")
+        self.stoplist.insert(0, ", ".join(cfg.get("stoplist", [])))
 
     def _prekresli_slova(self):
         self.seznam_slov.delete(0, "end")
@@ -191,10 +213,23 @@ class Okno(tk.Tk):
         cfg.setdefault("planovac", {})
         cfg["planovac"]["den_v_mesici"] = den
         cfg["planovac"]["cas"] = cas
-        cz = cfg.setdefault("zdroje", {}).setdefault("cz", {})
+        zdroje_cfg = cfg.setdefault("zdroje", {})
+        cz = zdroje_cfg.setdefault("cz", {})
+        sk = zdroje_cfg.setdefault("sk", {})
         url = self.cz_url.get().strip()
         cz["urls"] = [url] if url else []
-        cz["rezim"] = "rdap" if self.cz_rdap.get() else "auto"
+        cz["rdap"] = bool(self.zdroj_rdap.get())
+        cz["nrd"] = sk["nrd"] = bool(self.zdroj_nrd.get())
+        sk["seznam"] = bool(self.zdroj_sknic.get())
+        cfg["stoplist"] = [s.strip().lower()
+                           for s in self.stoplist.get().split(",") if s.strip()]
+
+        if not (cz["nrd"] or cz["rdap"] or cz["urls"] or sk["seznam"]):
+            messagebox.showerror(
+                "Zdroje dat",
+                "Musí být zapnutý aspoň jeden zdroj dat, jinak nebude "
+                "co prohledávat.")
+            return False
         return True
 
     def _uloz(self, potichu=False) -> bool:
@@ -263,7 +298,7 @@ class Okno(tk.Tk):
         threading.Thread(target=obal, daemon=True).start()
 
     def _over_zdroje(self):
-        volby = Namespace(offline_cz=None, offline_sk=None)
+        volby = Namespace(offline_cz=None, offline_sk=None, offline_nrd=None)
         self._spust_na_pozadi(
             lambda: self.jadro.over_zdroje(self.config_data, volby))
 
@@ -271,7 +306,8 @@ class Okno(tk.Tk):
         jadro = self.jadro
         znacka = planovac.znacka_obdobi(self.config_data.get("obdobi", "mesicne"))
         volby = Namespace(obdobi=znacka, znovu=True, jen_tld=None,
-                          offline_cz=None, offline_sk=None, tichy=True)
+                          offline_cz=None, offline_sk=None, offline_nrd=None,
+                          tichy=True)
 
         def prace():
             sklad = jadro.uloziste.Uloziste(os.path.join(jadro.KOREN, "data"))

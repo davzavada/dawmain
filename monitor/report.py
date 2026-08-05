@@ -12,7 +12,10 @@ _STYL = """
 body { font-family: "Segoe UI", system-ui, sans-serif; margin: 2rem auto;
        max-width: 68rem; padding: 0 1rem; color: #1a2733; background: #fff; }
 h1 { font-size: 1.5rem; border-bottom: 3px solid #0b6ea8; padding-bottom: .4rem; }
-h2 { font-size: 1.15rem; margin-top: 2rem; color: #0b6ea8; }
+h2 { font-size: 1.25rem; margin-top: 2.2rem; color: #0b6ea8;
+     border-bottom: 1px solid #dbe4ec; padding-bottom: .3rem; }
+h3 { font-size: 1rem; margin-top: 1.4rem; color: #33475b; }
+.uvod { color: #4a5b6d; font-size: .9rem; margin: .4rem 0 0; }
 table { border-collapse: collapse; width: 100%; margin-top: .5rem; }
 th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid #dbe4ec; }
 th { background: #eef4f9; font-weight: 600; }
@@ -55,11 +58,49 @@ def _stitek_typu(typ: str) -> str:
     return '<span class="%s">%s</span>' % (trida, html.escape(typ))
 
 
-def generuj_report(obdobi, behy, nalezy, slozka_reportu) -> str:
+def _sekce_nalezu(nalezy, nadpis, uvod, prazdne):
+    """Vykreslí jednu skupinu nálezů seskupenou podle klíčového slova."""
+    casti = ["<h2>%s</h2>" % html.escape(nadpis)]
+    if uvod:
+        casti.append('<p class="uvod">%s</p>' % uvod)
+    if not nalezy:
+        casti.append('<p class="nic">%s</p>' % html.escape(prazdne))
+        return casti
+
+    podle_slova = {}
+    for slovo, domena, tld, typ, registrator, _jistota, zdroj in nalezy:
+        podle_slova.setdefault(slovo, []).append((domena, tld, typ,
+                                                  registrator, zdroj))
+    for slovo in sorted(podle_slova):
+        radky = podle_slova[slovo]
+        casti.append("<h3>„%s“ – %d</h3>" % (html.escape(slovo), len(radky)))
+        casti.append("<table><tr><th>Doména</th><th>Typ shody</th>"
+                     "<th>Zdroj</th><th>Registrátor</th><th>Odkazy</th></tr>")
+        for domena, tld, typ, registrator, zdroj in radky:
+            zobrazeni = html.escape(domena)
+            if "xn--" in domena:
+                dekodovana = shoda.dekoduj_idn(domena)
+                if dekodovana != domena:
+                    zobrazeni += (" <small>(zobrazí se jako %s)</small>"
+                                  % html.escape(dekodovana))
+            casti.append(
+                "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td>"
+                '<td><a href="http://%s" target="_blank" rel="noopener">web</a> '
+                "· %s</td></tr>"
+                % (zobrazeni, _stitek_typu(typ), html.escape(zdroj or "–"),
+                   html.escape(registrator or "–"), html.escape(domena),
+                   _odkaz_registru(domena, tld))
+            )
+        casti.append("</table>")
+    return casti
+
+
+def generuj_report(obdobi, behy, nalezy_vysoka, nalezy_preklepy,
+                   slozka_reportu) -> str:
     """Vytvoří reporty/<značka období>.html a vrátí cestu k němu.
 
-    behy:   řádky (tld, spusteno, zdroj, pocet_domen, pocet_novych, vychozi_stav)
-    nalezy: řádky (slovo, domena, tld, typ, registrator) seřazené podle slova
+    behy: řádky (tld, spusteno, zdroj, pocet_domen, pocet_novych, vychozi_stav)
+    nalezy_*: řádky (slovo, domena, tld, typ, registrator, jistota, zdroj)
     """
     os.makedirs(slozka_reportu, exist_ok=True)
     casti = ["<h1>Monitoring domén – report za %s</h1>" % html.escape(obdobi)]
@@ -86,38 +127,23 @@ def generuj_report(obdobi, behy, nalezy, slozka_reportu) -> str:
             "registrované.</div>"
         )
 
-    if not nalezy:
-        casti.append('<p class="nic">Žádná nová doména neodpovídá klíčovým slovům.</p>')
+    casti.extend(_sekce_nalezu(
+        nalezy_vysoka, "Vysoká shoda",
+        "Klíčové slovo je v názvu obsažené přímo, nebo jen jinak zapsané "
+        "(diakritika, pomlčka, záměna podobných znaků). Tyhle nálezy stojí "
+        "za prohlédnutí vždy.",
+        "Žádná nová doména neodpovídá klíčovým slovům."))
 
-    podle_slova = {}
-    for slovo, domena, tld, typ, registrator in nalezy:
-        podle_slova.setdefault(slovo, []).append((domena, tld, typ, registrator))
-
-    for slovo in sorted(podle_slova):
-        radky = podle_slova[slovo]
-        casti.append("<h2>„%s“ – %d nález%s</h2>"
-                     % (html.escape(slovo), len(radky),
-                        "" if len(radky) == 1 else ("y" if len(radky) < 5 else "ů")))
-        casti.append("<table><tr><th>Doména</th><th>Typ shody</th>"
-                     "<th>Registrátor</th><th>Odkazy</th></tr>")
-        for domena, tld, typ, registrator in radky:
-            zobrazeni = html.escape(domena)
-            if "xn--" in domena:
-                dekodovana = shoda.dekoduj_idn(domena)
-                if dekodovana != domena:
-                    zobrazeni += " <small>(zobrazí se jako %s)</small>" % html.escape(dekodovana)
-            casti.append(
-                "<tr><td>%s</td><td>%s</td><td>%s</td>"
-                '<td><a href="http://%s" target="_blank" rel="noopener">web</a> '
-                "· %s</td></tr>"
-                % (zobrazeni, _stitek_typu(typ),
-                   html.escape(registrator or "–"), html.escape(domena),
-                   _odkaz_registru(domena, tld))
-            )
-        casti.append("</table>")
+    casti.extend(_sekce_nalezu(
+        nalezy_preklepy, "Možné překlepy",
+        "Název se od klíčového slova liší o jeden až dva znaky. Část z nich "
+        "budou náhodné shody s běžnými českými slovy – neškodné domény "
+        "můžeš přidat do seznamu ignorovaných v nastavení.",
+        "Žádné překlepové varianty."))
 
     casti.append('<p class="pata">Vygenerováno aplikací Monitoring domén. '
-                 'Zdroje dat: oficiální seznamy registrů CZ.NIC a SK-NIC. '
+                 'Zdroje dat: SK-NIC, RDAP CZ.NIC a veřejný feed nově '
+                 'registrovaných domén. '
                  '<a href="index.html">Přehled všech reportů</a></p>')
 
     cesta = os.path.join(slozka_reportu, "%s.html" % obdobi)

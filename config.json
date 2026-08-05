@@ -3,6 +3,8 @@
 
   "ignorovat_domeny": [],
 
+  "stoplist": [],
+
   "obdobi": "mesicne",
 
   "planovac": {
@@ -12,26 +14,37 @@
 
   "zdroje": {
     "sk": {
+      "seznam": true,
+      "nrd": true,
       "url": "https://sk-nic.sk/subory/domains.txt",
       "kodovani": "iso-8859-2"
     },
     "cz": {
-      "rezim": "auto",
+      "rdap": true,
+      "nrd": true,
       "urls": [],
       "kodovani": "utf-8",
       "_napoveda": [
-        "Do 'urls' vlož adresu souboru se seznamem .cz domén z otevřených dat CZ.NIC.",
-        "Kde ji najít: https://www.nic.cz/ (sekce Otevřená data) nebo https://data.gov.cz/ (hledej 'CZ.NIC').",
-        "Postup je popsán v README.md v sekci 'První spuštění'.",
-        "Pokud hromadný seznam není dostupný, nastav 'rezim' na 'rdap' - zapne se záložní kontrola kandidátních jmen přes oficiální rozhraní rdap.nic.cz."
+        "CZ.NIC hromadný seznam .cz domén nezveřejňuje, proto se .cz skládá ze dvou zdrojů:",
+        "  nrd  = feed nově registrovaných domén (najde i jména, která bychom neuhodli),",
+        "  rdap = ověření vygenerovaných překlepových variant přes oficiální rdap.nic.cz.",
+        "Kdyby CZ.NIC seznam někdy poskytl, stačí jeho adresu vložit do 'urls'."
+      ]
+    },
+    "nrd": {
+      "zaklad": "https://raw.githubusercontent.com/hagezi/nrd/main/domains/%s.txt",
+      "okna": ["nrd7", "nrd14-8", "nrd21-15", "nrd28-22", "nrd35-29"],
+      "_napoveda": [
+        "Feed nově registrovaných domén (projekt hagezi/nrd, data Stamus Labs).",
+        "Pět oken pokrývá klouzavých 35 dnů, proto monitoring spouštěj aspoň 1x měsíčně."
       ]
     }
   },
 
-  "rdap_fallback": {
+  "rdap": {
     "pripony_predpony": ["e", "moje", "muj", "web", "online", "shop", "eshop", "info", "cz", "sk", "24"],
     "max_kandidatu_na_slovo": 200,
-    "prodleva_sekund": 1.0
+    "prodleva_sekund": 1.2
   },
 
   "uchovavat_snapshotu": 6,
