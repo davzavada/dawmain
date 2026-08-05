@@ -1,0 +1,9 @@
+# Běhová data (snapshoty seznamů domén, databáze, logy)
+data/
+
+# Vygenerované reporty
+reporty/
+
+# Python
+__pycache__/
+*.pyc

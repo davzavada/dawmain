@@ -1,0 +1,39 @@
+{
+  "klicova_slova": [],
+
+  "ignorovat_domeny": [],
+
+  "obdobi": "mesicne",
+
+  "planovac": {
+    "den_v_mesici": 2,
+    "cas": "09:30"
+  },
+
+  "zdroje": {
+    "sk": {
+      "url": "https://sk-nic.sk/subory/domains.txt",
+      "kodovani": "iso-8859-2"
+    },
+    "cz": {
+      "rezim": "auto",
+      "urls": [],
+      "kodovani": "utf-8",
+      "_napoveda": [
+        "Do 'urls' vlož adresu souboru se seznamem .cz domén z otevřených dat CZ.NIC.",
+        "Kde ji najít: https://www.nic.cz/ (sekce Otevřená data) nebo https://data.gov.cz/ (hledej 'CZ.NIC').",
+        "Postup je popsán v README.md v sekci 'První spuštění'.",
+        "Pokud hromadný seznam není dostupný, nastav 'rezim' na 'rdap' - zapne se záložní kontrola kandidátních jmen přes oficiální rozhraní rdap.nic.cz."
+      ]
+    }
+  },
+
+  "rdap_fallback": {
+    "pripony_predpony": ["e", "moje", "muj", "web", "online", "shop", "eshop", "info", "cz", "sk", "24"],
+    "max_kandidatu_na_slovo": 200,
+    "prodleva_sekund": 1.0
+  },
+
+  "uchovavat_snapshotu": 6,
+  "otevrit_report": true
+}

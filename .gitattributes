@@ -1,0 +1,2 @@
+# Davkove soubory Windows musi zustat s konci radku CRLF
+*.bat -text

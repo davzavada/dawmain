@@ -1,0 +1,8 @@
+# Testovaci prosty seznam .cz domen (jedna domena na radek)
+autoskoda-plzen.cz
+kadernictvi-praha.cz
+skoda-dily.cz
+xn--koda-f6a.cz
+mojef1rma.cz
+obchod-online.cz
+s-koda.cz

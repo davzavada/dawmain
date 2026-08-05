@@ -1,0 +1,9 @@
+-- Zoznam v¹etkých registrovaných domén .sk
+-- Vygenerované: 2026-08-01 03:00
+domena;registrator;datum registracie
+autoservis-praha;NOVA-0001;2019-05-04
+kvetiny-bratislava;WEBS-0002;2021-11-11
+skodaservis;NOVA-0001;2024-02-19
+sk0da-eshop;TUCT-0003;2025-12-01
+pekaren-u-jozefa;WEBS-0002;2018-03-03
+mojefirma-oficial;GRAN-0004;2026-01-15
