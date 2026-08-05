@@ -1,0 +1,55 @@
+name: Sestaveni Windows aplikace
+
+on:
+  push:
+    branches: [main, claude/domain-monitoring-cz-sk-f3fcyr]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Testy
+        run: python -m unittest discover -s tests
+
+      - name: Instalace PyInstalleru
+        run: pip install pyinstaller
+
+      - name: Sestaveni MonitoringDomen.exe
+        run: pyinstaller --noconfirm --clean --onefile --windowed --name MonitoringDomen vstup_exe.py
+
+      - name: Sestaveni monitoring-domen.pyz
+        run: python vytvor-distribuci.py
+
+      - name: Kontrola, ze exe funguje
+        run: |
+          $p = Start-Process -FilePath "dist\MonitoringDomen.exe" -ArgumentList "slova" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "exe selhal s navratovym kodem $($p.ExitCode)" }
+          if (-not (Test-Path "dist\config.json")) { throw "exe nevytvoril config.json" }
+
+      - name: Artefakt
+        uses: actions/upload-artifact@v4
+        with:
+          name: MonitoringDomen
+          path: |
+            dist/MonitoringDomen.exe
+            dist/monitoring-domen.pyz
+
+      - name: Vydani exe-latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete exe-latest --cleanup-tag -y
+          if ($LASTEXITCODE -ne 0) { Write-Host "Zadne predchozi vydani." }
+          gh release create exe-latest dist/MonitoringDomen.exe dist/monitoring-domen.pyz --target $env:GITHUB_SHA -p -t "Monitoring domen - aktualni sestaveni" -n "MonitoringDomen.exe = aplikace s grafickym rozhranim, bez instalace (Windows 10/11). Pri prvnim spusteni muze SmartScreen zobrazit varovani: Dalsi informace -> Presto spustit. monitoring-domen.pyz = zalozni varianta pro pocitace s nainstalovanym Pythonem."

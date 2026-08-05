@@ -27,15 +27,18 @@ log = logging.getLogger("monitor")
 
 
 def _urci_koren():
-    """Složka aplikace: vedle balíčku monitor/, u zipapp vedle .pyz souboru."""
+    """Složka aplikace: vedle .exe / .pyz souboru, jinak vedle balíčku monitor/."""
+    if getattr(sys, "frozen", False):              # zabalené .exe (PyInstaller)
+        exe = os.path.abspath(sys.executable)
+        return os.path.dirname(exe), None, exe
     balicek = os.path.dirname(os.path.abspath(__file__))
     if os.path.isdir(balicek):
-        return os.path.dirname(balicek), None
+        return os.path.dirname(balicek), None, None
     archiv = os.path.abspath(sys.argv[0])          # běžíme uvnitř .pyz
-    return os.path.dirname(archiv), archiv
+    return os.path.dirname(archiv), archiv, None
 
 
-KOREN, ARCHIV_PYZ = _urci_koren()
+KOREN, ARCHIV_PYZ, ARCHIV_EXE = _urci_koren()
 
 VYCHOZI_CONFIG = {
     "klicova_slova": [],
@@ -72,14 +75,14 @@ VYCHOZI_CONFIG = {
 
 def _nastav_logovani(slozka_dat: str):
     os.makedirs(slozka_dat, exist_ok=True)
+    handlery = [logging.FileHandler(os.path.join(slozka_dat, "monitor.log"),
+                                    encoding="utf-8")]
+    if sys.stderr is not None:      # okenní .exe nemá konzoli
+        handlery.append(logging.StreamHandler())
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s  %(levelname)s  %(message)s",
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler(os.path.join(slozka_dat, "monitor.log"),
-                                encoding="utf-8"),
-        ],
+        handlers=handlery,
     )
 
 
@@ -241,6 +244,8 @@ def over_zdroje(config: dict, volby) -> int:
 
 
 def _jak_spustit() -> str:
+    if ARCHIV_EXE:
+        return '"%s"' % os.path.basename(ARCHIV_EXE)
     if ARCHIV_PYZ:
         return 'py "%s"' % os.path.basename(ARCHIV_PYZ)
     return "run.bat (nebo python -m monitor)"
@@ -288,8 +293,12 @@ def sprava_slov(config: dict, cesta_configu: str, volby) -> int:
 
 
 def sprava_planovace(config: dict, volby) -> int:
-    spousteni = ('py "%s" --tichy' % ARCHIV_PYZ if ARCHIV_PYZ
-                 else '"%s" --tichy' % os.path.join(KOREN, "run.bat"))
+    if ARCHIV_EXE:
+        spousteni = '"%s" --tichy' % ARCHIV_EXE
+    elif ARCHIV_PYZ:
+        spousteni = 'py "%s" --tichy' % ARCHIV_PYZ
+    else:
+        spousteni = '"%s" --tichy' % os.path.join(KOREN, "run.bat")
     try:
         xml = planovac.vytvor_xml_ulohy(KOREN, config, spousteni)
     except ValueError as chyba:
@@ -332,10 +341,11 @@ def main(argv=None):
         description="Monitoring nových domén .cz a .sk podle klíčových slov.",
     )
     parser.add_argument("prikaz", nargs="?", default="spustit",
-                        choices=["spustit", "over-zdroje", "slova",
+                        choices=["spustit", "gui", "over-zdroje", "slova",
                                  "pridej-slovo", "odeber-slovo",
                                  "planovac-xml", "nastav-planovac"],
-                        help="co udělat (výchozí: spustit)")
+                        help="co udělat (výchozí: spustit; "
+                             "zabalené .exe bez argumentů otevírá gui)")
     parser.add_argument("hodnota", nargs="?",
                         help="hodnota příkazu (např. klíčové slovo)")
     parser.add_argument("--obdobi", metavar="ZNACKA",
@@ -355,7 +365,10 @@ def main(argv=None):
                         help="u planovac-xml: kam uložit XML definici úlohy")
     parser.add_argument("--tichy", action="store_true",
                         help="neotvírat report v prohlížeči (pro plánovač)")
-    volby = parser.parse_args(argv)
+    argumenty = list(argv) if argv is not None else sys.argv[1:]
+    if ARCHIV_EXE and not argumenty:
+        argumenty = ["gui"]        # dvojklik na .exe otevře grafické rozhraní
+    volby = parser.parse_args(argumenty)
 
     cesta_configu = os.path.join(KOREN, "config.json")
     config = nacti_config(cesta_configu)
@@ -372,6 +385,9 @@ def main(argv=None):
         parser.error("--obdobi musí být RRRR-MM, RRRR-WTT nebo RRRR-MM-DD "
                      "(např. 2026-08, 2026-W32, 2026-08-05)")
 
+    if volby.prikaz == "gui":
+        from . import gui
+        return gui.spust_gui(sys.modules[__name__])
     if volby.prikaz in ("slova", "pridej-slovo", "odeber-slovo"):
         return sprava_slov(config, cesta_configu, volby)
     if volby.prikaz in ("planovac-xml", "nastav-planovac"):

@@ -12,10 +12,12 @@ Klíčová omezení zadání:
 - aplikace běží **lokálně na běžném počítači s Windows**,
 - **nevyžaduje žádná admin oprávnění** – ani k instalaci, ani k provozu,
 - data pocházejí **z oficiálních zdrojů** (správci registrů CZ.NIC a SK-NIC),
-- distribuce jako **jeden lokální soubor** (`monitoring-domen.pyz`, viz §5),
+- distribuce jako **jeden lokální soubor bez jakékoli instalace**
+  (`MonitoringDomen.exe` s grafickým rozhraním; záložně `monitoring-domen.pyz`
+  pro počítače s Pythonem – viz §5),
 - klíčová slova i období monitoringu (měsíčně/týdně/denně) si uživatel
-  **nastavuje sám** – slova příkazy `pridej-slovo`/`odeber-slovo`/`slova`,
-  období v `config.json`.
+  **nastavuje sám** – v okně aplikace, případně příkazy
+  `pridej-slovo`/`odeber-slovo`/`slova` a v `config.json`.
 
 ## 2. Datové zdroje
 
@@ -105,8 +107,11 @@ config.json            konfigurace: klíčová slova, whitelist, období, URL zd
 run.bat                spuštění dvojklikem (najde nainstalovaný Python)
 nastav-planovac.bat    registrace úlohy v Plánovači úloh (bez admin práv)
 vytvor-distribuci.py   sestaví jednosouborovou distribuci dist/monitoring-domen.pyz
+vstup_exe.py           vstupní bod pro zabalené MonitoringDomen.exe
+.github/workflows/     sestaveni.yml - CI: testy + build .exe na windows runneru
 monitor/
-  __main__.py          orchestrace běhů + příkazy (over-zdroje, slova, planovač…)
+  __main__.py          orchestrace běhů + příkazy (gui, over-zdroje, slova…)
+  gui.py               grafické rozhraní (tkinter): slova, období, zdroje, běh
   zdroje.py            stažení a parsování seznamů (SK-NIC, CZ.NIC, RDAP fallback)
   shoda.py             detekční jádro (normalizace, leet, Levenshtein)
   uloziste.py          SQLite databáze běhů a nálezů + gzip snapshoty
@@ -127,20 +132,38 @@ a přepočítat běh zpětně (`--mesic 2026-07 --znovu`).
 
 ## 5. Provoz na Windows bez admin práv
 
-### 5.1 Distribuce: jeden lokální soubor
+### 5.1 Distribuce: jeden lokální soubor, nic se neinstaluje
 
-Aplikace se šíří jako **jediný soubor `monitoring-domen.pyz`** (formát Python
-zipapp ze standardní knihovny). Stačí ho zkopírovat do libovolné složky;
-konfiguraci, data i reporty si vytváří vedle sebe, smazáním složky je
-„odinstalováno“. Na počítači s Pythonem z python.org funguje i **dvojklik**
-(přípona .pyz je asociovaná se spouštěčem `py`). Distribuci sestavuje
-`python vytvor-distribuci.py`.
+Hlavní distribuce je **`MonitoringDomen.exe`** – jediný soubor s grafickým
+rozhraním, který nevyžaduje ani Python, ani instalaci, ani admin práva.
+Protože windowsovské .exe nejde sestavit lokálně na jiném systému, sestavuje
+ho **GitHub Actions workflow na windows runneru** (PyInstaller `--onefile
+--windowed`): při každé změně kódu proběhnou testy, build a publikace do
+GitHub Releases (značka `exe-latest`). Stačí ho zkopírovat do libovolné
+složky; konfiguraci, data i reporty si vytváří vedle sebe, smazáním složky
+je „odinstalováno“.
 
-Zvažované .exe (PyInstaller) bylo zamítnuto záměrně: nepodepsané .exe soubory
-na firemních počítačích často blokuje SmartScreen/antivir (PyInstaller je
-známý falešnými poplachy) a nešlo by je sestavit bez dalších závislostí.
-Zipapp řeší totéž bez těchto rizik – jediná podmínka je nainstalovaný Python
-(bez admin práv, viz níže).
+Známá omezení nepodepsaného .exe (nemáme podpisový certifikát):
+
+- SmartScreen při prvním spuštění zobrazí varování → „Další informace →
+  Přesto spustit“; admin práva to nevyžaduje,
+- přísný firemní antivir může PyInstaller balíčky hlásit falešně pozitivně.
+
+Pro tyto případy existuje **záložní distribuce `monitoring-domen.pyz`**
+(formát Python zipapp ze standardní knihovny, sestavuje
+`python vytvor-distribuci.py`): potřebuje nainstalovaný Python (bez admin
+práv), obsahuje totéž včetně GUI (příkaz `gui`) a antiviry ji neřeší.
+
+### 5.1.1 Grafické rozhraní
+
+Okno (tkinter, součást Pythonu → žádná závislost navíc) pokrývá celý provoz:
+správu klíčových slov (přidat/odebrat, per slovo vypnutí překlepů), volbu
+období a času běhu, nastavení zdroje .cz (URL otevřených dat / záložní RDAP
+režim), tlačítka **Ověřit zdroje**, **Spustit teď** (otevře hotový report),
+**Naplánovat automatiku** a **Otevřít poslední report**; průběh se vypisuje
+do okna. Dlouhé akce běží ve vedlejším vlákně, okno nezamrzá. Dvojklik na
+.exe otevírá rovnou GUI; textové příkazy zůstávají pro pokročilé použití
+a pro úlohu plánovače (`--tichy`).
 
 ### 5.2 Prostředí a plánování
 

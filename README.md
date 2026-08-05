@@ -8,45 +8,59 @@ překlepů a vizuálně podobných zápisů (typosquatting) – a vytvoří pře
 
 Podrobný návrh řešení a zdůvodnění: [navrh.md](navrh.md).
 
-## Co je potřeba
+## Nejrychlejší zprovoznění: MonitoringDomen.exe (nic se neinstaluje)
 
-- Windows 10/11 (funguje i na macOS/Linux),
-- Python 3.9 nebo novější – **instalace nevyžaduje admin práva**:
-  1. stáhni instalátor z <https://www.python.org/downloads/>,
-  2. **nezaškrtávej** „Use admin privileges when installing py launcher“,
-     **zaškrtni** „Add python.exe to PATH“ a klikni **Install Now**
-     (instaluje se jen do tvého profilu),
-  3. nouzová varianta úplně bez instalace: „Windows embeddable package“ (ZIP)
-     rozbalený do složky aplikace.
+1. Stáhni **MonitoringDomen.exe** z
+   [Releases → exe-latest](https://github.com/davzavada/dawmain/releases/tag/exe-latest)
+   (sestavuje se automaticky GitHub Actions z tohoto repozitáře).
+2. Zkopíruj ho do vlastní složky, např. `Dokumenty\MonitoringDomen`
+   (aplikace si vedle sebe vytváří `config.json`, `data\` a `reporty\`).
+3. Spusť dvojklikem – otevře se **okno aplikace**. Při úplně prvním spuštění
+   může Windows SmartScreen zobrazit varování (nepodepsaná aplikace):
+   klikni **Další informace → Přesto spustit**. Admin práva nejsou potřeba.
+4. V okně:
+   - přidej **klíčová slova** (políčko + „Přidat“),
+   - tlačítkem **Ověřit zdroje** zkontroluj stahování dat
+     (`.sk` má fungovat hned; pro `.cz` viz [Zdroj dat pro .cz](#zdroj-dat-pro-cz)),
+   - **Spustit teď** provede první běh – uloží **výchozí stav** (ukáže všechny
+     už existující domény s klíčovými slovy; od dalšího běhu se hlásí jen nové
+     registrace) a otevře report,
+   - **Naplánovat automatiku** zaregistruje úlohu Plánovače úloh pro
+     přihlášeného uživatele (bez admin práv); když je počítač v naplánovaný
+     čas vypnutý, úloha doběhne po nejbližším zapnutí.
 
-## Zprovoznění – jednosouborová verze (doporučeno)
+Kdyby přísný firemní antivir odmítl spustit nepodepsané .exe, použij záložní
+variantu `.pyz` níže (vyžaduje jen Python, také bez admin práv).
 
-1. Zkopíruj `dist/monitoring-domen.pyz` do vlastní složky, např.
-   `Dokumenty\MonitoringDomen` (aplikace si vedle sebe vytváří `config.json`,
-   `data\` a `reporty\`).
-2. Otevři v té složce příkazový řádek a přidej klíčová slova:
+## Záložní varianta: monitoring-domen.pyz (potřebuje Python)
+
+Python 3.9+ se instaluje **bez admin práv**: instalátor z
+<https://www.python.org/downloads/>, **nezaškrtávej** „Use admin privileges…“,
+**zaškrtni** „Add python.exe to PATH“, klikni **Install Now**. Nouzová
+varianta úplně bez instalace: „Windows embeddable package“ (ZIP).
+
+1. Zkopíruj `monitoring-domen.pyz` (z Releases nebo `dist/`) do vlastní složky.
+2. V příkazovém řádku v té složce:
 
    ```
-   py monitoring-domen.pyz pridej-slovo skoda
-   py monitoring-domen.pyz pridej-slovo mojefirma
+   py monitoring-domen.pyz gui                    otevře stejné okno jako .exe
+   py monitoring-domen.pyz pridej-slovo skoda     ...nebo ovládej příkazy
+   py monitoring-domen.pyz over-zdroje
+   py monitoring-domen.pyz                        běh (funguje i dvojklik)
+   py monitoring-domen.pyz nastav-planovac        automatické spouštění
    ```
 
-3. Ověř datové zdroje: `py monitoring-domen.pyz over-zdroje`
-   – `.sk` má fungovat hned; pro `.cz` viz [Zdroj dat pro .cz](#zdroj-dat-pro-cz).
-4. První běh: `py monitoring-domen.pyz` (nebo dvojklik na soubor `.pyz`).
-   První běh uloží **výchozí stav** – ukáže všechny už existující domény
-   s klíčovými slovy; od dalšího běhu se hlásí jen nové registrace.
-5. Automatické spouštění: `py monitoring-domen.pyz nastav-planovac`
-   – zaregistruje úlohu Plánovače úloh pro přihlášeného uživatele
-   (bez admin práv). Když je počítač v naplánovaný čas vypnutý, úloha
-   doběhne po nejbližším zapnutí.
-
-## Zprovoznění – z repozitáře
+## Zprovoznění – z repozitáře (pro vývoj)
 
 Stáhni celý repozitář, pak stačí dvojklik na `run.bat` (spustí běh) nebo
 `nastav-planovac.bat` (zaregistruje úlohu). Všechny příkazy níže fungují
 i jako `run.bat <příkaz>`, případně `python -m monitor <příkaz>`.
-Jednosouborovou distribuci sestavíš příkazem `python vytvor-distribuci.py`.
+Jednosouborovou distribuci sestavíš příkazem `python vytvor-distribuci.py`;
+`MonitoringDomen.exe` sestavuje workflow GitHub Actions (viz
+`.github/workflows/sestaveni.yml`).
+
+Pozn.: okenní `.exe` nemá konzoli – textové příkazy v něm fungují, ale bez
+výpisů. Pro práci z příkazové řádky použij `.pyz`.
 
 ## Klíčová slova
 
