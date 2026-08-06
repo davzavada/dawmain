@@ -9,6 +9,8 @@ export const PUBLICATION_TYPES = [
   'other',
 ] as const;
 
+export type PublicationType = (typeof PUBLICATION_TYPES)[number];
+
 /** Accepts a bare ORCID iD or a full https://orcid.org/… URL; returns the bare iD or null. */
 export function normalizeOrcid(input: string): string | null {
   const m = input

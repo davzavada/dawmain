@@ -8,6 +8,7 @@ import type {
   affiliationInput,
   orcidImportInput,
   fromOrcidInput,
+  PublicationType,
 } from './schemas.js';
 
 export type PersonInput = z.infer<typeof personInput>;
@@ -182,7 +183,7 @@ export interface OrcidPreviewPublication {
   title: string;
   year: number | null;
   venue: string | null;
-  type: string;
+  type: PublicationType;
   doi: string | null;
   url: string | null;
   already_imported: boolean;

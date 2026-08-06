@@ -3,6 +3,7 @@ import {
   type OrcidPreview,
   type OrcidPreviewAffiliation,
   type OrcidPreviewPublication,
+  type PublicationType,
 } from '@crm/shared';
 import { db } from '../db.js';
 import { BadRequestError, NotFoundError, UpstreamError } from '../errors.js';
@@ -14,7 +15,7 @@ const ORCID_API = 'https://pub.orcid.org/v3.0';
  * so this module reads it with loose types and defensive access. */
 type Json = Record<string, any>;
 
-const WORK_TYPE_MAP: Record<string, string> = {
+const WORK_TYPE_MAP: Record<string, PublicationType> = {
   'journal-article': 'article',
   'journal-issue': 'article',
   'magazine-article': 'article',
