@@ -3,8 +3,11 @@ import fastifyStatic from '@fastify/static';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { migrate } from './db.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+
+migrate();
 
 const app = Fastify({ logger: true });
 
