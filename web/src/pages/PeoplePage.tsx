@@ -1,21 +1,41 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import type { PeopleSort } from '@crm/shared';
 import { usePeople, useTags } from '../api/queries';
+import { useDebouncedValue } from '../hooks';
 import OrcidImportModal from '../components/OrcidImportModal';
 import PersonDetail from '../components/PersonDetail';
 import PersonForm from '../components/PersonForm';
-import { Btn, Input, Loading, Select, TagChip } from '../components/ui';
+import { Btn, Input, LoadState, Select, TagChip } from '../components/ui';
+
+function parseId(raw: string | undefined): number | undefined {
+  if (raw === undefined) return undefined;
+  const id = Number(raw);
+  return Number.isInteger(id) && id > 0 ? id : undefined;
+}
 
 export default function PeoplePage() {
   const { id } = useParams();
-  const selectedId = id ? Number(id) : undefined;
+  const selectedId = parseId(id);
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [tag, setTag] = useState('');
+  const [sort, setSort] = useState<PeopleSort>('name');
   const [adding, setAdding] = useState(false);
   const [addingOrcid, setAddingOrcid] = useState(false);
-  const people = usePeople(search, tag);
+  const debouncedSearch = useDebouncedValue(search);
+  const people = usePeople(debouncedSearch, tag, sort);
   const tags = useTags();
+
+  // a malformed id in the URL (e.g. #/people/abc) is treated as no selection
+  useEffect(() => {
+    if (id !== undefined && selectedId === undefined) {
+      navigate('/people', { replace: true });
+    }
+  }, [id, selectedId, navigate]);
+
+  const filtered = debouncedSearch.trim() !== '' || tag !== '';
+  const rows = people.data ?? [];
 
   return (
     <div className="flex h-full">
@@ -24,16 +44,26 @@ export default function PeoplePage() {
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search people…"
-            className="!w-56"
+            placeholder="Search name, email, note, institution…"
+            className="!w-64"
           />
-          <Select value={tag} onChange={(e) => setTag(e.target.value)} className="!w-44">
+          <Select value={tag} onChange={(e) => setTag(e.target.value)} className="!w-40">
             <option value="">All tags</option>
             {(tags.data ?? []).map((t) => (
               <option key={t.id} value={t.name}>
-                {t.name}
+                {t.name} ({t.person_count})
               </option>
             ))}
+          </Select>
+          <Select
+            value={sort}
+            onChange={(e) => setSort(e.target.value as PeopleSort)}
+            className="!w-44"
+            title="Sort order"
+          >
+            <option value="name">Sort: name</option>
+            <option value="recent">Sort: recently contacted</option>
+            <option value="stale">Sort: longest silent</option>
           </Select>
           <div className="flex-1" />
           <Btn variant="subtle" onClick={() => setAddingOrcid(true)}>
@@ -42,9 +72,13 @@ export default function PeoplePage() {
           <Btn onClick={() => setAdding(true)}>Add person</Btn>
         </div>
 
-        {people.isLoading ? (
-          <Loading />
-        ) : (
+        <LoadState
+          isLoading={people.isLoading}
+          isError={people.isError}
+          error={people.error}
+          onRetry={() => void people.refetch()}
+        />
+        {!people.isLoading && !people.isError && (
           <div className="min-h-0 flex-1 overflow-y-auto">
             <table className="w-full text-left text-sm">
               <thead className="sticky top-0 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
@@ -52,6 +86,7 @@ export default function PeoplePage() {
                   <th className="px-4 py-2 font-medium">Name</th>
                   <th className="px-4 py-2 font-medium">Affiliation</th>
                   <th className="px-4 py-2 font-medium">Tags</th>
+                  <th className="px-3 py-2 font-medium">Last contact</th>
                   <th className="px-2 py-2 text-right font-medium" title="Publications">
                     Pubs
                   </th>
@@ -61,11 +96,15 @@ export default function PeoplePage() {
                 </tr>
               </thead>
               <tbody>
-                {(people.data ?? []).map((p) => (
+                {rows.map((p) => (
                   <tr
                     key={p.id}
                     onClick={() => navigate(`/people/${p.id}`)}
-                    className={`cursor-pointer border-t border-slate-100 hover:bg-slate-50 ${
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') navigate(`/people/${p.id}`);
+                    }}
+                    tabIndex={0}
+                    className={`cursor-pointer border-t border-slate-100 hover:bg-slate-50 focus:bg-slate-100 focus:outline-none ${
                       p.id === selectedId ? 'bg-blue-50 hover:bg-blue-50' : ''
                     }`}
                   >
@@ -81,6 +120,9 @@ export default function PeoplePage() {
                         ))}
                       </div>
                     </td>
+                    <td className="px-3 py-2 text-xs text-slate-500">
+                      {p.last_contact ?? <span className="text-slate-300">never</span>}
+                    </td>
                     <td className="px-2 py-2 text-right text-xs text-slate-500">
                       {p.publication_count}
                     </td>
@@ -89,10 +131,12 @@ export default function PeoplePage() {
                     </td>
                   </tr>
                 ))}
-                {(people.data ?? []).length === 0 && (
+                {rows.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-sm text-slate-400">
-                      No people yet. Add your first contact or import one from ORCID.
+                    <td colSpan={6} className="px-4 py-8 text-center text-sm text-slate-400">
+                      {filtered
+                        ? 'No people match this search or tag filter.'
+                        : 'No people yet. Add your first contact or import one from ORCID.'}
                     </td>
                   </tr>
                 )}
@@ -104,7 +148,11 @@ export default function PeoplePage() {
 
       {selectedId !== undefined && (
         <aside className="w-[26rem] shrink-0 border-l border-slate-200 bg-white">
-          <PersonDetail personId={selectedId} basePath="/people" />
+          <PersonDetail
+            key={selectedId}
+            personId={selectedId}
+            onClose={() => navigate('/people')}
+          />
         </aside>
       )}
 

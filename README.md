@@ -1,31 +1,37 @@
 # Academic CRM
 
 A simple, single-user CRM for managing academic relationships. Track scholars,
-their affiliations and publications, record how you know them (met at a
-conference, colleague, supervisor, …) and explore the whole network as an
-interactive graph — with ORCID import to fill in profiles.
+their affiliations and publications, log your interactions with them, record
+how you know them (met at a conference, colleague, supervisor, …) and keep a
+reading list of the papers you like — with ORCID import to fill in profiles.
 
 ## Features
 
-- **People** — searchable, taggable contact list; the detail panel shows
-  affiliations (with time ranges), publications, typed relations and notes.
-- **Network** — interactive graph (Cytoscape). Relation types are
-  color-coded, directed types (supervisor, reviewer) get arrows, and dashed
-  edges show co-authorships derived automatically from shared publications.
-  Double-click a person to focus their neighborhood and expand hop by hop.
-- **Publications** — ordered author lists that keep the name as printed;
-  authors who aren't contacts yet land in a **suggestions inbox** where one
-  click promotes them to a contact (or links them to an existing one).
+- **People** — searchable, taggable contact list with a **last-contact
+  column** (sortable by "recently contacted" or "longest silent"); the detail
+  panel shows the interaction timeline, affiliations (with time ranges),
+  publications, typed relations and notes; duplicate entries can be merged.
+- **Interactions** — a per-person journal (meeting / conference / email /
+  call) with date and note, so you always know when you last talked and about
+  what.
+- **Publications & reading list** — ordered author lists that keep the name
+  as printed; ★ star the papers you like, cycle a to-read/read status, filter
+  by shelf, keep a personal note per paper. Authors who aren't contacts yet
+  land in a **suggestions inbox** where one click promotes them to a contact
+  (or links them to an existing one); dismissals are undoable.
 - **ORCID import** — add a person from their ORCID iD, or complete an
   existing profile: employments/educations become affiliations, works become
   publications (deduplicated by DOI/title on re-import). Uses the public
   ORCID API, no key needed.
 - **Institutions** — created automatically from affiliation and ORCID
-  imports, manageable on their own tab.
+  imports; expand a row to see everyone affiliated, current and former.
+- **Export** — one-click JSON dump of the whole database from the header.
 
 Single user, no auth, one SQLite file. Schema carries OpenAlex / Semantic
 Scholar ID columns so richer enrichment can be added later without
-migrations.
+migrations. (The network graph view from v0.1 is parked for now — the
+`/api/graph` endpoint still exists, so it can return; the list views are the
+primary interface.)
 
 ## Stack
 

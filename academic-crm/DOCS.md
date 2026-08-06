@@ -14,20 +14,25 @@ Home Assistant authentication in front of it.
 
 ## Usage
 
-- **People** is the contact list. The right-hand panel shows everything about
-  the selected person: tags, affiliations (institutions are created
-  automatically by name), publications and relations.
+- **People** is the contact list, with a last-contact column and sorting by
+  "recently contacted" / "longest silent". The right-hand panel shows
+  everything about the selected person: the interaction timeline, tags,
+  affiliations (institutions are created automatically by name),
+  publications and color-coded relations. Duplicates can be merged from the
+  Edit dialog.
+- **Interactions**: log every touchpoint (meeting, conference, email, call)
+  with a date and note from the person's panel — this is what drives the
+  last-contact column.
+- **Publications** doubles as your reading list: ★ star papers you like,
+  click the status chip to cycle to-read → read, filter by shelf, and keep a
+  personal note per paper. Author names that are not contacts yet appear in
+  the amber **Suggested people** inbox — promote them to contacts, link them
+  to an existing person, or dismiss them (undoable).
 - **Add from ORCID** fetches a public ORCID profile and lets you pick which
   fields, affiliations and publications to import. People with an ORCID iD on
   file get a **Complete from ORCID** button to re-sync later — already
   imported publications are recognized and skipped.
-- **Publications**: when you record a publication, author names that are not
-  contacts yet appear in the amber **Suggested people** inbox — promote them
-  to contacts, link them to an existing person, or dismiss them.
-- **Network** shows everyone as a graph. Solid colored edges are the
-  relations you recorded (arrows mark directed types like supervisor);
-  dashed gray edges are co-authorships derived from shared publications.
-  Double-click a person to focus their neighborhood, then expand hop by hop.
+- **Export** (top right) downloads the entire database as JSON.
 
 ## Data & backups
 

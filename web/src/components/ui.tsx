@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 
 export function Btn({
   children,
@@ -19,7 +19,7 @@ export function Btn({
     primary: 'bg-slate-900 text-white hover:bg-slate-700 disabled:bg-slate-400',
     subtle: 'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:text-slate-400',
     danger: 'bg-red-50 text-red-700 hover:bg-red-100 disabled:text-red-300',
-    ghost: 'text-slate-500 hover:text-slate-900 hover:bg-slate-100',
+    ghost: 'text-slate-500 hover:text-slate-900 hover:bg-slate-100 disabled:text-slate-300',
   } as const;
   return (
     <button
@@ -107,6 +107,24 @@ export function Modal({
   children: ReactNode;
   wide?: boolean;
 }) {
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCloseRef.current();
+    };
+    document.addEventListener('keydown', onKey);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = previousOverflow;
+      previouslyFocused?.focus?.();
+    };
+  }, []);
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-6"
@@ -115,6 +133,9 @@ export function Modal({
       }}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
         className={`mt-6 w-full ${wide ? 'max-w-2xl' : 'max-w-md'} rounded-lg bg-white shadow-xl`}
       >
         <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
@@ -146,4 +167,33 @@ export function Loading({ label = 'Loading…' }: { label?: string }) {
 
 export function EmptyState({ children }: { children: ReactNode }) {
   return <p className="text-xs text-slate-400">{children}</p>;
+}
+
+export function LoadState({
+  isLoading,
+  isError,
+  error,
+  onRetry,
+}: {
+  isLoading: boolean;
+  isError: boolean;
+  error: unknown;
+  onRetry: () => void;
+}) {
+  if (isLoading) return <Loading />;
+  if (isError) {
+    return (
+      <div className="p-6 text-sm">
+        <p className="text-red-600">
+          Could not load data: {error instanceof Error ? error.message : String(error)}
+        </p>
+        <div className="mt-2">
+          <Btn variant="subtle" onClick={onRetry}>
+            Retry
+          </Btn>
+        </div>
+      </div>
+    );
+  }
+  return null;
 }

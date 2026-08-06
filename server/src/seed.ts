@@ -64,6 +64,15 @@ function relation(from: number, to: number, type: string, date: string | null, n
   ).run(from, to, type, date, note);
 }
 
+function interaction(personId: number, date: string, kind: string, note: string | null): void {
+  db.prepare('INSERT INTO interactions (person_id, date, kind, note) VALUES (?,?,?,?)').run(
+    personId,
+    date,
+    kind,
+    note,
+  );
+}
+
 function tag(personId: number, name: string): void {
   db.prepare('INSERT INTO tags (name) VALUES (?) ON CONFLICT(name) DO NOTHING').run(name);
   const t = db.prepare('SELECT id FROM tags WHERE name = ? COLLATE NOCASE').get(name) as { id: number };
@@ -121,6 +130,20 @@ withTransaction(() => {
   relation(jana, marco, 'met_at_conference', '2024', 'ICON-S Madrid');
   relation(martin, jana, 'friend', '2017', null);
   relation(lucia, anna, 'met_at_conference', '2025', 'COFOLA Brno');
+
+  interaction(jana, '2026-06-12', 'conference', 'chaired my panel at ICON-S, discussed AI act paper');
+  interaction(jana, '2026-07-30', 'email', 'sent her the draft for comments');
+  interaction(marco, '2024-07-08', 'conference', 'dinner after the Madrid panel');
+  interaction(peter, '2025-11-02', 'meeting', 'Heidelberg visit, talked postdoc options');
+
+  // mark one paper as a liked/read reference
+  db.prepare(
+    `UPDATE publications SET starred = 1, read_status = 'read',
+     note = 'great framing of judicial independence metrics — cite in ch. 2'
+     WHERE title = 'Judicial Independence in Central Europe'`,
+  ).run();
 });
 
-console.log('Seeded: 6 people, 4 institutions, 3 publications (one with an unlinked co-author), 5 relations.');
+console.log(
+  'Seeded: 6 people, 4 institutions, 3 publications (one starred, one with an unlinked co-author), 5 relations, 4 interactions.',
+);

@@ -1,7 +1,14 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
+import { Link } from 'react-router-dom';
 import type { InstitutionInput, InstitutionListItem } from '@crm/shared';
-import { api, useAppMutation, useInstitutions } from '../api/queries';
-import { Btn, ErrorText, Field, Input, Loading, Modal } from '../components/ui';
+import {
+  api,
+  useAppMutation,
+  useInstitutionDetail,
+  useInstitutions,
+} from '../api/queries';
+import { useDebouncedValue } from '../hooks';
+import { Btn, ErrorText, Field, Input, LoadState, Modal } from '../components/ui';
 
 function InstitutionForm({
   institution,
@@ -80,11 +87,43 @@ function InstitutionForm({
   );
 }
 
+function InstitutionPeople({ institutionId }: { institutionId: number }) {
+  const detail = useInstitutionDetail(institutionId);
+  if (detail.isLoading) return <p className="text-xs text-slate-400">Loading people…</p>;
+  if (detail.isError) return <ErrorText error={detail.error} />;
+  const people = detail.data?.people ?? [];
+  if (people.length === 0) {
+    return <p className="text-xs text-slate-400">Nobody affiliated yet.</p>;
+  }
+  return (
+    <ul className="space-y-1">
+      {people.map((p, i) => (
+        <li key={`${p.id}-${i}`} className="text-sm">
+          <Link className="font-medium text-blue-700 hover:underline" to={`/people/${p.id}`}>
+            {p.name}
+          </Link>
+          {p.role && <span className="text-xs text-slate-500"> — {p.role}</span>}
+          <span className="ml-1 text-xs text-slate-400">
+            {p.start_date ?? ''}
+            {(p.start_date || p.end_date) && '–'}
+            {p.end_date ?? (p.start_date ? 'now' : '')}
+            {!p.current && ' · former'}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export default function InstitutionsPage() {
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<InstitutionListItem | 'new' | null>(null);
-  const institutions = useInstitutions(search);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const debouncedSearch = useDebouncedValue(search);
+  const institutions = useInstitutions(debouncedSearch);
   const remove = useAppMutation(api.deleteInstitution);
+
+  const rows = institutions.data ?? [];
 
   return (
     <div className="flex h-full flex-col">
@@ -99,9 +138,13 @@ export default function InstitutionsPage() {
         <Btn onClick={() => setEditing('new')}>Add institution</Btn>
       </div>
 
-      {institutions.isLoading ? (
-        <Loading />
-      ) : (
+      <LoadState
+        isLoading={institutions.isLoading}
+        isError={institutions.isError}
+        error={institutions.error}
+        onRetry={() => void institutions.refetch()}
+      />
+      {!institutions.isLoading && !institutions.isError && (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <table className="w-full text-left text-sm">
             <thead className="sticky top-0 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
@@ -114,46 +157,67 @@ export default function InstitutionsPage() {
               </tr>
             </thead>
             <tbody>
-              {(institutions.data ?? []).map((inst) => (
-                <tr key={inst.id} className="group border-t border-slate-100 hover:bg-slate-50">
-                  <td className="px-4 py-2">
-                    <span className="font-medium">{inst.name}</span>
-                    {inst.short_name && (
-                      <span className="ml-1 text-xs text-slate-400">({inst.short_name})</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2 text-xs text-slate-500">{inst.city ?? ''}</td>
-                  <td className="px-4 py-2 text-xs text-slate-500">{inst.country ?? ''}</td>
-                  <td className="px-2 py-2 text-right text-xs text-slate-500">
-                    {inst.person_count}
-                  </td>
-                  <td className="px-2 py-2 text-right">
-                    <span className="invisible flex justify-end gap-1 group-hover:visible">
-                      <Btn variant="ghost" onClick={() => setEditing(inst)}>
-                        Edit
-                      </Btn>
-                      <Btn
-                        variant="ghost"
-                        onClick={() => {
-                          if (
-                            confirm(
-                              `Delete ${inst.name}? Affiliations of ${inst.person_count} people go with it.`,
-                            )
-                          ) {
-                            remove.mutate(inst.id);
-                          }
-                        }}
-                      >
-                        Delete
-                      </Btn>
-                    </span>
-                  </td>
-                </tr>
+              {rows.map((inst) => (
+                <Fragment key={inst.id}>
+                  <tr
+                    onClick={() => setExpandedId((current) => (current === inst.id ? null : inst.id))}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter')
+                        setExpandedId((current) => (current === inst.id ? null : inst.id));
+                    }}
+                    tabIndex={0}
+                    className={`group cursor-pointer border-t border-slate-100 hover:bg-slate-50 focus:bg-slate-100 focus:outline-none ${
+                      expandedId === inst.id ? 'bg-slate-50' : ''
+                    }`}
+                  >
+                    <td className="px-4 py-2">
+                      <span className="font-medium">{inst.name}</span>
+                      {inst.short_name && (
+                        <span className="ml-1 text-xs text-slate-400">({inst.short_name})</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-xs text-slate-500">{inst.city ?? ''}</td>
+                    <td className="px-4 py-2 text-xs text-slate-500">{inst.country ?? ''}</td>
+                    <td className="px-2 py-2 text-right text-xs text-slate-500">
+                      {inst.person_count}
+                    </td>
+                    <td className="px-2 py-2 text-right">
+                      <span className="invisible flex justify-end gap-1 group-hover:visible">
+                        <Btn variant="ghost" onClick={() => setEditing(inst)}>
+                          Edit
+                        </Btn>
+                        <Btn
+                          variant="ghost"
+                          onClick={() => {
+                            if (
+                              confirm(
+                                `Delete ${inst.name}? Affiliation history of ${inst.person_count} people goes with it.`,
+                              )
+                            ) {
+                              remove.mutate(inst.id);
+                            }
+                          }}
+                        >
+                          Delete
+                        </Btn>
+                      </span>
+                    </td>
+                  </tr>
+                  {expandedId === inst.id && (
+                    <tr className="border-t border-slate-100 bg-slate-50/60">
+                      <td colSpan={5} className="px-8 py-3">
+                        <InstitutionPeople institutionId={inst.id} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
-              {(institutions.data ?? []).length === 0 && (
+              {rows.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-4 py-8 text-center text-sm text-slate-400">
-                    No institutions yet — they are created automatically when you add affiliations.
+                    {debouncedSearch.trim()
+                      ? 'No institutions match this search.'
+                      : 'No institutions yet — they are created automatically when you add affiliations.'}
                   </td>
                 </tr>
               )}

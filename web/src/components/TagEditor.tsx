@@ -1,28 +1,50 @@
-import { useState } from 'react';
-import { api, useAppMutation, useTags } from '../api/queries';
+import { useRef, useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { api, useTags } from '../api/queries';
 import { ErrorText, Input, TagChip } from './ui';
 
+/**
+ * Local-first tag editing: `local` is the source of truth for quick
+ * successive edits (each save sends the complete current set, so an earlier
+ * in-flight save can never erase a later addition). The component remounts
+ * per person via the key on PersonDetail, so state can't leak across people.
+ */
 export default function TagEditor({ personId, tags }: { personId: number; tags: string[] }) {
+  const [local, setLocal] = useState(tags);
   const [draft, setDraft] = useState('');
+  const lastAcked = useRef(tags);
   const allTags = useTags();
-  const save = useAppMutation(api.setTags);
+  const queryClient = useQueryClient();
 
-  const update = (next: string[]) => save.mutate({ id: personId, tags: next });
+  const save = useMutation({
+    mutationFn: api.setTags,
+    onSuccess: (serverTags) => {
+      lastAcked.current = serverTags;
+      void queryClient.invalidateQueries();
+    },
+    onError: () => {
+      setLocal(lastAcked.current);
+    },
+  });
+
+  const commit = (next: string[]) => {
+    setLocal(next);
+    save.mutate({ id: personId, tags: next });
+  };
 
   const add = () => {
     const name = draft.trim();
-    if (!name) return;
-    if (!tags.some((t) => t.toLowerCase() === name.toLowerCase())) {
-      update([...tags, name]);
-    }
     setDraft('');
+    if (!name) return;
+    if (local.some((t) => t.toLowerCase() === name.toLowerCase())) return;
+    commit([...local, name]);
   };
 
   return (
     <div>
       <div className="flex flex-wrap items-center gap-1.5">
-        {tags.map((tag) => (
-          <TagChip key={tag} name={tag} onRemove={() => update(tags.filter((t) => t !== tag))} />
+        {local.map((tag) => (
+          <TagChip key={tag} name={tag} onRemove={() => commit(local.filter((t) => t !== tag))} />
         ))}
         <Input
           list="all-tags"

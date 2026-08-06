@@ -1,5 +1,5 @@
 name: Academic CRM
-version: "0.1.0"
+version: "0.2.0"
 slug: academic_crm
 description: Personal CRM for academic relationships — people, affiliations, publications, typed relations, a network graph and ORCID import.
 url: https://github.com/davzavada/dawmain

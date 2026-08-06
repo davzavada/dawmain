@@ -30,9 +30,11 @@ export default function RelationForm({
         e.preventDefault();
         const otherId = Number(form.otherId);
         if (!otherId) return;
+        // reversed only means something for directed types
+        const reversed = directed && form.reversed;
         save.mutate({
-          from_person_id: form.reversed ? otherId : personId,
-          to_person_id: form.reversed ? personId : otherId,
+          from_person_id: reversed ? otherId : personId,
+          to_person_id: reversed ? personId : otherId,
           type: form.type,
           date: form.date.trim() || null,
           note: form.note.trim() || null,
@@ -57,7 +59,7 @@ export default function RelationForm({
         <Field label="Relation type">
           <Select
             value={form.type}
-            onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}
+            onChange={(e) => setForm((f) => ({ ...f, type: e.target.value, reversed: false }))}
           >
             {RELATION_TYPES.map((t) => (
               <option key={t.value} value={t.value}>

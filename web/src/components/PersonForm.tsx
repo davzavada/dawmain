@@ -1,15 +1,17 @@
 import { useState } from 'react';
 import type { Person, PersonPatch } from '@crm/shared';
-import { api, useAppMutation } from '../api/queries';
-import { Btn, ErrorText, Field, Input, Modal, TextArea } from './ui';
+import { api, useAppMutation, usePeople } from '../api/queries';
+import { Btn, ErrorText, Field, Input, Modal, Select, TextArea } from './ui';
 
 interface Props {
   person?: Person;
   onClose: () => void;
   onSaved?: (person: Person) => void;
+  /** called with the surviving person's id after a merge */
+  onMerged?: (winnerId: number) => void;
 }
 
-export default function PersonForm({ person, onClose, onSaved }: Props) {
+export default function PersonForm({ person, onClose, onSaved, onMerged }: Props) {
   const [form, setForm] = useState({
     name: person?.name ?? '',
     titles: person?.titles ?? '',
@@ -19,6 +21,8 @@ export default function PersonForm({ person, onClose, onSaved }: Props) {
     orcid: person?.orcid ?? '',
     note: person?.note ?? '',
   });
+  const [mergeTarget, setMergeTarget] = useState('');
+  const people = usePeople('', '');
 
   const save = useAppMutation(
     async () => {
@@ -31,9 +35,7 @@ export default function PersonForm({ person, onClose, onSaved }: Props) {
         orcid: form.orcid.trim() || null,
         note: form.note.trim() || null,
       };
-      return person
-        ? api.patchPerson({ id: person.id, patch })
-        : api.createPerson(patch);
+      return person ? api.patchPerson({ id: person.id, patch }) : api.createPerson(patch);
     },
     (saved) => {
       onSaved?.(saved);
@@ -41,8 +43,17 @@ export default function PersonForm({ person, onClose, onSaved }: Props) {
     },
   );
 
-  const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
-    setForm((f) => ({ ...f, [key]: e.target.value }));
+  const merge = useAppMutation(api.mergePerson, (result) => {
+    onClose();
+    onMerged?.(result.detail.person.id);
+  });
+
+  const set =
+    (key: keyof typeof form) =>
+    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+      setForm((f) => ({ ...f, [key]: e.target.value }));
+
+  const mergeCandidates = (people.data ?? []).filter((p) => p.id !== person?.id);
 
   return (
     <Modal title={person ? `Edit ${person.name}` : 'Add person'} onClose={onClose}>
@@ -86,6 +97,49 @@ export default function PersonForm({ person, onClose, onSaved }: Props) {
         </div>
         <ErrorText error={save.error} />
       </form>
+
+      {person && (
+        <div className="mt-4 border-t border-slate-200 pt-3">
+          <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Merge duplicate
+          </h3>
+          <p className="mb-2 text-xs text-slate-500">
+            Moves all publications, affiliations, relations, interactions and tags of{' '}
+            <span className="font-medium">{person.name}</span> onto the selected person, then
+            deletes this entry.
+          </p>
+          <div className="flex items-center gap-2">
+            <Select
+              value={mergeTarget}
+              onChange={(e) => setMergeTarget(e.target.value)}
+              className="!w-56"
+            >
+              <option value="">— merge into… —</option>
+              {mergeCandidates.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </Select>
+            <Btn
+              variant="danger"
+              disabled={!mergeTarget || merge.isPending}
+              onClick={() => {
+                const target = mergeCandidates.find((p) => p.id === Number(mergeTarget));
+                if (
+                  target &&
+                  confirm(`Merge ${person.name} into ${target.name}? This cannot be undone.`)
+                ) {
+                  merge.mutate({ id: person.id, into_id: target.id });
+                }
+              }}
+            >
+              Merge
+            </Btn>
+          </div>
+          <ErrorText error={merge.error} />
+        </div>
+      )}
     </Modal>
   );
 }
