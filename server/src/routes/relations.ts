@@ -1,22 +1,12 @@
 import type { FastifyInstance } from 'fastify';
-import { isDirected, relationInput, relationPatch } from '@crm/shared';
+import { isDirected, relationInput, relationPatch, type Relation } from '@crm/shared';
 import { db } from '../db.js';
 import { ConflictError, NotFoundError } from '../errors.js';
-import { getPersonRow, idParam } from '../helpers.js';
+import { getPersonRow, idParam, touchPeople } from '../helpers.js';
 
-interface RelationRow {
-  id: number;
-  from_person_id: number;
-  to_person_id: number;
-  type: string;
-  date: string | null;
-  note: string | null;
-  created_at: string;
-}
-
-function getRelationRow(id: number): RelationRow {
+function getRelationRow(id: number): Relation {
   const row = db.prepare('SELECT * FROM relations WHERE id = ?').get(id) as unknown as
-    | RelationRow
+    | Relation
     | undefined;
   if (!row) throw new NotFoundError(`Relation ${id} not found`);
   return row;
@@ -66,13 +56,14 @@ export default function relationRoutes(app: FastifyInstance): void {
         body.date ?? null,
         body.note ?? null,
       );
+    touchPeople([body.from_person_id, body.to_person_id]);
     return getRelationRow(Number(info.lastInsertRowid));
   });
 
   app.patch('/api/relations/:id', async (req) => {
     const id = idParam(req.params);
-    const existing = getRelationRow(id);
     const body = relationPatch.parse(req.body);
+    const existing = getRelationRow(id);
     const type = body.type ?? existing.type;
     if (type !== existing.type) {
       assertNoDuplicate(existing.from_person_id, existing.to_person_id, type, id);
@@ -90,14 +81,16 @@ export default function relationRoutes(app: FastifyInstance): void {
     }
     if (sets.length > 0) {
       db.prepare(`UPDATE relations SET ${sets.join(', ')} WHERE id = ?`).run(...values, id);
+      touchPeople([existing.from_person_id, existing.to_person_id]);
     }
     return getRelationRow(id);
   });
 
   app.delete('/api/relations/:id', async (req, reply) => {
     const id = idParam(req.params);
-    const info = db.prepare('DELETE FROM relations WHERE id = ?').run(id);
-    if (info.changes === 0) throw new NotFoundError(`Relation ${id} not found`);
+    const existing = getRelationRow(id);
+    db.prepare('DELETE FROM relations WHERE id = ?').run(id);
+    touchPeople([existing.from_person_id, existing.to_person_id]);
     return reply.code(204).send();
   });
 }

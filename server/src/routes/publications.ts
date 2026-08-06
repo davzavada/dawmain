@@ -5,15 +5,27 @@ import {
   suggestionDismissInput,
   suggestionLinkInput,
   suggestionPromoteInput,
+  READ_STATUSES,
+  type DismissedSuggestion,
+  type PublicationDetail,
   type PublicationListItem,
   type Suggestion,
 } from '@crm/shared';
 import { db, withTransaction, touchPublication } from '../db.js';
-import { NotFoundError } from '../errors.js';
-import { getPersonRow, idParam, placeholders } from '../helpers.js';
+import { BadRequestError, NotFoundError } from '../errors.js';
+import {
+  getPersonRow,
+  idParam,
+  likeClause,
+  normalizeDoi,
+  placeholders,
+  queryInt,
+  queryText,
+  touchPeople,
+} from '../helpers.js';
 import { insertPerson } from './people.js';
 
-const PUBLICATION_FIELDS = [
+const PUBLICATION_TEXT_FIELDS = [
   'title',
   'year',
   'venue',
@@ -23,6 +35,7 @@ const PUBLICATION_FIELDS = [
   'abstract',
   'language',
   'note',
+  'read_status',
 ] as const;
 
 interface PublicationRow {
@@ -36,6 +49,8 @@ interface PublicationRow {
   abstract: string | null;
   language: string | null;
   note: string | null;
+  starred: number;
+  read_status: PublicationDetail['read_status'];
   source: string;
   created_at: string;
   updated_at: string;
@@ -73,9 +88,9 @@ function authorsFor(publicationIds: number[]): Map<number, PublicationListItem['
   return map;
 }
 
-function publicationDetail(id: number): PublicationRow & { authors: PublicationListItem['authors'] } {
+function publicationDetail(id: number): PublicationDetail {
   const row = getPublicationRow(id);
-  return { ...row, authors: authorsFor([id]).get(id) ?? [] };
+  return { ...row, starred: row.starred !== 0, authors: authorsFor([id]).get(id) ?? [] };
 }
 
 function replaceAuthors(
@@ -87,32 +102,91 @@ function replaceAuthors(
     db.prepare(
       `INSERT INTO publication_authors (publication_id, position, author_name, person_id)
        VALUES (?,?,?,?)`,
-    ).run(publicationId, index + 1, author.name, author.person_id ?? null);
+    ).run(publicationId, index + 1, author.name.trim(), author.person_id ?? null);
   });
+}
+
+/** Unlinked authorship rowids whose name matches (Unicode case-insensitive, like the inbox). */
+function unlinkedRowIds(name: string): number[] {
+  const target = name.trim().toLowerCase();
+  const rows = db
+    .prepare('SELECT rowid AS rid, author_name FROM publication_authors WHERE person_id IS NULL')
+    .all() as unknown as { rid: number; author_name: string }[];
+  return rows.filter((r) => r.author_name.toLowerCase() === target).map((r) => r.rid);
+}
+
+function linkRows(rowIds: number[], personId: number): number {
+  if (rowIds.length === 0) return 0;
+  const info = db
+    .prepare(
+      `UPDATE publication_authors SET person_id = ? WHERE rowid IN (${placeholders(rowIds.length)})`,
+    )
+    .run(personId, ...rowIds);
+  return Number(info.changes);
+}
+
+/** Removes a dismissal matching the name under the same case rule as the inbox. */
+function clearDismissal(name: string): void {
+  const target = name.trim().toLowerCase();
+  const rows = db.prepare('SELECT author_name FROM dismissed_suggestions').all() as unknown as {
+    author_name: string;
+  }[];
+  for (const row of rows) {
+    if (row.author_name.toLowerCase() === target) {
+      db.prepare('DELETE FROM dismissed_suggestions WHERE author_name = ?').run(row.author_name);
+    }
+  }
 }
 
 export default function publicationRoutes(app: FastifyInstance): void {
   app.get('/api/publications', async (req) => {
-    const { search = '', person_id = '' } = req.query as { search?: string; person_id?: string };
+    const search = queryText(req.query, 'search');
+    const personId = queryInt(req.query, 'person_id');
+    const starred = queryText(req.query, 'starred');
+    const readStatus = queryText(req.query, 'read_status');
+    const type = queryText(req.query, 'type');
     const params: (string | number | null)[] = [];
     let where = '1=1';
-    if (search.trim()) {
-      where += ` AND (p.title LIKE '%' || ? || '%' COLLATE NOCASE OR p.venue LIKE '%' || ? || '%' COLLATE NOCASE)`;
-      params.push(search.trim(), search.trim());
+    if (search) {
+      const text = likeClause(['p.title', 'p.venue'], search);
+      const author = likeClause(['pa2.author_name'], search);
+      where += ` AND (${text.sql} OR EXISTS (
+        SELECT 1 FROM publication_authors pa2 WHERE pa2.publication_id = p.id AND ${author.sql}))`;
+      params.push(...text.params, ...author.params);
     }
-    if (person_id.trim()) {
+    if (personId !== undefined) {
       where += ` AND EXISTS (SELECT 1 FROM publication_authors pa WHERE pa.publication_id = p.id AND pa.person_id = ?)`;
-      params.push(Number(person_id));
+      params.push(personId);
+    }
+    if (starred === '1' || starred === 'true') {
+      where += ' AND p.starred = 1';
+    }
+    if (readStatus) {
+      if (!(READ_STATUSES as readonly string[]).includes(readStatus)) {
+        throw new BadRequestError(`Invalid read_status: ${readStatus}`);
+      }
+      where += ' AND p.read_status = ?';
+      params.push(readStatus);
+    }
+    if (type) {
+      where += ' AND p.type = ?';
+      params.push(type);
     }
     const pubs = db
       .prepare(
-        `SELECT p.id, p.title, p.year, p.venue, p.type, p.doi, p.url
+        `SELECT p.id, p.title, p.year, p.venue, p.type, p.doi, p.url, p.note, p.starred, p.read_status
          FROM publications p WHERE ${where}
          ORDER BY p.year IS NULL, p.year DESC, p.title COLLATE NOCASE`,
       )
-      .all(...params) as unknown as Omit<PublicationListItem, 'authors'>[];
+      .all(...params) as unknown as (Omit<PublicationListItem, 'authors' | 'starred'> & {
+      starred: number;
+    })[];
     const authors = authorsFor(pubs.map((p) => p.id));
-    return pubs.map((p) => ({ ...p, authors: authors.get(p.id) ?? [] }));
+    return pubs.map((p) => ({
+      ...p,
+      starred: p.starred !== 0,
+      authors: authors.get(p.id) ?? [],
+    }));
   });
 
   app.post('/api/publications', async (req) => {
@@ -120,19 +194,21 @@ export default function publicationRoutes(app: FastifyInstance): void {
     const id = withTransaction(() => {
       const info = db
         .prepare(
-          `INSERT INTO publications (title, year, venue, type, doi, url, abstract, language, note)
-           VALUES (?,?,?,?,?,?,?,?,?)`,
+          `INSERT INTO publications (title, year, venue, type, doi, url, abstract, language, note, starred, read_status)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
         )
         .run(
-          body.title,
+          body.title.trim(),
           body.year ?? null,
           body.venue ?? null,
           body.type ?? 'article',
-          body.doi ?? null,
+          body.doi ? normalizeDoi(body.doi) : null,
           body.url ?? null,
           body.abstract ?? null,
           body.language ?? null,
           body.note ?? null,
+          body.starred ? 1 : 0,
+          body.read_status ?? 'none',
         );
       const publicationId = Number(info.lastInsertRowid);
       replaceAuthors(publicationId, body.authors);
@@ -147,15 +223,20 @@ export default function publicationRoutes(app: FastifyInstance): void {
 
   app.patch('/api/publications/:id', async (req) => {
     const id = idParam(req.params);
-    getPublicationRow(id);
     const body = publicationPatch.parse(req.body);
+    getPublicationRow(id);
     withTransaction(() => {
       const sets: string[] = [];
       const values: (string | number | null)[] = [];
-      for (const field of PUBLICATION_FIELDS) {
+      for (const field of PUBLICATION_TEXT_FIELDS) {
         if (body[field] === undefined) continue;
         sets.push(`${field} = ?`);
-        values.push(body[field] ?? null);
+        const value = body[field] ?? null;
+        values.push(field === 'doi' && typeof value === 'string' ? normalizeDoi(value) : value);
+      }
+      if (body.starred !== undefined) {
+        sets.push('starred = ?');
+        values.push(body.starred ? 1 : 0);
       }
       if (sets.length > 0) {
         db.prepare(`UPDATE publications SET ${sets.join(', ')} WHERE id = ?`).run(...values, id);
@@ -198,10 +279,10 @@ export default function publicationRoutes(app: FastifyInstance): void {
       const key = row.author_name.toLowerCase();
       if (dismissed.has(key)) continue;
       const entry = grouped.get(key) ?? { name: row.author_name, count: 0, publications: [] };
-      entry.count += 1;
       if (!entry.publications.some((p) => p.id === row.publication_id)) {
         entry.publications.push({ id: row.publication_id, title: row.title });
       }
+      entry.count = entry.publications.length;
       grouped.set(key, entry);
     }
     return [...grouped.values()].sort(
@@ -213,36 +294,41 @@ export default function publicationRoutes(app: FastifyInstance): void {
     const body = suggestionPromoteInput.parse(req.body);
     return withTransaction(() => {
       const person = insertPerson({ ...body.person, name: body.person?.name ?? body.name });
-      const info = db
-        .prepare(
-          `UPDATE publication_authors SET person_id = ?
-           WHERE person_id IS NULL AND author_name = ? COLLATE NOCASE`,
-        )
-        .run(person.id, body.name);
-      db.prepare('DELETE FROM dismissed_suggestions WHERE author_name = ? COLLATE NOCASE').run(
-        body.name,
-      );
-      return { person, linked: Number(info.changes) };
+      const linked = linkRows(unlinkedRowIds(body.name), person.id);
+      clearDismissal(body.name);
+      touchPeople([person.id]);
+      return { person, linked };
     });
   });
 
   app.post('/api/suggestions/link', async (req) => {
     const body = suggestionLinkInput.parse(req.body);
     getPersonRow(body.person_id);
-    const info = db
-      .prepare(
-        `UPDATE publication_authors SET person_id = ?
-         WHERE person_id IS NULL AND author_name = ? COLLATE NOCASE`,
-      )
-      .run(body.person_id, body.name);
-    return { linked: Number(info.changes) };
+    return withTransaction(() => {
+      const linked = linkRows(unlinkedRowIds(body.name), body.person_id);
+      clearDismissal(body.name);
+      touchPeople([body.person_id]);
+      return { linked };
+    });
   });
 
   app.post('/api/suggestions/dismiss', async (req, reply) => {
     const body = suggestionDismissInput.parse(req.body);
-    db.prepare(
-      'INSERT OR REPLACE INTO dismissed_suggestions (author_name) VALUES (?)',
-    ).run(body.name);
+    db.prepare('INSERT OR REPLACE INTO dismissed_suggestions (author_name) VALUES (?)').run(
+      body.name.trim(),
+    );
+    return reply.code(204).send();
+  });
+
+  app.get('/api/suggestions/dismissed', async (): Promise<DismissedSuggestion[]> => {
+    return db
+      .prepare('SELECT * FROM dismissed_suggestions ORDER BY dismissed_at DESC')
+      .all() as unknown as DismissedSuggestion[];
+  });
+
+  app.delete('/api/suggestions/dismissed/:name', async (req, reply) => {
+    const name = decodeURIComponent((req.params as { name: string }).name);
+    clearDismissal(name);
     return reply.code(204).send();
   });
 }

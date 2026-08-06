@@ -42,15 +42,37 @@ export function migrate(): void {
   }
 }
 
+let transactionDepth = 0;
+
+/**
+ * Runs fn atomically. Re-entrant: a nested call joins the outer transaction
+ * instead of issuing a second BEGIN (node:sqlite cannot nest transactions).
+ * Rollback errors never mask the original failure.
+ */
 export function withTransaction<T>(fn: () => T): T {
+  if (transactionDepth > 0) {
+    transactionDepth += 1;
+    try {
+      return fn();
+    } finally {
+      transactionDepth -= 1;
+    }
+  }
   db.exec('BEGIN');
+  transactionDepth = 1;
   try {
     const result = fn();
     db.exec('COMMIT');
     return result;
   } catch (err) {
-    db.exec('ROLLBACK');
+    try {
+      db.exec('ROLLBACK');
+    } catch {
+      // transaction already aborted — keep the original error
+    }
     throw err;
+  } finally {
+    transactionDepth = 0;
   }
 }
 

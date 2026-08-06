@@ -7,7 +7,7 @@ import {
 } from '@crm/shared';
 import { db, withTransaction, touchPerson } from '../db.js';
 import { ConflictError } from '../errors.js';
-import { getPersonRow, idParam, normalizeDoi } from '../helpers.js';
+import { cleanOrcid, getPersonRow, idParam, normalizeDoi } from '../helpers.js';
 import { orcidPreview, requireOrcid } from '../enrichment/orcid.js';
 import { insertPerson, personDetail, resolveInstitution } from './people.js';
 
@@ -42,7 +42,7 @@ function applyOrcidImport(personId: number, input: OrcidImportInput): ImportCoun
     const sets: string[] = [];
     const values: (string | number | null)[] = [];
     for (const field of FILLABLE_FIELDS) {
-      const value = input.fields[field];
+      const value = field === 'orcid' ? cleanOrcid(input.fields.orcid) : input.fields[field];
       if (value === undefined || value === null || value === '') continue;
       const current = person[field];
       if (!input.overwrite && current !== null && current !== '') continue;
@@ -103,7 +103,7 @@ function applyOrcidImport(personId: number, input: OrcidImportInput): ImportCoun
           pub.year ?? null,
           pub.venue ?? null,
           pub.type ?? 'article',
-          pub.doi ?? null,
+          pub.doi ? normalizeDoi(pub.doi) : null,
           pub.url ?? null,
         );
       publicationId = Number(info.lastInsertRowid);
