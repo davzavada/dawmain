@@ -1,0 +1,19 @@
+name: Academic CRM
+version: "0.1.0"
+slug: academic_crm
+description: Personal CRM for academic relationships — people, affiliations, publications, typed relations, a network graph and ORCID import.
+url: https://github.com/davzavada/dawmain
+arch:
+  - amd64
+  - aarch64
+image: ghcr.io/davzavada/academic-crm
+init: false
+ingress: true
+ingress_port: 3000
+panel_icon: mdi:school
+panel_title: Academic CRM
+webui: "http://[HOST]:[PORT:3000]"
+ports:
+  3000/tcp: null
+ports_description:
+  3000/tcp: Direct web UI (optional — ingress works without opening a port)
