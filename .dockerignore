@@ -1,0 +1,10 @@
+.git
+.github
+node_modules
+**/node_modules
+data
+web/dist
+academic-crm
+Dockerfile
+docker-compose.yml
+README.md

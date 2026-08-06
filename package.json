@@ -1,0 +1,26 @@
+{
+  "name": "academic-crm",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "workspaces": [
+    "shared",
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,green \"npm run dev -w server\" \"npm run dev -w web\"",
+    "build": "npm run build -w web",
+    "start": "npm run start -w server",
+    "seed": "npm run seed -w server",
+    "typecheck": "npm run typecheck --workspaces"
+  },
+  "devDependencies": {
+    "@types/node": "^22.17.0",
+    "concurrently": "^9.2.0",
+    "typescript": "^5.9.2"
+  }
+}
