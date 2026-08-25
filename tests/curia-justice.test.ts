@@ -1,0 +1,185 @@
+import { describe, expect, it } from "vitest";
+import { buildCuriaBody, caseNumberToCelex, parseCuriaSearch } from "@/src/sources/curia";
+import {
+  enumerateDays,
+  filterJusticeItems,
+  parseJusticeDecision,
+  parseJusticeListing,
+} from "@/src/sources/justice";
+import { SourceError } from "@/src/sources/shared/errors";
+
+describe("caseNumberToCelex", () => {
+  it("derives CELEX sector-6 numbers", () => {
+    expect(caseNumberToCelex("C-311/18", "judgment")).toBe("62018CJ0311");
+    expect(caseNumberToCelex("C-131/12", "judgment")).toBe("62012CJ0131");
+    expect(caseNumberToCelex("C-73/24", "opinion")).toBe("62024CC0073");
+    expect(caseNumberToCelex("T-655/17", "judgment")).toBe("62017TJ0655");
+  });
+  it("handles the century split of two-digit years", () => {
+    expect(caseNumberToCelex("C-283/81", "judgment")).toBe("61981CJ0283"); // CILFIT
+    expect(caseNumberToCelex("C-1/54", "judgment")).toBe("61954CJ0001");
+  });
+  it("rejects unparsable numbers", () => {
+    expect(caseNumberToCelex("nonsense", "judgment")).toBeNull();
+  });
+});
+
+describe("buildCuriaBody", () => {
+  it("mirrors the verbatim SPA body with the criteria filled in", () => {
+    const body = buildCuriaBody(
+      { caseNumber: "C-311/18", court: "C", sort: "date" },
+      0,
+      10,
+    ) as Record<string, unknown>;
+    expect(body.publishedId).toBe("C-311/18");
+    expect(body.searchTerm).toBe('"C-311/18"');
+    expect(body.tabName).toBe("affair");
+    expect(body.searchSources).toEqual(["document", "metadata"]);
+    expect((body.sortTermList as Array<{ sortTerm: string }>)[0].sortTerm).toBe("INTRODUCTION_DATE");
+    expect((body.filtersValue as Array<{ field: string }>)[0].field).toBe("jurisdiction");
+    expect((body.pagination as { from: number; to: number }).from).toBe(1);
+  });
+});
+
+describe("parseCuriaSearch", () => {
+  // Synthetic — nested innerHits shape verbatim from the research.
+  const payload = {
+    totalHits: 2,
+    searchHits: [
+      {
+        affId: 123,
+        innerHits: {
+          document: {
+            searchHits: [
+              {
+                document: {
+                  logicDocId: "id_C2020559",
+                  docTypeCode: "ARRET",
+                  docDate: "2020-07-16",
+                  parties: "Facebook Ireland a Schrems",
+                  ecli: "ECLI:EU:C:2020:559",
+                  docNoPart: "C-311/18",
+                },
+              },
+            ],
+          },
+        },
+      },
+    ],
+  };
+
+  it("flattens innerHits into hits", () => {
+    const page = parseCuriaSearch(payload);
+    expect(page.total).toBe(2);
+    expect(page.hits[0].ecli).toBe("ECLI:EU:C:2020:559");
+    expect(page.hits[0].caseNumber).toBe("C-311/18");
+    expect(page.hits[0].logicDocId).toBe("id_C2020559");
+  });
+
+  it("throws PARSE_DRIFT on shape mismatch", () => {
+    expect(() => parseCuriaSearch({ different: true })).toThrowError(SourceError);
+  });
+});
+
+describe("enumerateDays", () => {
+  it("lists inclusive day windows", () => {
+    expect(enumerateDays("2026-08-01", "2026-08-03")).toEqual([
+      "2026-08-01",
+      "2026-08-02",
+      "2026-08-03",
+    ]);
+  });
+  it("rejects reversed and oversized windows", () => {
+    expect(() => enumerateDays("2026-08-03", "2026-08-01")).toThrowError(SourceError);
+    expect(() => enumerateDays("2026-08-01", "2026-08-20")).toThrowError(SourceError);
+  });
+});
+
+describe("parseJusticeListing", () => {
+  // Synthetic — item fields verbatim from the ministry's OpenAPI + live probes.
+  const payload = {
+    items: [
+      {
+        jednaciCislo: "14 C 263/2020-19",
+        soud: "Okresní soud v Mostě",
+        autor: "JUDr. Jan Novák",
+        ecli: "ECLI:CZ:OSMO:2020:14.C.263.2020.2",
+        predmetRizeni: "o zaplacení 12 000 Kč",
+        datumVydani: "2020-10-15",
+        datumZverejneni: "2020-10-20",
+        klicovaSlova: ["smlouva o úvěru"],
+        zminenaUstanoveni: ["§ 142 z. č. 99/1963 Sb."],
+        odkaz: "https://rozhodnuti.justice.cz/api/finaldoc/1d6380c9-0364-498a-b494-d162a90121cb",
+      },
+    ],
+    totalPages: 4,
+    pageNumber: 0,
+  };
+
+  it("extracts items and the uuid from the odkaz", () => {
+    const listing = parseJusticeListing(payload);
+    expect(listing.totalPages).toBe(4);
+    expect(listing.items[0].uuid).toBe("1d6380c9-0364-498a-b494-d162a90121cb");
+    expect(listing.items[0].soud).toBe("Okresní soud v Mostě");
+  });
+
+  it("throws PARSE_DRIFT without items", () => {
+    expect(() => parseJusticeListing({})).toThrowError(SourceError);
+  });
+});
+
+describe("filterJusticeItems", () => {
+  const items = parseJusticeListing({
+    items: [
+      {
+        jednaciCislo: "14 C 263/2020-19",
+        soud: "Okresní soud v Mostě",
+        predmetRizeni: "o zaplacení",
+        klicovaSlova: ["úvěr"],
+        odkaz: ".../11111111-2222-3333-4444-555555555555",
+      },
+      {
+        jednaciCislo: "5 T 1/2021",
+        soud: "Krajský soud v Brně",
+        predmetRizeni: "podplácení",
+        odkaz: ".../66666666-7777-8888-9999-aaaaaaaaaaaa",
+      },
+    ],
+    totalPages: 1,
+  }).items;
+
+  it("filters by court substring and keyword", () => {
+    expect(filterJusticeItems(items, { court: "mostě" })).toHaveLength(1);
+    expect(filterJusticeItems(items, { keyword: "úvěr" })).toHaveLength(1);
+    expect(filterJusticeItems(items, { keyword: "podplácení" })[0].soud).toContain("Brně");
+    expect(filterJusticeItems(items, {})).toHaveLength(2);
+  });
+});
+
+describe("parseJusticeDecision", () => {
+  it("prefers verdictText + justificationText", () => {
+    const decision = parseJusticeDecision(
+      { verdictText: "Soud rozhodl takto.", justificationText: "Odůvodnění věci.", metadata: { type: "JUDGEMENT" } },
+      "1d6380c9-0364-498a-b494-d162a90121cb",
+    );
+    expect(decision.text).toBe("Soud rozhodl takto.\n\nOdůvodnění věci.");
+    expect(decision.url).toContain("?id=1d6380c9");
+  });
+
+  it("falls back to paragraph joining and tolerates drifted metadata", () => {
+    const decision = parseJusticeDecision(
+      {
+        verdictText: null,
+        verdict: [{ texts: [{ text: "Výrok " }, { text: "soudu." }] }],
+        justification: [{ texts: [{ text: "Odůvodnění." }] }],
+        metadata: { solver: { firstName: "Jan" }, caseResultType: ["X"] },
+      },
+      "1d6380c9-0364-498a-b494-d162a90121cb",
+    );
+    expect(decision.text).toBe("Výrok soudu.\n\nOdůvodnění.");
+  });
+
+  it("throws PARSE_DRIFT when no text is present", () => {
+    expect(() => parseJusticeDecision({ metadata: {} }, "x")).toThrowError(SourceError);
+  });
+});
