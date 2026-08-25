@@ -25,9 +25,12 @@ const FALLBACK_PUBLICATIONS: Record<string, string> = {
   design: "2231430",
 };
 
-const TITLE_PATTERNS: Record<string, RegExp> = {
-  trademark: /trade\s*mark/i,
-  design: /design/i,
+/** Title must contain the register word AND the English word "guidelines" —
+ * each language edition is a separate publication (Maltese "Linji gwida
+ * tat-trademarks" outranks the EN edition by id). */
+const TITLE_PATTERNS: Record<string, RegExp[]> = {
+  trademark: [/trade\s*marks?/i, /guideline/i],
+  design: [/design/i, /guideline/i],
 };
 
 function envPublication(register: "trademark" | "design"): string | undefined {
@@ -85,6 +88,7 @@ const str = (record: Record<string, unknown>, ...keys: string[]): string | undef
 export interface GuidelinesPublication {
   id: string;
   title: string;
+  language?: string;
 }
 
 /** Parse /api/publications (tolerant to Id/id casing). Pure — unit-tested. */
@@ -108,28 +112,34 @@ export function parsePublications(json: unknown): GuidelinesPublication[] {
       return {
         id: str(record, "Id", "id") ?? "",
         title: str(record, "Title", "title") ?? "",
+        language: str(record, "Language", "language", "LanguageCode", "Lang")?.toLowerCase(),
       };
     })
     .filter((publication) => publication.id);
 }
 
-/** Newest publication whose title matches the register (ids grow over time). */
+/** Newest ENGLISH publication matching the register (ids grow over time). */
 export function pickPublication(
   publications: GuidelinesPublication[],
   register: "trademark" | "design",
 ): GuidelinesPublication | undefined {
-  return publications
-    .filter((publication) => TITLE_PATTERNS[register].test(publication.title))
-    .sort((a, b) => Number(b.id) - Number(a.id))[0];
+  const matches = publications.filter((publication) =>
+    TITLE_PATTERNS[register].every((pattern) => pattern.test(publication.title)),
+  );
+  const english = matches.filter((publication) => !publication.language || publication.language.startsWith("en"));
+  return (english.length ? english : matches).sort((a, b) => Number(b.id) - Number(a.id))[0];
 }
 
 // ---------- TOC ----------
 
 export interface GuidelinesTopic {
-  topicId: string;
+  /** Numeric page id usable with euipo_guidelines_get_section (leaves only). */
+  topicId: string | null;
+  /** Sitemap id ("t1", …) for drilling into children via the TOC. */
+  sitemapId: string;
   title: string;
   hasChildren: boolean;
-  url: string;
+  url: string | null;
 }
 
 /** Parse a /api/toc response. Pure — unit-tested. */
@@ -150,21 +160,22 @@ export function parseToc(json: unknown, publicationId: string): GuidelinesTopic[
   return list
     .map((item) => {
       const record = item as Record<string, unknown>;
-      // Url looks like "/{pub}/{topic}/{slug}…" — the topic id is segment 2.
+      // Leaf Urls look like "/{pub}/{pageId}/{slug}…" — pageId is numeric.
       const url = str(record, "Url", "url") ?? "";
-      const fromUrl = new RegExp(`^/${publicationId}/(\\d+)`).exec(url)?.[1];
-      const id = fromUrl ?? str(record, "Id", "id") ?? "";
+      const pageId = new RegExp(`^/${publicationId}/(\\d+)`).exec(url)?.[1] ?? null;
+      const sitemapId = str(record, "Id", "id") ?? pageId ?? "";
       const hasChildren = Boolean(
         (record.HasChildNodes ?? record.hasChildNodes ?? record.HasChildren) === true,
       );
       return {
-        topicId: id,
+        topicId: pageId,
+        sitemapId,
         title: str(record, "Title", "title") ?? "",
         hasChildren,
-        url: `${BASE}/${publicationId}/${id}`,
+        url: pageId ? `${BASE}/${publicationId}/${pageId}` : null,
       };
     })
-    .filter((topic) => topic.topicId);
+    .filter((topic) => topic.sitemapId);
 }
 
 // ---------- section ----------

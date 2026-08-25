@@ -26,9 +26,9 @@ export function registerEuipoGuidelines(server: McpServer): void {
         register: z.enum(["trademark", "design"]).default("trademark"),
         parent_topic_id: z
           .string()
-          .regex(/^\d+$/)
+          .regex(/^[A-Za-z0-9:_.-]+$/)
           .optional()
-          .describe("Drill into one TOC item's children (topics with has_children)."),
+          .describe("Drill into one TOC item's children: pass its sitemapId (e.g. 't1')."),
       }),
       outputSchema: z.object({
         publication_id: z.string(),
@@ -36,10 +36,11 @@ export function registerEuipoGuidelines(server: McpServer): void {
         count: z.number(),
         topics: z.array(
           z.object({
-            topicId: z.string(),
+            topicId: z.string().nullable(),
+            sitemapId: z.string(),
             title: z.string(),
             hasChildren: z.boolean(),
-            url: z.string(),
+            url: z.string().nullable(),
           }),
         ),
       }),
@@ -56,7 +57,10 @@ export function registerEuipoGuidelines(server: McpServer): void {
         };
         const lines = toc.topics
           .slice(0, 100)
-          .map((topic) => `• ${topic.title} — topic ${topic.topicId}${topic.hasChildren ? " (has children)" : ""}`);
+          .map(
+            (topic) =>
+              `• ${topic.title}${topic.topicId ? ` — section ${topic.topicId}` : ""}${topic.hasChildren ? ` (drill: parent_topic_id "${topic.sitemapId}")` : ""}`,
+          );
         return {
           content: [
             {

@@ -87,14 +87,23 @@ describe("guidelines publications", () => {
   const listing = [
     { Id: "2302857", Title: "Trade mark Guidelines 2025" },
     { Id: "2319054", Title: "Trade mark Guidelines 2026" },
+    { Id: "2319266", Title: "Linji gwida tat-trademarks" }, // Maltese, higher id
     { Id: "2231430", Title: "Designs Guidelines" },
   ];
 
-  it("parses and picks the newest matching edition", () => {
+  it("parses and picks the newest ENGLISH edition", () => {
     const publications = parsePublications(listing);
-    expect(publications).toHaveLength(3);
+    expect(publications).toHaveLength(4);
     expect(pickPublication(publications, "trademark")?.id).toBe("2319054");
     expect(pickPublication(publications, "design")?.id).toBe("2231430");
+  });
+
+  it("prefers a language field when present", () => {
+    const publications = parsePublications([
+      { Id: "2", Title: "Trademark Guidelines", Language: "mt" },
+      { Id: "1", Title: "Trademark Guidelines", Language: "en" },
+    ]);
+    expect(pickPublication(publications, "trademark")?.id).toBe("1");
   });
 
   it("throws PARSE_DRIFT on a non-list", () => {
@@ -103,22 +112,25 @@ describe("guidelines publications", () => {
 });
 
 describe("guidelines parseToc", () => {
-  it("extracts topic ids from Url segments and flags children", () => {
+  it("extracts numeric page ids from Urls and sitemap ids for drill-down", () => {
     const topics = parseToc(
       [
+        { Id: "t1", Title: "Trade mark guidelines", HasChildNodes: true },
         { Id: "ish:123-1-512", Title: "1 Introduction", Url: "/2319054/2445755/trade-mark-guidelines/1-introduction", HasChildNodes: false },
-        { Id: "ish:123-2-512", Title: "Part B Examination", Url: "/2319054/2445760/x", HasChildNodes: true },
       ],
       "2319054",
     );
     expect(topics).toHaveLength(2);
-    expect(topics[0]).toEqual({
+    expect(topics[0].topicId).toBeNull();
+    expect(topics[0].sitemapId).toBe("t1");
+    expect(topics[0].hasChildren).toBe(true);
+    expect(topics[1]).toEqual({
       topicId: "2445755",
+      sitemapId: "ish:123-1-512",
       title: "1 Introduction",
       hasChildren: false,
       url: "https://guidelines.euipo.europa.eu/2319054/2445755",
     });
-    expect(topics[1].hasChildren).toBe(true);
   });
 });
 
