@@ -8,6 +8,9 @@ import { registerNss } from "./nss";
 import { registerCzCaselaw } from "./cz-caselaw";
 import { registerCuria } from "./curia";
 import { registerJustice } from "./justice";
+import { registerEuipoClw } from "./euipo-clw";
+import { registerEuipoGuidelines } from "./euipo-guidelines";
+import { registerUpv } from "./upv";
 
 /**
  * Every tool the server exposes. To add one: create `./<name>.ts` exporting a
@@ -23,6 +26,9 @@ const registrars: Array<(server: McpServer) => void> = [
   registerCzCaselaw,
   registerJustice,
   registerCuria,
+  registerEuipoClw,
+  registerEuipoGuidelines,
+  registerUpv,
 ];
 
 export function registerAllTools(server: McpServer): void {
