@@ -51,5 +51,9 @@ export function isoToCzech(iso: string): string {
 export function czechToIso(czech: string): string | null {
   const m = /^\s*(\d{1,2})[./]\s*(\d{1,2})[./]\s*(\d{4})\s*$/.exec(czech);
   if (!m) return null;
+  const [day, month] = [Number(m[1]), Number(m[2])];
+  // Range check keeps US-format dates (MM/DD/YYYY, e.g. 05/20/2026) from
+  // being misread as day.month — the caller can then try the US parser.
+  if (day < 1 || day > 31 || month < 1 || month > 12) return null;
   return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
 }
