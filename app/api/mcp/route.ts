@@ -19,12 +19,29 @@ function unauthorized(): Response {
   );
 }
 
+/**
+ * Header names the token is accepted from. `Authorization: Bearer <t>` is the
+ * canonical form; the alternatives exist because some connector UIs (e.g. the
+ * claude.ai custom-connector dialog) reserve the Authorization name for OAuth
+ * and only offer preset header names.
+ */
+const TOKEN_HEADERS = ["authorization", "x-api-key", "cf-aig-authorization"];
+
+function extractToken(request: Request): string | null {
+  for (const name of TOKEN_HEADERS) {
+    const raw = request.headers.get(name)?.trim();
+    if (!raw) continue;
+    // Accept the value with or without a "Bearer " prefix in every header.
+    return raw.toLowerCase().startsWith("bearer ") ? raw.slice(7).trim() : raw;
+  }
+  return null;
+}
+
 async function handle(request: Request): Promise<Response> {
   const expected = getBearerToken();
 
   if (expected) {
-    const header = request.headers.get("authorization") ?? "";
-    const provided = header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
+    const provided = extractToken(request);
     if (!provided || !tokenMatches(expected, provided)) {
       return unauthorized();
     }
