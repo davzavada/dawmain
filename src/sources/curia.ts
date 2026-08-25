@@ -64,6 +64,8 @@ export interface CuriaHit {
   parties?: string;
   ecli?: string;
   caseNumber?: string;
+  /** Human-verifiable link: InfoCuria case listing, else Cellar by ECLI. */
+  url: string | null;
 }
 
 export interface CuriaSearchPage {
@@ -132,13 +134,20 @@ export function parseCuriaSearch(json: unknown): CuriaSearchPage {
     for (const inner of outer.innerHits?.document?.searchHits ?? []) {
       const doc = (inner.document ?? inner.content ?? {}) as Record<string, unknown>;
       const str = (key: string) => (typeof doc[key] === "string" ? (doc[key] as string) : undefined);
+      const ecli = str("ecli") ?? str("docEcli");
+      const caseNumber = str("docNoPart") ?? str("idPublished");
       hits.push({
         logicDocId: str("logicDocId"),
         docType: str("docTypeCode"),
         date: str("docDate"),
         parties: str("parties"),
-        ecli: str("ecli") ?? str("docEcli"),
-        caseNumber: str("docNoPart") ?? str("idPublished"),
+        ecli,
+        caseNumber,
+        url: caseNumber
+          ? `https://curia.europa.eu/juris/liste.jsf?num=${encodeURIComponent(caseNumber)}&language=cs`
+          : ecli
+            ? `https://publications.europa.eu/resource/ecli/${encodeURIComponent(ecli)}`
+            : null,
       });
     }
   }

@@ -49,6 +49,7 @@ export function registerJustice(server: McpServer): void {
             datumVydani: z.string().optional(),
             datumZverejneni: z.string().optional(),
             klicovaSlova: z.array(z.string()).optional(),
+            url: z.string(),
           }),
         ),
       }),
@@ -62,16 +63,20 @@ export function registerJustice(server: McpServer): void {
           days_walked: result.days_walked,
           pages_fetched: result.pages_fetched,
           truncated: result.truncated,
-          items: result.items.map(({ autor: _autor, zminenaUstanoveni: _z, ...item }) => item),
+          items: result.items.map(({ autor: _autor, zminenaUstanoveni: _z, ...item }) => ({
+            ...item,
+            url: `https://rozhodnuti.justice.cz/rozhodnuti/?id=${item.uuid}`,
+          })),
         };
         const lines = result.items.map(
           (item, i) =>
-            `${i + 1}. ${item.jednaciCislo ?? "?"} — ${item.soud ?? "?"}${item.predmetRizeni ? ` — ${snippet(item.predmetRizeni, 90)}` : ""} — uuid ${item.uuid}`,
+            `${i + 1}. ${item.jednaciCislo ?? "?"} — ${item.soud ?? "?"}${item.predmetRizeni ? ` — ${snippet(item.predmetRizeni, 90)}` : ""} — uuid ${item.uuid}\n   https://rozhodnuti.justice.cz/rozhodnuti/?id=${item.uuid}`,
         );
         const text = result.items.length
           ? [
               `${result.items.length} decisions (window ${date_from}..${date_to}${result.truncated ? "; page budget hit — narrow the window or filters" : ""}):`,
               ...lines,
+              "Full text: justice_get_decision {uuid}.",
             ].join("\n")
           : `No decisions matched in ${date_from}..${date_to}. Note this source lists by PUBLICATION date and holds mostly first-instance civil decisions from 2020-10 on.`;
         return { content: [{ type: "text", text }], structuredContent: output };

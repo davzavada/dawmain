@@ -43,6 +43,10 @@ export function registerNs(server: McpServer): void {
         truncated: z.boolean(),
         count: z.number(),
         offset: z.number(),
+        applied_window_from: z
+          .string()
+          .nullable()
+          .describe("When set, results were limited to this start date because no dates were given."),
         items: z.array(
           z.object({ unid: z.string(), caseNumbers: z.array(z.string()), url: z.string() }),
         ),
@@ -62,15 +66,19 @@ export function registerNs(server: McpServer): void {
           truncated: page.truncated,
           count: page.hits.length,
           offset,
+          applied_window_from: page.appliedWindowFrom,
           items: page.hits,
         };
         const lines = page.hits.map(
-          (hit, i) => `${offset + i + 1}. ${hit.caseNumbers.join("; ")} — unid ${hit.unid}`,
+          (hit, i) => `${offset + i + 1}. ${hit.caseNumbers.join("; ")} — unid ${hit.unid}\n   ${hit.url}`,
         );
+        const windowNote = page.appliedWindowFrom
+          ? ` Results limited to decisions published since ${page.appliedWindowFrom} (the NS server rejects unbounded queries) — pass date_from/date_to for another period.`
+          : "";
         const text = page.empty
-          ? "No NS decisions matched. Broaden the query or the date range."
+          ? `No NS decisions matched.${windowNote} Broaden the query or the date range.`
           : [
-              `${page.total ?? "?"} decisions${page.truncated ? ` (window-capped; ${page.matched} match in total — narrow by date to see the rest)` : ""}:`,
+              `${page.total ?? "?"} decisions${page.truncated ? ` (window-capped; ${page.matched} match in total — narrow by date to see the rest)` : ""}:${windowNote}`,
               ...lines,
             ].join("\n");
         return { content: [{ type: "text", text }], structuredContent: output };

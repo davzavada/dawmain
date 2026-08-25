@@ -71,12 +71,13 @@ export function registerEuipoClw(server: McpServer): void {
         };
         const lines = result.items.map(
           (item, i) =>
-            `${offset + i + 1}. ${item.caseNumber ?? "?"} [${item.type ?? "?"}] ${item.entityName ?? ""}${item.date ? ` (${item.date})` : ""} — ${snippet(item.outcome ?? "", 80)}`,
+            `${offset + i + 1}. ${item.caseNumber ?? "?"} [${item.type ?? "?"}] ${item.entityName ?? ""}${item.date ? ` (${item.date})` : ""} — ${snippet(item.outcome ?? "", 80)}${item.viewUrl ? `\n   ${item.viewUrl}` : ""}`,
         );
         const text = result.items.length
           ? [
               `${result.numFound} decisions in the register${result.truncated ? ` (filters scanned only the newest ${result.scanned} — refine or use viewUrl deep links)` : ""}:`,
               ...lines,
+              "Full text: euipo_clw_get_document {pdf_url} (use the hit's pdfUrl).",
             ].join("\n")
           : `No decisions matched among the newest ${result.scanned} records. Filters here are client-side — loosen them or search the web UI: https://euipo.europa.eu/eSearchCLW/`;
         return { content: [{ type: "text", text }], structuredContent: output };

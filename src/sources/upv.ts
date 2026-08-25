@@ -15,7 +15,9 @@ import { decodeBody, htmlToText, loadHtml } from "./shared/html";
  */
 
 const SOURCE = "ÚPV (ISDV)";
-const BASE = "https://isdv.upv.gov.cz/webapp";
+/** gov.cz host first; the legacy host may sit behind different filtering. */
+const BASES = ["https://isdv.upv.gov.cz/webapp", "https://isdv.upv.cz/webapp"];
+const BASE = BASES[0];
 
 export interface UpvLink {
   label: string;
@@ -58,9 +60,34 @@ export interface UpvBrowseResult {
 // Live finding (2026-08): isdv.upv.gov.cz does not answer connections from
 // US Vercel regions (fetch failed) — likely geo-filtering. The tools stay in
 // place; run the deployment in fra1 and re-check with dawmain_probe_sources.
+/** Fetch with host fallback: network-level failures try the legacy host. */
+async function upvFetch(pathOrUrl: string): Promise<{ response: Response; html: string }> {
+  const candidates = pathOrUrl.startsWith("http")
+    ? [...new Set([pathOrUrl, ...BASES.map((base) => pathOrUrl.replace(/^https:\/\/[^/]+\/webapp/, base))])]
+    : BASES.map((base) => `${base}/${pathOrUrl}`);
+  let lastError: unknown;
+  for (const url of candidates) {
+    try {
+      const response = await fetchUpstream(SOURCE, url, { timeoutMs: 10_000, retry: false });
+      return { response, html: await decodeBody(response) };
+    } catch (error) {
+      if (error instanceof SourceError && error.kind !== "UPSTREAM_UNREACHABLE") throw error;
+      lastError = error;
+    }
+  }
+  throw lastError instanceof SourceError
+    ? new SourceError(
+        SOURCE,
+        "UPSTREAM_UNREACHABLE",
+        "Neither ISDV host (isdv.upv.gov.cz, isdv.upv.cz) accepted the connection.",
+        "The office appears to drop connections from cloud IPs. Verify the deployment region is fra1 (dawmain_ping) and retry; if both hosts stay dead, use https://isdv.upv.gov.cz/webapp/rozhodnuti.prochazet in a browser.",
+      )
+    : (lastError as Error);
+}
+
 export async function browseUpv(categoryUrl?: string): Promise<UpvBrowseResult> {
   const url = categoryUrl ?? `${BASE}/rozhodnuti.prochazet`;
-  if (!url.startsWith(BASE)) {
+  if (!BASES.some((base) => url.startsWith(base))) {
     throw new SourceError(
       SOURCE,
       "INPUT_INVALID",
@@ -68,8 +95,7 @@ export async function browseUpv(categoryUrl?: string): Promise<UpvBrowseResult> 
       `Use links returned by a previous upv_browse call (they start with ${BASE}).`,
     );
   }
-  const response = await fetchUpstream(SOURCE, url, { timeoutMs: 20_000 });
-  const html = await decodeBody(response);
+  const { response, html } = await upvFetch(url);
   if (!response.ok || isUpvMaintenance(html)) {
     throw new SourceError(
       SOURCE,
@@ -104,8 +130,7 @@ export async function getUpvDecision(pId: string): Promise<{ text: string; url: 
     );
   }
   const url = `${BASE}/rozhodnuti.showDocP?p_id=${pId}`;
-  const response = await fetchUpstream(SOURCE, url, { timeoutMs: 20_000 });
-  const html = await decodeBody(response);
+  const { response, html } = await upvFetch(`rozhodnuti.showDocP?p_id=${pId}`);
   if (!response.ok || isUpvMaintenance(html)) {
     throw new SourceError(
       SOURCE,

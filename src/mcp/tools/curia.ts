@@ -46,6 +46,7 @@ export function registerCuria(server: McpServer): void {
             date: z.string().optional(),
             docType: z.string().optional(),
             logicDocId: z.string().optional(),
+            url: z.string().nullable(),
           }),
         ),
       }),
@@ -67,10 +68,10 @@ export function registerCuria(server: McpServer): void {
         };
         const lines = result.hits.map(
           (hit, i) =>
-            `${page * limit + i + 1}. ${hit.caseNumber ?? "?"} ${hit.parties ?? ""}${hit.date ? ` (${hit.date})` : ""}${hit.ecli ? ` — ${hit.ecli}` : ""}`,
+            `${page * limit + i + 1}. ${hit.caseNumber ?? "?"} ${hit.parties ?? ""}${hit.date ? ` (${hit.date})` : ""}${hit.ecli ? ` — ${hit.ecli}` : ""}${hit.url ? `\n   ${hit.url}` : ""}`,
         );
         const text = result.hits.length
-          ? [`${result.total} documents:`, ...lines].join("\n")
+          ? [`${result.total} documents:`, ...lines, "Full text: curia_get_document {ecli | case_number | logic_doc_id}."].join("\n")
           : "No CJEU documents matched. Try English keywords or the exact case number.";
         return { content: [{ type: "text", text }], structuredContent: output };
       } catch (error) {

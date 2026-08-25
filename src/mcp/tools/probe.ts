@@ -65,14 +65,18 @@ function canaries(): Canary[] {
     {
       id: "ns",
       source: "Nejvyšší soud",
-      note: "Domino $$WebSearch1 tight query",
-      request: () => ({
-        url:
-          "https://rozhodnuti.nsoud.cz/Judikatura/judikatura_ns.nsf/$$WebSearch1?SearchView&Query=" +
-          encodeURIComponent('[spzn2]=cdo AND [datum_predani_na_web]>=01.01.2024') +
-          "&SearchMax=1000&SearchOrder=4&Start=0&Count=5&pohled=1",
-        init: { headers: { referer: "https://rozhodnuti.nsoud.cz/" } },
-      }),
+      note: "Domino $$WebSearch1, last-30-days window (the box 500s on wide queries)",
+      request: () => {
+        const from = new Date(Date.now() - 30 * 86_400_000);
+        const czech = `${from.getUTCDate()}.${from.getUTCMonth() + 1}.${from.getUTCFullYear()}`;
+        return {
+          url:
+            "https://rozhodnuti.nsoud.cz/Judikatura/judikatura_ns.nsf/$$WebSearch1?SearchView&Query=" +
+            encodeURIComponent(`[spzn2]=cdo AND [datum_predani_na_web]>=${czech}`) +
+            "&SearchMax=1000&SearchOrder=4&Start=0&Count=5&pohled=1",
+          init: { headers: { referer: "https://rozhodnuti.nsoud.cz/" } },
+        };
+      },
       marker: /Výsledky|Nebyly nalezeny|Podmínce vyhovuje/,
     },
     {
@@ -175,9 +179,19 @@ function canaries(): Canary[] {
     {
       id: "upv",
       source: "ÚPV (ISDV)",
-      note: "decisions browse entry point (unreachable from US regions — use fra1)",
+      note: "decisions browse (gov.cz host; connections from cloud IPs may be dropped)",
       request: () => ({
         url: "https://isdv.upv.gov.cz/webapp/rozhodnuti.prochazet",
+        init: {},
+      }),
+      marker: /rozhodnut/i,
+    },
+    {
+      id: "upv-legacy",
+      source: "ÚPV (ISDV)",
+      note: "legacy host isdv.upv.cz (may have different filtering)",
+      request: () => ({
+        url: "https://isdv.upv.cz/webapp/rozhodnuti.prochazet",
         init: {},
       }),
       marker: /rozhodnut/i,
@@ -325,6 +339,7 @@ const ALLOWED_FETCH_HOSTS = [
   "euipo.europa.eu",
   "guidelines.euipo.europa.eu",
   "isdv.upv.gov.cz",
+  "isdv.upv.cz",
 ];
 
 const inputSchema = z.object({

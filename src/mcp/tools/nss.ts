@@ -43,6 +43,7 @@ export function registerNss(server: McpServer): void {
             court: z.string().optional(),
             date: z.string().optional(),
             form: z.string().optional(),
+            url: z.string(),
           }),
         ),
       }),
@@ -64,12 +65,16 @@ export function registerNss(server: McpServer): void {
         };
         const lines = result.hits.map(
           (hit, i) =>
-            `${i + 1}. ${hit.caseNumber ?? "?"}${hit.form ? ` (${hit.form})` : ""}${hit.date ? ` ${hit.date}` : ""} — id ${hit.id}`,
+            `${i + 1}. ${hit.caseNumber ?? "?"}${hit.form ? ` (${hit.form})` : ""}${hit.date ? ` ${hit.date}` : ""} — id ${hit.id}\n   ${hit.url}`,
         );
         const text =
           result.total === 0 || (!result.hits.length && result.total === null)
             ? "No NSS decisions matched. Broaden the query or the date range."
-            : [`${result.total ?? "?"} decisions (page ${result.page}):`, ...lines].join("\n");
+            : [
+                `${result.total ?? "?"} decisions (page ${result.page}):`,
+                ...lines,
+                "Full text: nss_get_decision {document_id}.",
+              ].join("\n");
         return { content: [{ type: "text", text }], structuredContent: output };
       } catch (error) {
         return fail(error);

@@ -114,6 +114,7 @@ export interface NssHit {
   date?: string; // ISO
   form?: string;
   citation?: string;
+  url: string;
 }
 
 export interface NssResultsPage {
@@ -161,7 +162,7 @@ export function parseNssResults(html: string): NssResultsPage {
       date = date ?? cells.map((cell) => czechToIso(cell)).find((iso): iso is string => Boolean(iso));
       caseNumber = cells.find((cell) => /\d+\s*\/\s*\d{4}/.test(cell));
     }
-    hits.push({ id, caseNumber, court, date, form, citation });
+    hits.push({ id, caseNumber, court, date, form, citation, url: `${BASE}/DokumentDetail/Index/${id}` });
   });
 
   let pagination: NssResultsPage["pagination"] = null;

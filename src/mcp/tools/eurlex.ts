@@ -71,10 +71,10 @@ export function registerEurlex(server: McpServer): void {
         };
         const lines = hits.map(
           (hit, i) =>
-            `${offset + i + 1}. ${hit.celex}${hit.type ? ` [${hit.type}]` : ""}${hit.date ? ` ${hit.date}` : ""} — ${snippet(hit.title, 140)}`,
+            `${offset + i + 1}. ${hit.celex}${hit.type ? ` [${hit.type}]` : ""}${hit.date ? ` ${hit.date}` : ""} — ${snippet(hit.title, 140)}\n   ${hit.url}`,
         );
         const text = hits.length
-          ? lines.join("\n")
+          ? [...lines, "Full text: eurlex_get_document {celex} (case law also via curia_get_document)."].join("\n")
           : "No EUR-Lex documents matched. This searches TITLES only — try the act's official name keywords, or use curia_search for full-text case-law search.";
         return { content: [{ type: "text", text }], structuredContent: output };
       } catch (error) {

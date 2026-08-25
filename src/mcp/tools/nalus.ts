@@ -52,6 +52,7 @@ export function registerNalus(server: McpServer): void {
             form: z.string().optional(),
             date: z.string().optional(),
             citation: z.string().optional(),
+            url: z.string().nullable(),
           }),
         ),
       }),
@@ -82,11 +83,11 @@ export function registerNalus(server: McpServer): void {
         };
         const lines = result.hits.map(
           (hit, i) =>
-            `${page * 20 + i + 1}. ${hit.caseNumber}${hit.form ? ` (${hit.form})` : ""}${hit.date ? ` ${hit.date}` : ""} — sz ${hit.sz ?? "?"}`,
+            `${page * 20 + i + 1}. ${hit.caseNumber}${hit.form ? ` (${hit.form})` : ""}${hit.date ? ` ${hit.date}` : ""} — sz ${hit.sz ?? "?"}${hit.url ? `\n   ${hit.url}` : ""}`,
         );
         const text = result.empty
           ? "No Constitutional Court decisions matched. Broaden the criteria or check the citace format ('I. ÚS 123/20')."
-          : [`${result.total ?? "?"} decisions:`, ...lines].join("\n");
+          : [`${result.total ?? "?"} decisions:`, ...lines, "Full text: nalus_get_decision {sz}."].join("\n");
         return { content: [{ type: "text", text }], structuredContent: output };
       } catch (error) {
         return fail(error);

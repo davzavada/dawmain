@@ -24,6 +24,7 @@ interface AggregatedHit {
   caseNumber: string;
   date?: string;
   detail_tool: string;
+  url: string | null;
 }
 
 interface SourceStatus {
@@ -46,7 +47,7 @@ export function registerCzCaselaw(server: McpServer): void {
     {
       title: "Czech case law: search all top courts",
       description:
-        "FULL-TEXT search across NSS (administrative), NS (civil/criminal) and Ústavní soud (constitutional) in parallel with one Czech query. Returns interleaved top hits per source plus a per-source status. TIP: NS rejects broad queries without dates — provide date_from where possible. For deeper digging use nss_search/ns_search/nalus_search; fetch texts with the *_get_decision tool named in each hit.",
+        "FULL-TEXT search across NSS (administrative), NS (civil/criminal) and Ústavní soud (constitutional) in parallel with one Czech query. Returns interleaved top hits per source plus a per-source status. NS is auto-limited to the last 12 months unless dates are given (its server rejects unbounded queries). For deeper digging use nss_search/ns_search/nalus_search; fetch texts with the *_get_decision tool named in each hit.",
       inputSchema: z.object({
         query: z.string().min(2).describe("Czech full-text query."),
         date_from: isoDate.optional(),
@@ -73,6 +74,7 @@ export function registerCzCaselaw(server: McpServer): void {
             caseNumber: z.string(),
             date: z.string().optional(),
             detail_tool: z.string(),
+            url: z.string().nullable(),
           }),
         ),
       }),
@@ -100,6 +102,7 @@ export function registerCzCaselaw(server: McpServer): void {
               caseNumber: hit.caseNumber ?? "?",
               date: hit.date,
               detail_tool: "nss_get_decision",
+              url: hit.url,
             })),
           );
         },
@@ -117,6 +120,7 @@ export function registerCzCaselaw(server: McpServer): void {
               id: hit.unid,
               caseNumber: hit.caseNumbers.join("; "),
               detail_tool: "ns_get_decision",
+              url: hit.url,
             })),
           );
         },
@@ -135,6 +139,7 @@ export function registerCzCaselaw(server: McpServer): void {
               caseNumber: hit.caseNumber,
               date: hit.date,
               detail_tool: "nalus_get_decision",
+              url: hit.url,
             })),
           );
         },
@@ -172,7 +177,7 @@ export function registerCzCaselaw(server: McpServer): void {
       );
       const hitLines = items.map(
         (hit, i) =>
-          `${i + 1}. [${hit.source.toUpperCase()}] ${hit.caseNumber}${hit.date ? ` (${hit.date})` : ""} → ${hit.detail_tool} id/sz: ${hit.id}`,
+          `${i + 1}. [${hit.source.toUpperCase()}] ${hit.caseNumber}${hit.date ? ` (${hit.date})` : ""} → ${hit.detail_tool} id/sz: ${hit.id}${hit.url ? `\n   ${hit.url}` : ""}`,
       );
       return {
         content: [

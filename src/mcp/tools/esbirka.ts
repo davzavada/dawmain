@@ -69,6 +69,7 @@ export function registerEsbirka(server: McpServer): void {
             kod: z.string().optional(),
             stav: z.string().optional(),
             datum: z.string().optional(),
+            url: z.string(),
           }),
         ),
       }),
@@ -87,10 +88,11 @@ export function registerEsbirka(server: McpServer): void {
           count: result.items.length,
           offset,
           has_more: offset + result.items.length < result.total,
-          items: result.items,
+          items: result.items.map((item) => ({ ...item, url: `https://e-sbirka.gov.cz${item.staleUrl}` })),
         };
-        const lines = result.items.map(
-          (item, i) => `${offset + i + 1}. ${item.staleUrl} — ${snippet(item.nazev, 160)}${item.stav ? ` [${item.stav}]` : ""}`,
+        const lines = output.items.map(
+          (item, i) =>
+            `${offset + i + 1}. ${item.staleUrl} — ${snippet(item.nazev, 160)}${item.stav ? ` [${item.stav}]` : ""}\n   ${item.url}`,
         );
         const text = result.items.length
           ? `Found ${result.total} acts (showing ${offset + 1}–${offset + result.items.length}):\n${lines.join("\n")}`
@@ -148,6 +150,7 @@ export function registerEsbirka(server: McpServer): void {
           `staleUrl: ${output.staleUrl}`,
           detail.datumUcinnostiOd ? `Účinnost od: ${detail.datumUcinnostiOd}` : null,
           versions.length ? `Znění (${versions.length}):\n${versionLines.join("\n")}${versions.length > 30 ? "\n  …" : ""}` : null,
+          `Portál: https://e-sbirka.gov.cz${output.staleUrl}`,
           `Text: use esbirka_get_text with the same identifiers${date ? "" : " (add 'date' for a historical version)"}.`,
         ]
           .filter(Boolean)
@@ -176,6 +179,7 @@ export function registerEsbirka(server: McpServer): void {
       }),
       outputSchema: z.object({
         staleUrl: z.string(),
+        url: z.string(),
         section: z.string().optional(),
         page: z.number().int(),
         total_pages: z.number().int(),
@@ -192,6 +196,7 @@ export function registerEsbirka(server: McpServer): void {
           const paged = charPage(result.text, 1);
           const output = {
             staleUrl,
+            url: `https://e-sbirka.gov.cz${staleUrl}`,
             section,
             page: 1,
             total_pages: paged.total_pages,
@@ -219,6 +224,7 @@ export function registerEsbirka(server: McpServer): void {
           .trim();
         const output = {
           staleUrl,
+          url: `https://e-sbirka.gov.cz${staleUrl}`,
           page,
           total_pages: upstream.totalPages,
           has_more: page < upstream.totalPages,

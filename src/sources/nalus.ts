@@ -142,6 +142,7 @@ export interface NalusHit {
   citation?: string;
   form?: string;
   date?: string; // ISO
+  url: string | null;
 }
 
 export interface NalusSearchPage {
@@ -169,7 +170,7 @@ export function parseNalusResults(html: string): NalusSearchPage {
     const lines = cellText.split("\n").map((line) => line.trim()).filter(Boolean);
     const ecli = lines.find((line) => line.startsWith("ECLI:"));
     const judge = lines.filter((line) => line !== caseNumber && !line.startsWith("ECLI:")).at(-1);
-    hits.push({ sz: null, caseNumber, ecli, judge });
+    hits.push({ sz: null, caseNumber, ecli, judge, url: null });
   });
 
   // The actions row emits ShowLink("…GetText.aspx?sz=…") and the citation
@@ -180,6 +181,7 @@ export function parseNalusResults(html: string): NalusSearchPage {
   );
   hits.forEach((hit, index) => {
     hit.sz = szList[index] ?? null;
+    hit.url = hit.sz ? `${BASE}/GetText.aspx?sz=${hit.sz}` : null;
     const citation = citations[index];
     if (citation) {
       hit.citation = citation;

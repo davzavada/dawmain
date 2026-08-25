@@ -45,7 +45,8 @@ export function buildNsQuery(input: NsSearchInput): string {
     }
   }
   if (input.query) {
-    const sanitized = input.query.replace(/[()[\]]/g, " ").trim();
+    // Unbalanced quotes/braces break Domino FT syntax outright.
+    const sanitized = input.query.replace(/[()[\]"{}\\]/g, " ").replace(/\s+/g, " ").trim();
     clauses.push(`[ARozhodnutiRT]=((${sanitized}))`);
   }
   if (input.category) clauses.push(`[kategorie_rozhodnuti1]=${input.category.toUpperCase()}`);
@@ -60,6 +61,25 @@ export function buildNsQuery(input: NsSearchInput): string {
     );
   }
   return clauses.join(" AND ");
+}
+
+/** ISO date `days` back from `now` (default: today). Pure — unit-tested. */
+export function isoDaysAgo(days: number, now = Date.now()): string {
+  return new Date(now - days * 86_400_000).toISOString().slice(0, 10);
+}
+
+/**
+ * The Domino box answers HTTP 500 to unbounded queries (capacity, not
+ * syntax) — apply a default window when the caller gave no dates. Pure.
+ */
+export function withDefaultWindow(
+  input: NsSearchInput,
+  days: number,
+  now = Date.now(),
+): { input: NsSearchInput; appliedWindowFrom: string | null } {
+  if (input.dateFrom || input.dateTo) return { input, appliedWindowFrom: null };
+  const from = isoDaysAgo(days, now);
+  return { input: { ...input, dateFrom: from }, appliedWindowFrom: from };
 }
 
 export interface NsSearchHit {
@@ -214,35 +234,60 @@ export function usToIso(raw: string): string | null {
 
 // ---------- I/O ----------
 
-export async function searchNs(
-  input: NsSearchInput,
-  start: number,
-  count: number,
-): Promise<NsSearchPage> {
+async function runNsSearch(input: NsSearchInput, start: number, count: number): Promise<NsSearchPage> {
   const query = buildNsQuery(input);
   const url =
     `${BASE}/$$WebSearch1?SearchView&Query=${encodeURIComponent(query)}` +
     // SearchMax must stay large: SearchMax=1 provokes HTTP 500 upstream.
     `&SearchMax=1000&SearchOrder=4&Start=${start}&Count=${count}&pohled=1`;
-  let response: Response;
-  try {
-    response = await fetchUpstream(SOURCE, url, {
-      headers: { referer: "https://rozhodnuti.nsoud.cz/" },
-    });
-  } catch (error) {
-    // Live finding (2026-08): the Domino box answers 500 to broad queries
-    // (fulltext without date bounds) — the generic hint would mislead.
-    if (error instanceof SourceError && error.kind === "UPSTREAM_ERROR" && !input.dateFrom && !input.dateTo) {
-      throw new SourceError(
-        SOURCE,
-        "UPSTREAM_ERROR",
-        error.message,
-        "The NS server often rejects broad queries with HTTP 500 — narrow the search with date_from/date_to (e.g. one year) and try again.",
-      );
-    }
-    throw error;
-  }
+  const response = await fetchUpstream(SOURCE, url, {
+    headers: { referer: "https://rozhodnuti.nsoud.cz/" },
+  });
   return parseNsSearch(await response.text());
+}
+
+export interface NsSearchResult extends NsSearchPage {
+  /** Set when a default window was applied because no dates were given. */
+  appliedWindowFrom: string | null;
+}
+
+export async function searchNs(
+  input: NsSearchInput,
+  start: number,
+  count: number,
+): Promise<NsSearchResult> {
+  // Explicit dates: run as-given; a 500 then means the window is too wide.
+  if (input.dateFrom || input.dateTo) {
+    try {
+      return { ...(await runNsSearch(input, start, count)), appliedWindowFrom: null };
+    } catch (error) {
+      if (error instanceof SourceError && error.kind === "UPSTREAM_ERROR") {
+        throw new SourceError(
+          SOURCE,
+          "UPSTREAM_ERROR",
+          error.message,
+          "The NS server rejects large result sets with HTTP 500 — narrow date_from/date_to and try again.",
+        );
+      }
+      throw error;
+    }
+  }
+
+  // No dates: the box 500s on unbounded queries — apply 12 months, then 90 days.
+  const yearly = withDefaultWindow(input, 365);
+  try {
+    return {
+      ...(await runNsSearch(yearly.input, start, count)),
+      appliedWindowFrom: yearly.appliedWindowFrom,
+    };
+  } catch (error) {
+    if (!(error instanceof SourceError && error.kind === "UPSTREAM_ERROR")) throw error;
+    const quarterly = withDefaultWindow(input, 90);
+    return {
+      ...(await runNsSearch(quarterly.input, start, count)),
+      appliedWindowFrom: quarterly.appliedWindowFrom,
+    };
+  }
 }
 
 export async function getNsDecision(unid: string): Promise<NsDecision> {
