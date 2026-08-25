@@ -135,16 +135,28 @@ describe("guidelines parseToc", () => {
 });
 
 describe("guidelines parsePage", () => {
-  it("finds the longest HTML payload anywhere in the JSON", () => {
+  it("finds the HTML payload at the live nesting depth", () => {
+    // Live shape captured 2026-08 via probe fetch_url.
     const text = parsePage({
-      Id: "x",
-      Content: {
-        Html: `<main><h1>Priority</h1><p>${"Substantive requirements for priority claims. ".repeat(5)}</p></main>`,
-      },
-      Other: "<b>short</b>",
+      Regions: [
+        {
+          Name: "Main",
+          Entities: [
+            {
+              topicBody: {
+                Fragments: [
+                  { Html: `<h1>1 Introduction</h1><div><p>${"The Office's Guidelines are the main point of reference. ".repeat(5)}</p></div>` },
+                ],
+              },
+              topicTitle: "1 Introduction",
+            },
+          ],
+        },
+      ],
+      Meta: { description: "x" },
     });
-    expect(text).toContain("Priority");
-    expect(text).toContain("Substantive requirements");
+    expect(text).toContain("1 Introduction");
+    expect(text).toContain("main point of reference");
   });
 
   it("throws PARSE_DRIFT when no HTML is present", () => {

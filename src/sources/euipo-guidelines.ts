@@ -183,10 +183,12 @@ export function parseToc(json: unknown, publicationId: string): GuidelinesTopic[
 /** Pull the HTML/text payload out of a /api/page JSON. Pure — unit-tested. */
 export function parsePage(json: unknown): string {
   const record = json as Record<string, unknown>;
-  // The delivery API nests the content — take the longest HTML-looking string.
+  // The delivery API nests the content deep (live shape:
+  // Regions[0].Entities[0].topicBody.Fragments[0].Html) — walk generously
+  // and take the longest HTML-looking string.
   let best = "";
   const visit = (value: unknown, depth: number): void => {
-    if (depth > 4 || value == null) return;
+    if (depth > 10 || value == null) return;
     if (typeof value === "string") {
       if (value.length > best.length && /<\w+[^>]*>/.test(value)) best = value;
       return;
