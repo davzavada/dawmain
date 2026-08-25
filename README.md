@@ -1,158 +1,105 @@
 # dawmain-mcp-server
 
-Vzdálený [MCP](https://modelcontextprotocol.io) server přes Streamable HTTP,
-postavený na Next.js + [`mcp-handler`](https://www.npmjs.com/package/mcp-handler)
-a připravený k nasazení na Vercel.
-
-Server je **bezstavový** — žádné session, žádný Redis. To je právě to, co mu
-dovolí běžet na serverless funkci, která škáluje na nulu.
-
-Jeden handler obsluhuje obě generace protokolu:
-
-| Revize | Jak se s ní mluví |
-| --- | --- |
-| `2026-07-28` | bez handshaku; každý request nese `_meta` obálku a hlavičky `Mcp-Method` / `Mcp-Name`, které musí souhlasit s tělem |
-| `2025-06-18` | klasický `initialize` handshake, obsloužený bezstavově |
-
-## Struktura
-
-```
-app/api/mcp/route.ts   HTTP route + volitelná bearer autentizace
-app/page.tsx           landing page, která ukáže URL endpointu a config snippety
-src/mcp/server.ts      sestavení MCP serveru
-src/mcp/config.ts      identita serveru a autentizace
-src/mcp/tools/         jeden soubor = jeden nástroj
-scripts/smoke.mjs      end-to-end test proti běžícímu endpointu
-```
-
-## Lokální vývoj
-
-```bash
-npm install
-npm run dev            # http://localhost:3000, endpoint na /api/mcp
-npm run smoke          # v druhém terminálu
-```
-
-`npm run smoke` promluví s endpointem přímo po drátě (bez klientské SDK), takže
-když spadne, chyba je v serveru a ne v testovacím harnessu. Proti nasazenému
-prostředí:
-
-```bash
-MCP_URL=https://<deployment>.vercel.app/api/mcp npm run smoke
-```
-
-Další kontroly: `npm run typecheck`, `npm run build`.
+Vzdálený [MCP](https://modelcontextprotocol.io) server pro **právní rešerše**:
+živě vyhledává v českých a evropských právních databázích — žádná vlastní data,
+každý dotaz jde přímo do zdroje. Postavený na Next.js +
+[`mcp-handler`](https://www.npmjs.com/package/mcp-handler), bezstavový
+(Streamable HTTP), nasazený na Vercel.
 
 ## Nástroje
 
-| Nástroj | Co dělá |
-| --- | --- |
-| `dawmain_ping` | ověří, že server žije, a řekne, které nasazení odpovědělo (verze, čas, Vercel prostředí, region, commit) |
-| `dawmain_echo` | vrátí zadaný text, volitelně transformovaný — **placeholder**, smaž ho, jakmile server dělá něco užitečného |
+| Nástroj | Zdroj | Co dělá |
+| --- | --- | --- |
+| `esbirka_search` | e-Sbírka | fulltext v Sbírce zákonů |
+| `esbirka_get_act` | e-Sbírka | metadata a historie znění předpisu |
+| `esbirka_get_text` | e-Sbírka | konsolidovaný text k datu — celý předpis, nebo jeden § |
+| `ns_search` / `ns_get_decision` | rozhodnuti.nsoud.cz | judikatura Nejvyššího soudu |
+| `nss_search` / `nss_get_decision` | vyhledavac.nssoud.cz | judikatura NSS |
+| `nalus_search` / `nalus_get_decision` | nalus.usoud.cz | judikatura Ústavního soudu |
+| `cz_caselaw_search` | NSS + NS + ÚS | jeden dotaz paralelně přes tři vrcholné soudy |
+| `justice_list_decisions` / `justice_get_decision` | rozhodnuti.justice.cz | obecné soudy — výpis po dnech zveřejnění (zdroj nemá server-side vyhledávání) |
+| `curia_search` / `curia_get_document` | InfoCuria + Cellar | judikatura SDEU (C i T), texty dle CELEX/ECLI |
+| `euipo_clw_search` / `euipo_clw_get_document` | EUIPO eSearchCLW | rozhodnutí odvolacích senátů, námitky, zrušení; extrakce textu z PDF |
+| `euipo_guidelines_toc` / `euipo_guidelines_get_section` | guidelines.euipo.europa.eu | metodika EUIPO po sekcích |
+| `upv_browse` / `upv_get_decision` | isdv.upv.gov.cz | správní a soudní rozhodnutí ÚPV |
+| `dawmain_ping` | — | které nasazení odpovědělo |
+| `dawmain_probe_sources` | — | diagnostika všech upstreamů z nasazené funkce; `include_raw` pro záchyt fixtures, `discover` pro hledání neověřených endpointů |
 
-### Přidání nástroje
+Známá omezení (přiznaná i v popisech nástrojů): NS adresuje jen prvních 900
+výsledků dotazu (zužuj datem); justice.cz umí jen výpis po dnech; filtry EUIPO
+běží client-side přes nejnovější záznamy; ÚPV je zatím jen procházení
+kategorií.
 
-1. Vytvoř `src/mcp/tools/<jmeno>.ts`, který exportuje `register<Jmeno>(server)`.
-2. Zaregistruj ho v poli `registrars` v `src/mcp/tools/index.ts`.
+## Architektura
 
-Kostra nástroje, který volá cizí API:
-
-```ts
-import { z } from "zod";
-import type { McpServer } from "@modelcontextprotocol/server";
-
-const inputSchema = z.object({
-  query: z.string().min(1).describe("Co hledat. Například: 'náhrada škody'"),
-  limit: z.number().int().min(1).max(50).default(20).describe("Počet výsledků."),
-});
-
-export function registerSearch(server: McpServer): void {
-  server.registerTool(
-    "dawmain_search",
-    {
-      title: "Search",
-      description: "Jedna věta, která přesně vymezí, co nástroj dělá.",
-      inputSchema,
-      outputSchema: z.object({ items: z.array(z.string()), hasMore: z.boolean() }),
-      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-    },
-    async ({ query, limit }) => {
-      const response = await fetch(`https://api.example.com/search?q=${encodeURIComponent(query)}&limit=${limit}`, {
-        headers: { authorization: `Bearer ${process.env.EXAMPLE_API_KEY}` },
-      });
-
-      if (!response.ok) {
-        // Chybová hláška je pro model návod, co udělat jinak — ne jen stack trace.
-        return {
-          isError: true,
-          content: [{ type: "text", text: `Search failed with HTTP ${response.status}. Zkrať dotaz nebo sniž limit a zkus to znovu.` }],
-        };
-      }
-
-      const output = await response.json();
-      return { content: [{ type: "text", text: JSON.stringify(output, null, 2) }], structuredContent: output };
-    },
-  );
-}
+```
+app/api/mcp/route.ts        HTTP route + bearer autentizace
+src/mcp/tools/<zdroj>.ts    tenké MCP nástroje (schema → klient → tvar odpovědi)
+src/sources/<zdroj>.ts      klient zdroje; fetchX() (I/O) oddělené od parseX() (pure)
+src/sources/shared/         fetchUpstream, CookieSession, chybová taxonomie, char-paging
+docs/research/*.json        verbatim rešerše endpointů všech zdrojů
+tests/                      unit testy parserů proti fixtures
+scripts/smoke.mjs           end-to-end test po drátě (obě generace protokolu)
+scripts/fetch-fixtures.mjs  stáhne reálné fixtures z veřejných GitHub rep
 ```
 
-Pár pravidel, která se vyplatí držet: názvy nástrojů s prefixem služby a v
-snake_case, popisy, které přesně odpovídají chování, `annotations` u každého
-nástroje, stránkování u čehokoli, co vrací seznam, a chybové hlášky, ze kterých
-model pozná, co má udělat jinak.
+Zásady: každý nástroj má `annotations` (vše read-only), stránkování
+(`limit`/`offset` či `page`, `has_more`), `structuredContent` + čitelný text a
+chybové hlášky, které říkají, co zkusit jinak (`PARSE_DRIFT` = upstream změnil
+layout → spusť probe).
+
+## Vývoj
+
+```bash
+npm install
+npm run dev          # http://localhost:3000, endpoint /api/mcp
+npm test             # unit testy parserů (fixtures, bez sítě)
+npm run typecheck
+npm run smoke        # po drátě proti běžícímu serveru (bez upstreamů)
+```
+
+Pozor: soudní weby nejsou dostupné z každé sítě (CI, sandboxy). Integrační
+ověření se dělá **proti nasazení**:
+
+```bash
+MCP_URL=https://<deployment>.vercel.app/api/mcp MCP_BEARER_TOKEN=… npm run smoke
+MCP_URL=… MCP_BEARER_TOKEN=… SMOKE_LIVE=1 npm run smoke   # + reálné dotazy do zdrojů
+```
 
 ## Nasazení na Vercel
 
-Vercel si Next.js detekuje sám, takže není potřeba žádný `vercel.json`.
+Repo je propojené přes Git integraci — push nasadí preview, merge do `main`
+produkci. Bez `vercel.json`; Next.js si Vercel detekuje sám.
 
-**Přes Git integraci (doporučeno).** Ve Vercelu *Add New… → Project* → naimportuj
-`davzavada/dawmain` → Deploy. Od té chvíle každý push do větve nasadí novou
-verzi; produkční doména míří na výchozí větev, ostatní větve dostanou preview
-URL.
+**Po prvním nasazení:**
 
-**Přes CLI**, když chceš nasazovat z lokálu:
-
-```bash
-npx vercel link
-npx vercel --prod
-```
-
-**Region.** Ve *Project Settings → Functions* vyber region blízko sobě
-(`fra1`, Frankfurt) — u serveru, kterému model posílá desítky requestů za
-konverzaci, je latence znát.
-
-Po nasazení otevři kořen domény v prohlížeči: landing page ukáže URL endpointu
-a hotové config snippety. Samotný `/api/mcp` v prohlížeči vrátí `405`, protože
-odpovídá jen na MCP JSON-RPC — to je správné chování, ne chyba.
+1. *Project Settings → Environment Variables*: `MCP_BEARER_TOKEN`,
+   `ESBIRKA_API_KEY` (viz `.env.example`); *Functions → Region*: `fra1`.
+   Po změně env je potřeba Redeploy.
+2. Spusť smoke proti nasazení (viz výše), pak `SMOKE_LIVE=1`.
+3. Zavolej `dawmain_probe_sources` — u e-Sbírky ukáže, který host bere tvůj
+   klíč (`esbirka-api` vs. `esbirka-api-gov`); vítěze zafixuj v env
+   `ESBIRKA_API_BASE`.
+4. `dawmain_probe_sources {discover: true}` vypíše (a) kandidátní search
+   endpoint SPA justice.cz, (b) skutečná pole formuláře NSS — obojí slouží
+   k doladění `src/sources/nss.ts` a k budoucímu `justice_search`.
+5. Volitelné jednorázovky v prohlížeči (DevTools → Network): zachytit XHR
+   filtrovaného hledání na rozhodnuti.justice.cz a na EUIPO eSearchCLW —
+   odemkne server-side filtry.
 
 ## Připojení klienta
 
 ```bash
-claude mcp add --transport http dawmain https://<deployment>.vercel.app/api/mcp
+claude mcp add --transport http dawmain https://<deployment>.vercel.app/api/mcp --header "Authorization: Bearer <token>"
 ```
-
-Nebo v JSON configu klienta:
 
 ```json
 {
   "mcpServers": {
     "dawmain": {
       "type": "http",
-      "url": "https://<deployment>.vercel.app/api/mcp"
-    }
-  }
-}
-```
-
-Klient, který umí jen stdio, se připojí přes
-[`mcp-remote`](https://www.npmjs.com/package/mcp-remote):
-
-```json
-{
-  "mcpServers": {
-    "dawmain": {
-      "command": "npx",
-      "args": ["-y", "mcp-remote", "https://<deployment>.vercel.app/api/mcp"]
+      "url": "https://<deployment>.vercel.app/api/mcp",
+      "headers": { "Authorization": "Bearer <token>" }
     }
   }
 }
@@ -160,14 +107,14 @@ Klient, který umí jen stdio, se připojí přes
 
 ## Autentizace
 
-Bez konfigurace je endpoint **veřejný**. Jakmile nastavíš proměnnou prostředí
-`MCP_BEARER_TOKEN` (ve Vercelu *Project Settings → Environment Variables*),
-každý request musí nést `Authorization: Bearer <token>`; bez něj dostane `401`.
+S nastaveným `MCP_BEARER_TOKEN` vrací endpoint bez tokenu `401`. Bez něj je
+veřejný — nedoporučeno: server pak komukoli zprostředkuje dotazy do databází
+z tvé infrastruktury. Na plné OAuth 2.1 jsou v `mcp-handler` připravené
+`withMcpAuth` a `protectedResourceHandler`.
 
-Sdílené heslo je schválně to nejjednodušší řešení. Na skutečné OAuth 2.1 —
-metadata chráněného zdroje podle RFC 9728 a klienty podle CIMD — jsou v
-`mcp-handler` připravené `withMcpAuth` a `protectedResourceHandler`; nahraď jimi
-kontrolu v `app/api/mcp/route.ts`.
+## Přidání zdroje
 
-Než server zveřejníš, zvaž, co přes něj jde ven: veřejný MCP endpoint je
-veřejné API se vším všudy.
+1. `src/sources/<zdroj>.ts` — klient s odděleným `fetchX`/`parseX`.
+2. `src/mcp/tools/<zdroj>.ts` — `register<Zdroj>(server)`.
+3. Řádka v `src/mcp/tools/index.ts`, kanárek do `src/mcp/tools/probe.ts`,
+   testy do `tests/`, jméno nástroje do `EXPECTED_TOOLS` v `scripts/smoke.mjs`.

@@ -45,7 +45,9 @@ export default async function Home() {
       </code>
 
       <p style={{ color: "#6b7280", fontSize: "0.875rem", marginTop: "2rem" }}>
-        Call <code>dawmain_ping</code> to confirm which deployment is answering.
+        Legal-research MCP server: e-Sbírka, NSS, NS, ÚS (NALUS), obecné soudy, CJEU, EUIPO a ÚPV —
+        live queries, no local data. Call <code>dawmain_ping</code> to confirm which deployment is
+        answering and <code>dawmain_probe_sources</code> to check the upstream databases.
       </p>
     </>
   );

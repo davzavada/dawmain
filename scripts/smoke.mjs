@@ -108,25 +108,99 @@ function ok(label, detail) {
   console.log(`  ✓ ${label}${detail ? ` — ${detail}` : ""}`);
 }
 
+const EXPECTED_TOOLS = [
+  "dawmain_ping",
+  "dawmain_probe_sources",
+  "esbirka_search",
+  "esbirka_get_act",
+  "esbirka_get_text",
+  "ns_search",
+  "ns_get_decision",
+  "nalus_search",
+  "nalus_get_decision",
+  "nss_search",
+  "nss_get_decision",
+  "cz_caselaw_search",
+  "justice_list_decisions",
+  "justice_get_decision",
+  "curia_search",
+  "curia_get_document",
+  "euipo_clw_search",
+  "euipo_clw_get_document",
+  "euipo_guidelines_toc",
+  "euipo_guidelines_get_section",
+  "upv_browse",
+  "upv_get_decision",
+];
+
 async function checkTools(client) {
   const { tools } = await client.request("tools/list");
   if (!tools?.length) throw new Error("tools/list returned no tools");
-  ok("tools/list", tools.map((t) => t.name).join(", "));
+  const names = tools.map((t) => t.name).sort();
+  const expected = [...EXPECTED_TOOLS].sort();
+  const missing = expected.filter((name) => !names.includes(name));
+  const surplus = names.filter((name) => !expected.includes(name));
+  if (missing.length || surplus.length) {
+    throw new Error(
+      `tools/list mismatch — missing: [${missing.join(", ")}], unexpected: [${surplus.join(", ")}]`,
+    );
+  }
+  ok("tools/list", `${names.length} tools, roster matches`);
 
   const ping = await client.request("tools/call", { name: "dawmain_ping", arguments: {} });
   const info = ping.structuredContent ?? {};
   if (info.ok !== true) throw new Error(`dawmain_ping did not report ok: ${JSON.stringify(ping)}`);
   ok("dawmain_ping", `env=${info.environment} region=${info.region ?? "-"} commit=${info.commit ?? "-"}`);
 
-  const echo = await client.request("tools/call", {
-    name: "dawmain_echo",
-    arguments: { text: "ahoj", transform: "upper" },
-  });
-  const echoed = echo.structuredContent?.text ?? echo.content?.[0]?.text;
-  if (echoed !== "AHOJ") {
-    throw new Error(`dawmain_echo returned ${JSON.stringify(echoed)}, expected "AHOJ"`);
+  // Input validation must reject bad arguments without touching any upstream.
+  let validationRejected = false;
+  try {
+    const bad = await client.request("tools/call", {
+      name: "esbirka_search",
+      arguments: { query: "x", limit: 9999 },
+    });
+    validationRejected = bad.isError === true;
+  } catch {
+    validationRejected = true; // JSON-RPC invalid-params is equally fine
   }
-  ok("dawmain_echo", `"ahoj" → "${echoed}"`);
+  if (!validationRejected) throw new Error("esbirka_search accepted limit=9999 — schema validation is off");
+  ok("input validation", "esbirka_search rejected limit=9999");
+}
+
+/** SMOKE_LIVE=1: exercise real upstreams — meaningful only against a deployment. */
+async function checkLive(client) {
+  const probe = await client.request("tools/call", {
+    name: "dawmain_probe_sources",
+    arguments: {},
+  });
+  const probes = probe.structuredContent?.probes ?? [];
+  const healthy = probes.filter((p) => p.ok).length;
+  for (const p of probes) {
+    ok(`probe ${p.id}`, `${p.ok ? "OK" : "FAIL"} http=${p.http_status ?? "ERR"} ${p.latency_ms}ms marker=${p.marker_found}`);
+  }
+  if (!healthy) throw new Error("no upstream source is reachable from this deployment");
+
+  const act = await client.request("tools/call", {
+    name: "esbirka_get_act",
+    arguments: { year: 2012, number: 89 },
+  });
+  if (act.isError) throw new Error(`esbirka_get_act 89/2012 failed: ${act.content?.[0]?.text}`);
+  ok("esbirka_get_act", act.structuredContent?.nazev ?? "(no name)");
+
+  const nalus = await client.request("tools/call", {
+    name: "nalus_get_decision",
+    arguments: { sz: "1-709-05" },
+  });
+  if (nalus.isError) throw new Error(`nalus_get_decision failed: ${nalus.content?.[0]?.text}`);
+  ok("nalus_get_decision", `sz=1-709-05, ${nalus.structuredContent?.total_pages} text pages`);
+
+  const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10);
+  const ns = await client.request("tools/call", {
+    name: "ns_search",
+    arguments: { date_from: weekAgo, limit: 5 },
+  });
+  if (ns.isError) throw new Error(`ns_search failed: ${ns.content?.[0]?.text}`);
+  ok("ns_search", `last 7 days → ${ns.structuredContent?.count} hits of ${ns.structuredContent?.total ?? "?"}`);
 }
 
 async function main() {
@@ -148,6 +222,11 @@ async function main() {
   legacy.protocolVersion = init.protocolVersion;
   ok("initialize", `${init.serverInfo?.name} ${init.serverInfo?.version} (protocol ${init.protocolVersion})`);
   await checkTools(legacy);
+
+  if (process.env.SMOKE_LIVE === "1") {
+    console.log("\nLive upstream checks (SMOKE_LIVE=1)");
+    await checkLive(modern);
+  }
 
   console.log("\nAll checks passed.\n");
 }
