@@ -1,6 +1,7 @@
 import { SourceError } from "./shared/errors";
 import { fetchUpstream } from "./shared/http";
 import { htmlToText } from "./shared/html";
+import { TtlCache } from "./shared/cache";
 
 /**
  * EUIPO Examination Guidelines — guidelines.euipo.europa.eu.
@@ -18,6 +19,8 @@ import { htmlToText } from "./shared/html";
 
 const SOURCE = "EUIPO Guidelines";
 const BASE = "https://guidelines.euipo.europa.eu";
+/** Editions/TOC/sections change on the yearly revision cycle — cache 1 h. */
+const apiCache = new TtlCache<unknown>(60 * 60 * 1000);
 
 /** Fallback edition ids (2026 EN TM / EN designs) when the API listing fails. */
 const FALLBACK_PUBLICATIONS: Record<string, string> = {
@@ -42,6 +45,10 @@ function envPublication(register: "trademark" | "design"): string | undefined {
 }
 
 async function fetchJson(path: string): Promise<unknown> {
+  return apiCache.through(path, () => fetchJsonUncached(path));
+}
+
+async function fetchJsonUncached(path: string): Promise<unknown> {
   const response = await fetchUpstream(SOURCE, `${BASE}${path}`, {
     headers: { accept: "application/json" },
     timeoutMs: 20_000,

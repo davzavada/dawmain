@@ -1,6 +1,12 @@
 import { SourceError } from "./shared/errors";
 import { CookieSession, fetchUpstream } from "./shared/http";
 
+/** Politeness pause between listing pages of the client-side filter scan. */
+const FILTER_PAGE_DELAY_MS = 300;
+/** The download cookie handshake is reusable — cache it per warm instance. */
+const PDF_SESSION_TTL_MS = 10 * 60 * 1000;
+let pdfSession: { cookies: CookieSession; fetchedAt: number } | null = null;
+
 /**
  * EUIPO eSearch Case Law — Boards of Appeal, opposition, cancellation and
  * examination decisions (plus a design line), via the SPA's undocumented
@@ -171,6 +177,7 @@ export async function searchEuipoClw(
   let scanned = 0;
   let truncated = false;
   for (let page = 0; page < MAX_FILTER_PAGES; page++) {
+    if (page > 0) await new Promise((resolve) => setTimeout(resolve, FILTER_PAGE_DELAY_MS));
     const result = await fetchPage(register, page * 50, 50);
     numFound = result.numFound;
     scanned += result.items.length;
@@ -208,16 +215,30 @@ export async function getEuipoClwDocument(pdfUrl: string): Promise<EuipoClwDocum
     );
   }
 
-  // The download endpoint wants the session cookies of the SPA — acquire and
-  // replay them within this same invocation.
-  const session = new CookieSession();
-  const warmup = await fetchUpstream(SOURCE, `${BASE}/eSearchCLW/`, { timeoutMs: 15_000 });
-  session.absorb(warmup);
+  // The download endpoint wants the SPA's session cookies — reuse a cached
+  // handshake on warm instances (saves one request per document).
+  if (!pdfSession || Date.now() - pdfSession.fetchedAt > PDF_SESSION_TTL_MS) {
+    const cookies = new CookieSession();
+    const warmup = await fetchUpstream(SOURCE, `${BASE}/eSearchCLW/`, { timeoutMs: 15_000 });
+    cookies.absorb(warmup);
+    pdfSession = { cookies, fetchedAt: Date.now() };
+  }
 
-  const response = await fetchUpstream(SOURCE, pdfUrl, {
-    headers: { cookie: session.header(), referer: `${BASE}/eSearchCLW/` },
+  let response = await fetchUpstream(SOURCE, pdfUrl, {
+    headers: { cookie: pdfSession.cookies.header(), referer: `${BASE}/eSearchCLW/` },
     timeoutMs: 30_000,
   });
+  if (!response.ok) {
+    // Stale cached session → one fresh handshake before giving up.
+    const cookies = new CookieSession();
+    const warmup = await fetchUpstream(SOURCE, `${BASE}/eSearchCLW/`, { timeoutMs: 15_000 });
+    cookies.absorb(warmup);
+    pdfSession = { cookies, fetchedAt: Date.now() };
+    response = await fetchUpstream(SOURCE, pdfUrl, {
+      headers: { cookie: pdfSession.cookies.header(), referer: `${BASE}/eSearchCLW/` },
+      timeoutMs: 30_000,
+    });
+  }
   if (!response.ok) {
     throw new SourceError(
       SOURCE,

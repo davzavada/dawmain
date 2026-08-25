@@ -2,6 +2,7 @@ import { ESBIRKA_CACHE_BASE, getEsbirkaApiBase, getEsbirkaApiKey } from "@/src/m
 import { SourceError } from "./shared/errors";
 import { fetchUpstream } from "./shared/http";
 import { htmlToText } from "./shared/html";
+import { TtlCache } from "./shared/cache";
 
 /**
  * e-Sbírka — the official Czech electronic Collection of Laws.
@@ -25,7 +26,9 @@ const SOURCE = "e-Sbírka";
 const SPARQL_ENDPOINT = "https://opendata.eselpoint.gov.cz/sparql";
 const ESB = "https://slovník.gov.cz/datový/sbírka/pojem/";
 /** Fragment-page scan cap for the section fallback (each page is one request). */
-const SECTION_SCAN_MAX_PAGES = 30;
+const SECTION_SCAN_MAX_PAGES = 15;
+/** Act metadata and version history are near-static — cache 10 min. */
+const metadataCache = new TtlCache<unknown>(10 * 60 * 1000);
 
 export function buildStaleUrl(collection: string, year: number, number: number, date?: string): string {
   return `/${collection}/${year}/${number}${date ? `/${date}` : ""}`;
@@ -280,12 +283,16 @@ export async function searchActs(
 }
 
 export async function getAct(staleUrl: string): Promise<EsbirkaActDetail> {
-  const json = await esbirkaFetch({ path: `/dokumenty-sbirky/${encodeURIComponent(staleUrl)}` });
+  const json = await metadataCache.through(`act:${staleUrl}`, () =>
+    esbirkaFetch({ path: `/dokumenty-sbirky/${encodeURIComponent(staleUrl)}` }),
+  );
   return parseActDetail(json);
 }
 
 export async function getHistory(staleUrl: string): Promise<EsbirkaVersion[]> {
-  const json = await esbirkaFetch({ path: `/dokumenty-sbirky/${encodeURIComponent(staleUrl)}/historie` });
+  const json = await metadataCache.through(`hist:${staleUrl}`, () =>
+    esbirkaFetch({ path: `/dokumenty-sbirky/${encodeURIComponent(staleUrl)}/historie` }),
+  );
   return parseHistory(json);
 }
 

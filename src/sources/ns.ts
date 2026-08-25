@@ -240,8 +240,12 @@ async function runNsSearch(input: NsSearchInput, start: number, count: number): 
     `${BASE}/$$WebSearch1?SearchView&Query=${encodeURIComponent(query)}` +
     // SearchMax must stay large: SearchMax=1 provokes HTTP 500 upstream.
     `&SearchMax=1000&SearchOrder=4&Start=${start}&Count=${count}&pohled=1`;
+  // No automatic 5xx retry: NS 500s are deterministic for the given window
+  // (capacity, not flakiness) — re-sending the same query just hammers the box;
+  // the caller falls back to a narrower window instead.
   const response = await fetchUpstream(SOURCE, url, {
     headers: { referer: "https://rozhodnuti.nsoud.cz/" },
+    retry: false,
   });
   return parseNsSearch(await response.text());
 }

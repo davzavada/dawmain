@@ -17,7 +17,7 @@ const SOURCE = "rozhodnuti.justice.cz";
 const BASE = "https://rozhodnuti.justice.cz/api";
 /** Bounds for one invocation of the date-walk. */
 const MAX_WINDOW_DAYS = 7;
-const MAX_PAGES_PER_CALL = 30;
+const MAX_PAGES_PER_CALL = 20;
 
 export interface JusticeListItem {
   uuid: string;

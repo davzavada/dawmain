@@ -100,3 +100,16 @@ describe("CookieSession", () => {
     expect(session.header()).toBe("ASP.NET_SessionId=abc123; other=1");
   });
 });
+
+describe("TtlCache", () => {
+  it("serves within TTL and reloads after expiry", async () => {
+    const { TtlCache } = await import("@/src/sources/shared/cache");
+    const cache = new TtlCache<number>(50);
+    let loads = 0;
+    const load = async () => ++loads;
+    expect(await cache.through("k", load)).toBe(1);
+    expect(await cache.through("k", load)).toBe(1); // cached
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(await cache.through("k", load)).toBe(2); // expired → reload
+  });
+});

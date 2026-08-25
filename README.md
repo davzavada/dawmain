@@ -104,6 +104,18 @@ claude mcp add --transport http dawmain https://<deployment>.vercel.app/api/mcp 
 }
 ```
 
+## Výkon a šetrnost ke zdrojům
+
+- Neměnná data se cachují per warm instance: edice/TOC/sekce EUIPO Guidelines
+  (1 h), metadata a historie znění e-Sbírky (10 min), NSS handshake a EUIPO
+  download cookies (10 min).
+- NS: deterministická 500 se neopakuje — místo retry se zužuje datové okno
+  (bez zadaných dat automaticky 12 měsíců → 90 dnů).
+- Client-side filtry EUIPO dělají pauzu 300 ms mezi stránkami; procházení
+  justice.cz je stropované 20 stránkami na volání, scan § v e-Sbírce 15
+  stránkami; vše končí hned po naplnění limitu.
+- Timeouty: 15 s/request (NSS POST 25 s, SPARQL 30 s), celá invokace ≤ 60 s.
+
 ## Autentizace
 
 S nastaveným `MCP_BEARER_TOKEN` vrací endpoint bez tokenu `401`. Bez něj je
