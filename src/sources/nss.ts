@@ -65,12 +65,34 @@ export function parseNssForm(html: string): NssForm {
   return { fields };
 }
 
-/** Locate a criteria field by name suffix, else by label pattern. Pure. */
+/**
+ * Locate a criteria input. The reliable identifier is the VALUE of the sibling
+ * hidden `…TechnickyNazev` field (e.g. "datumvydanirozhodnuti") — the numeric
+ * indices in the names shift between form versions. Strategy: find a
+ * TechnickyNazev (value-level, then condition-level) whose value matches
+ * `technicalPattern`, take its prefix, and return the input `prefix + suffix`.
+ * Fallbacks: first field with the suffix, then a label match. Pure.
+ */
 export function findField(
   form: NssForm,
   suffix: string | null,
   labelPattern: RegExp | null,
+  technicalPattern?: RegExp,
 ): NssFormField | undefined {
+  if (technicalPattern && suffix) {
+    for (const field of form.fields) {
+      if (!field.name.endsWith(".TechnickyNazev") || !technicalPattern.test(field.value)) continue;
+      const prefix = field.name.slice(0, -".TechnickyNazev".length);
+      // Value-level sibling (same vyhledavaciPodminkaHodnota[j] prefix)…
+      const direct = form.fields.find((candidate) => candidate.name === prefix + suffix);
+      if (direct) return direct;
+      // …or condition-level: any value input nested under this condition.
+      const nested = form.fields.find(
+        (candidate) => candidate.name.startsWith(prefix + ".") && candidate.name.endsWith(suffix),
+      );
+      if (nested) return nested;
+    }
+  }
   if (suffix) {
     const bySuffix = form.fields.find((field) => field.name.endsWith(suffix));
     if (bySuffix) return bySuffix;
@@ -249,8 +271,9 @@ async function postSearch(session: NssSession, input: NssSearchInput): Promise<s
     value: string,
     suffix: string | null,
     labelPattern: RegExp | null,
+    technicalPattern?: RegExp,
   ) => {
-    const field = findField(formModel, suffix, labelPattern);
+    const field = findField(formModel, suffix, labelPattern, technicalPattern);
     if (!field) {
       throw new SourceError(
         SOURCE,
@@ -262,13 +285,29 @@ async function postSearch(session: NssSession, input: NssSearchInput): Promise<s
     form.set(field.name, value);
   };
 
-  if (input.dateFrom) setCriterion("date from", isoToCzech(input.dateFrom), ".HodnotaDatumACasOd", null);
-  if (input.dateTo) setCriterion("date to", isoToCzech(input.dateTo), ".HodnotaDatumACasDo", null);
+  if (input.dateFrom) {
+    setCriterion("date from", isoToCzech(input.dateFrom), ".HodnotaDatumACasOd", null, /datumvydani/i);
+  }
+  if (input.dateTo) {
+    setCriterion("date to", isoToCzech(input.dateTo), ".HodnotaDatumACasDo", null, /datumvydani/i);
+  }
   if (input.query) {
-    setCriterion("full text", input.query, ".HodnotaText", /pln[ýé]\s*text|fulltext|text\s+rozhodnutí|slova/i);
+    setCriterion(
+      "full text",
+      input.query,
+      ".HodnotaText",
+      /pln[ýé]\s*text|fulltext|text\s+rozhodnutí|slova/i,
+      /fulltext|^text|textdokument|textrozhodnuti/i,
+    );
   }
   if (input.caseNumber) {
-    setCriterion("case number", input.caseNumber, null, /spisov[áé]\s*značk|čísl[oa]\s*jednací|čj/i);
+    setCriterion(
+      "case number",
+      input.caseNumber,
+      ".HodnotaText",
+      /spisov[áé]\s*značk|čísl[oa]\s*jednací|čj/i,
+      /cislojednaci|spisovaznacka|znacka/i,
+    );
   }
 
   const response = await fetchUpstream(SOURCE, `${BASE}/Home/Index`, {

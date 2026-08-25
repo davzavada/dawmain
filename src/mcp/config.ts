@@ -34,13 +34,12 @@ export function getEsbirkaApiKey(): string | undefined {
 }
 
 /**
- * e-Sbírka API base. The host proven with a real key is api.e-sbirka.cz;
- * 2026-era references hint at api.e-sbirka.gov.cz after the gov.cz domain
- * migration — run dawmain_probe_sources against a deployment and pin the
- * winner via this env var.
+ * e-Sbírka API base. Live-verified 2026-08: api.e-sbirka.gov.cz answers with
+ * the key; the pre-migration host api.e-sbirka.cz returns 200 with a non-JSON
+ * body. Override via env if DIA moves the host again.
  */
 export function getEsbirkaApiBase(): string {
-  return (process.env.ESBIRKA_API_BASE?.trim() || "https://api.e-sbirka.cz").replace(/\/+$/, "");
+  return (process.env.ESBIRKA_API_BASE?.trim() || "https://api.e-sbirka.gov.cz").replace(/\/+$/, "");
 }
 
 /** Keyless gateway of the e-Sbírka SPA — same paths and response shapes. */

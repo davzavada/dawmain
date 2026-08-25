@@ -125,6 +125,8 @@ const EXPECTED_TOOLS = [
   "justice_get_decision",
   "curia_search",
   "curia_get_document",
+  "eurlex_search",
+  "eurlex_get_document",
   "euipo_clw_search",
   "euipo_clw_get_document",
   "euipo_guidelines_toc",

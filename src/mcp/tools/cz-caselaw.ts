@@ -46,7 +46,7 @@ export function registerCzCaselaw(server: McpServer): void {
     {
       title: "Czech case law: search all top courts",
       description:
-        "Search NSS (administrative), NS (civil/criminal) and Ústavní soud (constitutional) in parallel with one Czech full-text query. Returns interleaved top hits per source plus a per-source status. For deeper digging use the per-court tools (nss_search, ns_search, nalus_search); fetch texts with the matching *_get_decision tool named in each hit.",
+        "FULL-TEXT search across NSS (administrative), NS (civil/criminal) and Ústavní soud (constitutional) in parallel with one Czech query. Returns interleaved top hits per source plus a per-source status. TIP: NS rejects broad queries without dates — provide date_from where possible. For deeper digging use nss_search/ns_search/nalus_search; fetch texts with the *_get_decision tool named in each hit.",
       inputSchema: z.object({
         query: z.string().min(2).describe("Czech full-text query."),
         date_from: isoDate.optional(),

@@ -53,16 +53,6 @@ function canaries(): Canary[] {
       marker: /"nazev"|"staleUrl"/,
     },
     {
-      id: "esbirka-api-gov",
-      source: "e-Sbírka",
-      note: "candidate post-migration host api.e-sbirka.gov.cz",
-      request: () => ({
-        url: `https://api.e-sbirka.gov.cz/dokumenty-sbirky/${oz}`,
-        init: { headers: { accept: "application/json", ...keyHeader } },
-      }),
-      marker: /"nazev"|"staleUrl"/,
-    },
-    {
       id: "esbirka-cache",
       source: "e-Sbírka",
       note: "keyless SPA gateway (fallback channel)",
@@ -175,14 +165,17 @@ function canaries(): Canary[] {
     {
       id: "euipo-guidelines",
       source: "EUIPO Guidelines",
-      note: "site root reachable",
-      request: () => ({ url: "https://guidelines.euipo.europa.eu/", init: {} }),
-      marker: /uideline/i,
+      note: "SDL delivery JSON API (the site itself is a client-rendered SPA)",
+      request: () => ({
+        url: "https://guidelines.euipo.europa.eu/api/publications",
+        init: { headers: { accept: "application/json" } },
+      }),
+      marker: /"(Id|id)"\s*:/,
     },
     {
       id: "upv",
       source: "ÚPV (ISDV)",
-      note: "decisions browse entry point",
+      note: "decisions browse entry point (unreachable from US regions — use fra1)",
       request: () => ({
         url: "https://isdv.upv.gov.cz/webapp/rozhodnuti.prochazet",
         init: {},
@@ -266,8 +259,8 @@ async function discover(): Promise<Record<string, unknown>> {
         signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
       });
       const source = await response.text();
-      for (const m of source.matchAll(/["'`](\/api\/[a-zA-Z0-9/_${}.-]{2,80})["'`]/g)) {
-        apiPaths.add(m[1]);
+      for (const m of source.matchAll(/["'`]\/?((?:api|opendata|finaldoc)\/[a-zA-Z0-9/_${}.-]{2,80})["'`]/g)) {
+        apiPaths.add("/" + m[1]);
       }
     }
     out.justice = { scripts_scanned: scripts.length, api_paths: [...apiPaths].sort() };
@@ -284,21 +277,32 @@ async function discover(): Promise<Record<string, unknown>> {
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
     const $ = loadHtml(await response.text());
-    const fields: Array<{ name: string; type: string; label: string }> = [];
+    // Group by condition: the hidden TechnickyNazev/ZobrazovanyNazev VALUES
+    // identify each criterion; the value inputs sharing the prefix carry it.
+    const conditions = new Map<
+      string,
+      { technicky?: string; zobrazovany?: string; inputs: string[] }
+    >();
     $("form")
       .first()
       .find("input, select, textarea")
       .each((_, el) => {
         const $el = $(el);
         const name = $el.attr("name");
-        if (!name) return;
-        const label =
-          $el.closest("div").find("label").first().text().trim() ||
-          $el.attr("placeholder") ||
-          "";
-        fields.push({ name, type: $el.attr("type") ?? el.tagName, label: label.slice(0, 80) });
+        if (!name || !name.includes("vyhledavaciPodminka")) return;
+        const prefixMatch = /^(.*vyhledavaciPodminka(?:Hodnota)?\[\d+\])\./.exec(name);
+        if (!prefixMatch) return;
+        const prefix = prefixMatch[1];
+        const entry = conditions.get(prefix) ?? { inputs: [] };
+        const value = $el.attr("value") ?? "";
+        if (name.endsWith(".TechnickyNazev") && value) entry.technicky = value.slice(0, 60);
+        else if (name.endsWith(".ZobrazovanyNazev") && value) entry.zobrazovany = value.slice(0, 80);
+        else if (/\.Hodnota[A-Za-z]*$/.test(name)) entry.inputs.push(name.slice(name.lastIndexOf(".") + 1));
+        conditions.set(prefix, entry);
       });
-    out.nss = { form_fields: fields.slice(0, 200) };
+    out.nss = {
+      conditions: [...conditions.entries()].map(([prefix, entry]) => ({ prefix, ...entry })).slice(0, 80),
+    };
   } catch (error) {
     out.nss = { error: error instanceof Error ? error.message : String(error) };
   }

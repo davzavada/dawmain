@@ -55,6 +55,9 @@ export interface UpvBrowseResult {
   url: string;
 }
 
+// Live finding (2026-08): isdv.upv.gov.cz does not answer connections from
+// US Vercel regions (fetch failed) — likely geo-filtering. The tools stay in
+// place; run the deployment in fra1 and re-check with dawmain_probe_sources.
 export async function browseUpv(categoryUrl?: string): Promise<UpvBrowseResult> {
   const url = categoryUrl ?? `${BASE}/rozhodnuti.prochazet`;
   if (!url.startsWith(BASE)) {
@@ -72,7 +75,7 @@ export async function browseUpv(categoryUrl?: string): Promise<UpvBrowseResult> 
       SOURCE,
       "UPSTREAM_ERROR",
       `ISDV answered ${response.ok ? "a maintenance page" : `HTTP ${response.status}`}.`,
-      "The database has maintenance windows — try again later.",
+      "The database has maintenance windows and appears to reject non-EU datacenter IPs — make sure the Vercel function region is fra1 (Project Settings → Functions), then retry.",
     );
   }
   const links = parseUpvLinks(html);

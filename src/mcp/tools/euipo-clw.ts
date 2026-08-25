@@ -21,7 +21,7 @@ export function registerEuipoClw(server: McpServer): void {
     {
       title: "EUIPO: search case law",
       description:
-        "Search EUIPO decisions (Boards of Appeal, opposition, cancellation, examination) for trademarks, or the design line. Ordered newest-first. LIMITATION: filters are applied client-side over the newest ~200 records only (the backend's filter wire format is not public) — for older decisions use the deep link in viewUrl. Fetch text with euipo_clw_get_document using a hit's pdfUrl.",
+        "METADATA search (no full-text) of EUIPO decisions (Boards of Appeal, opposition, cancellation, examination) for trademarks, or the design line — filters: case number, IP right, type, trade-mark name, cited norm. Ordered newest-first; filters run client-side over the newest ~200 records only. For older decisions use the viewUrl deep link. Fetch text with euipo_clw_get_document using a hit's pdfUrl.",
       inputSchema: z.object({
         register: z.enum(["trademark", "design"]).default("trademark"),
         case_number: z.string().optional().describe("Substring, e.g. 'R 1933/2016-4' or 'B 3 250 868'."),

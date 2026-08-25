@@ -235,12 +235,47 @@ export function parseFragments(json: unknown): EsbirkaFragmentsPage {
 
 // ---------- fetch (I/O) ----------
 
-export async function searchActs(query: string, offset: number, limit: number): Promise<EsbirkaSearchPage> {
-  const json = await esbirkaFetch({
-    path: "/jednoducha-vyhledavani",
-    method: "POST",
-    body: { fulltext: query, start: offset, pocet: limit, razeni: ["+relevance"] },
-  });
+export interface EsbirkaSearchOptions {
+  /** all_words (default) | phrase | any_word — how the query terms combine. */
+  match?: "all_words" | "phrase" | "any_word";
+  /** Words that must NOT occur. */
+  excludeWords?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+export async function searchActs(
+  query: string,
+  offset: number,
+  limit: number,
+  options: EsbirkaSearchOptions = {},
+): Promise<EsbirkaSearchPage> {
+  const paging = { start: offset, pocet: limit, razeni: ["+relevance"] };
+  const advanced =
+    (options.match && options.match !== "all_words") ||
+    options.excludeWords ||
+    options.dateFrom ||
+    options.dateTo;
+
+  if (!advanced) {
+    const json = await esbirkaFetch({
+      path: "/jednoducha-vyhledavani",
+      method: "POST",
+      body: { fulltext: query, ...paging },
+    });
+    return parseSearch(json);
+  }
+
+  // Advanced endpoint (body fields verbatim from the official OpenAPI).
+  const body: Record<string, unknown> = { ...paging };
+  if (options.match === "phrase") body.fulltextUvedenaFraze = query;
+  else if (options.match === "any_word") body.fulltextJednoZeSlov = query;
+  else body.fulltextVsechnaSlova = query;
+  if (options.excludeWords) body.fulltextNeobsahujeSlova = options.excludeWords;
+  if (options.dateFrom) body.predmetneDatumOd = options.dateFrom;
+  if (options.dateTo) body.predmetneDatumDo = options.dateTo;
+
+  const json = await esbirkaFetch({ path: "/rozsirena-vyhledavani", method: "POST", body });
   return parseSearch(json);
 }
 

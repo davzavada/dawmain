@@ -23,7 +23,7 @@ export function registerNss(server: McpServer): void {
     {
       title: "Nejvyšší správní soud: search decisions",
       description:
-        "Search decisions of the Czech Supreme Administrative Court (kasační stížnosti — tax, immigration, public procurement, administrative law). Full-text queries are Czech. Page 1 returns up to 40 hits, later pages 20. Results carry a numeric document_id for nss_get_decision.",
+        "FULL-TEXT search of Czech Supreme Administrative Court decisions (kasační stížnosti — tax, immigration, public procurement, administrative law) — plus spisová značka/čj. and decision-date range. Czech queries. Page 1 returns up to 40 hits, later pages 20. Results carry a numeric document_id for nss_get_decision.",
       inputSchema: z.object({
         query: z.string().optional().describe("Czech full-text query."),
         case_number: z.string().optional().describe("Spisová značka / čj., e.g. '1 Afs 25/2024'."),

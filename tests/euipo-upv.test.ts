@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { euipoDateToIso, filterEuipoClw, parseEuipoClw } from "@/src/sources/euipo-clw";
-import { parseGuidelinesSection, parseGuidelinesToc } from "@/src/sources/euipo-guidelines";
+import {
+  parsePage,
+  parsePublications,
+  parseToc,
+  pickPublication,
+} from "@/src/sources/euipo-guidelines";
 import { isUpvMaintenance, parseUpvLinks } from "@/src/sources/upv";
 import { SourceError } from "@/src/sources/shared/errors";
 
@@ -77,38 +82,61 @@ describe("filterEuipoClw", () => {
   });
 });
 
-describe("parseGuidelinesToc", () => {
-  const html = `
-    <html><body><nav>
-      <a href="/2319054/2445755/trade-mark-guidelines/1-introduction">1 Introduction</a>
-      <a href="https://guidelines.euipo.europa.eu/2319054/2445760/trade-mark-guidelines/2-searches">2 Searches</a>
-      <a href="/2319054/2445755/trade-mark-guidelines/1-introduction">1 Introduction (duplicate)</a>
-      <a href="/9999999/1111111/other-publication">Other publication</a>
-      <a href="/binary/2319054/2008000000">PDF</a>
-    </nav></body></html>`;
+describe("guidelines publications", () => {
+  // Synthetic — SDL delivery API shapes (Id/Title casing tolerated).
+  const listing = [
+    { Id: "2302857", Title: "Trade mark Guidelines 2025" },
+    { Id: "2319054", Title: "Trade mark Guidelines 2026" },
+    { Id: "2231430", Title: "Designs Guidelines" },
+  ];
 
-  it("keeps only same-publication topic links, deduplicated", () => {
-    const topics = parseGuidelinesToc(html, "2319054");
+  it("parses and picks the newest matching edition", () => {
+    const publications = parsePublications(listing);
+    expect(publications).toHaveLength(3);
+    expect(pickPublication(publications, "trademark")?.id).toBe("2319054");
+    expect(pickPublication(publications, "design")?.id).toBe("2231430");
+  });
+
+  it("throws PARSE_DRIFT on a non-list", () => {
+    expect(() => parsePublications({ nonsense: 1 })).toThrowError(SourceError);
+  });
+});
+
+describe("guidelines parseToc", () => {
+  it("extracts topic ids from Url segments and flags children", () => {
+    const topics = parseToc(
+      [
+        { Id: "ish:123-1-512", Title: "1 Introduction", Url: "/2319054/2445755/trade-mark-guidelines/1-introduction", HasChildNodes: false },
+        { Id: "ish:123-2-512", Title: "Part B Examination", Url: "/2319054/2445760/x", HasChildNodes: true },
+      ],
+      "2319054",
+    );
     expect(topics).toHaveLength(2);
     expect(topics[0]).toEqual({
       topicId: "2445755",
       title: "1 Introduction",
+      hasChildren: false,
       url: "https://guidelines.euipo.europa.eu/2319054/2445755",
     });
+    expect(topics[1].hasChildren).toBe(true);
   });
 });
 
-describe("parseGuidelinesSection", () => {
-  it("prefers the main container and drops chrome", () => {
-    const text = parseGuidelinesSection(`
-      <html><body>
-      <nav>Navigation junk</nav>
-      <main><h1>Priority</h1><p>${"Substantive requirements for priority claims. ".repeat(10)}</p></main>
-      <footer>Footer junk</footer>
-      </body></html>`);
+describe("guidelines parsePage", () => {
+  it("finds the longest HTML payload anywhere in the JSON", () => {
+    const text = parsePage({
+      Id: "x",
+      Content: {
+        Html: `<main><h1>Priority</h1><p>${"Substantive requirements for priority claims. ".repeat(5)}</p></main>`,
+      },
+      Other: "<b>short</b>",
+    });
     expect(text).toContain("Priority");
     expect(text).toContain("Substantive requirements");
-    expect(text).not.toContain("Navigation junk");
+  });
+
+  it("throws PARSE_DRIFT when no HTML is present", () => {
+    expect(() => parsePage({ Title: "no html here" })).toThrowError(SourceError);
   });
 });
 

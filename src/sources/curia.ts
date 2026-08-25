@@ -1,6 +1,7 @@
 import { SourceError } from "./shared/errors";
 import { fetchUpstream } from "./shared/http";
 import { htmlToText } from "./shared/html";
+import { CELLAR_BASE, fetchCellarText } from "./cellar";
 
 /**
  * CJEU case law.
@@ -16,7 +17,6 @@ import { htmlToText } from "./shared/html";
 
 const SOURCE = "CJEU (InfoCuria)";
 const WS_BASE = "https://infocuriaws.curia.europa.eu";
-const CELLAR_BASE = "https://publications.europa.eu/resource";
 const SPA_ORIGIN = "https://infocuria.curia.europa.eu";
 
 const SPA_HEADERS = {
@@ -45,24 +45,13 @@ export function caseNumberToCelex(caseNumber: string, docType: "judgment" | "ord
   return `6${year}${typeLetters}${number}`;
 }
 
-/** MCP language input (cs/en/…) → Cellar's 3-letter ISO 639-2/T codes. */
-const CELLAR_LANGS: Record<string, string> = {
-  cs: "ces",
-  en: "eng",
-  de: "deu",
-  fr: "fra",
-  sk: "slk",
-  pl: "pol",
-  es: "spa",
-  it: "ita",
-};
-
 // ---------- search ----------
 
 export interface CuriaSearchInput {
   query?: string;
   caseNumber?: string;
   ecli?: string;
+  parties?: string; // usual name of the case ("Schrems", "Google Spain")
   court?: "C" | "T";
   sort?: "relevance" | "date";
   language?: string;
@@ -112,7 +101,7 @@ export function buildCuriaBody(input: CuriaSearchInput, page: number, pageSize: 
     isAllTabsRequest: false,
     ecli: input.ecli ?? "",
     publishedId: input.caseNumber ?? "",
-    usualName: "",
+    usualName: input.parties ?? "",
     logicDocId: "",
     repJurExpand: true,
     filtersValue,
@@ -161,12 +150,12 @@ export async function searchCuria(
   page: number,
   pageSize: number,
 ): Promise<CuriaSearchPage> {
-  if (!input.query && !input.caseNumber && !input.ecli) {
+  if (!input.query && !input.caseNumber && !input.ecli && !input.parties) {
     throw new SourceError(
       SOURCE,
       "INPUT_INVALID",
       "CURIA search needs at least one criterion.",
-      "Provide query (keywords), case_number (e.g. 'C-311/18'), or ecli.",
+      "Provide query (full-text keywords), case_number (e.g. 'C-311/18'), ecli, or parties.",
     );
   }
   const response = await fetchUpstream(SOURCE, `${WS_BASE}/elastic-connector/search`, {
@@ -194,39 +183,6 @@ export interface CuriaDocument {
   url: string;
 }
 
-async function fetchCellar(path: string, language: string): Promise<string | null> {
-  const lang3 = CELLAR_LANGS[language.toLowerCase()] ?? "eng";
-  const attempt = async (lang: string): Promise<string | null> => {
-    const response = await fetchUpstream(SOURCE, `${CELLAR_BASE}${path}`, {
-      headers: {
-        accept: "application/xhtml+xml, text/html",
-        "accept-language": lang,
-      },
-      timeoutMs: 25_000,
-    });
-    if (response.status === 300) {
-      // Multi-part document: the body lists sibling part URLs — fetch & concat.
-      const listing = await response.text();
-      const parts = [...listing.matchAll(/href="(http[^"]+)"/g)].map((m) => m[1]).slice(0, 10);
-      if (!parts.length) return null;
-      const texts: string[] = [];
-      for (const part of parts) {
-        const partResponse = await fetchUpstream(SOURCE, part, {
-          headers: { accept: "application/xhtml+xml, text/html", "accept-language": lang },
-          timeoutMs: 25_000,
-        });
-        if (partResponse.ok) texts.push(htmlToText(await partResponse.text()));
-      }
-      return texts.join("\n\n") || null;
-    }
-    if (!response.ok) return null;
-    const html = await response.text();
-    const text = htmlToText(html);
-    return text.length > 200 ? text : null;
-  };
-  return (await attempt(lang3)) ?? (lang3 !== "eng" ? attempt("eng") : null);
-}
-
 export async function getCuriaDocument(options: {
   celex?: string;
   ecli?: string;
@@ -236,11 +192,11 @@ export async function getCuriaDocument(options: {
   const language = options.language ?? "en";
 
   if (options.celex) {
-    const text = await fetchCellar(`/celex/${encodeURIComponent(options.celex)}`, language);
+    const text = await fetchCellarText(SOURCE, `/celex/${encodeURIComponent(options.celex)}`, language);
     if (text) return { text, via: "cellar", url: `${CELLAR_BASE}/celex/${options.celex}` };
   }
   if (options.ecli) {
-    const text = await fetchCellar(`/ecli/${encodeURIComponent(options.ecli)}`, language);
+    const text = await fetchCellarText(SOURCE, `/ecli/${encodeURIComponent(options.ecli)}`, language);
     if (text) return { text, via: "cellar", url: `${CELLAR_BASE}/ecli/${options.ecli}` };
   }
   if (options.logicDocId) {

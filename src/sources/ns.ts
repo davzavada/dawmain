@@ -27,6 +27,7 @@ const COUNT_RE = /Výsledky\s+\d+\s*-\s*\d+\s+z\s+(\d[\d\s]*)/;
 export interface NsSearchInput {
   query?: string;
   caseNumber?: string;
+  category?: string; // kategorie rozhodnutí A–E
   dateFrom?: string; // ISO
   dateTo?: string; // ISO
 }
@@ -47,6 +48,7 @@ export function buildNsQuery(input: NsSearchInput): string {
     const sanitized = input.query.replace(/[()[\]]/g, " ").trim();
     clauses.push(`[ARozhodnutiRT]=((${sanitized}))`);
   }
+  if (input.category) clauses.push(`[kategorie_rozhodnuti1]=${input.category.toUpperCase()}`);
   if (input.dateFrom) clauses.push(`[datum_predani_na_web]>=${isoToCzech(input.dateFrom)}`);
   if (input.dateTo) clauses.push(`[datum_predani_na_web]<=${isoToCzech(input.dateTo)}`);
   if (!clauses.length) {
@@ -222,9 +224,24 @@ export async function searchNs(
     `${BASE}/$$WebSearch1?SearchView&Query=${encodeURIComponent(query)}` +
     // SearchMax must stay large: SearchMax=1 provokes HTTP 500 upstream.
     `&SearchMax=1000&SearchOrder=4&Start=${start}&Count=${count}&pohled=1`;
-  const response = await fetchUpstream(SOURCE, url, {
-    headers: { referer: "https://rozhodnuti.nsoud.cz/" },
-  });
+  let response: Response;
+  try {
+    response = await fetchUpstream(SOURCE, url, {
+      headers: { referer: "https://rozhodnuti.nsoud.cz/" },
+    });
+  } catch (error) {
+    // Live finding (2026-08): the Domino box answers 500 to broad queries
+    // (fulltext without date bounds) — the generic hint would mislead.
+    if (error instanceof SourceError && error.kind === "UPSTREAM_ERROR" && !input.dateFrom && !input.dateTo) {
+      throw new SourceError(
+        SOURCE,
+        "UPSTREAM_ERROR",
+        error.message,
+        "The NS server often rejects broad queries with HTTP 500 — narrow the search with date_from/date_to (e.g. one year) and try again.",
+      );
+    }
+    throw error;
+  }
   return parseNsSearch(await response.text());
 }
 

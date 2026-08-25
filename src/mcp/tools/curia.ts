@@ -21,11 +21,12 @@ export function registerCuria(server: McpServer): void {
     {
       title: "CJEU: search case law",
       description:
-        "Search Court of Justice of the EU case law (Court of Justice 'C', General Court 'T') via the live InfoCuria index — includes same-day judgments. Search by keywords, case number (C-311/18) or ECLI. Fetch texts with curia_get_document using the ECLI, a derived CELEX, or the hit's logic_doc_id for very recent documents.",
+        "FULL-TEXT search of CJEU case law (Court of Justice 'C', General Court 'T') via the court's own live InfoCuria index — searches the TEXT of judgments/opinions plus metadata, includes same-day decisions. Also: case number (C-311/18), ECLI, parties (usual name), court filter, relevance/date sort. Fetch texts with curia_get_document.",
       inputSchema: z.object({
         query: z.string().optional().describe("Keywords (any EU language; English works best)."),
         case_number: z.string().optional().describe("E.g. 'C-311/18' or 'T-655/17'."),
         ecli: z.string().optional().describe("E.g. 'ECLI:EU:C:2020:559'."),
+        parties: z.string().optional().describe("Usual name / parties, e.g. 'Schrems' or 'Google Spain'."),
         court: z.enum(["C", "T"]).optional().describe("C = Court of Justice, T = General Court."),
         sort: z.enum(["relevance", "date"]).default("relevance"),
         limit: z.number().int().min(1).max(20).default(10),
@@ -50,10 +51,10 @@ export function registerCuria(server: McpServer): void {
       }),
       annotations: READ_ONLY,
     },
-    async ({ query, case_number, ecli, court, sort, limit, page, language }) => {
+    async ({ query, case_number, ecli, parties, court, sort, limit, page, language }) => {
       try {
         const result = await searchCuria(
-          { query, caseNumber: case_number, ecli, court, sort, language },
+          { query, caseNumber: case_number, ecli, parties, court, sort, language },
           page,
           limit,
         );
@@ -87,6 +88,7 @@ export function registerCuria(server: McpServer): void {
       inputSchema: z.object({
         celex: z.string().optional().describe("CELEX number, e.g. '62018CJ0311'."),
         ecli: z.string().optional().describe("E.g. 'ECLI:EU:C:2020:559'."),
+        parties: z.string().optional().describe("Usual name / parties, e.g. 'Schrems' or 'Google Spain'."),
         case_number: z.string().optional().describe("With doc_type, derives the CELEX. E.g. 'C-311/18'."),
         doc_type: z.enum(["judgment", "order", "opinion"]).default("judgment"),
         logic_doc_id: z.string().optional().describe("From curia_search, for very recent documents."),

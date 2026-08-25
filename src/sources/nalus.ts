@@ -127,6 +127,8 @@ export interface NalusSearchInput {
   query?: string;
   citace?: string;
   ecli?: string;
+  judge?: string; // soudce zpravodaj (free text)
+  popularName?: string;
   dateFrom?: string; // ISO
   dateTo?: string; // ISO
   types?: Array<"nález" | "usnesení" | "stanovisko">;
@@ -245,6 +247,8 @@ export function buildNalusForm(
   }
   if (input.citace) form.set(`${MC}citace`, input.citace);
   if (input.ecli) form.set(`${MC}ecli`, input.ecli);
+  if (input.judge) form.set(`${MC}soudce_zpravodaj`, input.judge);
+  if (input.popularName) form.set(`${MC}popularni_nazev`, input.popularName);
   if (input.dateFrom) form.set(`${MC}decidedFrom`, isoToCzech(input.dateFrom));
   if (input.dateTo) form.set(`${MC}decidedTo`, isoToCzech(input.dateTo));
 
@@ -259,12 +263,20 @@ export async function searchNalus(
   page: number,
   pageSize: 10 | 20 | 40 | 80 = 20,
 ): Promise<NalusSearchPage> {
-  if (!input.query && !input.citace && !input.ecli && !input.dateFrom && !input.dateTo) {
+  if (
+    !input.query &&
+    !input.citace &&
+    !input.ecli &&
+    !input.judge &&
+    !input.popularName &&
+    !input.dateFrom &&
+    !input.dateTo
+  ) {
     throw new SourceError(
       SOURCE,
       "INPUT_INVALID",
       "NALUS search needs at least one criterion.",
-      "Provide query (full-text), case_number (citace), ecli, or a date range.",
+      "Provide query (full-text), case_number (citace), ecli, judge, popular_name, or a date range.",
     );
   }
   const session = new CookieSession();

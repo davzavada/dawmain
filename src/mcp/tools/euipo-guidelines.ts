@@ -1,10 +1,6 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
-import {
-  fetchGuidelinesSection,
-  fetchGuidelinesToc,
-  getPublicationId,
-} from "@/src/sources/euipo-guidelines";
+import { fetchGuidelinesSection, fetchGuidelinesToc } from "@/src/sources/euipo-guidelines";
 import { SourceError, asSourceError, toToolError } from "@/src/sources/shared/errors";
 import { charPage } from "@/src/sources/shared/text";
 
@@ -25,26 +21,42 @@ export function registerEuipoGuidelines(server: McpServer): void {
     {
       title: "EUIPO Guidelines: table of contents",
       description:
-        "Section tree of the current EUIPO Examination Guidelines edition (trade marks or designs, English). Returns topic ids for euipo_guidelines_get_section. There is no full-text search on this source — navigate by section titles.",
+        "Table of contents of the current EUIPO Examination Guidelines edition (trade marks or designs). Call without parent_topic_id for the root; drill into items marked has_children via parent_topic_id. Returns topic ids for euipo_guidelines_get_section. No full-text search on this source — navigate by section titles.",
       inputSchema: z.object({
         register: z.enum(["trademark", "design"]).default("trademark"),
+        parent_topic_id: z
+          .string()
+          .regex(/^\d+$/)
+          .optional()
+          .describe("Drill into one TOC item's children (topics with has_children)."),
       }),
       outputSchema: z.object({
         publication_id: z.string(),
+        publication_title: z.string().optional(),
         count: z.number(),
-        topics: z.array(z.object({ topicId: z.string(), title: z.string(), url: z.string() })),
+        topics: z.array(
+          z.object({
+            topicId: z.string(),
+            title: z.string(),
+            hasChildren: z.boolean(),
+            url: z.string(),
+          }),
+        ),
       }),
       annotations: READ_ONLY,
     },
-    async ({ register }) => {
+    async ({ register, parent_topic_id }) => {
       try {
-        const toc = await fetchGuidelinesToc(register);
+        const toc = await fetchGuidelinesToc(register, parent_topic_id);
         const output = {
           publication_id: toc.publicationId,
+          publication_title: toc.publicationTitle,
           count: toc.topics.length,
           topics: toc.topics,
         };
-        const lines = toc.topics.slice(0, 100).map((topic) => `• ${topic.title} — topic ${topic.topicId}`);
+        const lines = toc.topics
+          .slice(0, 100)
+          .map((topic) => `• ${topic.title} — topic ${topic.topicId}${topic.hasChildren ? " (has children)" : ""}`);
         return {
           content: [
             {
@@ -87,7 +99,11 @@ export function registerEuipoGuidelines(server: McpServer): void {
     },
     async ({ topic_id, publication_id, register, page }) => {
       try {
-        const publicationId = publication_id ?? getPublicationId(register);
+        let publicationId = publication_id;
+        if (!publicationId) {
+          const toc = await fetchGuidelinesToc(register);
+          publicationId = toc.publicationId;
+        }
         const section = await fetchGuidelinesSection(publicationId, topic_id);
         const paged = charPage(section.text, page);
         const output = {

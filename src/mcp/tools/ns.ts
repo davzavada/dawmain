@@ -23,10 +23,15 @@ export function registerNs(server: McpServer): void {
     {
       title: "Nejvyšší soud: search decisions",
       description:
-        "Search decisions of the Czech Supreme Court (civil & criminal law: dovolání, sjednocující stanoviska). Full-text queries are Czech. Any query addresses at most its first 900 documents — when 'truncated' is true, narrow with a date range. Results carry a UNID for ns_get_decision.",
+        "FULL-TEXT search of Czech Supreme Court decisions (civil & criminal law: dovolání, sjednocující stanoviska) — plus spisová značka, kategorie rozhodnutí (A–E) and date range. Czech queries. Broad queries without dates often fail upstream (HTTP 500) and any query addresses at most its first 900 documents — narrow with dates. Results carry a UNID for ns_get_decision.",
       inputSchema: z.object({
         query: z.string().optional().describe("Czech full-text query over decision bodies."),
         case_number: z.string().optional().describe("Spisová značka, e.g. '23 Cdo 1234/2025'."),
+        category: z
+          .string()
+          .regex(/^[A-Ea-e]$/)
+          .optional()
+          .describe("Kategorie rozhodnutí A–E (A = zásadní judikatura)."),
         date_from: isoDate.optional().describe("Published-to-web from (ISO)."),
         date_to: isoDate.optional().describe("Published-to-web to (ISO)."),
         limit: z.number().int().min(1).max(40).default(20),
@@ -44,10 +49,10 @@ export function registerNs(server: McpServer): void {
       }),
       annotations: READ_ONLY,
     },
-    async ({ query, case_number, date_from, date_to, limit, offset }) => {
+    async ({ query, case_number, category, date_from, date_to, limit, offset }) => {
       try {
         const page = await searchNs(
-          { query, caseNumber: case_number, dateFrom: date_from, dateTo: date_to },
+          { query, caseNumber: case_number, category, dateFrom: date_from, dateTo: date_to },
           offset,
           limit,
         );

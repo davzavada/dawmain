@@ -18,7 +18,8 @@ každý dotaz jde přímo do zdroje. Postavený na Next.js +
 | `nalus_search` / `nalus_get_decision` | nalus.usoud.cz | judikatura Ústavního soudu |
 | `cz_caselaw_search` | NSS + NS + ÚS | jeden dotaz paralelně přes tři vrcholné soudy |
 | `justice_list_decisions` / `justice_get_decision` | rozhodnuti.justice.cz | obecné soudy — výpis po dnech zveřejnění (zdroj nemá server-side vyhledávání) |
-| `curia_search` / `curia_get_document` | InfoCuria + Cellar | judikatura SDEU (C i T), texty dle CELEX/ECLI |
+| `curia_search` / `curia_get_document` | InfoCuria + Cellar | FULLTEXT judikatury SDEU (C i T) přes vlastní index soudu; texty dle CELEX/ECLI |
+| `eurlex_search` / `eurlex_get_document` | Cellar SPARQL (Publications Office) | EU legislativa + judikatura dle názvů, CELEX/ECLI, typů a dat; texty z oficiálního Cellaru |
 | `euipo_clw_search` / `euipo_clw_get_document` | EUIPO eSearchCLW | rozhodnutí odvolacích senátů, námitky, zrušení; extrakce textu z PDF |
 | `euipo_guidelines_toc` / `euipo_guidelines_get_section` | guidelines.euipo.europa.eu | metodika EUIPO po sekcích |
 | `upv_browse` / `upv_get_decision` | isdv.upv.gov.cz | správní a soudní rozhodnutí ÚPV |
@@ -77,9 +78,7 @@ produkci. Bez `vercel.json`; Next.js si Vercel detekuje sám.
    `ESBIRKA_API_KEY` (viz `.env.example`); *Functions → Region*: `fra1`.
    Po změně env je potřeba Redeploy.
 2. Spusť smoke proti nasazení (viz výše), pak `SMOKE_LIVE=1`.
-3. Zavolej `dawmain_probe_sources` — u e-Sbírky ukáže, který host bere tvůj
-   klíč (`esbirka-api` vs. `esbirka-api-gov`); vítěze zafixuj v env
-   `ESBIRKA_API_BASE`.
+3. Zavolej `dawmain_probe_sources` — ověří všech 9 upstreamů z nasazení.
 4. `dawmain_probe_sources {discover: true}` vypíše (a) kandidátní search
    endpoint SPA justice.cz, (b) skutečná pole formuláře NSS — obojí slouží
    k doladění `src/sources/nss.ts` a k budoucímu `justice_search`.

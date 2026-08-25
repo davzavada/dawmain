@@ -23,11 +23,13 @@ export function registerNalus(server: McpServer): void {
     {
       title: "Ústavní soud: search NALUS",
       description:
-        "Search decisions of the Czech Constitutional Court (nálezy, usnesení, stanoviska pléna) in NALUS. Full-text queries are Czech. Search by citace (sp. zn. like 'Pl. ÚS 24/10'), ECLI, date range, or free text. Each hit carries an 'sz' identifier for nalus_get_decision. Costs 3 upstream requests per page.",
+        "FULL-TEXT search of Czech Constitutional Court decisions (nálezy, usnesení, stanoviska pléna) in NALUS — plus citace (sp. zn. like 'Pl. ÚS 24/10'), ECLI, soudce zpravodaj, populární název, date range and decision-type filters. Czech queries. Each hit carries an 'sz' identifier for nalus_get_decision. Costs 3 upstream requests per page.",
       inputSchema: z.object({
         query: z.string().optional().describe("Czech full-text query (právní věta, výrok, odůvodnění…)."),
         case_number: z.string().optional().describe("Citace / sp. zn., e.g. 'Pl. ÚS 24/10' or 'I. ÚS 1169/26'."),
         ecli: z.string().optional().describe("ECLI, e.g. 'ECLI:CZ:US:2026:1.US.1169.26.1'."),
+        judge: z.string().optional().describe("Soudce zpravodaj, e.g. 'Wagnerová'."),
+        popular_name: z.string().optional().describe("Populární název, e.g. 'Data retention'."),
         date_from: isoDate.optional().describe("Decision date from (ISO)."),
         date_to: isoDate.optional().describe("Decision date to (ISO)."),
         types: z
@@ -55,10 +57,19 @@ export function registerNalus(server: McpServer): void {
       }),
       annotations: READ_ONLY,
     },
-    async ({ query, case_number, ecli, date_from, date_to, types, page }) => {
+    async ({ query, case_number, ecli, judge, popular_name, date_from, date_to, types, page }) => {
       try {
         const result = await searchNalus(
-          { query, citace: case_number, ecli, dateFrom: date_from, dateTo: date_to, types },
+          {
+            query,
+            citace: case_number,
+            ecli,
+            judge,
+            popularName: popular_name,
+            dateFrom: date_from,
+            dateTo: date_to,
+            types,
+          },
           page,
         );
         const shown = (page + 1) * 20;

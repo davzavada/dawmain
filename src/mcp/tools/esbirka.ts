@@ -44,9 +44,16 @@ export function registerEsbirka(server: McpServer): void {
     {
       title: "e-Sbírka: search legislation",
       description:
-        "Full-text search of Czech legislation in the official e-Sbírka (Collection of Laws). Returns acts with their staleUrl identifiers (e.g. /sb/2012/89), names and states. Use Czech-language queries. For a known act number, prefer esbirka_get_act.",
+        "FULL-TEXT search of Czech legislation in the official e-Sbírka (Collection of Laws). Modes: all words (default), exact phrase, any word; optional excluded words and date range. Returns acts with their staleUrl identifiers (e.g. /sb/2012/89). Use Czech queries. For a known act number, prefer esbirka_get_act.",
       inputSchema: z.object({
         query: z.string().min(2).describe("Czech full-text query, e.g. 'náhrada škody zaměstnance'."),
+        match: z
+          .enum(["all_words", "phrase", "any_word"])
+          .default("all_words")
+          .describe("How the query terms combine."),
+        exclude_words: z.string().optional().describe("Words that must NOT occur."),
+        date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Subject date from (ISO)."),
+        date_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Subject date to (ISO)."),
         limit: z.number().int().min(1).max(25).default(10).describe("Results per page."),
         offset: z.number().int().min(0).default(0).describe("Result offset for pagination."),
       }),
@@ -67,9 +74,14 @@ export function registerEsbirka(server: McpServer): void {
       }),
       annotations: READ_ONLY,
     },
-    async ({ query, limit, offset }) => {
+    async ({ query, match, exclude_words, date_from, date_to, limit, offset }) => {
       try {
-        const result = await searchActs(query, offset, limit);
+        const result = await searchActs(query, offset, limit, {
+          match,
+          excludeWords: exclude_words,
+          dateFrom: date_from,
+          dateTo: date_to,
+        });
         const output = {
           total: result.total,
           count: result.items.length,
