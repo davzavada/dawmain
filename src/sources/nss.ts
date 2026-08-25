@@ -297,7 +297,7 @@ async function postSearch(session: NssSession, input: NssSearchInput): Promise<s
       input.query,
       ".HodnotaText",
       /pln[ýé]\s*text|fulltext|text\s+rozhodnutí|slova/i,
-      /fulltext|^text|textdokument|textrozhodnuti/i,
+      /^textdokumentu$|fulltext|^text/i,
     );
   }
   if (input.caseNumber) {
@@ -306,7 +306,7 @@ async function postSearch(session: NssSession, input: NssSearchInput): Promise<s
       input.caseNumber,
       ".HodnotaText",
       /spisov[áé]\s*značk|čísl[oa]\s*jednací|čj/i,
-      /cislojednaci|spisovaznacka|znacka/i,
+      /oznacenivecivcelku|cislojednaci|spisovaznacka/i,
     );
   }
 
@@ -403,8 +403,12 @@ export async function getNssDecision(id: string): Promise<NssDecision> {
     fetchUpstream(SOURCE, `${BASE}/DokumentOriginal/Text/${id}`),
   ]);
 
-  // The plain-text endpoint is UTF-16 (BOM-detected in decodeBody).
-  let text = (await decodeBody(textResponse, "utf-16le")).trim();
+  // The plain-text endpoint is UTF-16 (BOM-detected in decodeBody); Aspose
+  // leaves control characters where dashes belong (\u001e in case numbers).
+  let text = (await decodeBody(textResponse, "utf-16le"))
+    .replace(/\u001e/g, "-")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, " ")
+    .trim();
   if (isNssMissingBody(text)) {
     // Fall back to the HTML rendition before declaring the document missing.
     const htmlResponse = await fetchUpstream(SOURCE, `${BASE}/DokumentOriginal/Html/${id}`);

@@ -310,6 +310,23 @@ async function discover(): Promise<Record<string, unknown>> {
   return out;
 }
 
+/** fetch_url is restricted to the upstream hosts this server scrapes. */
+const ALLOWED_FETCH_HOSTS = [
+  "api.e-sbirka.gov.cz",
+  "e-sbirka.gov.cz",
+  "opendata.eselpoint.gov.cz",
+  "rozhodnuti.nsoud.cz",
+  "nalus.usoud.cz",
+  "vyhledavac.nssoud.cz",
+  "rozhodnuti.justice.cz",
+  "infocuriaws.curia.europa.eu",
+  "curia.europa.eu",
+  "publications.europa.eu",
+  "euipo.europa.eu",
+  "guidelines.euipo.europa.eu",
+  "isdv.upv.gov.cz",
+];
+
 const inputSchema = z.object({
   sources: z
     .array(z.string())
@@ -324,6 +341,13 @@ const inputSchema = z.object({
     .default(false)
     .describe(
       "Also hunt for unverified endpoints: justice.cz SPA search API (bundle scan) and the NSS search form field dump.",
+    ),
+  fetch_url: z
+    .string()
+    .url()
+    .optional()
+    .describe(
+      "Fetch ONE URL from an upstream host and return the first ~20 kB raw — for diagnosing PARSE_DRIFT. Only the sources' own hosts are allowed.",
     ),
 });
 
@@ -342,7 +366,38 @@ export function registerProbe(server: McpServer): void {
         openWorldHint: true,
       },
     },
-    async ({ sources, include_raw, discover: discoverMode }) => {
+    async ({ sources, include_raw, discover: discoverMode, fetch_url }) => {
+      if (fetch_url) {
+        const host = new URL(fetch_url).hostname;
+        if (!ALLOWED_FETCH_HOSTS.includes(host)) {
+          return {
+            isError: true as const,
+            content: [
+              {
+                type: "text" as const,
+                text: `Host ${host} is not an upstream of this server. Allowed: ${ALLOWED_FETCH_HOSTS.join(", ")}`,
+              },
+            ],
+          };
+        }
+        try {
+          const response = await fetch(fetch_url, {
+            headers: { "user-agent": USER_AGENT, accept: "application/json, text/html;q=0.9, */*;q=0.5" },
+            signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+          });
+          const body = (await response.text()).slice(0, RAW_CAP);
+          return {
+            content: [{ type: "text" as const, text: `HTTP ${response.status} ${response.headers.get("content-type") ?? ""}\n\n${body}` }],
+            structuredContent: { fetch: { url: fetch_url, http_status: response.status, body } },
+          };
+        } catch (error) {
+          return {
+            isError: true as const,
+            content: [{ type: "text" as const, text: `Fetch failed: ${error instanceof Error ? error.message : String(error)}` }],
+          };
+        }
+      }
+
       const selected = canaries().filter((c) => !sources?.length || sources.includes(c.id));
       const probes = await Promise.all(selected.map((c) => runCanary(c, include_raw)));
       const discoveries = discoverMode ? await discover() : undefined;
