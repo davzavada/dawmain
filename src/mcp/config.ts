@@ -25,3 +25,23 @@ export function tokenMatches(expected: string, provided: string): boolean {
   }
   return diff === 0;
 }
+
+/** e-Sbírka registered-API key (header `esel-api-access-key`). Optional — the
+ * client falls back to the keyless SPA gateway when unset. */
+export function getEsbirkaApiKey(): string | undefined {
+  const key = process.env.ESBIRKA_API_KEY?.trim();
+  return key ? key : undefined;
+}
+
+/**
+ * e-Sbírka API base. The host proven with a real key is api.e-sbirka.cz;
+ * 2026-era references hint at api.e-sbirka.gov.cz after the gov.cz domain
+ * migration — run dawmain_probe_sources against a deployment and pin the
+ * winner via this env var.
+ */
+export function getEsbirkaApiBase(): string {
+  return (process.env.ESBIRKA_API_BASE?.trim() || "https://api.e-sbirka.cz").replace(/\/+$/, "");
+}
+
+/** Keyless gateway of the e-Sbírka SPA — same paths and response shapes. */
+export const ESBIRKA_CACHE_BASE = "https://e-sbirka.gov.cz/sbr-cache";

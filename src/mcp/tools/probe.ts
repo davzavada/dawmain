@@ -1,0 +1,363 @@
+import { z } from "zod";
+import type { McpServer } from "@modelcontextprotocol/server";
+import { ESBIRKA_CACHE_BASE, getEsbirkaApiBase, getEsbirkaApiKey } from "../config";
+import { USER_AGENT } from "@/src/sources/shared/http";
+
+/**
+ * Diagnostics for the nine upstream databases. This is the only integration
+ * test that can run where egress actually works (the deployed function), so
+ * it does more than ping: every canary is a real request whose response must
+ * contain a marker the parsers depend on. `include_raw` returns the head of
+ * each body (for turning live responses into test fixtures); `discover`
+ * additionally hunts for endpoints the research could not verify.
+ */
+
+const RAW_CAP = 20_000;
+const PROBE_TIMEOUT_MS = 12_000;
+
+interface Canary {
+  id: string;
+  source: string;
+  note: string;
+  request: () => { url: string; init: RequestInit };
+  /** The probe reports whether this pattern occurs in the body. */
+  marker: RegExp;
+}
+
+function jsonPost(url: string, body: unknown, headers: Record<string, string> = {}) {
+  return {
+    url,
+    init: {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json", ...headers },
+      body: JSON.stringify(body),
+    } satisfies RequestInit,
+  };
+}
+
+function canaries(): Canary[] {
+  const esbirkaKey = getEsbirkaApiKey();
+  const keyHeader: Record<string, string> = esbirkaKey ? { "esel-api-access-key": esbirkaKey } : {};
+  // A well-known act: občanský zákoník 89/2012 Sb.
+  const oz = encodeURIComponent("/sb/2012/89");
+
+  return [
+    {
+      id: "esbirka-api",
+      source: "e-Sbírka",
+      note: `registered API at ${getEsbirkaApiBase()} (key ${esbirkaKey ? "set" : "NOT set"})`,
+      request: () => ({
+        url: `${getEsbirkaApiBase()}/dokumenty-sbirky/${oz}`,
+        init: { headers: { accept: "application/json", ...keyHeader } },
+      }),
+      marker: /"nazev"|"staleUrl"/,
+    },
+    {
+      id: "esbirka-api-gov",
+      source: "e-Sbírka",
+      note: "candidate post-migration host api.e-sbirka.gov.cz",
+      request: () => ({
+        url: `https://api.e-sbirka.gov.cz/dokumenty-sbirky/${oz}`,
+        init: { headers: { accept: "application/json", ...keyHeader } },
+      }),
+      marker: /"nazev"|"staleUrl"/,
+    },
+    {
+      id: "esbirka-cache",
+      source: "e-Sbírka",
+      note: "keyless SPA gateway (fallback channel)",
+      request: () => ({
+        url: `${ESBIRKA_CACHE_BASE}/dokumenty-sbirky/${oz}`,
+        init: { headers: { accept: "application/json" } },
+      }),
+      marker: /"nazev"|"staleUrl"/,
+    },
+    {
+      id: "ns",
+      source: "Nejvyšší soud",
+      note: "Domino $$WebSearch1 tight query",
+      request: () => ({
+        url:
+          "https://rozhodnuti.nsoud.cz/Judikatura/judikatura_ns.nsf/$$WebSearch1?SearchView&Query=" +
+          encodeURIComponent('[spzn2]=cdo AND [datum_predani_na_web]>=01.01.2024') +
+          "&SearchMax=1000&SearchOrder=4&Start=0&Count=5&pohled=1",
+        init: { headers: { referer: "https://rozhodnuti.nsoud.cz/" } },
+      }),
+      marker: /Výsledky|Nebyly nalezeny|Podmínce vyhovuje/,
+    },
+    {
+      id: "nalus",
+      source: "Ústavní soud (NALUS)",
+      note: "stateless GetText.aspx for a known decision",
+      request: () => ({
+        url: "https://nalus.usoud.cz/Search/GetText.aspx?sz=1-709-05",
+        init: {},
+      }),
+      marker: /lblRegistrySign|DocContent/,
+    },
+    {
+      id: "nss",
+      source: "Nejvyšší správní soud",
+      note: "search form (antiforgery token present?)",
+      request: () => ({ url: "https://vyhledavac.nssoud.cz/", init: {} }),
+      marker: /__RequestVerificationToken/,
+    },
+    {
+      id: "justice",
+      source: "rozhodnuti.justice.cz",
+      note: "open-data year index",
+      request: () => ({
+        url: "https://rozhodnuti.justice.cz/api/opendata",
+        init: { headers: { accept: "application/json" } },
+      }),
+      marker: /"rok"/,
+    },
+    {
+      id: "curia",
+      source: "CJEU (InfoCuria)",
+      note: "elastic-connector search, 1 hit",
+      request: () =>
+        jsonPost(
+          "https://infocuriaws.curia.europa.eu/elastic-connector/search",
+          {
+            searchTerm: "data protection",
+            multiSearchTerms: [],
+            sortTermList: [{ sortDirection: "DESC", sortTerm: "SCORE" }],
+            pagination: { pageNumber: 0, pageSize: 1, from: 1, to: 1 },
+            language: "EN",
+            tabName: "affair",
+            isAllTabsRequest: false,
+            ecli: "",
+            publishedId: "",
+            usualName: "",
+            logicDocId: "",
+            repJurExpand: true,
+            filtersValue: [],
+            advancedFiltersValue: [],
+            isSearchExact: true,
+            searchSources: ["document", "metadata"],
+          },
+          {
+            origin: "https://infocuria.curia.europa.eu",
+            referer: "https://infocuria.curia.europa.eu/",
+          },
+        ),
+      marker: /totalHits/,
+    },
+    {
+      id: "cellar",
+      source: "EU Publications Office (Cellar)",
+      note: "CELEX retrieval of a known judgment (Schrems II)",
+      request: () => ({
+        url: "https://publications.europa.eu/resource/celex/62018CJ0311",
+        init: {
+          headers: {
+            accept: "application/xhtml+xml, text/html",
+            "accept-language": "eng",
+          },
+        },
+      }),
+      marker: /<html|<HTML|xhtml/,
+    },
+    {
+      id: "euipo-clw",
+      source: "EUIPO eSearchCLW",
+      note: "officesearch JSON backend, 1 row",
+      request: () =>
+        jsonPost("https://euipo.europa.eu/caselaw/officesearch/json/en", {
+          resultsPerPage: 1,
+          start: 0,
+          criteria: [],
+          sort: { field: "DecisionDate", order: "desc" },
+        }),
+      marker: /numFound/,
+    },
+    {
+      id: "euipo-guidelines",
+      source: "EUIPO Guidelines",
+      note: "site root reachable",
+      request: () => ({ url: "https://guidelines.euipo.europa.eu/", init: {} }),
+      marker: /uideline/i,
+    },
+    {
+      id: "upv",
+      source: "ÚPV (ISDV)",
+      note: "decisions browse entry point",
+      request: () => ({
+        url: "https://isdv.upv.gov.cz/webapp/rozhodnuti.prochazet",
+        init: {},
+      }),
+      marker: /rozhodnut/i,
+    },
+  ];
+}
+
+interface ProbeResult {
+  id: string;
+  source: string;
+  note: string;
+  url: string;
+  ok: boolean;
+  http_status: number | null;
+  latency_ms: number;
+  marker_found: boolean;
+  error: string | null;
+  raw?: string;
+}
+
+async function runCanary(canary: Canary, includeRaw: boolean): Promise<ProbeResult> {
+  const { url, init } = canary.request();
+  const started = Date.now();
+  try {
+    const response = await fetch(url, {
+      ...init,
+      headers: { "user-agent": USER_AGENT, ...(init.headers as Record<string, string>) },
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+      redirect: "follow",
+    });
+    const body = await response.text();
+    const marker_found = canary.marker.test(body);
+    return {
+      id: canary.id,
+      source: canary.source,
+      note: canary.note,
+      url,
+      ok: response.ok && marker_found,
+      http_status: response.status,
+      latency_ms: Date.now() - started,
+      marker_found,
+      error: null,
+      ...(includeRaw ? { raw: body.slice(0, RAW_CAP) } : {}),
+    };
+  } catch (error) {
+    return {
+      id: canary.id,
+      source: canary.source,
+      note: canary.note,
+      url,
+      ok: false,
+      http_status: null,
+      latency_ms: Date.now() - started,
+      marker_found: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/** discover mode: hunt for endpoints the research could not verify. */
+async function discover(): Promise<Record<string, unknown>> {
+  const out: Record<string, unknown> = {};
+
+  // rozhodnuti.justice.cz — scan the SPA bundles for /api/ paths (the search
+  // endpoint the open-data API lacks must be in there).
+  try {
+    const home = await fetch("https://rozhodnuti.justice.cz/", {
+      headers: { "user-agent": USER_AGENT },
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    });
+    const html = await home.text();
+    const scripts = [...html.matchAll(/src="([^"]+\.js[^"]*)"/g)]
+      .map((m) => new URL(m[1], "https://rozhodnuti.justice.cz/").href)
+      .slice(0, 6);
+    const apiPaths = new Set<string>();
+    for (const script of scripts) {
+      const response = await fetch(script, {
+        headers: { "user-agent": USER_AGENT },
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+      });
+      const source = await response.text();
+      for (const m of source.matchAll(/["'`](\/api\/[a-zA-Z0-9/_${}.-]{2,80})["'`]/g)) {
+        apiPaths.add(m[1]);
+      }
+    }
+    out.justice = { scripts_scanned: scripts.length, api_paths: [...apiPaths].sort() };
+  } catch (error) {
+    out.justice = { error: error instanceof Error ? error.message : String(error) };
+  }
+
+  // NSS — dump the search form's fields (name + type + surrounding label) so
+  // the adapter's criteria mapping can be finalized against reality.
+  try {
+    const { loadHtml } = await import("@/src/sources/shared/html");
+    const response = await fetch("https://vyhledavac.nssoud.cz/", {
+      headers: { "user-agent": USER_AGENT },
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    });
+    const $ = loadHtml(await response.text());
+    const fields: Array<{ name: string; type: string; label: string }> = [];
+    $("form")
+      .first()
+      .find("input, select, textarea")
+      .each((_, el) => {
+        const $el = $(el);
+        const name = $el.attr("name");
+        if (!name) return;
+        const label =
+          $el.closest("div").find("label").first().text().trim() ||
+          $el.attr("placeholder") ||
+          "";
+        fields.push({ name, type: $el.attr("type") ?? el.tagName, label: label.slice(0, 80) });
+      });
+    out.nss = { form_fields: fields.slice(0, 200) };
+  } catch (error) {
+    out.nss = { error: error instanceof Error ? error.message : String(error) };
+  }
+
+  return out;
+}
+
+const inputSchema = z.object({
+  sources: z
+    .array(z.string())
+    .optional()
+    .describe("Limit to these canary ids (e.g. ['esbirka-api','ns']). Default: all."),
+  include_raw: z
+    .boolean()
+    .default(false)
+    .describe("Return the first ~20 kB of each response body (for building test fixtures)."),
+  discover: z
+    .boolean()
+    .default(false)
+    .describe(
+      "Also hunt for unverified endpoints: justice.cz SPA search API (bundle scan) and the NSS search form field dump.",
+    ),
+});
+
+export function registerProbe(server: McpServer): void {
+  server.registerTool(
+    "dawmain_probe_sources",
+    {
+      title: "Probe upstream sources",
+      description:
+        "Diagnose connectivity to the legal databases this server scrapes/queries, from the deployment itself. Each canary makes one real request and checks the response for a marker the parsers rely on. Use when any source tool fails unexpectedly, after deploying, or to capture raw upstream bodies as fixtures (include_raw). The discover mode scans for endpoints not yet wired up (justice.cz search, NSS form fields).",
+      inputSchema,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+    },
+    async ({ sources, include_raw, discover: discoverMode }) => {
+      const selected = canaries().filter((c) => !sources?.length || sources.includes(c.id));
+      const probes = await Promise.all(selected.map((c) => runCanary(c, include_raw)));
+      const discoveries = discoverMode ? await discover() : undefined;
+
+      const lines = probes.map(
+        (p) =>
+          `${p.ok ? "✓" : "✗"} ${p.id.padEnd(18)} ${String(p.http_status ?? "ERR").padEnd(4)} ${String(p.latency_ms).padStart(5)}ms  marker:${p.marker_found ? "yes" : "NO"}  ${p.error ?? p.note}`,
+      );
+      const summary = `${probes.filter((p) => p.ok).length}/${probes.length} sources healthy`;
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: [summary, "", ...lines, discoveries ? "\nDiscoveries:\n" + JSON.stringify(discoveries, null, 2) : ""].join("\n"),
+          },
+        ],
+        structuredContent: { summary, probes, ...(discoveries ? { discoveries } : {}) },
+      };
+    },
+  );
+}

@@ -1,0 +1,168 @@
+openapi: 3.0.3
+info:
+  title: Rozhodnutí soudů - Otevřená data
+  description: API pro přístup k anonymizovaným rozhodnutím soudů publikovaným Ministerstvem spravedlnosti na portálu rozhodnuti.justice.cz.
+  version: "1.0.0"
+
+servers:
+  - url: https://rozhodnuti.justice.cz/api
+
+paths:
+  /opendata:
+    get:
+      summary: Dostupné roky
+      description: Vrací seznam dostupných let, pro které jsou k dispozici rozhodnutí, jejich počet za daný rok a odkaz dále
+      responses:
+        '200':
+          description: Seznam let
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                  example: {"rok":2020,"pocet":797,"odkaz":"https://rozhodnuti.justice.cz/api/opendata/2020"}
+        '404':
+          description: Není dostupný žádný rok s daty
+
+ 
+  /opendata/{rok}:
+    get:
+      summary: Rozhodnutí za rok
+      description:  Vrací seznam dostupných měsíců, pro které jsou k dispozici rozhodnutí v daném roce, jejich počet za daný rok a odkaz dále
+      parameters:
+        - name: rok
+          in: path
+          required: true
+          description: Rok vydání rozhodnutí
+          schema:
+            type: integer
+            example: 2022
+      responses:
+        '200':
+          description: Seznam dostupných měsíců, pro které jsou k dispozici rozhodnutí v daném roce, jejich počet za daný rok a odkaz dále
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                  example: {"rok":2020,"mesic":10,"pocet":26,"odkaz":"https://rozhodnuti.justice.cz/api/opendata/2020/10"}
+        '404':
+          description: Pro daný rok nebyla nalezena žádná data
+ 
+ 
+  /opendata/{rok}/{mesic}:
+    get:
+      summary: Rozhodnutí za měsíc
+      description: Vrací seznam dostupných dnů pro které jsou k dispozici rozhodnutí a jejich počet za daný měsíc a odkaz dále
+      parameters:
+        - name: rok
+          in: path
+          required: true
+          schema:
+            type: integer
+            example: 2022
+        - name: mesic
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 12
+            example: 3
+      responses:
+        '200':
+          description: Seznam dnů s rozhodnutími pro daný měsíc
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                  example: {"datum":"2020-10-20","pocet":4,"odkaz":"https://rozhodnuti.justice.cz/api/opendata/2020/10/20"}
+        '404':
+          description: Pro daný měsíc nebyla nalezena žádná data
+
+
+  /opendata/{rok}/{mesic}/{den}:
+    get:
+      summary: Rozhodnutí za den
+      description: Vrací všechna rozhodnutí vydaná v daný den. Obsahuje údaje o spisové značce, soudci, ECLI, předmětu řízení, datumu rozhododnutí, datumu zveřejnění, klíčových slovech, využitých ustanovení a odkazu na anonimozovaný rozsudek.
+      parameters:
+        - name: rok
+          in: path
+          required: true
+          schema:
+            type: integer
+            example: 2022
+        - name: mesic
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 12
+            example: 3
+        - name: den
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 31
+            example: 7
+      responses:
+        '200':
+          description: Úspěšně vrácen seznam rozhodnutí
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                example: {"jednaciCislo":"14 C 263/2020-19","soud":"Okresní soud v Mostě","autor":"JUDr. Karel Štička","ecli":"ECLI:CZ:OSMO:2020:14.C.263.2020.2","predmetRizeni":"3 419 Kč s příslušenstvím","datumVydani":"2020-09-22","datumZverejneni":"2020-10-20","klicovaSlova":["peněžité plnění","pojištění odpovědnosti za škodu"],"zminenaUstanoveni":["§ 142 z. č. 99/1963 Sb.","§ 1968 z. č. 89/2012 Sb.","§ 115a z. č. 99/1963 Sb.","§  z. č. 168/1999 Sb.","§  vyhl. č. 177/1996 Sb.","§ 2779 z. č. 89/2012 Sb."],"odkaz":"https://rozhodnuti.justice.cz/api/finaldoc/1d6380c9-0364-498a-b494-d162a90121cb"}
+        '404':
+          description: Pro daný den nebyla nalezena žádná data
+
+
+components:
+  schemas:
+    Rozhodnuti:
+      type: object
+      properties:
+        jednaciCislo:
+          type: string
+          description: Spisová značka
+        soud:
+          type: string
+          description: Název soudu
+        autor:
+          type: string
+          description: Soudce, který rozhodnutí vydal
+        predmetRizeni:  
+          type: string
+          description: Předmět řízení
+        datumVydani:
+          type: string
+          format: date
+          description: Datum vydání rozhodnutí
+        datumZverejneni:
+          type: string
+          format: date
+          description: Datum zveřejnění rozhodnutí
+        klicovaSlova:
+          type: string
+          description: Klíčová slova (např. pojištění odpovědnosti za škodu)
+        zminenaUstanoveni:
+          type: string
+          description: Využitá ustanovení (např. § 142 z. č. 99/1963 Sb.)
+        odkaz:
+          type: string
+          format: uri
+          description: Odkaz na podrobnější údaje o rozhodnutí
+
+
+
+
+
