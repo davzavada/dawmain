@@ -2,6 +2,7 @@ import { SourceError } from "./shared/errors";
 import { fetchUpstream } from "./shared/http";
 import { htmlToText } from "./shared/html";
 import { CELLAR_BASE, fetchCellarText } from "./cellar";
+import { SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
 
 /**
  * CJEU case law.
@@ -228,7 +229,19 @@ export function refineCuriaHits(hits: CuriaHit[], input: CuriaSearchInput): Curi
   });
 }
 
+const searchCache = new TtlCache<CuriaSearchPage & { filtered: number }>(SEARCH_TTL_MS);
+
 export async function searchCuria(
+  input: CuriaSearchInput,
+  page: number,
+  pageSize: number,
+): Promise<CuriaSearchPage & { filtered: number }> {
+  return searchCache.through(memoKey("curia-search", [input, page, pageSize]), () =>
+    runSearchCuria(input, page, pageSize),
+  );
+}
+
+async function runSearchCuria(
   input: CuriaSearchInput,
   page: number,
   pageSize: number,

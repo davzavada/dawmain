@@ -2,6 +2,7 @@ import { SourceError } from "./shared/errors";
 import { CookieSession, fetchUpstream } from "./shared/http";
 import { htmlToText, loadHtml } from "./shared/html";
 import { czechToIso, isoToCzech } from "./shared/text";
+import { DOCUMENT_TTL_MS, SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
 
 /**
  * NALUS — Ústavní soud decisions (nalus.usoud.cz, ASP.NET WebForms).
@@ -103,6 +104,9 @@ export function parseNalusAbstract(html: string): NalusAbstract {
   return { abstract, legalSentence };
 }
 
+const decisionCache = new TtlCache<NalusDecision & NalusAbstract>(DOCUMENT_TTL_MS, 24);
+const searchCache = new TtlCache<NalusSearchPage>(SEARCH_TTL_MS);
+
 export async function getNalusDecision(sz: string): Promise<NalusDecision & NalusAbstract> {
   if (!isValidSz(sz)) {
     throw new SourceError(
@@ -112,13 +116,15 @@ export async function getNalusDecision(sz: string): Promise<NalusDecision & Nalu
       "Use '{senát}-{číslo}-{rok}[_{pořadí}]', e.g. '1-1169-26_1' (I.ÚS 1169/26) or 'Pl-24-10_1'. An ECLI works too — pass it as 'ecli'.",
     );
   }
-  const [decisionResponse, abstractResponse] = await Promise.all([
-    fetchUpstream(SOURCE, `${BASE}/GetText.aspx?sz=${sz}`),
-    fetchUpstream(SOURCE, `${BASE}/GetAbstract.aspx?sz=${sz}`).catch(() => null),
-  ]);
-  const decision = parseNalusDecision(await decisionResponse.text(), sz);
-  const extras = abstractResponse ? parseNalusAbstract(await abstractResponse.text()) : {};
-  return { ...decision, ...extras };
+  return decisionCache.through(memoKey("nalus-doc", [sz]), async () => {
+    const [decisionResponse, abstractResponse] = await Promise.all([
+      fetchUpstream(SOURCE, `${BASE}/GetText.aspx?sz=${sz}`),
+      fetchUpstream(SOURCE, `${BASE}/GetAbstract.aspx?sz=${sz}`).catch(() => null),
+    ]);
+    const decision = parseNalusDecision(await decisionResponse.text(), sz);
+    const extras = abstractResponse ? parseNalusAbstract(await abstractResponse.text()) : {};
+    return { ...decision, ...extras };
+  });
 }
 
 // ---------- search (3-step viewstate dance) ----------
@@ -264,6 +270,20 @@ export async function searchNalus(
   input: NalusSearchInput,
   page: number,
   pageSize: 10 | 20 | 40 | 80 = 20,
+): Promise<NalusSearchPage> {
+  // The ASP.NET session stores the criteria server-side, so the 3-step dance
+  // must keep its own fresh cookies per search (sharing them across concurrent
+  // searches would cross-contaminate results) — but identical repeats within
+  // the TTL can skip all three requests.
+  return searchCache.through(memoKey("nalus-search", [input, page, pageSize]), () =>
+    runSearchNalus(input, page, pageSize),
+  );
+}
+
+async function runSearchNalus(
+  input: NalusSearchInput,
+  page: number,
+  pageSize: 10 | 20 | 40 | 80,
 ): Promise<NalusSearchPage> {
   if (
     !input.query &&

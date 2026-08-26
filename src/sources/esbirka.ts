@@ -2,7 +2,7 @@ import { ESBIRKA_CACHE_BASE, getEsbirkaApiBase, getEsbirkaApiKey } from "@/src/m
 import { SourceError } from "./shared/errors";
 import { fetchUpstream } from "./shared/http";
 import { htmlToText } from "./shared/html";
-import { TtlCache } from "./shared/cache";
+import { DOCUMENT_TTL_MS, SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
 
 /**
  * e-Sbírka — the official Czech electronic Collection of Laws.
@@ -29,6 +29,12 @@ const ESB = "https://slovník.gov.cz/datový/sbírka/pojem/";
 const SECTION_SCAN_MAX_PAGES = 15;
 /** Act metadata and version history are near-static — cache 10 min. */
 const metadataCache = new TtlCache<unknown>(10 * 60 * 1000);
+const searchCache = new TtlCache<EsbirkaSearchPage>(SEARCH_TTL_MS);
+/** Fragment pages back both §-scans and whole-act paging — page N of a long
+ * act should not re-download pages the previous call already fetched. */
+const fragmentsCache = new TtlCache<EsbirkaFragmentsPage>(DOCUMENT_TTL_MS, 120);
+/** How many fragment pages to request concurrently during a §-scan. */
+const SECTION_SCAN_BATCH = 5;
 
 export function buildStaleUrl(collection: string, year: number, number: number, date?: string): string {
   return `/${collection}/${year}/${number}${date ? `/${date}` : ""}`;
@@ -253,6 +259,17 @@ export async function searchActs(
   limit: number,
   options: EsbirkaSearchOptions = {},
 ): Promise<EsbirkaSearchPage> {
+  return searchCache.through(memoKey("esbirka-search", [query, offset, limit, options]), () =>
+    runSearchActs(query, offset, limit, options),
+  );
+}
+
+async function runSearchActs(
+  query: string,
+  offset: number,
+  limit: number,
+  options: EsbirkaSearchOptions,
+): Promise<EsbirkaSearchPage> {
   const paging = { start: offset, pocet: limit, razeni: ["+relevance"] };
   const advanced =
     (options.match && options.match !== "all_words") ||
@@ -297,10 +314,12 @@ export async function getHistory(staleUrl: string): Promise<EsbirkaVersion[]> {
 }
 
 export async function getFragmentsPage(staleUrl: string, page: number): Promise<EsbirkaFragmentsPage> {
-  const json = await esbirkaFetch({
-    path: `/dokumenty-sbirky/${encodeURIComponent(staleUrl)}/fragmenty?cisloStranky=${page}`,
+  return fragmentsCache.through(memoKey("esbirka-frag", [staleUrl, page]), async () => {
+    const json = await esbirkaFetch({
+      path: `/dokumenty-sbirky/${encodeURIComponent(staleUrl)}/fragmenty?cisloStranky=${page}`,
+    });
+    return parseFragments(json);
   });
-  return parseFragments(json);
 }
 
 // ---------- single § ----------
@@ -361,20 +380,33 @@ async function getSectionViaSparql(
 
 async function getSectionViaScan(staleUrl: string, paragraph: string): Promise<string | null> {
   const sectionRe = new RegExp(`(^|[^0-9a-z])§\\s*${paragraph}(\\s|$|[^0-9a-z])`, "iu");
-  const collected: string[] = [];
-  let totalPages = 1;
-  for (let page = 0; page < Math.min(totalPages, SECTION_SCAN_MAX_PAGES); page++) {
-    const result = await getFragmentsPage(staleUrl, page);
-    totalPages = result.totalPages;
-    for (const fragment of result.fragments) {
-      if (fragment.zkracenaCitace && sectionRe.test(fragment.zkracenaCitace)) {
-        collected.push(fragment.text);
-      }
+  const matchesOf = (result: EsbirkaFragmentsPage) =>
+    result.fragments
+      .filter((f) => f.zkracenaCitace && sectionRe.test(f.zkracenaCitace))
+      .map((f) => f.text);
+
+  const first = await getFragmentsPage(staleUrl, 0);
+  const totalPages = Math.min(first.totalPages, SECTION_SCAN_MAX_PAGES);
+  const collected = matchesOf(first);
+
+  // Fragments of one § are contiguous, so a later page with zero matches
+  // (once something was collected) ends the scan. Pages come in small
+  // parallel batches — same request count, a fraction of the wall clock;
+  // at worst one batch overshoots past the section's end.
+  let done = false;
+  for (let start = 1; start < totalPages && !done; start += SECTION_SCAN_BATCH) {
+    const pageNumbers = [];
+    for (let page = start; page < Math.min(start + SECTION_SCAN_BATCH, totalPages); page++) {
+      pageNumbers.push(page);
     }
-    // Fragments of one § are contiguous; once we have some and the page had
-    // none, we are past the section.
-    if (collected.length && !result.fragments.some((f) => f.zkracenaCitace && sectionRe.test(f.zkracenaCitace))) {
-      break;
+    const results = await Promise.all(pageNumbers.map((page) => getFragmentsPage(staleUrl, page)));
+    for (const result of results) {
+      const found = matchesOf(result);
+      collected.push(...found);
+      if (collected.length && !found.length) {
+        done = true;
+        break;
+      }
     }
   }
   return collected.length ? collected.join("\n") : null;

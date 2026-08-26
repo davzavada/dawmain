@@ -1,5 +1,6 @@
 import { SourceError } from "./shared/errors";
 import { CookieSession, fetchUpstream } from "./shared/http";
+import { DOCUMENT_TTL_MS, SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
 
 /** Politeness pause between listing pages of the client-side filter scan. */
 const FILTER_PAGE_DELAY_MS = 300;
@@ -155,7 +156,22 @@ export interface EuipoClwSearchResult {
   truncated: boolean;
 }
 
+const searchCache = new TtlCache<EuipoClwSearchResult>(SEARCH_TTL_MS);
+/** Extracted PDF texts — the extraction itself is the expensive part. */
+const documentCache = new TtlCache<EuipoClwDocument>(DOCUMENT_TTL_MS, 24);
+
 export async function searchEuipoClw(
+  register: "trademark" | "design",
+  filter: EuipoClwFilter,
+  offset: number,
+  limit: number,
+): Promise<EuipoClwSearchResult> {
+  return searchCache.through(memoKey("euipo-search", [register, filter, offset, limit]), () =>
+    runSearchEuipoClw(register, filter, offset, limit),
+  );
+}
+
+async function runSearchEuipoClw(
   register: "trademark" | "design",
   filter: EuipoClwFilter,
   offset: number,
@@ -215,6 +231,10 @@ export async function getEuipoClwDocument(pdfUrl: string): Promise<EuipoClwDocum
     );
   }
 
+  return documentCache.through(memoKey("euipo-doc", [pdfUrl]), () => downloadEuipoClwDocument(pdfUrl));
+}
+
+async function downloadEuipoClwDocument(pdfUrl: string): Promise<EuipoClwDocument> {
   // The download endpoint wants the SPA's session cookies — reuse a cached
   // handshake on warm instances (saves one request per document).
   if (!pdfSession || Date.now() - pdfSession.fetchedAt > PDF_SESSION_TTL_MS) {

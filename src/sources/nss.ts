@@ -2,6 +2,7 @@ import { SourceError } from "./shared/errors";
 import { CookieSession, fetchUpstream } from "./shared/http";
 import { decodeBody, decodeJsStringLiteral, htmlToText, loadHtml } from "./shared/html";
 import { czechToIso, isoToCzech } from "./shared/text";
+import { DOCUMENT_TTL_MS, SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
 
 /**
  * Nejvyšší správní soud — vyhledavac.nssoud.cz (server-rendered ASP.NET Core
@@ -344,7 +345,14 @@ export interface NssSearchResult extends NssResultsPage {
   page: number;
 }
 
+const searchCache = new TtlCache<NssSearchResult>(SEARCH_TTL_MS);
+const decisionCache = new TtlCache<NssDecision>(DOCUMENT_TTL_MS, 24);
+
 export async function searchNss(input: NssSearchInput, page: number): Promise<NssSearchResult> {
+  return searchCache.through(memoKey("nss-search", [input, page]), () => runSearchNss(input, page));
+}
+
+async function runSearchNss(input: NssSearchInput, page: number): Promise<NssSearchResult> {
   if (!input.query && !input.caseNumber && !input.dateFrom && !input.dateTo) {
     throw new SourceError(
       SOURCE,
@@ -413,6 +421,10 @@ export async function getNssDecision(id: string): Promise<NssDecision> {
       "Pass the numeric id returned by nss_search.",
     );
   }
+  return decisionCache.through(memoKey("nss-doc", [id]), () => runGetNssDecision(id));
+}
+
+async function runGetNssDecision(id: string): Promise<NssDecision> {
   const [detailResponse, textResponse] = await Promise.all([
     fetchUpstream(SOURCE, `${BASE}/DokumentDetail/Index/${id}`).catch(() => null),
     fetchUpstream(SOURCE, `${BASE}/DokumentOriginal/Text/${id}`),

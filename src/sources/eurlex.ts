@@ -1,6 +1,7 @@
 import { SourceError } from "./shared/errors";
 import { fetchUpstream } from "./shared/http";
 import { CELLAR_LANGS, fetchCellarText } from "./cellar";
+import { SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
 
 /**
  * EUR-Lex — searched through the official Publications Office Cellar SPARQL
@@ -145,7 +146,19 @@ export function parseEurlexResults(json: unknown): EurlexHit[] {
 
 const VIRTUOSO_ERROR_RE = /Virtuoso\s+\S*\s*Error|SP031|query execution timed out/i;
 
+const searchCache = new TtlCache<EurlexHit[]>(SEARCH_TTL_MS);
+
 export async function searchEurlex(
+  input: EurlexSearchInput,
+  limit: number,
+  offset: number,
+): Promise<EurlexHit[]> {
+  return searchCache.through(memoKey("eurlex-search", [input, limit, offset]), () =>
+    runSearchEurlex(input, limit, offset),
+  );
+}
+
+async function runSearchEurlex(
   input: EurlexSearchInput,
   limit: number,
   offset: number,

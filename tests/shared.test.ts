@@ -116,6 +116,27 @@ describe("TtlCache", () => {
     await new Promise((resolve) => setTimeout(resolve, 60));
     expect(await cache.through("k", load)).toBe(2); // expired → reload
   });
+
+  it("evicts the oldest entry once maxEntries is reached", async () => {
+    const { TtlCache } = await import("@/src/sources/shared/cache");
+    const cache = new TtlCache<string>(60_000, 2);
+    cache.set("a", "A");
+    cache.set("b", "B");
+    cache.set("c", "C"); // over capacity → "a" goes
+    expect(cache.get("a")).toBeUndefined();
+    expect(cache.get("b")).toBe("B");
+    expect(cache.get("c")).toBe("C");
+  });
+
+  it("memoKey separates scopes and ignores undefined criteria", async () => {
+    const { memoKey } = await import("@/src/sources/shared/cache");
+    expect(memoKey("nss-search", [{ query: "azyl" }, 1])).toBe(
+      memoKey("nss-search", [{ query: "azyl", caseNumber: undefined }, 1]),
+    );
+    expect(memoKey("nss-search", [{ query: "azyl" }, 1])).not.toBe(
+      memoKey("ns-search", [{ query: "azyl" }, 1]),
+    );
+  });
 });
 
 describe("findExcerpts / pageOrExcerpt", () => {

@@ -2,6 +2,7 @@ import { SourceError } from "./shared/errors";
 import { fetchUpstream } from "./shared/http";
 import { htmlToText, loadHtml } from "./shared/html";
 import { czechToIso, isoToCzech } from "./shared/text";
+import { DOCUMENT_TTL_MS, SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
 
 /**
  * Nejvyšší soud — rozhodnuti.nsoud.cz (IBM Domino classic web).
@@ -255,7 +256,20 @@ export interface NsSearchResult extends NsSearchPage {
   appliedWindowFrom: string | null;
 }
 
+const searchCache = new TtlCache<NsSearchResult>(SEARCH_TTL_MS);
+const decisionCache = new TtlCache<NsDecision>(DOCUMENT_TTL_MS, 24);
+
 export async function searchNs(
+  input: NsSearchInput,
+  start: number,
+  count: number,
+): Promise<NsSearchResult> {
+  return searchCache.through(memoKey("ns-search", [input, start, count]), () =>
+    runSearchNsWindowed(input, start, count),
+  );
+}
+
+async function runSearchNsWindowed(
   input: NsSearchInput,
   start: number,
   count: number,
@@ -304,8 +318,10 @@ export async function getNsDecision(unid: string): Promise<NsDecision> {
     );
   }
   // WebPrint yields the cleanest HTML for extraction.
-  const response = await fetchUpstream(SOURCE, `${BASE}/WebPrint/${unid}?openDocument`, {
-    headers: { referer: "https://rozhodnuti.nsoud.cz/" },
+  return decisionCache.through(memoKey("ns-doc", [unid.toUpperCase()]), async () => {
+    const response = await fetchUpstream(SOURCE, `${BASE}/WebPrint/${unid}?openDocument`, {
+      headers: { referer: "https://rozhodnuti.nsoud.cz/" },
+    });
+    return parseNsDecision(await response.text(), unid.toUpperCase());
   });
-  return parseNsDecision(await response.text(), unid.toUpperCase());
 }

@@ -48,7 +48,11 @@ scripts/fetch-fixtures.mjs  stáhne reálné fixtures z veřejných GitHub rep
 Zásady: každý nástroj má `annotations` (vše read-only), stránkování
 (`limit`/`offset` či `page`, `has_more`), `structuredContent` + čitelný text a
 chybové hlášky, které říkají, co zkusit jinak (`PARSE_DRIFT` = upstream změnil
-layout → spusť probe).
+layout → spusť probe). Rychlost: opakovaná identická volání jdou z per-instance
+cache (5 min hledání, 10 min texty rozhodnutí — stránka 2 dokumentu už text
+nestahuje znovu) a vícestránkové smyčky (e-Sbírka §-scan, justice day-walk,
+vícedílné dokumenty v Cellaru) běží v malých paralelních dávkách — stejný
+počet requestů na upstream, zlomek času.
 
 ## Vývoj
 

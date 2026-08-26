@@ -1,5 +1,6 @@
 import { SourceError } from "./shared/errors";
 import { fetchUpstream } from "./shared/http";
+import { DOCUMENT_TTL_MS, SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
 
 /**
  * rozhodnuti.justice.cz — decisions of obecné soudy (okresní, krajské,
@@ -18,6 +19,11 @@ const BASE = "https://rozhodnuti.justice.cz/api";
 /** Bounds for one invocation of the date-walk. */
 const MAX_WINDOW_DAYS = 7;
 const MAX_PAGES_PER_CALL = 20;
+/** Concurrent listing requests per batch — the API 429s under real load. */
+const WALK_CONCURRENCY = 4;
+
+const listCache = new TtlCache<JusticeListResult>(SEARCH_TTL_MS);
+const decisionCache = new TtlCache<JusticeDecision>(DOCUMENT_TTL_MS, 24);
 
 export interface JusticeListItem {
   uuid: string;
@@ -155,26 +161,58 @@ export async function listJusticeDecisions(
   filter: JusticeListFilter,
   limit: number,
 ): Promise<JusticeListResult> {
+  return listCache.through(memoKey("justice-list", [fromIso, toIso, filter, limit]), () =>
+    walkJusticeDecisions(fromIso, toIso, filter, limit),
+  );
+}
+
+async function walkJusticeDecisions(
+  fromIso: string,
+  toIso: string,
+  filter: JusticeListFilter,
+  limit: number,
+): Promise<JusticeListResult> {
   const days = enumerateDays(fromIso, toIso);
   const items: JusticeListItem[] = [];
   let pagesFetched = 0;
   let truncated = false;
 
-  outer: for (const day of days) {
-    let page = 0;
-    let totalPages = 1;
-    while (page < totalPages) {
-      if (pagesFetched >= MAX_PAGES_PER_CALL) {
-        truncated = true;
-        break outer;
+  // Walk the window in small parallel batches: first page of several days at
+  // once, then the follow-up pages of multi-page days — same page budget as
+  // the serial walk, a fraction of the wall clock. Item order stays
+  // day-by-day (each batch flattens per day before appending).
+  for (let i = 0; i < days.length && items.length < limit; i += WALK_CONCURRENCY) {
+    const batch = days.slice(i, i + WALK_CONCURRENCY);
+    let budget = MAX_PAGES_PER_CALL - pagesFetched;
+    if (budget <= 0 || batch.length > budget) truncated = true;
+    if (budget <= 0) break;
+
+    const headDays = batch.slice(0, budget);
+    const heads = await Promise.all(headDays.map((day) => fetchListingPage(day, 0)));
+    pagesFetched += heads.length;
+    const perDay = heads.map((head) => filterJusticeItems(head.items, filter));
+
+    const alreadyEnough = items.length + perDay.reduce((n, d) => n + d.length, 0) >= limit;
+    if (!alreadyEnough) {
+      const followUps: Array<{ dayIndex: number; page: number }> = [];
+      heads.forEach((head, j) => {
+        for (let page = 1; page < head.totalPages; page++) followUps.push({ dayIndex: j, page });
+      });
+      const room = MAX_PAGES_PER_CALL - pagesFetched;
+      if (followUps.length > room) truncated = true;
+      const scheduled = followUps.slice(0, Math.max(room, 0));
+      for (let s = 0; s < scheduled.length; s += WALK_CONCURRENCY) {
+        const chunk = scheduled.slice(s, s + WALK_CONCURRENCY);
+        const pages = await Promise.all(
+          chunk.map((f) => fetchListingPage(headDays[f.dayIndex], f.page)),
+        );
+        pagesFetched += pages.length;
+        pages.forEach((result, k) =>
+          perDay[chunk[k].dayIndex].push(...filterJusticeItems(result.items, filter)),
+        );
       }
-      const result = await fetchListingPage(day, page);
-      pagesFetched++;
-      totalPages = result.totalPages;
-      items.push(...filterJusticeItems(result.items, filter));
-      if (items.length >= limit) break outer;
-      page++;
     }
+    for (const dayItems of perDay) items.push(...dayItems);
   }
 
   return { items: items.slice(0, limit), days_walked: days, pages_fetched: pagesFetched, truncated };
@@ -241,24 +279,26 @@ export async function getJusticeDecision(uuid: string): Promise<JusticeDecision>
       "Pass the uuid from justice_list_decisions.",
     );
   }
-  const response = await fetchUpstream(SOURCE, `${BASE}/finaldoc/${uuid}`, {
-    headers: { accept: "application/json" },
+  return decisionCache.through(memoKey("justice-doc", [uuid]), async () => {
+    const response = await fetchUpstream(SOURCE, `${BASE}/finaldoc/${uuid}`, {
+      headers: { accept: "application/json" },
+    });
+    if (response.status === 404) {
+      throw new SourceError(
+        SOURCE,
+        "NOT_FOUND",
+        `justice.cz has no decision ${uuid}.`,
+        "The uuid may be stale — re-run justice_list_decisions.",
+      );
+    }
+    if (!response.ok) {
+      throw new SourceError(
+        SOURCE,
+        "UPSTREAM_ERROR",
+        `justice.cz answered HTTP ${response.status} for finaldoc.`,
+        "Retry in a moment (the server 429s under load).",
+      );
+    }
+    return parseJusticeDecision(await response.json(), uuid);
   });
-  if (response.status === 404) {
-    throw new SourceError(
-      SOURCE,
-      "NOT_FOUND",
-      `justice.cz has no decision ${uuid}.`,
-      "The uuid may be stale — re-run justice_list_decisions.",
-    );
-  }
-  if (!response.ok) {
-    throw new SourceError(
-      SOURCE,
-      "UPSTREAM_ERROR",
-      `justice.cz answered HTTP ${response.status} for finaldoc.`,
-      "Retry in a moment (the server 429s under load).",
-    );
-  }
-  return parseJusticeDecision(await response.json(), uuid);
 }
