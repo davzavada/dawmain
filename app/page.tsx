@@ -92,17 +92,6 @@ export default async function Home() {
           </a>
         </li>
       </ul>
-      <p style={{ fontSize: "0.9rem", color: "#6b7280" }}>
-        Právní předpisy:{" "}
-        <a href="https://www.e-sbirka.cz" target="_blank" rel="noreferrer">
-          e-Sbírka
-        </a>
-        , unijní legislativa a judikatura:{" "}
-        <a href="https://eur-lex.europa.eu" target="_blank" rel="noreferrer">
-          EUR-Lex
-        </a>
-        .
-      </p>
 
       <h2 style={{ fontSize: "1.1rem", marginTop: "2rem" }}>Jak se připojit?</h2>
       <code style={code}>{endpoint}</code>
