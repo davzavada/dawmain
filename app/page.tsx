@@ -61,13 +61,18 @@ export default async function Home() {
 
       <h2 style={{ fontSize: "1.1rem", marginTop: "2rem" }}>Jak se připojit?</h2>
       <code style={code}>{endpoint}</code>
+      <ol style={{ paddingLeft: "1.4rem", lineHeight: 1.9 }}>
+        <li>
+          V aplikaci claude.ai otevřete <strong>Nastavení → Konektory</strong>.
+        </li>
+        <li>
+          Zvolte <strong>Přidat vlastní konektor</strong> a vložte adresu výše.
+        </li>
+        <li>Při autentizaci vložte svůj přístupový kód.</li>
+        <li>V nové konverzaci pak stačí napsat, co potřebujete najít.</li>
+      </ol>
       <p>
-        V aplikaci claude.ai: <strong>Nastavení → Konektory → Přidat vlastní konektor</strong> a
-        vložit adresu výše.
-      </p>
-      <p>
-        Při autentizaci je potřeba vložit vlastní přístupový kód - pokud byste chtěli nástroj
-        vyzkoušet, ozvěte se mi.
+        Přístupový kód je osobní - pokud byste chtěli nástroj vyzkoušet, ozvěte se mi.
       </p>
     </>
   );
