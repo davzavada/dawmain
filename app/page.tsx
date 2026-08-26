@@ -104,7 +104,7 @@ export default async function Home() {
         .
       </p>
 
-      <h2 style={{ fontSize: "1.1rem", marginTop: "2rem" }}>Endpoint</h2>
+      <h2 style={{ fontSize: "1.1rem", marginTop: "2rem" }}>Jak se připojit?</h2>
       <code style={code}>{endpoint}</code>
       <p>
         V aplikaci claude.ai: <strong>Nastavení → Konektory → Přidat vlastní konektor</strong> a
