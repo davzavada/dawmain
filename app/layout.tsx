@@ -23,7 +23,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           background: "#ffffff",
         }}
       >
-        <main style={{ maxWidth: "44rem", margin: "0 auto" }}>{children}</main>
+        <main style={{ maxWidth: "44rem", margin: "0 auto", textAlign: "justify" }}>{children}</main>
       </body>
     </html>
   );
