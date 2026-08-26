@@ -23,7 +23,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           background: "#ffffff",
         }}
       >
-        <main style={{ maxWidth: "44rem", margin: "0 auto", textAlign: "justify" }}>{children}</main>
+        {/* Justified text only where lines are long enough — on narrow
+            phone columns block justification produces ugly word gaps. */}
+        <style>{`main { text-align: justify; } @media (max-width: 640px) { main { text-align: left; } }`}</style>
+        <main style={{ maxWidth: "44rem", margin: "0 auto" }}>{children}</main>
       </body>
     </html>
   );
