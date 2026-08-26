@@ -283,8 +283,12 @@ async function discover(): Promise<Record<string, unknown>> {
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
     const html = await home.text();
+    // Absolute src values survive new URL() unchanged, so a script tag could
+    // otherwise point this scan at any address — keep it on allowed hosts.
     const scripts = [...html.matchAll(/src="([^"]+\.js[^"]*)"/g)]
-      .map((m) => new URL(m[1], "https://rozhodnuti.justice.cz/").href)
+      .map((m) => new URL(m[1], "https://rozhodnuti.justice.cz/"))
+      .filter((url) => url.protocol === "https:" && ALLOWED_FETCH_HOSTS.includes(url.hostname))
+      .map((url) => url.href)
       .slice(0, 6);
     const apiPaths = new Set<string>();
     // In parallel: serially these six 12 s fetches alone could outlast the

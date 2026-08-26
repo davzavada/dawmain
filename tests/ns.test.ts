@@ -21,6 +21,17 @@ describe("buildNsQuery", () => {
   it("falls back to a phrase for unparsable case numbers", () => {
     expect(buildNsQuery({ caseNumber: "Pl. ÚS-st 1/93" })).toBe('"Pl. ÚS-st 1/93"');
   });
+
+  it("sanitizes the fallback phrase — no breaking out into Domino operators", () => {
+    const query = buildNsQuery({
+      caseNumber: 'x" OR [kategorie_rozhodnuti1]=A OR [ARozhodnutiRT]=((*))',
+      query: "smlouva",
+    });
+    // Exactly two quotes: the ones we put around the sanitized phrase.
+    expect(query.match(/"/g)).toHaveLength(2);
+    expect(query).not.toContain("[kategorie_rozhodnuti1]");
+    expect(query).toContain("[ARozhodnutiRT]=((smlouva))");
+  });
   it("wraps full text and appends date bounds in Czech format", () => {
     expect(
       buildNsQuery({ query: "náhrada škody", dateFrom: "2025-02-24", dateTo: "2025-03-01" }),

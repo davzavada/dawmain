@@ -68,6 +68,10 @@ async function esbirkaFetch(request: EsbirkaRequest): Promise<unknown> {
           ...attempt.headers,
         },
         body: request.body !== undefined ? JSON.stringify(request.body) : undefined,
+        // undici strips cookie/authorization across origins but FORWARDS custom
+        // headers — a cross-origin 302 would hand our registered API key to the
+        // redirect target. Never follow a redirect while carrying the key.
+        redirect: attempt.headers["esel-api-access-key"] ? "manual" : "follow",
       });
 
       // 401/403 on the keyed channel = bad key → try the keyless gateway.
@@ -357,6 +361,17 @@ async function getSectionViaSparql(
   date: string | undefined,
   paragraph: string,
 ): Promise<string | null> {
+  // Defence in depth: the tool schema constrains `collection`, but this IRI is
+  // interpolated into a SPARQL query — a ">" here would close it and hand the
+  // caller control of the triple patterns we send to a .gov.cz endpoint.
+  if (!/^[A-Za-z0-9-]{1,8}$/.test(collection)) {
+    throw new SourceError(
+      SOURCE,
+      "INPUT_INVALID",
+      `"${collection}" is not a collection code.`,
+      "Use 'sb' (Sbírka zákonů) or 'sm' (mezinárodní smlouvy).",
+    );
+  }
   const actIri = `https://opendata.eselpoint.gov.cz/esel-esb/eli/cz/${collection}/${year}/${number}${date ? `/${date}` : ""}`;
   const query = sectionSparql(actIri, paragraph, Boolean(date));
   const response = await fetchUpstream(SOURCE, `${SPARQL_ENDPOINT}?query=${encodeURIComponent(query)}`, {

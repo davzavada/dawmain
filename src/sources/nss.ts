@@ -1,6 +1,6 @@
 import { SourceError } from "./shared/errors";
 import { CookieSession, fetchUpstream } from "./shared/http";
-import { decodeBody, decodeJsStringLiteral, htmlToText, loadHtml } from "./shared/html";
+import { decodeBody, decodeJsStringLiteral, htmlToText, loadHtml, looksLikeHtml } from "./shared/html";
 import { czechToIso, isoToCzech } from "./shared/text";
 import { DOCUMENT_TTL_MS, SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
 
@@ -448,7 +448,7 @@ async function runGetNssDecision(id: string): Promise<NssDecision> {
       );
     }
     text = htmlToText(html);
-  } else if (/<\w+[^>]*>/.test(text)) {
+  } else if (looksLikeHtml(text)) {
     // Residual tags in the text rendition — strip them.
     text = htmlToText(text);
   }

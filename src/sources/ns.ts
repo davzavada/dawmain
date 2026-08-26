@@ -42,7 +42,10 @@ export function buildNsQuery(input: NsSearchInput): string {
     if (m) {
       clauses.push(`[spzn1]=${m[1]}`, `[spzn2]=${m[2].toLowerCase()}`, `"${m[3]}"`);
     } else {
-      clauses.push(`"${input.caseNumber.trim()}"`);
+      // Same sanitizer as the full-text path: an unescaped quote here would
+      // close the phrase and hand the caller Domino field selectors.
+      const sanitized = input.caseNumber.replace(/[()[\]"{}\\]/g, " ").replace(/\s+/g, " ").trim();
+      clauses.push(`"${sanitized}"`);
     }
   }
   if (input.query) {

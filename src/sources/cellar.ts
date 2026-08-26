@@ -54,7 +54,19 @@ export async function fetchCellarText(
       // fails the WHOLE retrieval: silently joining around a hole would
       // present a judgment with a missing middle as complete text.
       const listing = await response.text();
-      const allParts = [...listing.matchAll(/href="(http[^"]+)"/g)].map((m) => m[1]);
+      // These URLs come out of a RESPONSE BODY — the only such fetch targets in
+      // the codebase. Keep them on Cellar's own origin so a doctored listing
+      // cannot make the deployment fetch (and echo back) arbitrary addresses.
+      const cellarOrigin = new URL(CELLAR_BASE).origin;
+      const allParts = [...listing.matchAll(/href="(http[^"]+)"/g)]
+        .map((m) => m[1])
+        .filter((href) => {
+          try {
+            return new URL(href).origin === cellarOrigin;
+          } catch {
+            return false;
+          }
+        });
       const parts = allParts.slice(0, PART_CAP);
       if (!parts.length) return null;
       const texts = await Promise.all(

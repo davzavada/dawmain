@@ -1,6 +1,6 @@
 import { SourceError } from "./shared/errors";
 import { fetchUpstream } from "./shared/http";
-import { htmlToText } from "./shared/html";
+import { htmlToText, looksLikeHtml } from "./shared/html";
 import { TtlCache } from "./shared/cache";
 
 /**
@@ -197,7 +197,7 @@ export function parsePage(json: unknown): string {
   const visit = (value: unknown, depth: number): void => {
     if (depth > 10 || value == null) return;
     if (typeof value === "string") {
-      if (value.length > best.length && /<\w+[^>]*>/.test(value)) best = value;
+      if (value.length > best.length && looksLikeHtml(value)) best = value;
       return;
     }
     if (Array.isArray(value)) {

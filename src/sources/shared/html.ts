@@ -31,6 +31,16 @@ export async function decodeBody(response: Response, fallbackCharset = "utf-8"):
   }
 }
 
+/**
+ * Cheap "does this look like markup?" test. Deliberately bounded: the obvious
+ * /<\w+[^>]*>/ backtracks quadratically on text full of "<" with no ">"
+ * (measured: 15 s on 200 kB — a normal decision length), which would burn the
+ * whole function budget on one malformed upstream body.
+ */
+export function looksLikeHtml(text: string): boolean {
+  return /<[a-zA-Z][^>]{0,200}>/.test(text.slice(0, 100_000));
+}
+
 /** Strip tags and collapse whitespace, preserving paragraph breaks. */
 export function htmlToText(html: string): string {
   const $ = cheerio.load(html);

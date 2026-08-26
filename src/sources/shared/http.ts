@@ -10,6 +10,8 @@ export const USER_AGENT =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 dawmain-mcp/0.2";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
+/** Nothing legitimate here is bigger; a runaway body would exhaust the heap. */
+const DEFAULT_MAX_BYTES = 12 * 1024 * 1024;
 
 export interface UpstreamOptions {
   method?: "GET" | "POST";
@@ -20,6 +22,8 @@ export interface UpstreamOptions {
   redirect?: RequestRedirect;
   /** Retry once on 429/5xx/network. Defaults to true for GET, false for POST. */
   retry?: boolean;
+  /** Reject bodies larger than this (default 12 MB). */
+  maxBytes?: number;
 }
 
 async function delay(ms: number): Promise<void> {
@@ -72,6 +76,20 @@ export async function fetchUpstream(
       "UPSTREAM_ERROR",
       `${source} answered HTTP ${response.status}${retry ? " even after a retry" : ""}.`,
       "The service is overloaded or down. Wait a minute and try again with a narrower query.",
+    );
+  }
+
+  // Refuse oversized bodies BEFORE any caller reads them into memory: every
+  // reader here (.text(), .arrayBuffer(), PDF extraction) is unbounded, so one
+  // runaway response would exhaust the function's heap.
+  const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
+  const declared = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    throw new SourceError(
+      source,
+      "UPSTREAM_ERROR",
+      `${source} returned ${Math.round(declared / 1024 / 1024)} MB, over the ${Math.round(maxBytes / 1024 / 1024)} MB limit.`,
+      "Narrow the request — this server does not download whole datasets.",
     );
   }
 

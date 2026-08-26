@@ -182,6 +182,23 @@ describe("findExcerpts / pageOrExcerpt", () => {
   });
 });
 
+describe("looksLikeHtml", () => {
+  it("detects markup and rejects plain text", async () => {
+    const { looksLikeHtml } = await import("@/src/sources/shared/html");
+    expect(looksLikeHtml("<p>Odůvodnění</p>")).toBe(true);
+    expect(looksLikeHtml("Nejvyšší soud rozhodl takto: dovolání se zamítá.")).toBe(false);
+    expect(looksLikeHtml("a < b and c > d")).toBe(false);
+  });
+
+  it("stays fast on pathological input (the old regex took 15 s on 200 kB)", async () => {
+    const { looksLikeHtml } = await import("@/src/sources/shared/html");
+    const evil = "<a".repeat(400_000); // 800 kB of "<" with no ">"
+    const started = Date.now();
+    expect(looksLikeHtml(evil)).toBe(false);
+    expect(Date.now() - started).toBeLessThan(250);
+  });
+});
+
 describe("parallel-search helpers", () => {
   const decision =
     "Úvod rozhodnutí. ".repeat(20) +

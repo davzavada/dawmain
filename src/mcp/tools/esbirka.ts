@@ -30,6 +30,8 @@ const actIdentity = {
   number: z.number().int().min(1).describe("Number of the act, e.g. 89 for 89/2012 Sb."),
   collection: z
     .string()
+    // Interpolated into a SPARQL IRI downstream — letters only, no delimiters.
+    .regex(/^[a-z]{2,4}$/, "Collection code is 2–4 lowercase letters, e.g. 'sb'")
     .default("sb")
     .describe("Collection code: 'sb' (Sbírka zákonů, default), 'sm' (mezinárodní smlouvy), …"),
 };
