@@ -1,5 +1,4 @@
 import { headers } from "next/headers";
-import { SERVER_NAME } from "@/src/mcp/config";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +33,7 @@ export default async function Home() {
           style={{ display: "block", borderRadius: "0.75rem" }}
         />
         <div>
-          <h1 style={{ fontSize: "1.75rem", margin: 0, letterSpacing: "-0.01em" }}>{SERVER_NAME}</h1>
+          <h1 style={{ fontSize: "1.75rem", margin: 0, letterSpacing: "-0.01em" }}>Dawmain</h1>
           <p style={{ color: "#6b7280", margin: 0, fontSize: "0.95rem" }}>David Závada</p>
         </div>
       </header>
@@ -115,7 +114,7 @@ export default async function Home() {
       </p>
       <p>
         Při autentizaci je potřeba vložit vlastní přístupový kód - pokud byste chtěli nástroj
-        vyzkoušet, napište mi na <a href="mailto:davzavada@gmail.com">davzavada@gmail.com</a>.
+        vyzkoušet, ozvěte se mi.
       </p>
     </>
   );
