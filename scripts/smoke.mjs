@@ -127,12 +127,9 @@ const EXPECTED_TOOLS = [
   "curia_get_document",
   "eurlex_search",
   "eurlex_get_document",
-  "euipo_clw_search",
-  "euipo_clw_get_document",
-  "euipo_guidelines_toc",
-  "euipo_guidelines_get_section",
-  // upv_browse / upv_get_decision are deliberately unregistered: the ÚPV
-  // portal drops datacenter connections (see src/mcp/tools/index.ts).
+  // Deliberately unregistered (see src/mcp/tools/index.ts): the EUIPO tools
+  // (their legal notices opt out of automated access) and the ÚPV tools (the
+  // portal drops datacenter connections).
 ];
 
 async function checkTools(client) {

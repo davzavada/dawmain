@@ -17,15 +17,16 @@ Uživatelský popis je v [README](../README.md).
 | `justice_list_decisions` / `justice_get_decision` | rozhodnuti.justice.cz | obecné soudy — výpis po dnech zveřejnění (zdroj nemá server-side vyhledávání) |
 | `curia_search` / `curia_get_document` | InfoCuria + Cellar | FULLTEXT judikatury SDEU (C i T) přes vlastní index soudu; texty dle CELEX/ECLI |
 | `eurlex_search` / `eurlex_get_document` | Cellar SPARQL (Publications Office) | EU legislativa + judikatura dle názvů, CELEX/ECLI, typů a dat; texty z oficiálního Cellaru |
-| `euipo_clw_search` / `euipo_clw_get_document` | EUIPO eSearchCLW | rozhodnutí odvolacích senátů, námitky, zrušení; extrakce textu z PDF |
-| `euipo_guidelines_toc` / `euipo_guidelines_get_section` | guidelines.euipo.europa.eu | metodika EUIPO po sekcích |
 | `dawmain_ping` | — | které nasazení odpovědělo |
 | `dawmain_probe_sources` | — | diagnostika všech upstreamů z nasazené funkce; `include_raw` pro záchyt fixtures, `discover` pro hledání neověřených endpointů |
 
 Známá omezení (přiznaná i v popisech nástrojů): NS adresuje jen prvních 900
-výsledků dotazu (zužuj datem); justice.cz umí jen výpis po dnech; filtry EUIPO
-běží client-side přes nejnovější záznamy. **ÚPV** (isdv.upv.gov.cz) zahazuje
-spojení z datacentrových IP (ověřeno živě z regionu fra1 na obou hostech),
+výsledků dotazu (zužuj datem); justice.cz umí jen výpis po dnech.
+**EUIPO** (eSearchCLW i Guidelines) je záměrně nedostupné: právní doložky EUIPO
+si výslovně vyhrazují zákaz TDM a scrapingu „jakýmikoli prostředky, včetně
+botů" mimo vědecký výzkum, takže nástroje nejsou registrované a probe na EUIPO
+nesahá; klienti zůstávají v `src/sources/` pro případ písemného svolení.
+**ÚPV** (isdv.upv.gov.cz) zahazuje spojení z datacentrových IP (ověřeno živě z regionu fra1 na obou hostech),
 takže nástroje `upv_browse`/`upv_get_decision` nejsou registrované — kód i
 probe kanárky (`upv`, `upv-legacy`) zůstávají, kdyby se zdroj zpřístupnil.
 
@@ -80,13 +81,12 @@ produkci. Bez `vercel.json`; Next.js si Vercel detekuje sám.
    `ESBIRKA_API_KEY` (viz `.env.example`); *Functions → Region*: `fra1`.
    Po změně env je potřeba Redeploy.
 2. Spusť smoke proti nasazení (viz výše), pak `SMOKE_LIVE=1`.
-3. Zavolej `dawmain_probe_sources` — ověří všech 9 upstreamů z nasazení.
+3. Zavolej `dawmain_probe_sources` — ověří všechny upstreamy z nasazení.
 4. `dawmain_probe_sources {discover: true}` vypíše (a) kandidátní search
    endpoint SPA justice.cz, (b) skutečná pole formuláře NSS — obojí slouží
    k doladění `src/sources/nss.ts` a k budoucímu `justice_search`.
-5. Volitelné jednorázovky v prohlížeči (DevTools → Network): zachytit XHR
-   filtrovaného hledání na rozhodnuti.justice.cz a na EUIPO eSearchCLW —
-   odemkne server-side filtry.
+5. Volitelná jednorázovka v prohlížeči (DevTools → Network): zachytit XHR
+   filtrovaného hledání na rozhodnuti.justice.cz — odemkne server-side filtry.
 
 ## Připojení klienta
 
@@ -108,24 +108,27 @@ claude mcp add --transport http dawmain https://<deployment>.vercel.app/api/mcp 
 
 ## Výkon a šetrnost ke zdrojům
 
-- Neměnná data se cachují per warm instance: edice/TOC/sekce EUIPO Guidelines
-  (1 h), metadata a historie znění e-Sbírky (10 min), NSS handshake a EUIPO
-  download cookies (10 min).
+- Neměnná data se cachují per warm instance: metadata a historie znění
+  e-Sbírky (10 min), NSS handshake (10 min), texty dokumentů (10 min)
+  a výsledky hledání (5 min).
 - NS: deterministická 500 se neopakuje — místo retry se zužuje datové okno
   (bez zadaných dat automaticky 12 měsíců → 90 dnů).
-- Client-side filtry EUIPO dělají pauzu 300 ms mezi stránkami; procházení
-  justice.cz je stropované 20 stránkami na volání, scan § v e-Sbírce 15
-  stránkami; vše končí hned po naplnění limitu.
+- Procházení justice.cz je stropované 20 stránkami na volání, scan § v
+  e-Sbírce 15 stránkami; vše končí hned po naplnění limitu.
 - Texty dokumentů se vracejí po stránkách 45 000 znaků (bezpečně pod limity klientů) — typické rozhodnutí
   v jedné odpovědi; delší texty nesou pokyn agentovi pokračovat bez ptaní.
 - Timeouty: výchozí 15 s/request; odchylky: NSS POST 25 s, Cellar retrieval 25 s,
-  Cellar SPARQL 30 s, e-Sbírka SPARQL 20 s, EUIPO PDF 30 s. Celá invokace ≤ 60 s.
+  Cellar SPARQL 30 s, e-Sbírka SPARQL 20 s. Celá invokace ≤ 60 s.
 
 ## Autentizace
 
-S nastaveným `MCP_BEARER_TOKEN` vrací endpoint bez tokenu `401`. Bez něj je
-veřejný — nedoporučeno: server pak komukoli zprostředkuje dotazy do databází
-z tvé infrastruktury. Na plné OAuth 2.1 jsou v `mcp-handler` připravené
+S nastaveným `MCP_BEARER_TOKEN` vrací endpoint bez tokenu `401`; token se
+přijímá z `Authorization`, `X-API-Key` i `cf-aig-authorization` (stačí, když
+sedí kterákoli). **Bez nastaveného tokenu se na Vercelu odmítne všechno** —
+prázdná nebo chybějící proměnná by jinak tiše zveřejnila celý server, a to i
+na preview adresách; proto proměnnou zaškrtni pro Production i Preview.
+Anonymní provoz je možný jen lokálně. Aktuální stav hlásí `dawmain_ping`
+polem `auth`. Na plné OAuth 2.1 jsou v `mcp-handler` připravené
 `withMcpAuth` a `protectedResourceHandler`.
 
 ## Přidání zdroje

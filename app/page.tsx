@@ -56,7 +56,6 @@ export default async function Home() {
         <li>Ústavního soudu (NALUS)</li>
         <li>obecných soudů</li>
         <li>Soudního dvora EU (InfoCuria)</li>
-        <li>EUIPO (rozhodovací praxe a metodika)</li>
       </ul>
 
       <h2 style={{ fontSize: "1.1rem", marginTop: "2rem" }}>Jak se připojit?</h2>

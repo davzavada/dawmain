@@ -174,29 +174,6 @@ function canaries(): Canary[] {
       marker: /<html|<HTML|xhtml/,
     },
     {
-      id: "euipo-clw",
-      source: "EUIPO eSearchCLW",
-      note: "officesearch JSON backend, 1 row",
-      request: () =>
-        jsonPost("https://euipo.europa.eu/caselaw/officesearch/json/en", {
-          resultsPerPage: 1,
-          start: 0,
-          criteria: [],
-          sort: { field: "DecisionDate", order: "desc" },
-        }),
-      marker: /numFound/,
-    },
-    {
-      id: "euipo-guidelines",
-      source: "EUIPO Guidelines",
-      note: "SDL delivery JSON API (the site itself is a client-rendered SPA)",
-      request: () => ({
-        url: "https://guidelines.euipo.europa.eu/api/publications",
-        init: { headers: { accept: "application/json" } },
-      }),
-      marker: /"(Id|id)"\s*:/,
-    },
-    {
       id: "upv",
       source: "ÚPV (ISDV)",
       note: "decisions browse (gov.cz host; connections from cloud IPs may be dropped)",
@@ -367,8 +344,6 @@ const ALLOWED_FETCH_HOSTS = [
   "infocuria.curia.europa.eu",
   "curia.europa.eu",
   "publications.europa.eu",
-  "euipo.europa.eu",
-  "guidelines.euipo.europa.eu",
   "isdv.upv.gov.cz",
   "isdv.upv.cz",
 ];

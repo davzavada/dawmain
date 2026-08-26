@@ -21,7 +21,6 @@ EUR-Lexem). Konkrétně je napojený na judikaturu:
 - Ústavního soudu (NALUS) - dostupné [zde](https://nalus.usoud.cz)
 - obecných soudů - dostupné [zde](https://rozhodnuti.justice.cz)
 - Soudního dvora EU (InfoCuria) - dostupné [zde](https://infocuria.curia.europa.eu)
-- EUIPO - rozhodovací praxe dostupná [zde](https://euipo.europa.eu/eSearchCLW/), metodika [zde](https://guidelines.euipo.europa.eu)
 
 Právní předpisy: [e-Sbírka](https://www.e-sbirka.cz), unijní legislativa a
 judikatura: [EUR-Lex](https://eur-lex.europa.eu).
