@@ -14,20 +14,20 @@ export interface ToolPreview {
   excerpt: string;
 }
 
-const PREVIEW_DEADLINE_MS = 15_000;
+export const PREVIEW_DEADLINE_MS = 15_000;
 
-function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T> {
+export function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
     promise,
     new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`timed out after ${ms} ms`)), ms)),
   ]);
 }
 
-export async function buildPreviews(
-  targets: Array<{ id: string; caseNumber: string }>,
+export async function buildPreviews<T extends { id: string; caseNumber: string }>(
+  targets: T[],
   getText: (id: string) => Promise<string>,
   terms: string[],
-): Promise<ToolPreview[] | undefined> {
+): Promise<Array<T & { matches: number; excerpt: string }> | undefined> {
   if (!targets.length) return undefined;
   const settled = await Promise.all(
     targets.map(async (target) => {
@@ -39,7 +39,8 @@ export async function buildPreviews(
       }
     }),
   );
-  const previews = settled.filter((preview): preview is ToolPreview => preview !== null);
+  const previews: Array<T & { matches: number; excerpt: string }> = [];
+  for (const preview of settled) if (preview) previews.push(preview);
   return previews.length ? previews : undefined;
 }
 

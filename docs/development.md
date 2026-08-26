@@ -118,7 +118,8 @@ claude mcp add --transport http dawmain https://<deployment>.vercel.app/api/mcp 
   stránkami; vše končí hned po naplnění limitu.
 - Texty dokumentů se vracejí po stránkách 45 000 znaků (bezpečně pod limity klientů) — typické rozhodnutí
   v jedné odpovědi; delší texty nesou pokyn agentovi pokračovat bez ptaní.
-- Timeouty: 15 s/request (NSS POST 25 s, SPARQL 30 s), celá invokace ≤ 60 s.
+- Timeouty: výchozí 15 s/request; odchylky: NSS POST 25 s, Cellar retrieval 25 s,
+  Cellar SPARQL 30 s, e-Sbírka SPARQL 20 s, EUIPO PDF 30 s. Celá invokace ≤ 60 s.
 
 ## Autentizace
 

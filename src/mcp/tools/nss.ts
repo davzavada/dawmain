@@ -106,7 +106,7 @@ export function registerNss(server: McpServer): void {
           count: result.hits.length,
           page: result.page,
           has_more: result.total !== null && seen < result.total,
-          items: result.hits.map(({ citation: _citation, ...hit }) => hit),
+          items: result.hits,
           previews,
         };
         const lines = result.hits.map(

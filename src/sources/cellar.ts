@@ -26,6 +26,9 @@ export const CELLAR_LANGS: Record<string, string> = {
 
 /** Texts are big — keep the entry count low; the TTL bounds memory, not staleness. */
 const textCache = new TtlCache<string>(DOCUMENT_TTL_MS, 24);
+/** Multi-part cap: raised well above anything seen in practice, with an
+ * explicit truncation marker when a document still exceeds it. */
+const PART_CAP = 20;
 
 export async function fetchCellarText(
   source: string,
@@ -47,30 +50,44 @@ export async function fetchCellarText(
     });
     if (response.status === 300) {
       // Multi-part document: the body lists sibling part URLs — fetch in
-      // parallel (order preserved by Promise.all) and concat.
+      // parallel (order preserved by Promise.all) and concat. A failed part
+      // fails the WHOLE retrieval: silently joining around a hole would
+      // present a judgment with a missing middle as complete text.
       const listing = await response.text();
-      const parts = [...listing.matchAll(/href="(http[^"]+)"/g)].map((m) => m[1]).slice(0, 10);
+      const allParts = [...listing.matchAll(/href="(http[^"]+)"/g)].map((m) => m[1]);
+      const parts = allParts.slice(0, PART_CAP);
       if (!parts.length) return null;
-      const texts = (
-        await Promise.all(
-          parts.map(async (part) => {
-            const partResponse = await fetchUpstream(source, part, {
-              headers: { accept: "application/xhtml+xml, text/html", "accept-language": lang },
-              timeoutMs: 25_000,
-            });
-            return partResponse.ok ? htmlToText(await partResponse.text()) : "";
-          }),
-        )
-      ).filter(Boolean);
-      return texts.join("\n\n") || null;
+      const texts = await Promise.all(
+        parts.map(async (part) => {
+          const partResponse = await fetchUpstream(source, part, {
+            headers: { accept: "application/xhtml+xml, text/html", "accept-language": lang },
+            timeoutMs: 25_000,
+          });
+          return partResponse.ok ? htmlToText(await partResponse.text()) : null;
+        }),
+      );
+      if (texts.some((text) => text === null)) return null;
+      const joined = texts.filter(Boolean).join("\n\n");
+      if (!joined) return null;
+      return allParts.length > PART_CAP
+        ? `${joined}\n\n[Document truncated: only the first ${PART_CAP} of ${allParts.length} parts were retrieved.]`
+        : joined;
     }
     if (!response.ok) return null;
     const text = htmlToText(await response.text());
     return text.length > 200 ? text : null;
   };
 
-  const text = (await attempt(lang3)) ?? (lang3 !== "eng" ? await attempt("eng") : null);
-  // Cache only hits — a null can be a transient upstream miss.
-  if (text) textCache.set(key, text);
-  return text;
+  const primary = await attempt(lang3);
+  if (primary) {
+    textCache.set(key, primary);
+    return primary;
+  }
+  // English fallback: cache under the language that actually served it, so a
+  // transient failure of e.g. the cs rendition does not pin English text to
+  // the cs key for the whole TTL. (Nulls are never cached — could be transient.)
+  if (lang3 === "eng") return null;
+  const fallback = await attempt("eng");
+  if (fallback) textCache.set(memoKey("cellar", [path, "eng"]), fallback);
+  return fallback;
 }

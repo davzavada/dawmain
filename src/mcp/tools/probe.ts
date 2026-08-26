@@ -139,6 +139,26 @@ function canaries(): Canary[] {
       marker: /totalHits/,
     },
     {
+      id: "cellar-sparql",
+      source: "EU Publications Office (Cellar SPARQL)",
+      note: "trivial SELECT against the Virtuoso endpoint behind eurlex_search",
+      request: () => ({
+        url: "https://publications.europa.eu/webapi/rdf/sparql",
+        init: {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            accept: "application/sparql-results+json",
+          },
+          body: new URLSearchParams({
+            query: "SELECT (1 AS ?ok) WHERE {}",
+            format: "application/sparql-results+json",
+          }).toString(),
+        },
+      }),
+      marker: /results|bindings/,
+    },
+    {
       id: "cellar",
       source: "EU Publications Office (Cellar)",
       note: "CELEX retrieval of a known judgment (Schrems II)",

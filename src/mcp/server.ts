@@ -38,7 +38,7 @@ SOURCES → TOOLS
 - NOT covered: ÚPV rozhodnutí (isdv.upv.gov.cz rejects server connections) — if asked, say so and point the user at https://isdv.upv.gov.cz directly.
 
 SPEED — wall-clock time is mostly YOUR serial round-trips; the user is waiting
-- The search tools parallelize FOR you: pass queries:["variant 1","variant 2","variant 3"] (Czech inflects — use stems/synonyms/EN terms) and read_top:2 and ONE call runs every variant upstream in parallel, merges deduplicated hits AND returns excerpt previews of the best hits. Prefer this over calling the same tool repeatedly.
+- The CASE-LAW search tools (cz_caselaw_search, nss_search, ns_search, nalus_search, curia_search) parallelize FOR you: pass queries:["variant 1","variant 2","variant 3"] (Czech inflects — use stems/synonyms/EN terms) and read_top:2 and ONE call runs every variant upstream in parallel, merges deduplicated hits AND returns excerpt previews of the best hits. Prefer this over calling the same tool repeatedly. (esbirka/eurlex/euipo/justice tools take a single query.)
 - For case law start with cz_caselaw_search — one call queries NSS + NS + Ústavní soud (and with include_eu the CJEU) in parallel; with queries + read_top it is a whole first research round in a single call.
 - Batch INDEPENDENT tool calls into one turn: different sources, then the promising documents together (with find:"term" when hunting passages). Go serial only when a call needs the previous call's result.
 - Identical calls repeated within ~5 minutes are served from server cache — re-running a search after reading documents is cheap, so don't hoard earlier results in context.

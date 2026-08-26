@@ -381,5 +381,23 @@ async function fetchNsRendition(unid: string, rendition: "WebPrint" | "WebSearch
   const response = await fetchUpstream(SOURCE, `${BASE}/${rendition}/${unid}?openDocument`, {
     headers: { referer: "https://rozhodnuti.nsoud.cz/" },
   });
+  // fetchUpstream only throws on 429/5xx — a Domino "Entry not found" page
+  // comes back as 404 HTML and would otherwise parse into a bogus decision.
+  if (response.status === 404) {
+    throw new SourceError(
+      SOURCE,
+      "NOT_FOUND",
+      `NS has no document ${unid}.`,
+      "The UNID may be stale — re-run ns_search and use a fresh unid.",
+    );
+  }
+  if (!response.ok) {
+    throw new SourceError(
+      SOURCE,
+      "UPSTREAM_ERROR",
+      `NS answered HTTP ${response.status} for ${rendition}/${unid}.`,
+      "Try again in a moment.",
+    );
+  }
   return parseNsDecision(await response.text(), unid.toUpperCase());
 }

@@ -70,7 +70,7 @@ export async function fetchUpstream(
     throw new SourceError(
       source,
       "UPSTREAM_ERROR",
-      `${source} answered HTTP ${response.status} even after a retry.`,
+      `${source} answered HTTP ${response.status}${retry ? " even after a retry" : ""}.`,
       "The service is overloaded or down. Wait a minute and try again with a narrower query.",
     );
   }

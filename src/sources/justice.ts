@@ -174,6 +174,7 @@ async function walkJusticeDecisions(
 ): Promise<JusticeListResult> {
   const days = enumerateDays(fromIso, toIso);
   const items: JusticeListItem[] = [];
+  const walkedDays: string[] = [];
   let pagesFetched = 0;
   let truncated = false;
 
@@ -189,6 +190,7 @@ async function walkJusticeDecisions(
 
     const headDays = batch.slice(0, budget);
     const heads = await Promise.all(headDays.map((day) => fetchListingPage(day, 0)));
+    walkedDays.push(...headDays);
     pagesFetched += heads.length;
     const perDay = heads.map((head) => filterJusticeItems(head.items, filter));
 
@@ -215,7 +217,15 @@ async function walkJusticeDecisions(
     for (const dayItems of perDay) items.push(...dayItems);
   }
 
-  return { items: items.slice(0, limit), days_walked: days, pages_fetched: pagesFetched, truncated };
+  // Report only the days actually fetched — hitting `limit` ends the walk
+  // early, and an agent advancing its date cursor past days_walked would
+  // otherwise silently skip unlisted publication days.
+  return {
+    items: items.slice(0, limit),
+    days_walked: walkedDays,
+    pages_fetched: pagesFetched,
+    truncated: truncated || walkedDays.length < days.length,
+  };
 }
 
 // ---------- full text ----------

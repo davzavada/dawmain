@@ -37,11 +37,14 @@ export function parseUpvLinks(html: string): UpvLink[] {
     const label = $(el).text().replace(/\s+/g, " ").trim();
     if (!label) return;
     const pId = /showDocP\?p_id=([A-Za-z0-9]{4,16})/.exec(href)?.[1];
-    links.push({
-      label,
-      href: href.startsWith("http") ? href : `${BASE}/${href.replace(/^\.?\//, "")}`,
-      pId,
-    });
+    // Root-relative hrefs (/webapp/…) must resolve against the ORIGIN — BASE
+    // already ends in /webapp, so naive prefixing would double the path.
+    const absolute = href.startsWith("http")
+      ? href
+      : href.startsWith("/")
+        ? new URL(href, BASE).toString()
+        : `${BASE}/${href.replace(/^\.\//, "")}`;
+    links.push({ label, href: absolute, pId });
   });
   return links;
 }

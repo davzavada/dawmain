@@ -120,7 +120,7 @@ export function registerCuria(server: McpServer): void {
           filtered: results.reduce((n, r) => n + r.filtered, 0),
           hits: dedupeBy(
             results.flatMap((r) => r.hits),
-            (hit) => hit.ecli ?? hit.logicDocId ?? `${hit.caseNumber}|${hit.date}`,
+            (hit) => hit.ecli ?? hit.logicDocId ?? `${hit.caseNumber}|${hit.date}|${hit.docType}`,
           ).slice(0, limit),
         };
         const previewTargets = result.hits
@@ -176,8 +176,7 @@ export function registerCuria(server: McpServer): void {
       inputSchema: z.object({
         celex: z.string().optional().describe("CELEX number, e.g. '62018CJ0311'."),
         ecli: z.string().optional().describe("E.g. 'ECLI:EU:C:2020:559'."),
-        parties: z.string().optional().describe("Usual name / parties, e.g. 'Schrems' or 'Google Spain'."),
-        case_number: z.string().optional().describe("With doc_type, derives the CELEX. E.g. 'C-311/18'."),
+        case_number: z.string().optional().describe("With doc_type, derives the CELEX. E.g. 'C-311/18'. Party names alone cannot identify a document — resolve them via curia_search first."),
         doc_type: z.enum(["judgment", "order", "opinion"]).default("judgment"),
         logic_doc_id: z.string().optional().describe("From curia_search, for very recent documents."),
         language: z.string().default("en").describe("Preferred language (cs, en, …); falls back to English."),

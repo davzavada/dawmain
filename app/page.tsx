@@ -24,7 +24,6 @@ export default async function Home() {
   return (
     <>
       <header style={{ display: "flex", alignItems: "center", gap: "0.9rem" }}>
-        {/* eslint-disable-next-line @next/next/no-img-element -- static brand mark, no optimization wanted */}
         <img
           src="/logo.svg"
           alt=""

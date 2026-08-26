@@ -120,6 +120,9 @@ export function registerEsbirka(server: McpServer): void {
         uplnaCitace: z.string().optional(),
         eli: z.string().optional(),
         datumUcinnostiOd: z.string().optional(),
+        datumCasVyhlaseni: z.string().optional(),
+        datumUcinnostiZneniOd: z.string().optional(),
+        datumUcinnostiZneniDo: z.string().optional(),
         typZneni: z.string().optional(),
         versions: z.array(
           z.object({
@@ -175,7 +178,7 @@ export function registerEsbirka(server: McpServer): void {
           .string()
           .optional()
           .describe("One section, e.g. '§ 12' or '12' or '3a'. Omit for the whole act."),
-        page: z.number().int().min(1).default(1).describe("Page of the act text (ignored with 'section')."),
+        page: z.number().int().min(1).default(1).describe("Page of the act text (or of a long section)."),
       }),
       outputSchema: z.object({
         staleUrl: z.string(),
@@ -193,18 +196,23 @@ export function registerEsbirka(server: McpServer): void {
         const staleUrl = buildStaleUrl(collection, year, number, date);
         if (section) {
           const result = await getSection(collection, year, number, date, section);
-          const paged = charPage(result.text, 1);
+          const paged = charPage(result.text, page);
           const output = {
             staleUrl,
             url: `https://e-sbirka.gov.cz${staleUrl}`,
             section,
-            page: 1,
+            page: paged.page,
             total_pages: paged.total_pages,
             has_more: paged.has_more,
             text: paged.text,
           };
           return {
-            content: [{ type: "text", text: `${staleUrl} ${section} (via ${result.via}):\n\n${paged.text}` }],
+            content: [
+              {
+                type: "text",
+                text: `${staleUrl} ${section} (via ${result.via}):\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — call again with page: ${paged.page + 1} for the rest)` : ""}`,
+              },
+            ],
             structuredContent: output,
           };
         }

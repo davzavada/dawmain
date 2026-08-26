@@ -72,6 +72,9 @@ export function czechToIso(czech: string): string | null {
 const EXCERPT_CONTEXT_CHARS = 1_500;
 
 function foldChar(char: string): string {
+  // Astral characters (surrogate pairs) occupy TWO UTF-16 units — emit them
+  // unchanged so folded offsets stay 1:1 with the original string.
+  if (char.length === 2) return char;
   return char.normalize("NFD")[0]?.toLowerCase() ?? char;
 }
 
@@ -112,19 +115,21 @@ export function findExcerpts(
   }
   if (!matches) return { matches: 0, text: "", truncated: false };
 
+  const SEPARATOR = "\n\n[…]\n\n";
   const parts: string[] = [];
   let used = 0;
   let truncated = false;
   for (const [start, end] of windows) {
     const piece = `${start > 0 ? "…" : ""}${text.slice(start, end)}${end < text.length ? "…" : ""}`;
-    if (used + piece.length > maxTotalChars) {
+    const cost = piece.length + (parts.length ? SEPARATOR.length : 0);
+    if (used + cost > maxTotalChars) {
       truncated = true;
       break;
     }
     parts.push(piece);
-    used += piece.length;
+    used += cost;
   }
-  return { matches, text: parts.join("\n\n[…]\n\n"), truncated };
+  return { matches, text: parts.join(SEPARATOR), truncated };
 }
 
 /** Distinct, trimmed query variants — at most `cap` (case-insensitive dedupe). */

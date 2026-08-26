@@ -175,6 +175,10 @@ describe("parseUpvLinks", () => {
 
   it("extracts app links and decision tokens", () => {
     const links = parseUpvLinks(html);
+    // Root-relative hrefs must resolve against the origin, not double /webapp.
+    for (const link of links) {
+      expect(link.href).not.toContain("/webapp/webapp");
+    }
     expect(links).toHaveLength(3);
     const decision = links.find((link) => link.pId);
     expect(decision?.pId).toBe("LXDatkyH");

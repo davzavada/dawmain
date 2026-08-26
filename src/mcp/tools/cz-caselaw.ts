@@ -5,7 +5,8 @@ import { getNalusDecision, searchNalus } from "@/src/sources/nalus";
 import { getNssDecision, searchNss } from "@/src/sources/nss";
 import { getCuriaDocument, searchCuria } from "@/src/sources/curia";
 import { SourceError } from "@/src/sources/shared/errors";
-import { dedupeBy, maxTotal, previewExcerpt, uniqueQueries } from "@/src/sources/shared/text";
+import { dedupeBy, maxTotal, uniqueQueries } from "@/src/sources/shared/text";
+import { PREVIEW_DEADLINE_MS, buildPreviews, withDeadline } from "./previews";
 
 /**
  * One call, many searches: up to 3 query variants across the three top Czech
@@ -13,15 +14,16 @@ import { dedupeBy, maxTotal, previewExcerpt, uniqueQueries } from "@/src/sources
  * and with `read_top` the response already carries excerpt previews of the
  * best hits, so a research round trip collapses into a single tool call.
  * Each source gets its own deadline and reports its own status — one failing
- * court must not sink the others. rozhodnuti.justice.cz is absent by design:
- * it has no server-side search (see justice_list_decisions).
+ * court must not sink the others. Runners RETURN their results (no shared
+ * mutable state), so a late completion after a timeout cannot race a second,
+ * contradictory status into the response. rozhodnuti.justice.cz is absent by
+ * design: it has no server-side search (see justice_list_decisions).
  */
 
 const SOURCES = ["nss", "ns", "nalus", "curia"] as const;
 type SourceId = (typeof SOURCES)[number];
 const CZ_SOURCES: SourceId[] = ["nss", "ns", "nalus"];
 const PER_SOURCE_DEADLINE_MS = 20_000;
-const PREVIEW_DEADLINE_MS = 15_000;
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use ISO format YYYY-MM-DD");
 
@@ -41,19 +43,9 @@ interface SourceStatus {
   error?: string;
 }
 
-interface HitPreview {
-  source: SourceId;
-  id: string;
-  caseNumber: string;
-  matches: number;
-  excerpt: string;
-}
-
-function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`timed out after ${ms} ms`)), ms)),
-  ]);
+interface RunnerResult {
+  total: number | null;
+  hits: AggregatedHit[];
 }
 
 async function fetchPreviewText(hit: AggregatedHit): Promise<string> {
@@ -164,32 +156,31 @@ export function registerCzCaselaw(server: McpServer): void {
 
       const defaults: SourceId[] = include_eu ? [...CZ_SOURCES, "curia"] : CZ_SOURCES;
       const active = sources?.length ? SOURCES.filter((s) => sources.includes(s)) : defaults;
-      const statuses: SourceStatus[] = [];
-      const perSource = new Map<SourceId, AggregatedHit[]>();
 
       // Each runner searches ALL variants of its source in parallel, merges in
-      // variant order and dedupes — one upstream request per variant.
-      const runners: Record<SourceId, () => Promise<void>> = {
+      // variant order, dedupes, and RETURNS its result — one upstream request
+      // per variant, no shared state.
+      const runners: Record<SourceId, () => Promise<RunnerResult>> = {
         nss: async () => {
           const results = await Promise.all(
             variants.map((v) => searchNss({ query: v, dateFrom: date_from, dateTo: date_to }, 1)),
           );
-          statuses.push({ source: "nss", ok: true, total: maxTotal(results.map((r) => r.total)) });
-          const hits = dedupeBy(
-            results.flatMap((r) => r.hits),
-            (hit) => hit.id,
-          ).slice(0, per_source_limit);
-          perSource.set(
-            "nss",
-            hits.map((hit) => ({
-              source: "nss",
-              id: hit.id,
-              caseNumber: hit.caseNumber ?? "?",
-              date: hit.date,
-              detail_tool: "nss_get_decision",
-              url: hit.url,
-            })),
-          );
+          return {
+            total: maxTotal(results.map((r) => r.total)),
+            hits: dedupeBy(
+              results.flatMap((r) => r.hits),
+              (hit) => hit.id,
+            )
+              .slice(0, per_source_limit)
+              .map((hit) => ({
+                source: "nss" as const,
+                id: hit.id,
+                caseNumber: hit.caseNumber ?? "?",
+                date: hit.date,
+                detail_tool: "nss_get_decision",
+                url: hit.url,
+              })),
+          };
         },
         ns: async () => {
           const results = await Promise.all(
@@ -197,76 +188,76 @@ export function registerCzCaselaw(server: McpServer): void {
               searchNs({ query: v, dateFrom: date_from, dateTo: date_to }, 0, per_source_limit),
             ),
           );
-          statuses.push({
-            source: "ns",
-            ok: true,
+          return {
             total: maxTotal(results.map((r) => r.matched ?? r.total)),
-          });
-          const hits = dedupeBy(
-            results.flatMap((r) => r.hits),
-            (hit) => hit.unid,
-          ).slice(0, per_source_limit);
-          perSource.set(
-            "ns",
-            hits.map((hit) => ({
-              source: "ns",
-              id: hit.unid,
-              caseNumber: hit.caseNumbers.join("; "),
-              detail_tool: "ns_get_decision",
-              url: hit.url,
-            })),
-          );
+            hits: dedupeBy(
+              results.flatMap((r) => r.hits),
+              (hit) => hit.unid,
+            )
+              .slice(0, per_source_limit)
+              .map((hit) => ({
+                source: "ns" as const,
+                id: hit.unid,
+                caseNumber: hit.caseNumbers.join("; "),
+                detail_tool: "ns_get_decision",
+                url: hit.url,
+              })),
+          };
         },
         nalus: async () => {
           const results = await Promise.all(
             variants.map((v) => searchNalus({ query: v, dateFrom: date_from, dateTo: date_to }, 0, 20)),
           );
-          statuses.push({ source: "nalus", ok: true, total: maxTotal(results.map((r) => r.total)) });
-          const hits = dedupeBy(
-            results.flatMap((r) => r.hits),
-            (hit) => hit.sz ?? hit.caseNumber,
-          ).slice(0, per_source_limit);
-          perSource.set(
-            "nalus",
-            hits.map((hit) => ({
-              source: "nalus",
-              id: hit.sz ?? hit.caseNumber,
-              caseNumber: hit.caseNumber,
-              date: hit.date,
-              detail_tool: "nalus_get_decision",
-              url: hit.url,
-            })),
-          );
+          return {
+            total: maxTotal(results.map((r) => r.total)),
+            // Hits without an sz cannot be fetched by nalus_get_decision —
+            // never hand the model an id that the next tool will reject.
+            hits: dedupeBy(
+              results.flatMap((r) => r.hits).filter((hit) => hit.sz),
+              (hit) => hit.sz as string,
+            )
+              .slice(0, per_source_limit)
+              .map((hit) => ({
+                source: "nalus" as const,
+                id: hit.sz as string,
+                caseNumber: hit.caseNumber,
+                date: hit.date,
+                detail_tool: "nalus_get_decision",
+                url: hit.url,
+              })),
+          };
         },
         curia: async () => {
           const results = await Promise.all(
             variants.map((v) =>
-              searchCuria({ query: v, dateFrom: date_from, dateTo: date_to }, 1, per_source_limit),
+              // searchCuria pages are 0-based — page 0 = the top-relevance rows.
+              searchCuria({ query: v, dateFrom: date_from, dateTo: date_to }, 0, per_source_limit),
             ),
           );
-          statuses.push({ source: "curia", ok: true, total: maxTotal(results.map((r) => r.total)) });
-          const hits = dedupeBy(
-            results.flatMap((r) => r.hits),
-            (hit) => hit.ecli ?? hit.logicDocId ?? `${hit.caseNumber}|${hit.date}`,
-          ).slice(0, per_source_limit);
-          perSource.set(
-            "curia",
-            hits.map((hit) => ({
-              source: "curia",
-              id: hit.ecli ?? hit.logicDocId ?? "?",
-              caseNumber: hit.caseNumber ?? hit.caseName ?? "?",
-              date: hit.date,
-              detail_tool: "curia_get_document",
-              url: hit.url,
-            })),
-          );
+          return {
+            total: maxTotal(results.map((r) => r.total)),
+            hits: dedupeBy(
+              results.flatMap((r) => r.hits),
+              (hit) => hit.ecli ?? hit.logicDocId ?? `${hit.caseNumber}|${hit.date}|${hit.docType}`,
+            )
+              .slice(0, per_source_limit)
+              .map((hit) => ({
+                source: "curia" as const,
+                id: hit.ecli ?? hit.logicDocId ?? "?",
+                caseNumber: hit.caseNumber ?? hit.caseName ?? "?",
+                date: hit.date,
+                detail_tool: "curia_get_document",
+                url: hit.url,
+              })),
+          };
         },
       };
 
-      await Promise.allSettled(
+      const settled = await Promise.all(
         active.map(async (source) => {
           try {
-            await withDeadline(runners[source](), PER_SOURCE_DEADLINE_MS);
+            const result = await withDeadline(runners[source](), PER_SOURCE_DEADLINE_MS);
+            return { source, status: { source, ok: true, total: result.total }, hits: result.hits };
           } catch (error) {
             const message =
               error instanceof SourceError
@@ -274,10 +265,16 @@ export function registerCzCaselaw(server: McpServer): void {
                 : error instanceof Error
                   ? error.message
                   : String(error);
-            statuses.push({ source, ok: false, total: null, error: message });
+            return {
+              source,
+              status: { source, ok: false, total: null, error: message } satisfies SourceStatus,
+              hits: [] as AggregatedHit[],
+            };
           }
         }),
       );
+      const statuses: SourceStatus[] = settled.map((s) => s.status);
+      const perSource = new Map<SourceId, AggregatedHit[]>(settled.map((s) => [s.source, s.hits]));
 
       // Interleave: one hit per source in rotation, so no court dominates.
       const items: AggregatedHit[] = [];
@@ -288,25 +285,17 @@ export function registerCzCaselaw(server: McpServer): void {
         }
       }
 
-      // read_top: pull the texts of the leading hits in parallel and preview
-      // them around the query terms. Failures skip silently — a preview must
-      // never sink the search itself; the full read stays one tool call away.
-      let previews: HitPreview[] | undefined;
-      if (read_top > 0 && items.length) {
-        const settled = await Promise.all(
-          items.slice(0, read_top).map(async (hit) => {
-            try {
-              const text = await withDeadline(fetchPreviewText(hit), PREVIEW_DEADLINE_MS);
-              const preview = previewExcerpt(text, variants);
-              return { source: hit.source, id: hit.id, caseNumber: hit.caseNumber, ...preview };
-            } catch {
-              return null;
-            }
-          }),
-        );
-        previews = settled.filter((p): p is HitPreview => p !== null);
-        if (!previews.length) previews = undefined;
-      }
+      // read_top: shared preview machinery over the leading hits; a failed
+      // preview skips silently and the full read stays one tool call away.
+      const previews = await buildPreviews(
+        items.slice(0, read_top),
+        (id) => {
+          const hit = items.find((item) => item.id === id);
+          if (!hit) throw new Error("hit vanished");
+          return withDeadline(fetchPreviewText(hit), PREVIEW_DEADLINE_MS);
+        },
+        variants,
+      );
 
       statuses.sort((a, b) => SOURCES.indexOf(a.source) - SOURCES.indexOf(b.source));
       const statusLines = statuses.map(
@@ -319,7 +308,7 @@ export function registerCzCaselaw(server: McpServer): void {
       );
       const previewBlocks = (previews ?? []).map(
         (preview) =>
-          `— PREVIEW [${preview.source.toUpperCase()}] ${preview.caseNumber} (${preview.matches ? `${preview.matches}× query terms` : "document head"}):\n${preview.excerpt}\n(full text: the ${items.find((i) => i.id === preview.id)?.detail_tool} tool)`,
+          `— PREVIEW [${preview.source.toUpperCase()}] ${preview.caseNumber} (${preview.matches ? `${preview.matches}× query terms` : "document head"}):\n${preview.excerpt}\n(excerpt only — full text via ${preview.detail_tool})`,
       );
       return {
         content: [
@@ -334,7 +323,18 @@ export function registerCzCaselaw(server: McpServer): void {
             ].join("\n"),
           },
         ],
-        structuredContent: { variants, statuses, items, previews },
+        structuredContent: {
+          variants,
+          statuses,
+          items,
+          previews: previews?.map(({ source, id, caseNumber, matches, excerpt }) => ({
+            source,
+            id,
+            caseNumber,
+            matches,
+            excerpt,
+          })),
+        },
       };
     },
   );
