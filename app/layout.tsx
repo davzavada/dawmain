@@ -2,9 +2,8 @@ import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 
 export const metadata: Metadata = {
-  title: "dawmain MCP server",
-  description:
-    "Remote Model Context Protocol server for Czech and EU legal research over Streamable HTTP.",
+  title: "Dawmain - MCP server",
+  description: "MCP server pro české a unijní právní rešerše — živé dotazy do oficiálních databází.",
 };
 
 /** Matches the top of the logo's dawn sky — tints mobile browser chrome. */
@@ -12,7 +11,7 @@ export const viewport: Viewport = { themeColor: "#0E1938" };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="cs">
       <body
         style={{
           margin: 0,

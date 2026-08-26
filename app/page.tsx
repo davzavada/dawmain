@@ -15,6 +15,8 @@ const code: React.CSSProperties = {
   fontSize: "0.875rem",
 };
 
+const muted: React.CSSProperties = { color: "#6b7280", fontSize: "0.875rem" };
+
 export default async function Home() {
   const headerList = await headers();
   const host = headerList.get("x-forwarded-host") ?? headerList.get("host") ?? "localhost:3000";
@@ -36,32 +38,39 @@ export default async function Home() {
         <div>
           <h1 style={{ fontSize: "1.75rem", margin: 0, letterSpacing: "-0.01em" }}>{SERVER_NAME}</h1>
           <p style={{ color: "#6b7280", margin: 0, fontSize: "0.95rem" }}>
-            Version {SERVER_VERSION} · Model Context Protocol over Streamable HTTP
+            Verze {SERVER_VERSION} · Model Context Protocol přes Streamable HTTP
           </p>
         </div>
       </header>
 
+      <p style={{ marginTop: "1.75rem" }}>
+        MCP server pro české a unijní právní rešerše. Nemá vlastní databázi — funguje jako
+        nachytřený Google: vyhledává živě přímo v oficiálních databázích judikatury a přes API je
+        napojený na e-Sbírku (právní předpisy) a EUR-Lex (unijní právo). Konkrétně je napojený na
+        judikaturu:
+      </p>
+      <ul style={{ marginTop: "0.25rem", paddingLeft: "1.4rem", lineHeight: 1.9 }}>
+        <li>Nejvyššího soudu</li>
+        <li>Nejvyššího správního soudu</li>
+        <li>Ústavního soudu (NALUS)</li>
+        <li>obecných soudů (rozhodnuti.justice.cz)</li>
+        <li>Soudního dvora EU (InfoCuria)</li>
+        <li>EUIPO (rozhodovací praxe a metodika)</li>
+      </ul>
+
       <h2 style={{ fontSize: "1.1rem", marginTop: "2rem" }}>Endpoint</h2>
       <code style={code}>{endpoint}</code>
-      <p style={{ color: "#6b7280", fontSize: "0.875rem" }}>
-        This URL only answers MCP JSON-RPC requests — opening it in a browser returns an error,
-        which is expected.
+      <p style={muted}>
+        Adresa odpovídá jen na MCP požadavky — po otevření v prohlížeči vrátí chybu, to je v
+        pořádku.
       </p>
 
-      <h2 style={{ fontSize: "1.1rem", marginTop: "2rem" }}>Connect from Claude Code</h2>
+      <h2 style={{ fontSize: "1.1rem", marginTop: "2rem" }}>Připojení do Claude</h2>
+      <p>
+        V aplikaci claude.ai: <strong>Nastavení → Konektory → Přidat vlastní konektor</strong> a
+        vložit adresu endpointu výše. V Claude Code:
+      </p>
       <code style={code}>{`claude mcp add --transport http dawmain ${endpoint}`}</code>
-
-      <h2 style={{ fontSize: "1.1rem", marginTop: "2rem" }}>Connect from a JSON config</h2>
-      <code style={code}>
-        {JSON.stringify({ mcpServers: { dawmain: { type: "http", url: endpoint } } }, null, 2)}
-      </code>
-
-      <p style={{ color: "#6b7280", fontSize: "0.875rem", marginTop: "2rem" }}>
-        Legal-research MCP server: e-Sbírka, NSS, NS, ÚS (NALUS), obecné soudy, CJEU, EUR-Lex a
-        EUIPO — live queries, no local data. Call <code>dawmain_ping</code> to confirm which
-        deployment is answering and <code>dawmain_probe_sources</code> to check the upstream
-        databases.
-      </p>
     </>
   );
 }
