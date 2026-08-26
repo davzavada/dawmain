@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import {
   buildNsQuery,
   isoDaysAgo,
@@ -131,16 +133,47 @@ describe("parseNsDecision", () => {
     expect(decision.text).toContain("Odůvodnění");
   });
 
-  it("clips the pre-2013 opening 'Nejvyšší soud České republiky rozhodl'", () => {
-    const legacy = `<html><body>
-      <table><tr><td class="left-part">Spisová značka:</td><td class="right-part">23 Cdo 3375/2011</td></tr></table>
-      <font face="Times New Roman">Záhlaví stránky.</font>
-      <font face="Times New Roman">Nejvyšší soud České republiky rozhodl v senátě složeném z předsedy… takto: dovolání se odmítá. O d ů v o d n ě n í : text.</font>
-      <font face="Times New Roman">Citace rozhodnutí Nejvyššího soudu</font>
-    </body></html>`;
-    const decision = parseNsDecision(legacy, "0123456789ABCDEF0123456789ABCDEF");
+  // Live captures of 23 Cdo 3375/2011 — 2013-era markup where the body sits
+  // in <tt><font size="4"> WITHOUT a face attribute (Times New Roman marks
+  // only the metadata table), which defeated the old face-based extractor.
+  const LEGACY_WEBPRINT = readFileSync(
+    path.join(__dirname, "fixtures", "ns-webprint-legacy.html"),
+    "utf8",
+  );
+  const LEGACY_WEBSEARCH = readFileSync(
+    path.join(__dirname, "fixtures", "ns-websearch-legacy.html"),
+    "utf8",
+  );
+
+  it("extracts the face-less legacy body from WebPrint (23 Cdo 3375/2011)", () => {
+    const decision = parseNsDecision(LEGACY_WEBPRINT, "5019E1CBD0C332A2C1257C470065C6CD");
+    expect(decision.metadata["Spisová značka"]).toBe("23 Cdo 3375/2011");
+    expect(decision.metadata["ECLI"]).toBe("ECLI:CZ:NS:2013:23.CDO.3375.2011.1");
+    expect(decision.metadata["Datum rozhodnutí"]).toBe("2013-12-11");
     expect(decision.text).toMatch(/^Nejvyšší soud České republiky rozhodl/);
-    expect(decision.text).not.toContain("Citace rozhodnutí");
+    expect(decision.text).toContain("APETITO");
+    expect(decision.text).toContain("Dovolání");
+    // The metadata table must not leak into the body.
+    expect(decision.text).not.toContain("Kategorie rozhodnutí");
+    expect(nsBodyMissing(decision.text)).toBe(false);
+  });
+
+  it("extracts the legacy body from WebSearch and skips the citace-links row", () => {
+    const decision = parseNsDecision(LEGACY_WEBSEARCH, "5019E1CBD0C332A2C1257C470065C6CD");
+    expect(decision.metadata["23 Cdo 3375/2011"]).toBeUndefined();
+    expect(decision.metadata["Datum rozhodnutí"]).toBe("2013-12-11");
+    expect(decision.text).toMatch(/^Nejvyšší soud České republiky rozhodl/);
+    expect(decision.text).toContain("APETITO");
+    // The citation-format note precedes the body here — it must not truncate it.
+    expect(decision.text).not.toContain("by měla obsahovat");
+  });
+
+  it("lifts the ústavní stížnost outcome into metadata from both renditions", () => {
+    for (const html of [LEGACY_WEBPRINT, LEGACY_WEBSEARCH]) {
+      const decision = parseNsDecision(html, "5019E1CBD0C332A2C1257C470065C6CD");
+      expect(decision.metadata["Ústavní stížnost"]).toContain("II.ÚS 754/14");
+      expect(decision.metadata["Ústavní stížnost"]).toContain("odmítnuto");
+    }
   });
 });
 

@@ -169,14 +169,19 @@ export function parseNsDecision(html: string, unid: string): NsDecision {
   const $ = loadHtml(html);
   const metadata: Record<string, string> = {};
 
-  // Preferred: td.left-part / td.right-part rows (current markup).
+  // Preferred: td.left-part / td.right-part rows (WebSearch + modern
+  // WebPrint). The first WebSearch row pairs the case number with citace
+  // popup links (td.right-part.links) — skip it, it is not a field.
   $("td.left-part").each((_, el) => {
     const label = $(el).text().replace(/:\s*$/, "").trim();
-    const value = $(el).siblings("td.right-part").first().text().trim();
+    const valueCell = $(el).siblings("td.right-part").first();
+    if (valueCell.hasClass("links")) return;
+    const value = valueCell.text().trim();
     if (label && value) metadata[label] = value.replace(/\s+/g, " ");
   });
 
-  // Fallback: any table row whose first cell is a known label (legacy markup).
+  // Fallback: any table row whose first cell is a known label (legacy
+  // WebPrint has no left-part/right-part classes).
   if (!Object.keys(metadata).length) {
     $("tr").each((_, row) => {
       const cells = $(row).find("td");
@@ -188,19 +193,39 @@ export function parseNsDecision(html: string, unid: string): NsDecision {
     });
   }
 
-  // Body: <font face="Times New Roman"> runs between the operative opening
-  // and the closing citation note.
-  const fontRuns: string[] = [];
-  $('font[face*="Times New Roman"]').each((_, el) => {
-    fontRuns.push($(el).text());
+  // Ústavní stížnost outcomes live in a table nested inside the metadata
+  // table on both renditions — decisive "is this still good law" metadata.
+  const usComplaints: string[] = [];
+  $("table table tr").each((_, row) => {
+    const cells = $(row)
+      .find("td")
+      .toArray()
+      .map((cell) => $(cell).text().replace(/\s+/g, " ").trim())
+      .filter(Boolean);
+    if (cells.some((cell) => /ÚS\s*\d+\/\d+/u.test(cell))) usComplaints.push(cells.join(" | "));
   });
-  let text = fontRuns.join("\n");
-  if (!text.trim()) text = htmlToText(html);
+  if (usComplaints.length) metadata["Ústavní stížnost"] = usComplaints.join("; ");
+
+  // Body: strip the metadata tables and chrome from the DOM, then take the
+  // text of what remains. Do NOT key on font faces: modern pages set the
+  // body in font[face="Times New Roman"], but 2013-era pages set it in
+  // plain <tt><font size="4"> while Times New Roman marks only the metadata
+  // table — a face-based selector then "extracts" the metadata instead of
+  // the judgment (live case: 23 Cdo 3375/2011).
+  $("head, script, style").remove();
+  $(".tlacitko, .list-intro-heading").remove();
+  $("table#tabl, table#box-table-a").remove();
+  $("table")
+    .filter((_, table) => $(table).find("td.left-part").length > 0)
+    .remove();
+  let text = htmlToText($.html());
   // Older decisions (≲2013) open with "Nejvyšší soud České republiky rozhodl".
   const start = text.search(/Nejvyšší soud(?: České republiky)? (?:rozhodl|jako soud)/);
   if (start > 0) text = text.slice(start);
-  const end = text.indexOf("Citace rozhodnutí");
-  if (end > 0) text = text.slice(0, end);
+  // The citation-format note PRECEDES the body on WebSearch pages and closes
+  // WebPrint pages — cut it only when it trails the text.
+  const end = text.lastIndexOf("Citace rozhodnutí");
+  if (end > text.length / 2) text = text.slice(0, end);
   text = text.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
 
   if (!text && !Object.keys(metadata).length) {
@@ -290,8 +315,11 @@ async function runSearchNsWindowed(
   start: number,
   count: number,
 ): Promise<NsSearchResult> {
-  // Explicit dates: run as-given; a 500 then means the window is too wide.
-  if (input.dateFrom || input.dateTo) {
+  // Explicit dates — and unique keys like a spisová značka — run as-given;
+  // the 500-guard window exists for unbounded FULL-TEXT queries. A sp. zn.
+  // matches a handful of documents and must find them in ANY year (live
+  // case: "23 Cdo 3375/2011" found nothing inside the 12-month window).
+  if (input.dateFrom || input.dateTo || input.caseNumber) {
     try {
       return { ...(await runNsSearch(input, start, count)), appliedWindowFrom: null };
     } catch (error) {
@@ -334,10 +362,10 @@ export async function getNsDecision(unid: string): Promise<NsDecision> {
     );
   }
   return decisionCache.through(memoKey("ns-doc", [unid.toUpperCase()]), async () => {
-    // WebPrint yields the cleanest HTML — but for older decisions (≲2013,
-    // e.g. 23 Cdo 3375/2011) it renders the metadata table WITHOUT the
-    // judgment body. When the parsed text is only a metadata echo, fall back
-    // to the WebSearch document view (the same page the hit URL points at).
+    // WebPrint yields the cleanest HTML. Should its markup ever defeat the
+    // extraction (a metadata echo instead of a body), try the WebSearch
+    // document view — the same page the hit URL points at — and keep the
+    // longer text. A pure safety net; both renditions carry the body.
     const webPrint = await fetchNsRendition(unid, "WebPrint");
     if (!nsBodyMissing(webPrint.text)) return webPrint;
     const webSearch = await fetchNsRendition(unid, "WebSearch").catch(() => null);
