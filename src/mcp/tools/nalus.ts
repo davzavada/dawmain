@@ -2,7 +2,8 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { ecliToSz, getNalusDecision, searchNalus } from "@/src/sources/nalus";
 import { SourceError, asSourceError, toToolError } from "@/src/sources/shared/errors";
-import { pageOrExcerpt } from "@/src/sources/shared/text";
+import { dedupeBy, maxTotal, pageOrExcerpt, uniqueQueries } from "@/src/sources/shared/text";
+import { buildPreviews, renderPreviews } from "./previews";
 
 const READ_ONLY = {
   readOnlyHint: true,
@@ -23,9 +24,14 @@ export function registerNalus(server: McpServer): void {
     {
       title: "Ústavní soud: search NALUS",
       description:
-        "FULL-TEXT search of Czech Constitutional Court decisions (nálezy, usnesení, stanoviska pléna) in NALUS — plus citace (sp. zn. like 'Pl. ÚS 24/10'), ECLI, soudce zpravodaj, populární název, date range and decision-type filters. Czech queries. Each hit carries an 'sz' identifier for nalus_get_decision. Costs 3 upstream requests per page.",
+        "FULL-TEXT search of Czech Constitutional Court decisions (nálezy, usnesení, stanoviska pléna) in NALUS — plus citace (sp. zn. like 'Pl. ÚS 24/10'), ECLI, soudce zpravodaj, populární název, date range and decision-type filters. Czech queries; 'queries' searches up to 3 variants IN PARALLEL and merges deduplicated results. Each hit carries an 'sz' identifier for nalus_get_decision. read_top: N also returns excerpt previews of the N best hits. Costs 3 upstream requests per variant.",
       inputSchema: z.object({
         query: z.string().optional().describe("Czech full-text query (právní věta, výrok, odůvodnění…)."),
+        queries: z
+          .array(z.string().min(2))
+          .max(3)
+          .optional()
+          .describe("Up to 3 query variants searched in parallel and merged (inflections, synonyms)."),
         case_number: z.string().optional().describe("Citace / sp. zn., e.g. 'Pl. ÚS 24/10' or 'I. ÚS 1169/26'."),
         ecli: z.string().optional().describe("ECLI, e.g. 'ECLI:CZ:US:2026:1.US.1169.26.1'."),
         judge: z.string().optional().describe("Soudce zpravodaj, e.g. 'Wagnerová'."),
@@ -37,6 +43,13 @@ export function registerNalus(server: McpServer): void {
           .optional()
           .describe("Restrict decision forms. Default: all."),
         page: z.number().int().min(0).default(0).describe("Result page (0-indexed, 20 hits per page)."),
+        read_top: z
+          .number()
+          .int()
+          .min(0)
+          .max(3)
+          .default(0)
+          .describe("Fetch the N best hits' texts in parallel and return excerpts around the query."),
       }),
       outputSchema: z.object({
         total: z.number().nullable(),
@@ -55,23 +68,55 @@ export function registerNalus(server: McpServer): void {
             url: z.string().nullable(),
           }),
         ),
+        previews: z
+          .array(
+            z.object({
+              id: z.string(),
+              caseNumber: z.string(),
+              matches: z.number(),
+              excerpt: z.string(),
+            }),
+          )
+          .optional(),
       }),
       annotations: READ_ONLY,
     },
-    async ({ query, case_number, ecli, judge, popular_name, date_from, date_to, types, page }) => {
+    async ({ query, queries, case_number, ecli, judge, popular_name, date_from, date_to, types, page, read_top }) => {
       try {
-        const result = await searchNalus(
-          {
-            query,
-            citace: case_number,
-            ecli,
-            judge,
-            popularName: popular_name,
-            dateFrom: date_from,
-            dateTo: date_to,
-            types,
-          },
-          page,
+        const variants = uniqueQueries(query, queries);
+        // One 3-step NALUS session per variant, in parallel; merged + deduped.
+        const results = await Promise.all(
+          (variants.length ? variants : [undefined]).map((variant) =>
+            searchNalus(
+              {
+                query: variant,
+                citace: case_number,
+                ecli,
+                judge,
+                popularName: popular_name,
+                dateFrom: date_from,
+                dateTo: date_to,
+                types,
+              },
+              page,
+            ),
+          ),
+        );
+        const result = {
+          total: maxTotal(results.map((r) => r.total)),
+          empty: results.every((r) => r.empty),
+          hits: dedupeBy(
+            results.flatMap((r) => r.hits),
+            (hit) => hit.sz ?? hit.caseNumber,
+          ).slice(0, 20),
+        };
+        const previews = await buildPreviews(
+          result.hits
+            .slice(0, read_top)
+            .filter((hit) => hit.sz)
+            .map((hit) => ({ id: hit.sz as string, caseNumber: hit.caseNumber })),
+          (id) => getNalusDecision(id).then((d) => d.text),
+          variants,
         );
         const shown = (page + 1) * 20;
         const output = {
@@ -80,6 +125,7 @@ export function registerNalus(server: McpServer): void {
           page,
           has_more: result.total !== null && shown < result.total,
           items: result.hits,
+          previews,
         };
         const lines = result.hits.map(
           (hit, i) =>
@@ -87,7 +133,12 @@ export function registerNalus(server: McpServer): void {
         );
         const text = result.empty
           ? "No Constitutional Court decisions matched. Broaden the criteria or check the citace format ('I. ÚS 123/20')."
-          : [`${result.total ?? "?"} decisions:`, ...lines, "Full text: nalus_get_decision {sz}."].join("\n");
+          : [
+              `${result.total ?? "?"} decisions:`,
+              ...lines,
+              "Full text: nalus_get_decision {sz}.",
+              ...renderPreviews(previews, "nalus_get_decision"),
+            ].join("\n");
         return { content: [{ type: "text", text }], structuredContent: output };
       } catch (error) {
         return fail(error);

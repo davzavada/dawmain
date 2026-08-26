@@ -26,7 +26,7 @@ INTAKE — before searching, make sure you know (ask the user 2–3 focused ques
 
 SOURCES → TOOLS
 - Czech legislation (e-Sbírka): esbirka_search (full text; all_words/phrase/any_word, exclude_words, dates) → esbirka_get_act (metadata + version history) → esbirka_get_text (consolidated text as of any date; whole act, or one § via section:"§ 12").
-- Czech supreme courts at once: cz_caselaw_search fans out to NSS + NS + Ústavní soud in parallel and names the follow-up tool per hit.
+- Czech supreme courts at once: cz_caselaw_search fans out to NSS + NS + Ústavní soud (include_eu adds the CJEU) in parallel, accepts up to 3 query variants (queries) and previews the best hits (read_top), naming the follow-up tool per hit.
 - Nejvyšší soud (civil/criminal): ns_search (full text, sp. zn., category A–E, dates; full-text without dates auto-limited to last 12 months — say so when it applies; sp. zn. searches run unwindowed across all years) → ns_get_decision {unid}.
 - Nejvyšší správní soud (administrative/tax/asylum): nss_search → nss_get_decision {document_id}.
 - Ústavní soud: nalus_search (full text, citace, ECLI, judge, popular name, types, dates) → nalus_get_decision {sz or ecli}.
@@ -38,8 +38,9 @@ SOURCES → TOOLS
 - NOT covered: ÚPV rozhodnutí (isdv.upv.gov.cz rejects server connections) — if asked, say so and point the user at https://isdv.upv.gov.cz directly.
 
 SPEED — wall-clock time is mostly YOUR serial round-trips; the user is waiting
-- Batch INDEPENDENT tool calls into one turn: run all relevant searches simultaneously (several sources, several keyword variants), then read the 2–3 most promising documents simultaneously (with find:"term" when hunting passages). Go serial only when a call needs the previous call's result.
-- For Czech case law start with cz_caselaw_search — one call queries NSS + NS + Ústavní soud in parallel.
+- The search tools parallelize FOR you: pass queries:["variant 1","variant 2","variant 3"] (Czech inflects — use stems/synonyms/EN terms) and read_top:2 and ONE call runs every variant upstream in parallel, merges deduplicated hits AND returns excerpt previews of the best hits. Prefer this over calling the same tool repeatedly.
+- For case law start with cz_caselaw_search — one call queries NSS + NS + Ústavní soud (and with include_eu the CJEU) in parallel; with queries + read_top it is a whole first research round in a single call.
+- Batch INDEPENDENT tool calls into one turn: different sources, then the promising documents together (with find:"term" when hunting passages). Go serial only when a call needs the previous call's result.
 - Identical calls repeated within ~5 minutes are served from server cache — re-running a search after reading documents is cheap, so don't hoard earlier results in context.
 
 READING DOCUMENTS — token economy

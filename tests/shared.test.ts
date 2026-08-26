@@ -181,3 +181,54 @@ describe("findExcerpts / pageOrExcerpt", () => {
     expect(empty.text).toContain("stem");
   });
 });
+
+describe("parallel-search helpers", () => {
+  const decision =
+    "Úvod rozhodnutí. ".repeat(20) +
+    "Soud odkazuje na doktrínu safe harbour. " +
+    "Další text. ".repeat(20) +
+    "Podruhé zmíněný SAFE HARBOUR v závěru. " +
+    "Konec. ".repeat(10);
+
+  it("uniqueQueries trims, dedupes case-insensitively and caps at 3", async () => {
+    const { uniqueQueries } = await import("@/src/sources/shared/text");
+    expect(uniqueQueries("náhrada škody", [" Náhrada škody ", "ušlý zisk", "škoda", "čtvrtá"])).toEqual([
+      "náhrada škody",
+      "ušlý zisk",
+      "škoda",
+    ]);
+    expect(uniqueQueries(undefined, undefined)).toEqual([]);
+    expect(uniqueQueries(undefined, ["jediná"])).toEqual(["jediná"]);
+  });
+
+  it("dedupeBy keeps the first occurrence in order", async () => {
+    const { dedupeBy } = await import("@/src/sources/shared/text");
+    const items = [
+      { id: "a", rank: 1 },
+      { id: "b", rank: 2 },
+      { id: "a", rank: 3 },
+    ];
+    expect(dedupeBy(items, (i) => i.id)).toEqual([
+      { id: "a", rank: 1 },
+      { id: "b", rank: 2 },
+    ]);
+  });
+
+  it("maxTotal reports the largest known variant total", async () => {
+    const { maxTotal } = await import("@/src/sources/shared/text");
+    expect(maxTotal([12, null, 179])).toBe(179);
+    expect(maxTotal([null, null])).toBeNull();
+  });
+
+  it("previewExcerpt falls through variants and defaults to the head", async () => {
+    const { previewExcerpt } = await import("@/src/sources/shared/text");
+    const hit = previewExcerpt(decision, ["neexistuje", "safe harbour"], 40, 500);
+    expect(hit.matches).toBe(2);
+    expect(hit.excerpt).toContain("safe harbour");
+    const miss = previewExcerpt(decision, ["neexistuje"], 40, 120);
+    expect(miss.matches).toBe(0);
+    expect(miss.excerpt.length).toBeLessThanOrEqual(121);
+    expect(miss.excerpt).toContain("Úvod rozhodnutí");
+    expect(miss.excerpt.endsWith("…")).toBe(true);
+  });
+});

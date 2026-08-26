@@ -2,7 +2,8 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { getNsDecision, nsBodyMissing, searchNs } from "@/src/sources/ns";
 import { SourceError, asSourceError, toToolError } from "@/src/sources/shared/errors";
-import { pageOrExcerpt } from "@/src/sources/shared/text";
+import { dedupeBy, maxTotal, pageOrExcerpt, uniqueQueries } from "@/src/sources/shared/text";
+import { buildPreviews, renderPreviews } from "./previews";
 
 const READ_ONLY = {
   readOnlyHint: true,
@@ -23,9 +24,14 @@ export function registerNs(server: McpServer): void {
     {
       title: "Nejvyšší soud: search decisions",
       description:
-        "FULL-TEXT search of Czech Supreme Court decisions (civil & criminal law: dovolání, sjednocující stanoviska) — plus spisová značka, kategorie rozhodnutí (A–E) and date range. Czech queries. Broad queries without dates often fail upstream (HTTP 500) and any query addresses at most its first 900 documents — narrow with dates. Results carry a UNID for ns_get_decision.",
+        "FULL-TEXT search of Czech Supreme Court decisions (civil & criminal law: dovolání, sjednocující stanoviska) — plus spisová značka, kategorie rozhodnutí (A–E) and date range. Czech queries; 'queries' searches up to 3 variants IN PARALLEL and merges deduplicated results. Broad queries without dates often fail upstream (HTTP 500) and any query addresses at most its first 900 documents — narrow with dates. Results carry a UNID for ns_get_decision. read_top: N also returns excerpt previews of the N best hits.",
       inputSchema: z.object({
         query: z.string().optional().describe("Czech full-text query over decision bodies."),
+        queries: z
+          .array(z.string().min(2))
+          .max(3)
+          .optional()
+          .describe("Up to 3 query variants searched in parallel and merged (inflections, synonyms)."),
         case_number: z.string().optional().describe("Spisová značka, e.g. '23 Cdo 1234/2025'."),
         category: z
           .string()
@@ -36,6 +42,13 @@ export function registerNs(server: McpServer): void {
         date_to: isoDate.optional().describe("Published-to-web to (ISO)."),
         limit: z.number().int().min(1).max(40).default(20),
         offset: z.number().int().min(0).max(880).default(0).describe("Offset within the 900-doc window."),
+        read_top: z
+          .number()
+          .int()
+          .min(0)
+          .max(3)
+          .default(0)
+          .describe("Fetch the N best hits' texts in parallel and return excerpts around the query."),
       }),
       outputSchema: z.object({
         total: z.number().nullable(),
@@ -50,15 +63,49 @@ export function registerNs(server: McpServer): void {
         items: z.array(
           z.object({ unid: z.string(), caseNumbers: z.array(z.string()), url: z.string() }),
         ),
+        previews: z
+          .array(
+            z.object({
+              id: z.string(),
+              caseNumber: z.string(),
+              matches: z.number(),
+              excerpt: z.string(),
+            }),
+          )
+          .optional(),
       }),
       annotations: READ_ONLY,
     },
-    async ({ query, case_number, category, date_from, date_to, limit, offset }) => {
+    async ({ query, queries, case_number, category, date_from, date_to, limit, offset, read_top }) => {
       try {
-        const page = await searchNs(
-          { query, caseNumber: case_number, category, dateFrom: date_from, dateTo: date_to },
-          offset,
-          limit,
+        const variants = uniqueQueries(query, queries);
+        // One Domino request per variant, in parallel; merged and deduplicated.
+        const results = await Promise.all(
+          (variants.length ? variants : [undefined]).map((variant) =>
+            searchNs(
+              { query: variant, caseNumber: case_number, category, dateFrom: date_from, dateTo: date_to },
+              offset,
+              limit,
+            ),
+          ),
+        );
+        const page = {
+          total: maxTotal(results.map((r) => r.total)),
+          matched: maxTotal(results.map((r) => r.matched)),
+          truncated: results.some((r) => r.truncated),
+          appliedWindowFrom: results[0].appliedWindowFrom,
+          empty: results.every((r) => r.empty),
+          hits: dedupeBy(
+            results.flatMap((r) => r.hits),
+            (hit) => hit.unid,
+          ).slice(0, limit),
+        };
+        const previews = await buildPreviews(
+          page.hits
+            .slice(0, read_top)
+            .map((hit) => ({ id: hit.unid, caseNumber: hit.caseNumbers.join("; ") })),
+          (id) => getNsDecision(id).then((d) => d.text),
+          variants,
         );
         const output = {
           total: page.total,
@@ -68,6 +115,7 @@ export function registerNs(server: McpServer): void {
           offset,
           applied_window_from: page.appliedWindowFrom,
           items: page.hits,
+          previews,
         };
         const lines = page.hits.map(
           (hit, i) => `${offset + i + 1}. ${hit.caseNumbers.join("; ")} — unid ${hit.unid}\n   ${hit.url}`,
@@ -80,6 +128,7 @@ export function registerNs(server: McpServer): void {
           : [
               `${page.total ?? "?"} decisions${page.truncated ? ` (window-capped; ${page.matched} match in total — narrow by date to see the rest)` : ""}:${windowNote}`,
               ...lines,
+              ...renderPreviews(previews, "ns_get_decision"),
             ].join("\n");
         return { content: [{ type: "text", text }], structuredContent: output };
       } catch (error) {

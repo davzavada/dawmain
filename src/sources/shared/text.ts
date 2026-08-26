@@ -127,6 +127,68 @@ export function findExcerpts(
   return { matches, text: parts.join("\n\n[…]\n\n"), truncated };
 }
 
+/** Distinct, trimmed query variants — at most `cap` (case-insensitive dedupe). */
+export function uniqueQueries(
+  query: string | undefined,
+  queries: string[] | undefined,
+  cap = 3,
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const candidate of [query, ...(queries ?? [])]) {
+    const trimmed = candidate?.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(trimmed);
+    if (out.length >= cap) break;
+  }
+  return out;
+}
+
+/** Highest per-variant total — with several variants the union is unknowable. */
+export function maxTotal(totals: Array<number | null>): number | null {
+  const known = totals.filter((total): total is number => total !== null);
+  return known.length ? Math.max(...known) : null;
+}
+
+/** First occurrence wins; order preserved. */
+export function dedupeBy<T>(items: T[], key: (item: T) => string): T[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const k = key(item);
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
+export interface SearchPreview {
+  matches: number;
+  excerpt: string;
+}
+
+/**
+ * Search-result preview: excerpts around the first query variant that matches
+ * (diacritics-insensitive), else the head of the text. Small on purpose —
+ * a preview earns a full *_get_decision read, it does not replace one.
+ */
+export function previewExcerpt(
+  text: string,
+  terms: string[],
+  contextChars = 600,
+  maxChars = 2_400,
+): SearchPreview {
+  for (const term of terms) {
+    if (!term?.trim()) continue;
+    const result = findExcerpts(text, term, contextChars, maxChars);
+    if (result.matches) return { matches: result.matches, excerpt: result.text };
+  }
+  const head = text.slice(0, maxChars).trim();
+  return { matches: 0, excerpt: text.length > maxChars ? `${head}…` : head };
+}
+
 export interface DocumentView extends CharPage {
   mode: "page" | "excerpt";
   /** Number of `find` matches (excerpt mode only). */

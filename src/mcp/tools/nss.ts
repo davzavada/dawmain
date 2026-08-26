@@ -2,7 +2,8 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { getNssDecision, searchNss } from "@/src/sources/nss";
 import { SourceError, asSourceError, toToolError } from "@/src/sources/shared/errors";
-import { pageOrExcerpt } from "@/src/sources/shared/text";
+import { dedupeBy, maxTotal, pageOrExcerpt, uniqueQueries } from "@/src/sources/shared/text";
+import { buildPreviews, renderPreviews } from "./previews";
 
 const READ_ONLY = {
   readOnlyHint: true,
@@ -23,13 +24,25 @@ export function registerNss(server: McpServer): void {
     {
       title: "Nejvyšší správní soud: search decisions",
       description:
-        "FULL-TEXT search of Czech Supreme Administrative Court decisions (kasační stížnosti — tax, immigration, public procurement, administrative law) — plus spisová značka/čj. and decision-date range. Czech queries. Page 1 returns up to 40 hits, later pages 20. Results carry a numeric document_id for nss_get_decision.",
+        "FULL-TEXT search of Czech Supreme Administrative Court decisions (kasační stížnosti — tax, immigration, public procurement, administrative law) — plus spisová značka/čj. and decision-date range. Czech queries. 'queries' searches up to 3 variants IN PARALLEL in one call (Czech inflects — pass stems/synonyms) and merges deduplicated results. Page 1 returns up to 40 hits, later pages 20. Results carry a numeric document_id for nss_get_decision. read_top: N also returns excerpt previews of the N best hits — search + first reading in one call.",
       inputSchema: z.object({
         query: z.string().optional().describe("Czech full-text query."),
+        queries: z
+          .array(z.string().min(2))
+          .max(3)
+          .optional()
+          .describe("Up to 3 query variants searched in parallel and merged (inflections, synonyms)."),
         case_number: z.string().optional().describe("Spisová značka / čj., e.g. '1 Afs 25/2024'."),
         date_from: isoDate.optional().describe("Decision date from (ISO)."),
         date_to: isoDate.optional().describe("Decision date to (ISO)."),
         page: z.number().int().min(1).default(1),
+        read_top: z
+          .number()
+          .int()
+          .min(0)
+          .max(3)
+          .default(0)
+          .describe("Fetch the N best hits' texts in parallel and return excerpts around the query."),
       }),
       outputSchema: z.object({
         total: z.number().nullable(),
@@ -46,14 +59,46 @@ export function registerNss(server: McpServer): void {
             url: z.string(),
           }),
         ),
+        previews: z
+          .array(
+            z.object({
+              id: z.string(),
+              caseNumber: z.string(),
+              matches: z.number(),
+              excerpt: z.string(),
+            }),
+          )
+          .optional(),
       }),
       annotations: READ_ONLY,
     },
-    async ({ query, case_number, date_from, date_to, page }) => {
+    async ({ query, queries, case_number, date_from, date_to, page, read_top }) => {
       try {
-        const result = await searchNss(
-          { query, caseNumber: case_number, dateFrom: date_from, dateTo: date_to },
-          page,
+        const variants = uniqueQueries(query, queries);
+        // One upstream request per variant, in parallel; hits merged in
+        // variant order and deduplicated. Totals/has_more follow the largest
+        // variant — the union across variants is unknowable.
+        const results = await Promise.all(
+          (variants.length ? variants : [undefined]).map((variant) =>
+            searchNss(
+              { query: variant, caseNumber: case_number, dateFrom: date_from, dateTo: date_to },
+              page,
+            ),
+          ),
+        );
+        const cap = page === 1 ? 40 : 20;
+        const result = {
+          total: maxTotal(results.map((r) => r.total)),
+          page: results[0].page,
+          hits: dedupeBy(
+            results.flatMap((r) => r.hits),
+            (hit) => hit.id,
+          ).slice(0, cap),
+        };
+        const previews = await buildPreviews(
+          result.hits.slice(0, read_top).map((hit) => ({ id: hit.id, caseNumber: hit.caseNumber ?? "?" })),
+          (id) => getNssDecision(id).then((d) => d.text),
+          variants,
         );
         const seen = page === 1 ? result.hits.length : 40 + (page - 1) * 20;
         const output = {
@@ -62,6 +107,7 @@ export function registerNss(server: McpServer): void {
           page: result.page,
           has_more: result.total !== null && seen < result.total,
           items: result.hits.map(({ citation: _citation, ...hit }) => hit),
+          previews,
         };
         const lines = result.hits.map(
           (hit, i) =>
@@ -71,9 +117,10 @@ export function registerNss(server: McpServer): void {
           result.total === 0 || (!result.hits.length && result.total === null)
             ? "No NSS decisions matched. Broaden the query or the date range."
             : [
-                `${result.total ?? "?"} decisions (page ${result.page}):`,
+                `${result.total ?? "?"} decisions${variants.length > 1 ? ` (best of ${variants.length} variants, merged)` : ""} (page ${result.page}):`,
                 ...lines,
                 "Full text: nss_get_decision {document_id}.",
+                ...renderPreviews(previews, "nss_get_decision"),
               ].join("\n");
         return { content: [{ type: "text", text }], structuredContent: output };
       } catch (error) {
