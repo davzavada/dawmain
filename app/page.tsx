@@ -41,8 +41,7 @@ export default async function Home() {
       <p style={{ marginTop: "1.75rem" }}>
         Přístup k judikatuře a právním předpisům s AI by podle mě neměl být možný jen přes komerční
         nástroje, ale v době, kdy jsou ta data dobře přístupná a provoz je v zásadě zdarma, mi
-        přišlo, že by měla existovat nekomerční alternativa. Budu rád, pokud nástroj vyzkoušíte a
-        dáte mi zpětnou vazbu :)
+        přišlo, že by měla existovat nekomerční alternativa. Budu rád, pokud nástroj vyzkoušíte :)
       </p>
 
       <h2 style={{ fontSize: "1.1rem", marginTop: "2rem" }}>Jak to funguje?</h2>
