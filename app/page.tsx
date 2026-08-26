@@ -51,46 +51,12 @@ export default async function Home() {
         napojený na judikaturu:
       </p>
       <ul style={{ marginTop: "0.25rem", paddingLeft: "1.4rem", lineHeight: 1.9 }}>
-        <li>
-          Nejvyššího soudu - dostupné{" "}
-          <a href="https://rozhodnuti.nsoud.cz" target="_blank" rel="noreferrer">
-            zde
-          </a>
-        </li>
-        <li>
-          Nejvyššího správního soudu - dostupné{" "}
-          <a href="https://vyhledavac.nssoud.cz" target="_blank" rel="noreferrer">
-            zde
-          </a>
-        </li>
-        <li>
-          Ústavního soudu (NALUS) - dostupné{" "}
-          <a href="https://nalus.usoud.cz" target="_blank" rel="noreferrer">
-            zde
-          </a>
-        </li>
-        <li>
-          obecných soudů - dostupné{" "}
-          <a href="https://rozhodnuti.justice.cz" target="_blank" rel="noreferrer">
-            zde
-          </a>
-        </li>
-        <li>
-          Soudního dvora EU (InfoCuria) - dostupné{" "}
-          <a href="https://infocuria.curia.europa.eu" target="_blank" rel="noreferrer">
-            zde
-          </a>
-        </li>
-        <li>
-          EUIPO - rozhodovací praxe dostupná{" "}
-          <a href="https://euipo.europa.eu/eSearchCLW/" target="_blank" rel="noreferrer">
-            zde
-          </a>
-          , metodika{" "}
-          <a href="https://guidelines.euipo.europa.eu" target="_blank" rel="noreferrer">
-            zde
-          </a>
-        </li>
+        <li>Nejvyššího soudu</li>
+        <li>Nejvyššího správního soudu</li>
+        <li>Ústavního soudu (NALUS)</li>
+        <li>obecných soudů</li>
+        <li>Soudního dvora EU (InfoCuria)</li>
+        <li>EUIPO (rozhodovací praxe a metodika)</li>
       </ul>
 
       <h2 style={{ fontSize: "1.1rem", marginTop: "2rem" }}>Jak se připojit?</h2>
