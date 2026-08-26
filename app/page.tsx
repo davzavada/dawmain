@@ -35,41 +35,88 @@ export default async function Home() {
         />
         <div>
           <h1 style={{ fontSize: "1.75rem", margin: 0, letterSpacing: "-0.01em" }}>{SERVER_NAME}</h1>
-          <p style={{ color: "#6b7280", margin: 0, fontSize: "0.95rem" }}>
-            Model Context Protocol - David Závada
-          </p>
+          <p style={{ color: "#6b7280", margin: 0, fontSize: "0.95rem" }}>David Závada</p>
         </div>
       </header>
 
       <p style={{ marginTop: "1.75rem" }}>
-        Vítejte u mého passion projektu - přístup k judikatuře a právním předpisům s AI by podle mě
-        neměl být možný jen přes komerční nástroje, ale v době, kdy jsou ta data dobře přístupná a
-        provoz je v zásadě zdarma, mi přišlo, že by měla existovat nekomerční alternativa. Budu rád,
-        pokud nástroj vyzkoušíte a dáte mi zpětnou vazbu :)
+        Přístup k judikatuře a právním předpisům s AI by podle mě neměl být možný jen přes komerční
+        nástroje, ale v době, kdy jsou ta data dobře přístupná a provoz je v zásadě zdarma, mi
+        přišlo, že by měla existovat nekomerční alternativa. Budu rád, pokud nástroj vyzkoušíte a
+        dáte mi zpětnou vazbu :)
       </p>
 
+      <h2 style={{ fontSize: "1.1rem", marginTop: "2rem" }}>Jak to funguje?</h2>
       <p>
-        MCP server pro české a unijní právní rešerše. Nemá vlastní databázi - funguje jako
-        nachytřený Google: vyhledává živě přímo v oficiálních databázích. Právní předpisy bere přes
-        API e-Sbírky, unijní legislativu z Cellaru (strojové rozhraní Úřadu pro publikace EU, které
-        stojí za EUR-Lexem). Konkrétně je napojený na judikaturu:
+        Server nemá vlastní databázi - funguje jako nachytřený Google: vyhledává živě přímo v
+        oficiálních databázích. Právní předpisy bere přes API e-Sbírky, unijní legislativu z
+        Cellaru (strojové rozhraní Úřadu pro publikace EU, které stojí za EUR-Lexem). Konkrétně je
+        napojený na judikaturu:
       </p>
       <ul style={{ marginTop: "0.25rem", paddingLeft: "1.4rem", lineHeight: 1.9 }}>
-        <li>Nejvyššího soudu</li>
-        <li>Nejvyššího správního soudu</li>
-        <li>Ústavního soudu (NALUS)</li>
-        <li>obecných soudů (rozhodnuti.justice.cz)</li>
-        <li>Soudního dvora EU (InfoCuria)</li>
-        <li>EUIPO (rozhodovací praxe a metodika)</li>
+        <li>
+          Nejvyššího soudu - dostupné{" "}
+          <a href="https://rozhodnuti.nsoud.cz" target="_blank" rel="noreferrer">
+            zde
+          </a>
+        </li>
+        <li>
+          Nejvyššího správního soudu - dostupné{" "}
+          <a href="https://vyhledavac.nssoud.cz" target="_blank" rel="noreferrer">
+            zde
+          </a>
+        </li>
+        <li>
+          Ústavního soudu (NALUS) - dostupné{" "}
+          <a href="https://nalus.usoud.cz" target="_blank" rel="noreferrer">
+            zde
+          </a>
+        </li>
+        <li>
+          obecných soudů - dostupné{" "}
+          <a href="https://rozhodnuti.justice.cz" target="_blank" rel="noreferrer">
+            zde
+          </a>
+        </li>
+        <li>
+          Soudního dvora EU (InfoCuria) - dostupné{" "}
+          <a href="https://infocuria.curia.europa.eu" target="_blank" rel="noreferrer">
+            zde
+          </a>
+        </li>
+        <li>
+          EUIPO - rozhodovací praxe dostupná{" "}
+          <a href="https://euipo.europa.eu/eSearchCLW/" target="_blank" rel="noreferrer">
+            zde
+          </a>
+          , metodika{" "}
+          <a href="https://guidelines.euipo.europa.eu" target="_blank" rel="noreferrer">
+            zde
+          </a>
+        </li>
       </ul>
+      <p style={{ fontSize: "0.9rem", color: "#6b7280" }}>
+        Právní předpisy:{" "}
+        <a href="https://www.e-sbirka.cz" target="_blank" rel="noreferrer">
+          e-Sbírka
+        </a>
+        , unijní legislativa a judikatura:{" "}
+        <a href="https://eur-lex.europa.eu" target="_blank" rel="noreferrer">
+          EUR-Lex
+        </a>
+        .
+      </p>
 
       <h2 style={{ fontSize: "1.1rem", marginTop: "2rem" }}>Endpoint</h2>
       <code style={code}>{endpoint}</code>
       <p>
         V aplikaci claude.ai: <strong>Nastavení → Konektory → Přidat vlastní konektor</strong> a
-        vložit adresu výše. V Claude Code:
+        vložit adresu výše.
       </p>
-      <code style={code}>{`claude mcp add --transport http dawmain ${endpoint}`}</code>
+      <p>
+        Při autentizaci je potřeba vložit vlastní přístupový kód - pokud byste chtěli nástroj
+        vyzkoušet, napište mi na <a href="mailto:davzavada@gmail.com">davzavada@gmail.com</a>.
+      </p>
     </>
   );
 }
