@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
-import { SERVER_NAME, SERVER_VERSION } from "../config";
+import { SERVER_NAME, SERVER_VERSION, getBearerToken } from "../config";
 
 const outputSchema = z.object({
   ok: z.literal(true),
@@ -12,6 +12,9 @@ const outputSchema = z.object({
     .describe("Vercel environment: production, preview, development, or local."),
   region: z.string().nullable().describe("Vercel region the function ran in."),
   commit: z.string().nullable().describe("Short git SHA of the deployment."),
+  auth: z
+    .enum(["token", "open"])
+    .describe("Whether this deployment requires a bearer token ('open' = anyone can call it)."),
 });
 
 /**
@@ -44,6 +47,9 @@ export function registerPing(server: McpServer): void {
         environment: process.env.VERCEL_ENV ?? "local",
         region: process.env.VERCEL_REGION ?? null,
         commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? null,
+        // Surfaces a misconfigured token: without this, an accidentally
+        // anonymous deployment looks identical to a protected one.
+        auth: getBearerToken() ? ("token" as const) : ("open" as const),
       };
 
       return {

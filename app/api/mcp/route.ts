@@ -27,22 +27,33 @@ function unauthorized(): Response {
  */
 const TOKEN_HEADERS = ["authorization", "x-api-key", "cf-aig-authorization"];
 
-function extractToken(request: Request): string | null {
+/** Every candidate token the request carries, "Bearer " prefix stripped. */
+function extractTokens(request: Request): string[] {
+  const candidates: string[] = [];
   for (const name of TOKEN_HEADERS) {
     const raw = request.headers.get(name)?.trim();
     if (!raw) continue;
     // Accept the value with or without a "Bearer " prefix in every header.
-    return raw.toLowerCase().startsWith("bearer ") ? raw.slice(7).trim() : raw;
+    candidates.push(raw.toLowerCase().startsWith("bearer ") ? raw.slice(7).trim() : raw);
   }
-  return null;
+  return candidates;
 }
 
 async function handle(request: Request): Promise<Response> {
   const expected = getBearerToken();
 
-  if (expected) {
-    const provided = extractToken(request);
-    if (!provided || !tokenMatches(expected, provided)) {
+  if (!expected) {
+    // Fail CLOSED on any deployment. A blank, misspelled or environment-scoped
+    // MCP_BEARER_TOKEN would otherwise silently publish the whole tool surface
+    // — on production and on every preview URL alike — with nothing to notice
+    // it by. Anonymous access stays possible only when running locally.
+    if (process.env.VERCEL) return unauthorized();
+  } else {
+    // Check EVERY header present, not just the first: a client that also sends
+    // an unrelated Authorization header must not be locked out when the real
+    // token rides in x-api-key (the reason those fallbacks exist).
+    const candidates = extractTokens(request);
+    if (!candidates.some((candidate) => tokenMatches(expected, candidate))) {
       return unauthorized();
     }
   }

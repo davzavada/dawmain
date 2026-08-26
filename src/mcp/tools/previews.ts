@@ -16,11 +16,17 @@ export interface ToolPreview {
 
 export const PREVIEW_DEADLINE_MS = 15_000;
 
+/**
+ * Reject when `ms` elapses. The underlying request keeps running until its own
+ * AbortSignal fires (the source clients own those); the timer is cleared on
+ * settle so a fast call leaves nothing pending.
+ */
 export function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`timed out after ${ms} ms`)), ms)),
-  ]);
+  let timer: ReturnType<typeof setTimeout>;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timed out after ${ms} ms`)), ms);
+  });
+  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
 }
 
 export async function buildPreviews<T extends { id: string; caseNumber: string }>(

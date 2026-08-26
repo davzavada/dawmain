@@ -1,3 +1,5 @@
+import { timingSafeEqual } from "node:crypto";
+
 /** Identity reported to MCP clients during `initialize`. */
 export const SERVER_NAME = "dawmain-mcp-server";
 export const SERVER_VERSION = "0.1.0";
@@ -16,14 +18,16 @@ export function getBearerToken(): string | undefined {
   return token ? token : undefined;
 }
 
-/** Timing-safe-ish comparison that does not leak length via early exit. */
+/**
+ * Constant-time comparison of the token bytes. Length is compared first — as
+ * `crypto.timingSafeEqual` itself requires equal-length buffers — so the check
+ * reveals whether the length matched, never which bytes did.
+ */
 export function tokenMatches(expected: string, provided: string): boolean {
-  if (expected.length !== provided.length) return false;
-  let diff = 0;
-  for (let i = 0; i < expected.length; i++) {
-    diff |= expected.charCodeAt(i) ^ provided.charCodeAt(i);
-  }
-  return diff === 0;
+  const a = Buffer.from(expected, "utf8");
+  const b = Buffer.from(provided, "utf8");
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
 }
 
 /** e-Sbírka registered-API key (header `esel-api-access-key`). Optional — the
