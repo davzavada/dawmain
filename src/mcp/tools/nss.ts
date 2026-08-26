@@ -87,7 +87,7 @@ export function registerNss(server: McpServer): void {
     {
       title: "Nejvyšší správní soud: decision text",
       description:
-        "Full text and metadata (ECLI, soudce zpravodaj, výrok, oblast úpravy) of one Supreme Administrative Court decision, by the numeric id from nss_search. Long texts come in ~60k-character pages — when has_more is true, keep calling with the next page until you have the whole document; never ask the user whether to continue.",
+        "Full text and metadata (ECLI, soudce zpravodaj, výrok, oblast úpravy) of one Supreme Administrative Court decision, by the numeric id from nss_search. Long texts come in ~45k-character pages — when has_more is true, keep calling with the next page until you have the whole document; never ask the user whether to continue.",
       inputSchema: z.object({
         document_id: z.string().regex(/^\d+$/, "Numeric id from nss_search"),
         page: z.number().int().min(1).default(1),

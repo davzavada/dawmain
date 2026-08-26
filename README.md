@@ -114,7 +114,7 @@ claude mcp add --transport http dawmain https://<deployment>.vercel.app/api/mcp 
 - Client-side filtry EUIPO dělají pauzu 300 ms mezi stránkami; procházení
   justice.cz je stropované 20 stránkami na volání, scan § v e-Sbírce 15
   stránkami; vše končí hned po naplnění limitu.
-- Texty dokumentů se vracejí po stránkách 60 000 znaků — typické rozhodnutí
+- Texty dokumentů se vracejí po stránkách 45 000 znaků (bezpečně pod limity klientů) — typické rozhodnutí
   v jedné odpovědi; delší texty nesou pokyn agentovi pokračovat bez ptaní.
 - Timeouty: 15 s/request (NSS POST 25 s, SPARQL 30 s), celá invokace ≤ 60 s.
 

@@ -93,7 +93,7 @@ export function registerNs(server: McpServer): void {
     {
       title: "Nejvyšší soud: decision text",
       description:
-        "Full text and metadata (spisová značka, ECLI, právní věta, heslo, dotčené předpisy) of one Supreme Court decision, by the 32-hex UNID from ns_search. Long texts come in ~60k-character pages — when has_more is true, keep calling with the next page until you have the whole document; never ask the user whether to continue.",
+        "Full text and metadata (spisová značka, ECLI, právní věta, heslo, dotčené předpisy) of one Supreme Court decision, by the 32-hex UNID from ns_search. Long texts come in ~45k-character pages — when has_more is true, keep calling with the next page until you have the whole document; never ask the user whether to continue.",
       inputSchema: z.object({
         unid: z.string().regex(/^[0-9A-Fa-f]{32}$/, "32-hex UNID from ns_search"),
         page: z.number().int().min(1).default(1),

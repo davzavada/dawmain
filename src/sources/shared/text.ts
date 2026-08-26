@@ -1,10 +1,12 @@
 /** Size discipline: every tool result must stay digestible for an LLM. */
 
 /** Max characters of one document page returned by a *_get_* tool.
- * Sized so a typical Czech decision fits in ONE response (like DirectCase/
- * Salvia serve documents) while staying under MCP clients' output caps
- * (~25k tokens) — only very long texts still page. */
-export const DOC_PAGE_CHARS = 60_000;
+ * Czech legal text tokenizes at ~2.5 chars/token, so a page must stay well
+ * under MCP clients' ~25k-token output caps or the WHOLE response gets
+ * rejected and the model reads nothing (measured live: 60k chars tripped the
+ * cap). 45k chars ≈ 18k tokens: every page arrives reliably, a typical
+ * decision fits in 1–2 pages, and the auto-continue hint chains the rest. */
+export const DOC_PAGE_CHARS = 45_000;
 /** Max characters of a single search-result snippet. */
 export const SNIPPET_CHARS = 400;
 

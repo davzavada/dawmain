@@ -100,7 +100,7 @@ export function registerNalus(server: McpServer): void {
     {
       title: "Ústavní soud: decision text",
       description:
-        "Full text, abstract and právní věta of one Constitutional Court decision. Identify it by the NALUS 'sz' (e.g. '1-1169-26_1' from nalus_search) or by ECLI. Long texts come in ~60k-character pages — when has_more is true, keep calling with the next page until you have the whole document; never ask the user whether to continue.",
+        "Full text, abstract and právní věta of one Constitutional Court decision. Identify it by the NALUS 'sz' (e.g. '1-1169-26_1' from nalus_search) or by ECLI. Long texts come in ~45k-character pages — when has_more is true, keep calling with the next page until you have the whole document; never ask the user whether to continue.",
       inputSchema: z.object({
         sz: z.string().optional().describe("NALUS id: '{senát}-{číslo}-{rok}[_{pořadí}]', e.g. 'Pl-24-10_1'."),
         ecli: z.string().optional().describe("Alternative: the decision's ECLI."),

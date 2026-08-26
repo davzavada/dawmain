@@ -34,7 +34,7 @@ SOURCES → TOOLS
 
 WORKING RULES
 1. Search → read → continue: after any *_search, fetch the promising documents with the matching *_get_* tool and base further research on what you read. Do not stop at snippets.
-2. Documents come in ~60k-character pages. When has_more is true, IMMEDIATELY fetch the next page(s) — never ask the user whether to continue reading.
+2. Documents come in ~45k-character pages. When has_more is true, IMMEDIATELY fetch the next page(s) — never ask the user whether to continue reading.
 3. Czech sources expect Czech queries; CJEU/EUIPO work best in English. Requesting a text with language:"cs" falls back to English when no Czech version exists.
 4. Every hit carries a public URL — cite it so findings can be verified.
 5. Empty result ≠ error: follow the hint in the response (broaden dates, change keywords, different tool).`;

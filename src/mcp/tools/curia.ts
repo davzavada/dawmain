@@ -118,7 +118,7 @@ export function registerCuria(server: McpServer): void {
     {
       title: "CJEU: document text",
       description:
-        "Full text of a CJEU judgment, order or AG opinion. Identify it by CELEX (62018CJ0311), ECLI (ECLI:EU:C:2020:559), or by case_number + doc_type (the CELEX is derived). For very recent documents not yet in Cellar, pass the logic_doc_id from curia_search. Long texts come in ~60k-character pages — when has_more is true, keep calling with the next page until you have the whole document; never ask the user whether to continue.",
+        "Full text of a CJEU judgment, order or AG opinion. Identify it by CELEX (62018CJ0311), ECLI (ECLI:EU:C:2020:559), or by case_number + doc_type (the CELEX is derived). For very recent documents not yet in Cellar, pass the logic_doc_id from curia_search. Long texts come in ~45k-character pages — when has_more is true, keep calling with the next page until you have the whole document; never ask the user whether to continue.",
       inputSchema: z.object({
         celex: z.string().optional().describe("CELEX number, e.g. '62018CJ0311'."),
         ecli: z.string().optional().describe("E.g. 'ECLI:EU:C:2020:559'."),

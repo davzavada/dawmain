@@ -91,7 +91,7 @@ export function registerJustice(server: McpServer): void {
     {
       title: "Obecné soudy: decision text",
       description:
-        "Full anonymized text of one general-court decision by its UUID from justice_list_decisions. Long texts come in ~60k-character pages — when has_more is true, keep calling with the next page until you have the whole document; never ask the user whether to continue.",
+        "Full anonymized text of one general-court decision by its UUID from justice_list_decisions. Long texts come in ~45k-character pages — when has_more is true, keep calling with the next page until you have the whole document; never ask the user whether to continue.",
       inputSchema: z.object({
         uuid: z.string().uuid().describe("Decision UUID from justice_list_decisions."),
         page: z.number().int().min(1).default(1),

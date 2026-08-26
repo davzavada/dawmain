@@ -4,8 +4,8 @@ import { htmlToText, decodeBody, decodeJsStringLiteral } from "@/src/sources/sha
 import { CookieSession } from "@/src/sources/shared/http";
 
 describe("charPage", () => {
-  it("defaults to 60k-character pages (typical decision = one response)", () => {
-    expect(DOC_PAGE_CHARS).toBe(60_000);
+  it("defaults to 45k-character pages (reliably under client output caps)", () => {
+    expect(DOC_PAGE_CHARS).toBe(45_000);
   });
 
   it("splits into fixed pages", () => {
