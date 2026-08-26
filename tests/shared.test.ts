@@ -117,3 +117,38 @@ describe("TtlCache", () => {
     expect(await cache.through("k", load)).toBe(2); // expired → reload
   });
 });
+
+describe("findExcerpts / pageOrExcerpt", () => {
+  const decision =
+    "Úvod rozhodnutí. ".repeat(50) +
+    "Soud odkazuje na rozsudek C-610/15 Stichting Brein a doktrínu safe harbour. " +
+    "Další text. ".repeat(50) +
+    "Podruhé zmíněný SAFE HARBOUR v závěru. " +
+    "Konec. ".repeat(20);
+
+  it("finds matches diacritics- and case-insensitively and merges windows", async () => {
+    const { findExcerpts } = await import("@/src/sources/shared/text");
+    const result = findExcerpts(decision, "safe harbour", 80);
+    expect(result.matches).toBe(2);
+    expect(result.text).toContain("C-610/15");
+    expect(result.text).toContain("SAFE HARBOUR");
+    expect(result.text).toContain("[…]");
+  });
+
+  it("folds Czech diacritics in the needle", async () => {
+    const { findExcerpts } = await import("@/src/sources/shared/text");
+    expect(findExcerpts("Nejvyšší soud o vydržení rozhodl.", "VYDRZENI", 20).matches).toBe(1);
+  });
+
+  it("pageOrExcerpt switches modes", async () => {
+    const { pageOrExcerpt } = await import("@/src/sources/shared/text");
+    const paged = pageOrExcerpt(decision, 1);
+    expect(paged.mode).toBe("page");
+    expect(paged.matches).toBeUndefined();
+    const excerpted = pageOrExcerpt(decision, 1, "Stichting Brein");
+    expect(excerpted.mode).toBe("excerpt");
+    expect(excerpted.matches).toBe(1);
+    expect(excerpted.text).toContain("Stichting Brein");
+    expect(excerpted.has_more).toBe(false);
+  });
+});

@@ -62,3 +62,90 @@ export function czechToIso(czech: string): string | null {
   if (day < 1 || day > 31 || month < 1 || month > 12) return null;
   return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
 }
+
+/**
+ * Targeted excerpts: windows of text around every match of `term`,
+ * diacritics- and case-insensitive (per-char NFD fold keeps offsets 1:1).
+ * Lets the model jump to the relevant passages of a long decision instead
+ * of paging through all of it — the token-economical read.
+ */
+const EXCERPT_CONTEXT_CHARS = 1_500;
+
+function foldChar(char: string): string {
+  return char.normalize("NFD")[0]?.toLowerCase() ?? char;
+}
+
+function foldText(text: string): string {
+  let out = "";
+  for (const char of text) out += foldChar(char);
+  return out;
+}
+
+export interface ExcerptResult {
+  matches: number;
+  /** Windows joined with a […] separator; capped at one page. */
+  text: string;
+  truncated: boolean;
+}
+
+export function findExcerpts(
+  text: string,
+  term: string,
+  contextChars = EXCERPT_CONTEXT_CHARS,
+  maxTotalChars = DOC_PAGE_CHARS,
+): ExcerptResult {
+  const needle = foldText(term.trim());
+  if (!needle) return { matches: 0, text: "", truncated: false };
+  const haystack = foldText(text);
+
+  const windows: Array<[number, number]> = [];
+  let index = haystack.indexOf(needle);
+  let matches = 0;
+  while (index !== -1 && matches < 200) {
+    matches++;
+    const start = Math.max(0, index - contextChars);
+    const end = Math.min(text.length, index + needle.length + contextChars);
+    const last = windows[windows.length - 1];
+    if (last && start <= last[1]) last[1] = end;
+    else windows.push([start, end]);
+    index = haystack.indexOf(needle, index + needle.length);
+  }
+  if (!matches) return { matches: 0, text: "", truncated: false };
+
+  const parts: string[] = [];
+  let used = 0;
+  let truncated = false;
+  for (const [start, end] of windows) {
+    const piece = `${start > 0 ? "…" : ""}${text.slice(start, end)}${end < text.length ? "…" : ""}`;
+    if (used + piece.length > maxTotalChars) {
+      truncated = true;
+      break;
+    }
+    parts.push(piece);
+    used += piece.length;
+  }
+  return { matches, text: parts.join("\n\n[…]\n\n"), truncated };
+}
+
+export interface DocumentView extends CharPage {
+  mode: "page" | "excerpt";
+  /** Number of `find` matches (excerpt mode only). */
+  matches?: number;
+}
+
+/** One entry point for *_get_* tools: full-text page, or `find` excerpts. */
+export function pageOrExcerpt(text: string, page: number, find?: string): DocumentView {
+  if (find?.trim()) {
+    const result = findExcerpts(text, find);
+    return {
+      mode: "excerpt",
+      matches: result.matches,
+      text: result.text,
+      page: 1,
+      total_pages: 1,
+      total_chars: text.length,
+      has_more: result.truncated,
+    };
+  }
+  return { mode: "page", ...charPage(text, page) };
+}

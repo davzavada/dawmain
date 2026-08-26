@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { getJusticeDecision, listJusticeDecisions } from "@/src/sources/justice";
 import { SourceError, asSourceError, toToolError } from "@/src/sources/shared/errors";
-import { charPage, snippet } from "@/src/sources/shared/text";
+import { pageOrExcerpt, snippet } from "@/src/sources/shared/text";
 
 const READ_ONLY = {
   readOnlyHint: true,
@@ -91,9 +91,15 @@ export function registerJustice(server: McpServer): void {
     {
       title: "Obecné soudy: decision text",
       description:
-        "Full anonymized text of one general-court decision by its UUID from justice_list_decisions. Long texts come in ~45k-character pages — when has_more is true, keep calling with the next page until you have the whole document; never ask the user whether to continue.",
+        "Full anonymized text of one general-court decision by its UUID from justice_list_decisions. Long texts come in ~45k-character pages. Token economy: to locate specific passages use 'find' (returns excerpts around matches); fetch further pages only when you genuinely need the whole text. Continue on your own — never ask the user whether to keep reading.",
       inputSchema: z.object({
         uuid: z.string().uuid().describe("Decision UUID from justice_list_decisions."),
+        find: z
+          .string()
+          .optional()
+          .describe(
+            "Return only excerpts around matches of this term (diacritics-insensitive) instead of pages — the cheap way to locate specific passages in a long text.",
+          ),
         page: z.number().int().min(1).default(1),
       }),
       outputSchema: z.object({
@@ -103,14 +109,15 @@ export function registerJustice(server: McpServer): void {
         page: z.number(),
         total_pages: z.number(),
         has_more: z.boolean(),
+        matches: z.number().optional().describe("Match count when 'find' was used."),
         text: z.string(),
       }),
       annotations: READ_ONLY,
     },
-    async ({ uuid, page }) => {
+    async ({ uuid, find, page }) => {
       try {
         const decision = await getJusticeDecision(uuid);
-        const paged = charPage(decision.text, page);
+        const paged = pageOrExcerpt(decision.text, page, find);
         const output = {
           uuid: decision.uuid,
           url: decision.url,
@@ -118,13 +125,14 @@ export function registerJustice(server: McpServer): void {
           page: paged.page,
           total_pages: paged.total_pages,
           has_more: paged.has_more,
+          matches: paged.matches,
           text: paged.text,
         };
         return {
           content: [
             {
               type: "text",
-              text: `${decision.url}\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — IMMEDIATELY call this tool again with page: ${paged.page + 1} to get the rest; do not ask the user)` : ""}`,
+              text: `${decision.url}\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — fetch ONLY what you need, without asking the user: full close reading → call again with page: ${paged.page + 1}; specific passages → call again with find: "term" for targeted excerpts instead of more pages)` : ""}`,
             },
           ],
           structuredContent: output,

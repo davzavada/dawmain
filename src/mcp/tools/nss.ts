@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { getNssDecision, searchNss } from "@/src/sources/nss";
 import { SourceError, asSourceError, toToolError } from "@/src/sources/shared/errors";
-import { charPage } from "@/src/sources/shared/text";
+import { pageOrExcerpt } from "@/src/sources/shared/text";
 
 const READ_ONLY = {
   readOnlyHint: true,
@@ -87,9 +87,15 @@ export function registerNss(server: McpServer): void {
     {
       title: "Nejvyšší správní soud: decision text",
       description:
-        "Full text and metadata (ECLI, soudce zpravodaj, výrok, oblast úpravy) of one Supreme Administrative Court decision, by the numeric id from nss_search. Long texts come in ~45k-character pages — when has_more is true, keep calling with the next page until you have the whole document; never ask the user whether to continue.",
+        "Full text and metadata (ECLI, soudce zpravodaj, výrok, oblast úpravy) of one Supreme Administrative Court decision, by the numeric id from nss_search. Long texts come in ~45k-character pages. Token economy: to locate specific passages use 'find' (returns excerpts around matches); fetch further pages only when you genuinely need the whole text. Continue on your own — never ask the user whether to keep reading.",
       inputSchema: z.object({
         document_id: z.string().regex(/^\d+$/, "Numeric id from nss_search"),
+        find: z
+          .string()
+          .optional()
+          .describe(
+            "Return only excerpts around matches of this term (diacritics-insensitive) instead of pages — the cheap way to locate specific passages in a long text.",
+          ),
         page: z.number().int().min(1).default(1),
       }),
       outputSchema: z.object({
@@ -99,14 +105,15 @@ export function registerNss(server: McpServer): void {
         page: z.number(),
         total_pages: z.number(),
         has_more: z.boolean(),
+        matches: z.number().optional().describe("Match count when 'find' was used."),
         text: z.string(),
       }),
       annotations: READ_ONLY,
     },
-    async ({ document_id, page }) => {
+    async ({ document_id, find, page }) => {
       try {
         const decision = await getNssDecision(document_id);
-        const paged = charPage(decision.text, page);
+        const paged = pageOrExcerpt(decision.text, page, find);
         const output = {
           id: decision.id,
           url: decision.url,
@@ -114,6 +121,7 @@ export function registerNss(server: McpServer): void {
           page: paged.page,
           total_pages: paged.total_pages,
           has_more: paged.has_more,
+          matches: paged.matches,
           text: paged.text,
         };
         const meta = Object.entries(decision.metadata)
@@ -123,7 +131,7 @@ export function registerNss(server: McpServer): void {
           content: [
             {
               type: "text",
-              text: `${meta}\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — IMMEDIATELY call this tool again with page: ${paged.page + 1} to get the rest; do not ask the user)` : ""}`,
+              text: `${meta}\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — fetch ONLY what you need, without asking the user: full close reading → call again with page: ${paged.page + 1}; specific passages → call again with find: "term" for targeted excerpts instead of more pages)` : ""}`,
             },
           ],
           structuredContent: output,

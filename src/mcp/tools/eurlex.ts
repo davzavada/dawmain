@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { getEurlexDocument, searchEurlex } from "@/src/sources/eurlex";
 import { SourceError, asSourceError, toToolError } from "@/src/sources/shared/errors";
-import { charPage, snippet } from "@/src/sources/shared/text";
+import { pageOrExcerpt, snippet } from "@/src/sources/shared/text";
 
 const READ_ONLY = {
   readOnlyHint: true,
@@ -88,11 +88,17 @@ export function registerEurlex(server: McpServer): void {
     {
       title: "EUR-Lex: document text",
       description:
-        "Full text of an EU legal act or judgment from the official Cellar dissemination API, by CELEX (e.g. '32016R0679' for GDPR) or ECLI. Prefers the requested language and falls back to English. Long texts come in ~45k-character pages — when has_more is true, keep calling with the next page until you have the whole document; never ask the user whether to continue.",
+        "Full text of an EU legal act or judgment from the official Cellar dissemination API, by CELEX (e.g. '32016R0679' for GDPR) or ECLI. Prefers the requested language and falls back to English. Long texts come in ~45k-character pages. Token economy: to locate specific passages use 'find' (returns excerpts around matches); fetch further pages only when you genuinely need the whole text. Continue on your own — never ask the user whether to keep reading.",
       inputSchema: z.object({
         celex: z.string().optional().describe("CELEX, e.g. '32016R0679' or '62018CJ0311'."),
         ecli: z.string().optional().describe("ECLI, e.g. 'ECLI:EU:C:2020:559'."),
         language: z.string().default("en").describe("Preferred language (cs, en, …)."),
+        find: z
+          .string()
+          .optional()
+          .describe(
+            "Return only excerpts around matches of this term (diacritics-insensitive) instead of pages — the cheap way to locate specific passages in a long text.",
+          ),
         page: z.number().int().min(1).default(1),
       }),
       outputSchema: z.object({
@@ -100,11 +106,12 @@ export function registerEurlex(server: McpServer): void {
         page: z.number(),
         total_pages: z.number(),
         has_more: z.boolean(),
+        matches: z.number().optional().describe("Match count when 'find' was used."),
         text: z.string(),
       }),
       annotations: READ_ONLY,
     },
-    async ({ celex, ecli, language, page }) => {
+    async ({ celex, ecli, language, find, page }) => {
       try {
         if (!celex && !ecli) {
           throw new SourceError(
@@ -115,19 +122,20 @@ export function registerEurlex(server: McpServer): void {
           );
         }
         const document = await getEurlexDocument({ celex, ecli, language });
-        const paged = charPage(document.text, page);
+        const paged = pageOrExcerpt(document.text, page, find);
         const output = {
           url: document.url,
           page: paged.page,
           total_pages: paged.total_pages,
           has_more: paged.has_more,
+          matches: paged.matches,
           text: paged.text,
         };
         return {
           content: [
             {
               type: "text",
-              text: `${document.url}\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — IMMEDIATELY call this tool again with page: ${paged.page + 1} to get the rest; do not ask the user)` : ""}`,
+              text: `${document.url}\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — fetch ONLY what you need, without asking the user: full close reading → call again with page: ${paged.page + 1}; specific passages → call again with find: "term" for targeted excerpts instead of more pages)` : ""}`,
             },
           ],
           structuredContent: output,

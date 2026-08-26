@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { caseNumberToCelex, getCuriaDocument, searchCuria } from "@/src/sources/curia";
 import { SourceError, asSourceError, toToolError } from "@/src/sources/shared/errors";
-import { charPage } from "@/src/sources/shared/text";
+import { pageOrExcerpt } from "@/src/sources/shared/text";
 
 const READ_ONLY = {
   readOnlyHint: true,
@@ -118,7 +118,7 @@ export function registerCuria(server: McpServer): void {
     {
       title: "CJEU: document text",
       description:
-        "Full text of a CJEU judgment, order or AG opinion. Identify it by CELEX (62018CJ0311), ECLI (ECLI:EU:C:2020:559), or by case_number + doc_type (the CELEX is derived). For very recent documents not yet in Cellar, pass the logic_doc_id from curia_search. Long texts come in ~45k-character pages — when has_more is true, keep calling with the next page until you have the whole document; never ask the user whether to continue.",
+        "Full text of a CJEU judgment, order or AG opinion. Identify it by CELEX (62018CJ0311), ECLI (ECLI:EU:C:2020:559), or by case_number + doc_type (the CELEX is derived). For very recent documents not yet in Cellar, pass the logic_doc_id from curia_search. Long texts come in ~45k-character pages. Token economy: to locate specific passages use 'find' (returns excerpts around matches); fetch further pages only when you genuinely need the whole text. Continue on your own — never ask the user whether to keep reading.",
       inputSchema: z.object({
         celex: z.string().optional().describe("CELEX number, e.g. '62018CJ0311'."),
         ecli: z.string().optional().describe("E.g. 'ECLI:EU:C:2020:559'."),
@@ -127,6 +127,12 @@ export function registerCuria(server: McpServer): void {
         doc_type: z.enum(["judgment", "order", "opinion"]).default("judgment"),
         logic_doc_id: z.string().optional().describe("From curia_search, for very recent documents."),
         language: z.string().default("en").describe("Preferred language (cs, en, …); falls back to English."),
+        find: z
+          .string()
+          .optional()
+          .describe(
+            "Return only excerpts around matches of this term (diacritics-insensitive) instead of pages — the cheap way to locate specific passages in a long text.",
+          ),
         page: z.number().int().min(1).default(1),
       }),
       outputSchema: z.object({
@@ -135,11 +141,12 @@ export function registerCuria(server: McpServer): void {
         page: z.number(),
         total_pages: z.number(),
         has_more: z.boolean(),
+        matches: z.number().optional().describe("Match count when 'find' was used."),
         text: z.string(),
       }),
       annotations: READ_ONLY,
     },
-    async ({ celex, ecli, case_number, doc_type, logic_doc_id, language, page }) => {
+    async ({ celex, ecli, case_number, doc_type, logic_doc_id, language, find, page }) => {
       try {
         let resolvedCelex = celex;
         if (!resolvedCelex && case_number) {
@@ -159,20 +166,21 @@ export function registerCuria(server: McpServer): void {
           logicDocId: logic_doc_id,
           language,
         });
-        const paged = charPage(document.text, page);
+        const paged = pageOrExcerpt(document.text, page, find);
         const output = {
           url: document.url,
           via: document.via,
           page: paged.page,
           total_pages: paged.total_pages,
           has_more: paged.has_more,
+          matches: paged.matches,
           text: paged.text,
         };
         return {
           content: [
             {
               type: "text",
-              text: `${document.url} (via ${document.via})\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — IMMEDIATELY call this tool again with page: ${paged.page + 1} to get the rest; do not ask the user)` : ""}`,
+              text: `${document.url} (via ${document.via})\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — fetch ONLY what you need, without asking the user: full close reading → call again with page: ${paged.page + 1}; specific passages → call again with find: "term" for targeted excerpts instead of more pages)` : ""}`,
             },
           ],
           structuredContent: output,

@@ -199,11 +199,14 @@ export function parseCuriaSearch(json: unknown): CuriaSearchPage {
         caseNumber,
         caseName,
         stateCode,
-        url: caseNumber
-          ? `https://curia.europa.eu/juris/liste.jsf?num=${encodeURIComponent(caseNumber)}&language=cs`
-          : ecli
-            ? `https://publications.europa.eu/resource/ecli/${encodeURIComponent(ecli)}`
-            : null,
+        // Prefer a link that opens the TEXT of the document itself.
+        url: ecli
+          ? `https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=ecli:${encodeURIComponent(ecli)}`
+          : str("logicDocId")
+            ? `${WS_BASE}/blob/download-file/${encodeURIComponent(str("logicDocId")!.replace(/^id_/, ""))}/EN/html`
+            : caseNumber
+              ? `https://curia.europa.eu/juris/liste.jsf?num=${encodeURIComponent(caseNumber)}&language=cs`
+              : null,
       });
     }
   }
