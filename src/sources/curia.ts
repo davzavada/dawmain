@@ -53,9 +53,24 @@ export interface CuriaSearchInput {
   ecli?: string;
   parties?: string; // usual name of the case ("Schrems", "Google Spain")
   court?: "C" | "T";
+  /** Case status of the main proceedings (InfoCuria "Case status"). */
+  state?: "all" | "closed" | "pending";
+  /** Client-side filter over docTypeCode of the returned documents. */
+  docType?: "judgment" | "opinion" | "order" | "request" | "any";
+  dateFrom?: string; // ISO, client-side on docDate
+  dateTo?: string; // ISO
   sort?: "relevance" | "date";
   language?: string;
 }
+
+/** docTypeCode prefixes per docType (codes observed live: ARRET, ARRET_SOM,
+ * ARRET_EXT, CONCL, DDP, DDP_COMM, DDP_ADD, RES, ARR_COMM, ORD…). */
+const DOC_TYPE_PREFIXES: Record<string, string[]> = {
+  judgment: ["ARRET"],
+  opinion: ["CONCL"],
+  order: ["ORD", "RES"],
+  request: ["DDP"],
+};
 
 export interface CuriaHit {
   logicDocId?: string;
@@ -64,6 +79,10 @@ export interface CuriaHit {
   parties?: string;
   ecli?: string;
   caseNumber?: string;
+  /** Usual name of the case from the affair level (e.g. "Telia Finland"). */
+  caseName?: string;
+  /** Affair state code (CLOTPUB… = closed, ENC… = pending). */
+  stateCode?: string;
   /** Human-verifiable link: InfoCuria case listing, else Cellar by ECLI. */
   url: string | null;
 }
@@ -83,8 +102,27 @@ export function buildCuriaBody(input: CuriaSearchInput, page: number, pageSize: 
       valuesWithFullHierarchy: [input.court],
     });
   }
+  if (input.state === "closed") {
+    filtersValue.push({
+      field: "affairState",
+      values: ["CLOTPUB"],
+      valuesWithFullHierarchy: ["CLOTPUB"],
+    });
+  } else if (input.state === "pending") {
+    // Pending codes start with ENC (en cours) — the client-side
+    // affairStateCode guard in the caller backs this filter up.
+    filtersValue.push({
+      field: "affairState",
+      values: ["ENC"],
+      valuesWithFullHierarchy: ["ENC"],
+    });
+  }
+  // The backend ignores usualName without a searchTerm — party names go
+  // through full text too (verified live: found C-201/22 for "Telia Finland").
+  const searchTerm =
+    input.query ?? (input.caseNumber ? `"${input.caseNumber}"` : (input.parties ?? ""));
   return {
-    searchTerm: input.query ?? (input.caseNumber ? `"${input.caseNumber}"` : ""),
+    searchTerm,
     multiSearchTerms: [],
     sortTermList: [
       {
@@ -92,6 +130,9 @@ export function buildCuriaBody(input: CuriaSearchInput, page: number, pageSize: 
         sortTerm: input.sort === "date" ? "INTRODUCTION_DATE" : "SCORE",
       },
     ],
+    // Free-text keyword search behaves better non-exact (raglex production
+    // client); identifiers stay exact.
+    
     pagination: {
       pageNumber: page,
       pageSize,
@@ -108,7 +149,7 @@ export function buildCuriaBody(input: CuriaSearchInput, page: number, pageSize: 
     repJurExpand: true,
     filtersValue,
     advancedFiltersValue: [],
-    isSearchExact: true,
+    isSearchExact: !input.query,
     searchSources: ["document", "metadata"],
   };
 }
@@ -131,11 +172,24 @@ export function parseCuriaSearch(json: unknown): CuriaSearchPage {
   }
   const hits: CuriaHit[] = [];
   for (const outer of data.searchHits) {
+    // Affair-level content: case number, usual name, state code.
+    const affair = ((outer as Record<string, unknown>).content ?? {}) as Record<string, unknown>;
+    const affairStr = (key: string) =>
+      typeof affair[key] === "string" ? (affair[key] as string) : undefined;
+    const usualNameML = Array.isArray(affair.usualNameML)
+      ? (affair.usualNameML as Array<Record<string, unknown>>)
+      : [];
+    const caseName = usualNameML
+      .map((entry) => (typeof entry.en === "string" ? entry.en : undefined))
+      .find(Boolean);
+    const affairCaseNumber = affairStr("publishedId") ?? affairStr("publishedAffId");
+    const stateCode = affairStr("affairStateCode");
+
     for (const inner of outer.innerHits?.document?.searchHits ?? []) {
       const doc = (inner.document ?? inner.content ?? {}) as Record<string, unknown>;
       const str = (key: string) => (typeof doc[key] === "string" ? (doc[key] as string) : undefined);
       const ecli = str("ecli") ?? str("docEcli");
-      const caseNumber = str("docNoPart") ?? str("idPublished");
+      const caseNumber = str("docNoPart") ?? str("idPublished") ?? affairCaseNumber;
       hits.push({
         logicDocId: str("logicDocId"),
         docType: str("docTypeCode"),
@@ -143,6 +197,8 @@ export function parseCuriaSearch(json: unknown): CuriaSearchPage {
         parties: str("parties"),
         ecli,
         caseNumber,
+        caseName,
+        stateCode,
         url: caseNumber
           ? `https://curia.europa.eu/juris/liste.jsf?num=${encodeURIComponent(caseNumber)}&language=cs`
           : ecli
@@ -154,11 +210,26 @@ export function parseCuriaSearch(json: unknown): CuriaSearchPage {
   return { total: data.totalHits, hits };
 }
 
+/** Client-side refinements over the returned documents. Pure — unit-tested. */
+export function refineCuriaHits(hits: CuriaHit[], input: CuriaSearchInput): CuriaHit[] {
+  return hits.filter((hit) => {
+    if (input.docType && input.docType !== "any") {
+      const prefixes = DOC_TYPE_PREFIXES[input.docType] ?? [];
+      if (!prefixes.some((prefix) => (hit.docType ?? "").startsWith(prefix))) return false;
+    }
+    if (input.state === "closed" && hit.stateCode && !hit.stateCode.startsWith("CLOT")) return false;
+    if (input.state === "pending" && hit.stateCode && !hit.stateCode.startsWith("ENC")) return false;
+    if (input.dateFrom && hit.date && hit.date < input.dateFrom) return false;
+    if (input.dateTo && hit.date && hit.date > input.dateTo) return false;
+    return true;
+  });
+}
+
 export async function searchCuria(
   input: CuriaSearchInput,
   page: number,
   pageSize: number,
-): Promise<CuriaSearchPage> {
+): Promise<CuriaSearchPage & { filtered: number }> {
   if (!input.query && !input.caseNumber && !input.ecli && !input.parties) {
     throw new SourceError(
       SOURCE,
@@ -181,7 +252,9 @@ export async function searchCuria(
       "Try again in a minute; if it persists the backend may have changed — run dawmain_probe_sources.",
     );
   }
-  return parseCuriaSearch(await response.json());
+  const parsed = parseCuriaSearch(await response.json());
+  const refined = refineCuriaHits(parsed.hits, input);
+  return { total: parsed.total, hits: refined, filtered: parsed.hits.length - refined.length };
 }
 
 // ---------- document text ----------

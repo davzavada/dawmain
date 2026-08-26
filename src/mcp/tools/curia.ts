@@ -21,13 +21,26 @@ export function registerCuria(server: McpServer): void {
     {
       title: "CJEU: search case law",
       description:
-        "FULL-TEXT search of CJEU case law (Court of Justice 'C', General Court 'T') via the court's own live InfoCuria index — searches the TEXT of judgments/opinions plus metadata, includes same-day decisions. Also: case number (C-311/18), ECLI, parties (usual name), court filter, relevance/date sort. Fetch texts with curia_get_document.",
+        "FULL-TEXT search of CJEU case law (Court of Justice 'C', General Court 'T') via the court's own live InfoCuria index — the advanced-search surface: text of judgments/opinions + metadata, case number (C-311/18), case/party name, ECLI, case status (closed/pending), document type, court and date filters, relevance/date sort. Includes same-day decisions. Fetch texts with curia_get_document.",
       inputSchema: z.object({
         query: z.string().optional().describe("Keywords (any EU language; English works best)."),
         case_number: z.string().optional().describe("E.g. 'C-311/18' or 'T-655/17'."),
         ecli: z.string().optional().describe("E.g. 'ECLI:EU:C:2020:559'."),
-        parties: z.string().optional().describe("Usual name / parties, e.g. 'Schrems' or 'Google Spain'."),
+        parties: z
+          .string()
+          .optional()
+          .describe("Case/party name, e.g. 'Telia Finland' — matched through document full text."),
         court: z.enum(["C", "T"]).optional().describe("C = Court of Justice, T = General Court."),
+        state: z
+          .enum(["all", "closed", "pending"])
+          .default("all")
+          .describe("Case status of the main proceedings (InfoCuria 'Case status')."),
+        doc_type: z
+          .enum(["any", "judgment", "opinion", "order", "request"])
+          .default("any")
+          .describe("Restrict document kinds: judgments, AG opinions, orders, preliminary-ruling requests."),
+        date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Document date from (ISO)."),
+        date_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Document date to (ISO)."),
         sort: z.enum(["relevance", "date"]).default("relevance"),
         limit: z.number().int().min(1).max(20).default(10),
         page: z.number().int().min(0).default(0),
@@ -43,8 +56,10 @@ export function registerCuria(server: McpServer): void {
             caseNumber: z.string().optional(),
             parties: z.string().optional(),
             ecli: z.string().optional(),
+            caseName: z.string().optional(),
             date: z.string().optional(),
             docType: z.string().optional(),
+            stateCode: z.string().optional(),
             logicDocId: z.string().optional(),
             url: z.string().nullable(),
           }),
@@ -52,10 +67,22 @@ export function registerCuria(server: McpServer): void {
       }),
       annotations: READ_ONLY,
     },
-    async ({ query, case_number, ecli, parties, court, sort, limit, page, language }) => {
+    async ({ query, case_number, ecli, parties, court, state, doc_type, date_from, date_to, sort, limit, page, language }) => {
       try {
         const result = await searchCuria(
-          { query, caseNumber: case_number, ecli, parties, court, sort, language },
+          {
+            query,
+            caseNumber: case_number,
+            ecli,
+            parties,
+            court,
+            state,
+            docType: doc_type,
+            dateFrom: date_from,
+            dateTo: date_to,
+            sort,
+            language,
+          },
           page,
           limit,
         );
@@ -68,11 +95,17 @@ export function registerCuria(server: McpServer): void {
         };
         const lines = result.hits.map(
           (hit, i) =>
-            `${page * limit + i + 1}. ${hit.caseNumber ?? "?"} ${hit.parties ?? ""}${hit.date ? ` (${hit.date})` : ""}${hit.ecli ? ` — ${hit.ecli}` : ""}${hit.url ? `\n   ${hit.url}` : ""}`,
+            `${page * limit + i + 1}. ${hit.caseNumber ?? "?"} ${hit.caseName ?? hit.parties ?? ""} [${hit.docType ?? "?"}]${hit.date ? ` (${hit.date})` : ""}${hit.ecli ? ` — ${hit.ecli}` : ""}${hit.url ? `\n   ${hit.url}` : ""}`,
         );
         const text = result.hits.length
-          ? [`${result.total} documents:`, ...lines, "Full text: curia_get_document {ecli | case_number | logic_doc_id}."].join("\n")
-          : "No CJEU documents matched. Try English keywords or the exact case number.";
+          ? [
+              `${result.total} matching cases${result.filtered ? ` (${result.filtered} documents hidden by doc_type/state/date filters)` : ""}:`,
+              ...lines,
+              "Full text: curia_get_document {ecli | case_number | logic_doc_id}.",
+            ].join("\n")
+          : result.total > 0
+            ? `${result.total} cases matched but no document scored for this query — add keywords (query), a case_number or an ecli; party names alone need the full-text route (put the name in 'query' or 'parties').`
+            : "No CJEU documents matched. Try English keywords or the exact case number.";
         return { content: [{ type: "text", text }], structuredContent: output };
       } catch (error) {
         return fail(error);
@@ -85,7 +118,7 @@ export function registerCuria(server: McpServer): void {
     {
       title: "CJEU: document text",
       description:
-        "Full text of a CJEU judgment, order or AG opinion. Identify it by CELEX (62018CJ0311), ECLI (ECLI:EU:C:2020:559), or by case_number + doc_type (the CELEX is derived). For very recent documents not yet in Cellar, pass the logic_doc_id from curia_search. Long texts are paginated by characters.",
+        "Full text of a CJEU judgment, order or AG opinion. Identify it by CELEX (62018CJ0311), ECLI (ECLI:EU:C:2020:559), or by case_number + doc_type (the CELEX is derived). For very recent documents not yet in Cellar, pass the logic_doc_id from curia_search. Long texts come in ~60k-character pages — when has_more is true, keep calling with the next page until you have the whole document; never ask the user whether to continue.",
       inputSchema: z.object({
         celex: z.string().optional().describe("CELEX number, e.g. '62018CJ0311'."),
         ecli: z.string().optional().describe("E.g. 'ECLI:EU:C:2020:559'."),
@@ -139,7 +172,7 @@ export function registerCuria(server: McpServer): void {
           content: [
             {
               type: "text",
-              text: `${document.url} (via ${document.via})\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — continue with page: ${paged.page + 1})` : ""}`,
+              text: `${document.url} (via ${document.via})\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — IMMEDIATELY call this tool again with page: ${paged.page + 1} to get the rest; do not ask the user)` : ""}`,
             },
           ],
           structuredContent: output,

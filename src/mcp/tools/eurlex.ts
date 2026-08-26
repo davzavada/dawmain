@@ -88,7 +88,7 @@ export function registerEurlex(server: McpServer): void {
     {
       title: "EUR-Lex: document text",
       description:
-        "Full text of an EU legal act or judgment from the official Cellar dissemination API, by CELEX (e.g. '32016R0679' for GDPR) or ECLI. Prefers the requested language and falls back to English. Long texts are paginated by characters.",
+        "Full text of an EU legal act or judgment from the official Cellar dissemination API, by CELEX (e.g. '32016R0679' for GDPR) or ECLI. Prefers the requested language and falls back to English. Long texts come in ~60k-character pages — when has_more is true, keep calling with the next page until you have the whole document; never ask the user whether to continue.",
       inputSchema: z.object({
         celex: z.string().optional().describe("CELEX, e.g. '32016R0679' or '62018CJ0311'."),
         ecli: z.string().optional().describe("ECLI, e.g. 'ECLI:EU:C:2020:559'."),
@@ -127,7 +127,7 @@ export function registerEurlex(server: McpServer): void {
           content: [
             {
               type: "text",
-              text: `${document.url}\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — continue with page: ${paged.page + 1})` : ""}`,
+              text: `${document.url}\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — IMMEDIATELY call this tool again with page: ${paged.page + 1} to get the rest; do not ask the user)` : ""}`,
             },
           ],
           structuredContent: output,

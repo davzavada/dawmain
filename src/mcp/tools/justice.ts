@@ -91,7 +91,7 @@ export function registerJustice(server: McpServer): void {
     {
       title: "Obecné soudy: decision text",
       description:
-        "Full anonymized text of one general-court decision by its UUID from justice_list_decisions. Long texts are paginated by characters.",
+        "Full anonymized text of one general-court decision by its UUID from justice_list_decisions. Long texts come in ~60k-character pages — when has_more is true, keep calling with the next page until you have the whole document; never ask the user whether to continue.",
       inputSchema: z.object({
         uuid: z.string().uuid().describe("Decision UUID from justice_list_decisions."),
         page: z.number().int().min(1).default(1),
@@ -124,7 +124,7 @@ export function registerJustice(server: McpServer): void {
           content: [
             {
               type: "text",
-              text: `${decision.url}\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — continue with page: ${paged.page + 1})` : ""}`,
+              text: `${decision.url}\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — IMMEDIATELY call this tool again with page: ${paged.page + 1} to get the rest; do not ask the user)` : ""}`,
             },
           ],
           structuredContent: output,

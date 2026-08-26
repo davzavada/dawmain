@@ -334,6 +334,7 @@ const ALLOWED_FETCH_HOSTS = [
   "vyhledavac.nssoud.cz",
   "rozhodnuti.justice.cz",
   "infocuriaws.curia.europa.eu",
+  "infocuria.curia.europa.eu",
   "curia.europa.eu",
   "publications.europa.eu",
   "euipo.europa.eu",

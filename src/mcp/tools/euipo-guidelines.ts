@@ -121,7 +121,7 @@ export function registerEuipoGuidelines(server: McpServer): void {
           content: [
             {
               type: "text",
-              text: `${section.url}\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — continue with page: ${paged.page + 1})` : ""}`,
+              text: `${section.url}\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — IMMEDIATELY call this tool again with page: ${paged.page + 1} to get the rest; do not ask the user)` : ""}`,
             },
           ],
           structuredContent: output,

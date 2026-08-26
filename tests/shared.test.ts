@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { charPage, snippet, isoToCzech, czechToIso } from "@/src/sources/shared/text";
+import { charPage, DOC_PAGE_CHARS, snippet, isoToCzech, czechToIso } from "@/src/sources/shared/text";
 import { htmlToText, decodeBody, decodeJsStringLiteral } from "@/src/sources/shared/html";
 import { CookieSession } from "@/src/sources/shared/http";
 
 describe("charPage", () => {
+  it("defaults to 60k-character pages (typical decision = one response)", () => {
+    expect(DOC_PAGE_CHARS).toBe(60_000);
+  });
+
   it("splits into fixed pages", () => {
     const page1 = charPage("a".repeat(30), 1, 25);
     expect(page1.text).toHaveLength(25);

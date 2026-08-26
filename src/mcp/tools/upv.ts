@@ -69,7 +69,7 @@ export function registerUpv(server: McpServer): void {
     {
       title: "ÚPV: decision text",
       description:
-        "Full text of one ÚPV decision by its p_id token from upv_browse. Tokens are opaque and may expire — always take them fresh. Long texts are paginated by characters.",
+        "Full text of one ÚPV decision by its p_id token from upv_browse. Tokens are opaque and may expire — always take them fresh. Long texts come in ~60k-character pages — when has_more is true, keep calling with the next page until you have the whole document; never ask the user whether to continue.",
       inputSchema: z.object({
         p_id: z.string().regex(/^[A-Za-z0-9]{4,16}$/, "Token from upv_browse"),
         page: z.number().int().min(1).default(1),
@@ -98,7 +98,7 @@ export function registerUpv(server: McpServer): void {
           content: [
             {
               type: "text",
-              text: `${decision.url}\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — continue with page: ${paged.page + 1})` : ""}`,
+              text: `${decision.url}\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — IMMEDIATELY call this tool again with page: ${paged.page + 1} to get the rest; do not ask the user)` : ""}`,
             },
           ],
           structuredContent: output,

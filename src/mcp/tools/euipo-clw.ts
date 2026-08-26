@@ -123,7 +123,7 @@ export function registerEuipoClw(server: McpServer): void {
           content: [
             {
               type: "text",
-              text: `${document.pdfUrl} (${document.pages} PDF pages)\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — continue with page: ${paged.page + 1})` : ""}`,
+              text: `${document.pdfUrl} (${document.pages} PDF pages)\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — IMMEDIATELY call this tool again with page: ${paged.page + 1} to get the rest; do not ask the user)` : ""}`,
             },
           ],
           structuredContent: output,

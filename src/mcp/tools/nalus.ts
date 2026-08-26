@@ -100,7 +100,7 @@ export function registerNalus(server: McpServer): void {
     {
       title: "Ústavní soud: decision text",
       description:
-        "Full text, abstract and právní věta of one Constitutional Court decision. Identify it by the NALUS 'sz' (e.g. '1-1169-26_1' from nalus_search) or by ECLI. Long texts are paginated by characters.",
+        "Full text, abstract and právní věta of one Constitutional Court decision. Identify it by the NALUS 'sz' (e.g. '1-1169-26_1' from nalus_search) or by ECLI. Long texts come in ~60k-character pages — when has_more is true, keep calling with the next page until you have the whole document; never ask the user whether to continue.",
       inputSchema: z.object({
         sz: z.string().optional().describe("NALUS id: '{senát}-{číslo}-{rok}[_{pořadí}]', e.g. 'Pl-24-10_1'."),
         ecli: z.string().optional().describe("Alternative: the decision's ECLI."),
@@ -160,7 +160,7 @@ export function registerNalus(server: McpServer): void {
           content: [
             {
               type: "text",
-              text: `${header}\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — continue with page: ${paged.page + 1})` : ""}`,
+              text: `${header}\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — IMMEDIATELY call this tool again with page: ${paged.page + 1} to get the rest; do not ask the user)` : ""}`,
             },
           ],
           structuredContent: output,

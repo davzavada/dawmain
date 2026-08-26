@@ -1,7 +1,10 @@
 /** Size discipline: every tool result must stay digestible for an LLM. */
 
-/** Max characters of one document page returned by a *_get_* tool. */
-export const DOC_PAGE_CHARS = 25_000;
+/** Max characters of one document page returned by a *_get_* tool.
+ * Sized so a typical Czech decision fits in ONE response (like DirectCase/
+ * Salvia serve documents) while staying under MCP clients' output caps
+ * (~25k tokens) — only very long texts still page. */
+export const DOC_PAGE_CHARS = 60_000;
 /** Max characters of a single search-result snippet. */
 export const SNIPPET_CHARS = 400;
 

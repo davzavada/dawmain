@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildCuriaBody, caseNumberToCelex, parseCuriaSearch } from "@/src/sources/curia";
+import {
+  buildCuriaBody,
+  caseNumberToCelex,
+  parseCuriaSearch,
+  refineCuriaHits,
+} from "@/src/sources/curia";
 import {
   enumerateDays,
   filterJusticeItems,
@@ -25,6 +30,35 @@ describe("caseNumberToCelex", () => {
 });
 
 describe("buildCuriaBody", () => {
+  it("routes party names through full text and keeps usualName set", () => {
+    const body = buildCuriaBody({ parties: "Telia Finland" }, 0, 10) as Record<string, unknown>;
+    expect(body.searchTerm).toBe("Telia Finland");
+    expect(body.usualName).toBe("Telia Finland");
+    expect(body.isSearchExact).toBe(true);
+  });
+
+  it("maps case status to the affairState filter (closed=CLOTPUB, pending=ENC)", () => {
+    const closed = buildCuriaBody({ query: "x", state: "closed" }, 0, 10) as {
+      filtersValue: Array<{ field: string; values: string[] }>;
+    };
+    expect(closed.filtersValue).toContainEqual({
+      field: "affairState",
+      values: ["CLOTPUB"],
+      valuesWithFullHierarchy: ["CLOTPUB"],
+    });
+    const pending = buildCuriaBody({ query: "x", state: "pending" }, 0, 10) as {
+      filtersValue: Array<{ field: string; values: string[] }>;
+    };
+    expect(pending.filtersValue[0].values).toEqual(["ENC"]);
+    const all = buildCuriaBody({ query: "x", state: "all" }, 0, 10) as { filtersValue: unknown[] };
+    expect(all.filtersValue).toHaveLength(0);
+  });
+
+  it("keyword queries search non-exact; identifier searches stay exact", () => {
+    expect((buildCuriaBody({ query: "data protection" }, 0, 10) as { isSearchExact: boolean }).isSearchExact).toBe(false);
+    expect((buildCuriaBody({ caseNumber: "C-311/18" }, 0, 10) as { isSearchExact: boolean }).isSearchExact).toBe(true);
+  });
+
   it("mirrors the verbatim SPA body with the criteria filled in", () => {
     const body = buildCuriaBody(
       { caseNumber: "C-311/18", court: "C", sort: "date" },
@@ -76,8 +110,61 @@ describe("parseCuriaSearch", () => {
     expect(page.hits[0].logicDocId).toBe("id_C2020559");
   });
 
+  it("lifts affair-level case name, number and state code", () => {
+    const page = parseCuriaSearch({
+      totalHits: 1,
+      searchHits: [
+        {
+          content: {
+            publishedId: "C-201/22",
+            affairStateCode: "CLOTPUB",
+            usualNameML: [{ fr: "Telia Finlande" }, { en: "Telia Finland" }],
+          },
+          innerHits: {
+            document: { searchHits: [{ document: { docTypeCode: "ARRET", docDate: "2023-11-23" } }] },
+          },
+        },
+      ],
+    });
+    expect(page.hits[0].caseName).toBe("Telia Finland");
+    expect(page.hits[0].caseNumber).toBe("C-201/22");
+    expect(page.hits[0].stateCode).toBe("CLOTPUB");
+  });
+
   it("throws PARSE_DRIFT on shape mismatch", () => {
     expect(() => parseCuriaSearch({ different: true })).toThrowError(SourceError);
+  });
+});
+
+describe("refineCuriaHits", () => {
+  const hits = parseCuriaSearch({
+    totalHits: 1,
+    searchHits: [
+      {
+        content: { publishedId: "C-201/22", affairStateCode: "CLOTPUB", usualNameML: [] },
+        innerHits: {
+          document: {
+            searchHits: [
+              { document: { docTypeCode: "ARRET", docDate: "2023-11-23" } },
+              { document: { docTypeCode: "CONCL", docDate: "2023-05-11" } },
+              { document: { docTypeCode: "DDP", docDate: "2022-03-15" } },
+            ],
+          },
+        },
+      },
+    ],
+  }).hits;
+
+  it("filters by doc type prefix", () => {
+    expect(refineCuriaHits(hits, { docType: "judgment" })).toHaveLength(1);
+    expect(refineCuriaHits(hits, { docType: "opinion" })[0].docType).toBe("CONCL");
+    expect(refineCuriaHits(hits, { docType: "any" })).toHaveLength(3);
+  });
+
+  it("filters by document dates and state guard", () => {
+    expect(refineCuriaHits(hits, { dateFrom: "2023-01-01" })).toHaveLength(2);
+    expect(refineCuriaHits(hits, { state: "pending" })).toHaveLength(0);
+    expect(refineCuriaHits(hits, { state: "closed" })).toHaveLength(3);
   });
 });
 
