@@ -1,3 +1,5 @@
+<img src="public/logo.svg" alt="" width="76" align="right">
+
 # dawmain-mcp-server
 
 Vzdálený [MCP](https://modelcontextprotocol.io) server pro **právní rešerše**:

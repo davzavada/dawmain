@@ -24,10 +24,22 @@ export default async function Home() {
 
   return (
     <>
-      <h1 style={{ fontSize: "1.75rem", marginBottom: "0.25rem" }}>{SERVER_NAME}</h1>
-      <p style={{ color: "#6b7280", marginTop: 0 }}>
-        Version {SERVER_VERSION} · Model Context Protocol over Streamable HTTP
-      </p>
+      <header style={{ display: "flex", alignItems: "center", gap: "0.9rem" }}>
+        {/* eslint-disable-next-line @next/next/no-img-element -- static brand mark, no optimization wanted */}
+        <img
+          src="/logo.svg"
+          alt=""
+          width={52}
+          height={52}
+          style={{ display: "block", borderRadius: "0.75rem" }}
+        />
+        <div>
+          <h1 style={{ fontSize: "1.75rem", margin: 0, letterSpacing: "-0.01em" }}>{SERVER_NAME}</h1>
+          <p style={{ color: "#6b7280", margin: 0, fontSize: "0.95rem" }}>
+            Version {SERVER_VERSION} · Model Context Protocol over Streamable HTTP
+          </p>
+        </div>
+      </header>
 
       <h2 style={{ fontSize: "1.1rem", marginTop: "2rem" }}>Endpoint</h2>
       <code style={code}>{endpoint}</code>
@@ -45,9 +57,10 @@ export default async function Home() {
       </code>
 
       <p style={{ color: "#6b7280", fontSize: "0.875rem", marginTop: "2rem" }}>
-        Legal-research MCP server: e-Sbírka, NSS, NS, ÚS (NALUS), obecné soudy, CJEU, EUIPO a ÚPV —
-        live queries, no local data. Call <code>dawmain_ping</code> to confirm which deployment is
-        answering and <code>dawmain_probe_sources</code> to check the upstream databases.
+        Legal-research MCP server: e-Sbírka, NSS, NS, ÚS (NALUS), obecné soudy, CJEU, EUR-Lex a
+        EUIPO — live queries, no local data. Call <code>dawmain_ping</code> to confirm which
+        deployment is answering and <code>dawmain_probe_sources</code> to check the upstream
+        databases.
       </p>
     </>
   );
