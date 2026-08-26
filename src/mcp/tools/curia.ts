@@ -120,13 +120,14 @@ export function registerCuria(server: McpServer): void {
           filtered: results.reduce((n, r) => n + r.filtered, 0),
           hits: dedupeBy(
             results.flatMap((r) => r.hits),
-            (hit) => hit.ecli ?? hit.logicDocId ?? `${hit.caseNumber}|${hit.date}|${hit.docType}`,
+            // || not ??: empty-string ids must fall through like missing ones.
+            (hit) => hit.ecli || hit.logicDocId || `${hit.caseNumber}|${hit.date}|${hit.docType}`,
           ).slice(0, limit),
         };
         const previewTargets = result.hits
           .slice(0, read_top)
           .map((hit) => ({
-            id: hit.ecli ?? hit.logicDocId ?? "",
+            id: hit.ecli || hit.logicDocId || "",
             caseNumber: hit.caseNumber ?? hit.caseName ?? "?",
           }))
           .filter((target) => target.id);

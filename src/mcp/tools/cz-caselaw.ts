@@ -238,12 +238,15 @@ export function registerCzCaselaw(server: McpServer): void {
             total: maxTotal(results.map((r) => r.total)),
             hits: dedupeBy(
               results.flatMap((r) => r.hits),
-              (hit) => hit.ecli ?? hit.logicDocId ?? `${hit.caseNumber}|${hit.date}|${hit.docType}`,
+              // || not ??: InfoCuria can return EMPTY-STRING ids, which must
+              // fall through like missing ones (?? would keep "" and collapse
+              // every such hit into one dedupe bucket).
+              (hit) => hit.ecli || hit.logicDocId || `${hit.caseNumber}|${hit.date}|${hit.docType}`,
             )
               .slice(0, per_source_limit)
               .map((hit) => ({
                 source: "curia" as const,
-                id: hit.ecli ?? hit.logicDocId ?? "?",
+                id: hit.ecli || hit.logicDocId || "?",
                 caseNumber: hit.caseNumber ?? hit.caseName ?? "?",
                 date: hit.date,
                 detail_tool: "curia_get_document",
