@@ -36,13 +36,20 @@ export default async function Home() {
         <div>
           <h1 style={{ fontSize: "1.75rem", margin: 0, letterSpacing: "-0.01em" }}>{SERVER_NAME}</h1>
           <p style={{ color: "#6b7280", margin: 0, fontSize: "0.95rem" }}>
-            Model Context Protocol přes Streamable HTTP
+            Model Context Protocol - David Závada
           </p>
         </div>
       </header>
 
       <p style={{ marginTop: "1.75rem" }}>
-        MCP server pro české a unijní právní rešerše. Nemá vlastní databázi — funguje jako
+        Vítejte u mého passion projektu - přístup k judikatuře a právním předpisům s AI by podle mě
+        neměl být možný jen přes komerční nástroje, ale v době, kdy jsou ta data dobře přístupná a
+        provoz je v zásadě zdarma, mi přišlo, že by měla existovat nekomerční alternativa. Budu rád,
+        pokud nástroj vyzkoušíte a dáte mi zpětnou vazbu :)
+      </p>
+
+      <p>
+        MCP server pro české a unijní právní rešerše. Nemá vlastní databázi - funguje jako
         nachytřený Google: vyhledává živě přímo v oficiálních databázích. Právní předpisy bere přes
         API e-Sbírky, unijní legislativu z Cellaru (strojové rozhraní Úřadu pro publikace EU, které
         stojí za EUR-Lexem). Konkrétně je napojený na judikaturu:
