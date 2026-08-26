@@ -151,4 +151,12 @@ describe("findExcerpts / pageOrExcerpt", () => {
     expect(excerpted.text).toContain("Stichting Brein");
     expect(excerpted.has_more).toBe(false);
   });
+
+  it("says so explicitly when find matches nothing", async () => {
+    const { pageOrExcerpt } = await import("@/src/sources/shared/text");
+    const empty = pageOrExcerpt(decision, 1, "bezpečný přístav");
+    expect(empty.matches).toBe(0);
+    expect(empty.text).toContain('No occurrences of "bezpečný přístav"');
+    expect(empty.text).toContain("stem");
+  });
 });

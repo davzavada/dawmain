@@ -22,14 +22,15 @@ každý dotaz jde přímo do zdroje. Postavený na Next.js +
 | `eurlex_search` / `eurlex_get_document` | Cellar SPARQL (Publications Office) | EU legislativa + judikatura dle názvů, CELEX/ECLI, typů a dat; texty z oficiálního Cellaru |
 | `euipo_clw_search` / `euipo_clw_get_document` | EUIPO eSearchCLW | rozhodnutí odvolacích senátů, námitky, zrušení; extrakce textu z PDF |
 | `euipo_guidelines_toc` / `euipo_guidelines_get_section` | guidelines.euipo.europa.eu | metodika EUIPO po sekcích |
-| `upv_browse` / `upv_get_decision` | isdv.upv.gov.cz | správní a soudní rozhodnutí ÚPV |
 | `dawmain_ping` | — | které nasazení odpovědělo |
 | `dawmain_probe_sources` | — | diagnostika všech upstreamů z nasazené funkce; `include_raw` pro záchyt fixtures, `discover` pro hledání neověřených endpointů |
 
 Známá omezení (přiznaná i v popisech nástrojů): NS adresuje jen prvních 900
 výsledků dotazu (zužuj datem); justice.cz umí jen výpis po dnech; filtry EUIPO
-běží client-side přes nejnovější záznamy; ÚPV je zatím jen procházení
-kategorií.
+běží client-side přes nejnovější záznamy. **ÚPV** (isdv.upv.gov.cz) zahazuje
+spojení z datacentrových IP (ověřeno živě z regionu fra1 na obou hostech),
+takže nástroje `upv_browse`/`upv_get_decision` nejsou registrované — kód i
+probe kanárky (`upv`, `upv-legacy`) zůstávají, kdyby se zdroj zpřístupnil.
 
 ## Architektura
 

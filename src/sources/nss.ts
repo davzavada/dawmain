@@ -197,33 +197,47 @@ export interface NssDecision {
   url: string;
 }
 
-/** div ids confirmed on /DokumentDetail/Index/{id}. */
+/**
+ * Technical field names confirmed live on /DokumentDetail/Index/{id}
+ * (captured 2026-08 via probe fetch_url). They appear as `data-field-id`
+ * ATTRIBUTES — on `div.detcard` rows (value in a child `span.det-textval`)
+ * and on table cells (`td.det-textval` is itself the value; the matching
+ * `td.det-textitle` header carries the same attribute and must be skipped).
+ */
 const DETAIL_FIELDS: Record<string, string> = {
+  oznacenivecivcelku: "Spisová značka",
   ecli: "ECLI",
+  soudsenat: "Soud (senát)",
   soudcezpravodaj: "Soudce zpravodaj",
-  soudsenat: "Senát",
-  oblastupravy: "Oblast úpravy",
-  druhdokumentuavyrokrozhodnuti: "Druh dokumentu a výrok",
-  datumvydanirozhodnuti: "Datum vydání rozhodnutí",
-  vyrokrozhodnuti: "Výrok",
+  druhdokumentuavyrokrozhodnuti: "Druh dokumentu",
+  vyrokrozhodnuti: "Výrok rozhodnutí NSS",
   typrizeni: "Typ řízení",
-  ucastnicirizeniz: "Účastníci řízení",
   stavrizeni: "Stav řízení",
+  rozhodnutivevztahukrizeni: "Rozhodnutí ve vztahu k řízení",
+  datumvydanirozhodnuti: "Datum vydání rozhodnutí",
+  pravnivetaanv: "Právní věta",
+  sbnsspublikovano: "Sb. NSS publikováno",
+  oblastupravy: "Oblast úpravy",
+  ucastnikrizeni: "Účastníci řízení",
+  zastupce: "Zástupce",
   nazevspravnihoorganu: "Správní orgán",
-  citace: "Citace (Sb. NSS)",
 };
 
 /** Parse the metadata detail page. Pure — unit-tested. */
 export function parseNssDetail(html: string): Record<string, string> {
   const $ = loadHtml(html);
   const metadata: Record<string, string> = {};
-  for (const [divId, label] of Object.entries(DETAIL_FIELDS)) {
-    const value = $(`div#${divId} span.det-textval`)
-      .toArray()
-      .map((el) => $(el).text().trim())
-      .filter(Boolean)
-      .join("; ");
-    if (value) metadata[label] = value;
+  for (const [fieldId, label] of Object.entries(DETAIL_FIELDS)) {
+    const values: string[] = [];
+    $(`[data-field-id='${fieldId}']`).each((_, el) => {
+      const $el = $(el);
+      const text = ($el.hasClass("det-textval") ? $el : $el.find(".det-textval"))
+        .text()
+        .replace(/\s+/g, " ")
+        .trim();
+      if (text) values.push(text);
+    });
+    if (values.length) metadata[label] = [...new Set(values)].join("; ");
   }
   return metadata;
 }

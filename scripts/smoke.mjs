@@ -131,8 +131,8 @@ const EXPECTED_TOOLS = [
   "euipo_clw_get_document",
   "euipo_guidelines_toc",
   "euipo_guidelines_get_section",
-  "upv_browse",
-  "upv_get_decision",
+  // upv_browse / upv_get_decision are deliberately unregistered: the ÚPV
+  // portal drops datacenter connections (see src/mcp/tools/index.ts).
 ];
 
 async function checkTools(client) {

@@ -1,3 +1,9 @@
+/**
+ * UNREGISTERED (see ../tools/index.ts): the ÚPV portal drops connections
+ * from datacenter IPs — verified live from the fra1 deployment on both
+ * hosts. Kept so the tools can be re-registered the moment the probe
+ * canaries ('upv' / 'upv-legacy') report the source reachable again.
+ */
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { browseUpv, getUpvDecision } from "@/src/sources/upv";

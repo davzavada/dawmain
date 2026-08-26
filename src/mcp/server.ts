@@ -33,8 +33,9 @@ SOURCES → TOOLS
 - Obecné soudy (rozhodnuti.justice.cz): justice_list_decisions lists by PUBLICATION date only (no server-side search exists) → justice_get_decision {uuid}.
 - CJEU (InfoCuria live index, same-day decisions): curia_search (full text, case number, case/party name, ECLI, case status closed/pending, doc_type, court C/T, dates) → curia_get_document {ecli | celex | case_number | logic_doc_id}; Czech texts usually via language:"cs".
 - EUR-Lex/Cellar: eurlex_search (titles + CELEX/ECLI/types/dates — NOT full text; full-text CJEU search = curia_search) → eurlex_get_document {celex} (32016R0679 = GDPR).
-- EUIPO decisions: euipo_clw_search → euipo_clw_get_document {pdf_url}. EUIPO Guidelines: euipo_guidelines_toc (drill via parent_topic_id) → euipo_guidelines_get_section {topic_id}. ÚPV: upv_browse → upv_get_decision {p_id}.
+- EUIPO decisions: euipo_clw_search → euipo_clw_get_document {pdf_url}. EUIPO Guidelines: euipo_guidelines_toc (drill via parent_topic_id) → euipo_guidelines_get_section {topic_id}.
 - Diagnostics: dawmain_ping, dawmain_probe_sources (when a source misbehaves).
+- NOT covered: ÚPV rozhodnutí (isdv.upv.gov.cz rejects server connections) — if asked, say so and point the user at https://isdv.upv.gov.cz directly.
 
 READING DOCUMENTS — token economy
 1. After a search, READ the promising documents with the matching *_get_* tool and let what you read drive the next step. Do not argue from snippets alone.

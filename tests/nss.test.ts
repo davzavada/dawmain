@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   findField,
@@ -118,13 +120,46 @@ describe("parseNssResults", () => {
 });
 
 describe("parseNssDetail", () => {
-  it("reads span.det-textval values from the confirmed div ids", () => {
+  // Live capture of DokumentDetail/Index/784744 (1 As 59/2026) — the field
+  // keys are data-field-id ATTRIBUTES, not element ids.
+  const DETAIL_HTML = readFileSync(
+    path.join(__dirname, "fixtures", "nss-detail-784744.html"),
+    "utf8",
+  );
+
+  it("extracts the confirmed data-field-id cards from the live capture", () => {
+    const metadata = parseNssDetail(DETAIL_HTML);
+    expect(metadata["Spisová značka"]).toBe("1 As 59/2026-106");
+    expect(metadata["ECLI"]).toBe("ECLI:CZ:NSS:2026:1.As.59.2026.106");
+    expect(metadata["Soudce zpravodaj"]).toContain("POSPÍŠIL Ivo");
+    expect(metadata["Soud (senát)"]).toBe("tříčlenný senát NSS");
+    expect(metadata["Druh dokumentu"]).toBe("Rozsudek");
+    expect(metadata["Výrok rozhodnutí NSS"]).toContain("zrušeno");
+    expect(metadata["Typ řízení"]).toBe("opatření obecné povahy");
+    expect(metadata["Stav řízení"]).toBe("Skončeno");
+    expect(metadata["Datum vydání rozhodnutí"]).toBe("20.08.2026");
+  });
+
+  it("joins repeated cards and never leaks det-textitle header cells", () => {
+    const metadata = parseNssDetail(DETAIL_HTML);
+    // Two zástupce cards → one joined value.
+    expect(metadata["Zástupce"]).toContain("AVE CZ");
+    expect(metadata["Zástupce"]).toContain("Obec Rybitví");
+    expect(metadata["Zástupce"]).toContain("; ");
+    // The účastník table in the capture has only its header row — the
+    // det-textitle cells carry the same data-field-id and must not leak.
+    expect(metadata["Účastníci řízení"]).toBeUndefined();
+  });
+
+  it("reads td.det-textval table cells (účastníci) when rows are present", () => {
     const metadata = parseNssDetail(`
-      <div id="ecli"><span class="det-textval" title="e">ECLI:CZ:NSS:2026:1.AFS.25.2024.30</span></div>
-      <div id="soudcezpravodaj"><span class="det-textval">JUDr. Jana Nováková</span></div>
-      <div id="datumvydanirozhodnuti"><span class="det-textval">10.06.2026</span></div>`);
-    expect(metadata["ECLI"]).toContain("ECLI:CZ:NSS");
-    expect(metadata["Soudce zpravodaj"]).toBe("JUDr. Jana Nováková");
+      <table><thead><tr>
+        <td class="det-textitle" data-field-id="ucastnikrizeni">Účastník řízení</td>
+      </tr></thead><tbody>
+        <tr><td class="det-textval" data-field-id="ucastnikrizeni">AVE CZ odpadové hospodářství s.r.o.</td></tr>
+        <tr><td class="det-textval" data-field-id="ucastnikrizeni">Obec Rybitví</td></tr>
+      </tbody></table>`);
+    expect(metadata["Účastníci řízení"]).toBe("AVE CZ odpadové hospodářství s.r.o.; Obec Rybitví");
   });
 });
 

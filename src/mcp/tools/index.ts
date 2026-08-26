@@ -11,11 +11,15 @@ import { registerEurlex } from "./eurlex";
 import { registerJustice } from "./justice";
 import { registerEuipoClw } from "./euipo-clw";
 import { registerEuipoGuidelines } from "./euipo-guidelines";
-import { registerUpv } from "./upv";
 
 /**
  * Every tool the server exposes. To add one: create `./<name>.ts` exporting a
  * `register<Name>(server)` function and append it here.
+ *
+ * NOT registered: ./upv.ts — isdv.upv.gov.cz (and the legacy isdv.upv.cz)
+ * drops TCP connections from datacenter IPs, verified from the fra1
+ * deployment (probe canaries 'upv'/'upv-legacy' both fail with no HTTP
+ * status). Re-add registerUpv here if a canary ever comes back healthy.
  */
 const registrars: Array<(server: McpServer) => void> = [
   registerPing,
@@ -30,7 +34,6 @@ const registrars: Array<(server: McpServer) => void> = [
   registerEurlex,
   registerEuipoClw,
   registerEuipoGuidelines,
-  registerUpv,
 ];
 
 export function registerAllTools(server: McpServer): void {

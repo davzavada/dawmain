@@ -140,7 +140,11 @@ export function pageOrExcerpt(text: string, page: number, find?: string): Docume
     return {
       mode: "excerpt",
       matches: result.matches,
-      text: result.text,
+      // A zero-match answer must say so explicitly — an empty string reads
+      // as a broken fetch, and Czech terms inflect, so hint at the fix.
+      text: result.matches
+        ? result.text
+        : `No occurrences of "${find.trim()}" in this document (${text.length} chars searched; matching is case- and diacritics-insensitive). Inflected languages: retry with a shorter word stem or a synonym — or read the pages.`,
       page: 1,
       total_pages: 1,
       total_chars: text.length,
