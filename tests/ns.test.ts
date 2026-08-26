@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildNsQuery,
   isoDaysAgo,
+  nsBodyMissing,
   parseNsDecision,
   parseNsSearch,
   usToIso,
@@ -128,6 +129,42 @@ describe("parseNsDecision", () => {
     expect(decision.text).toMatch(/^Nejvyšší soud rozhodl/);
     expect(decision.text).not.toContain("Citace rozhodnutí");
     expect(decision.text).toContain("Odůvodnění");
+  });
+
+  it("clips the pre-2013 opening 'Nejvyšší soud České republiky rozhodl'", () => {
+    const legacy = `<html><body>
+      <table><tr><td class="left-part">Spisová značka:</td><td class="right-part">23 Cdo 3375/2011</td></tr></table>
+      <font face="Times New Roman">Záhlaví stránky.</font>
+      <font face="Times New Roman">Nejvyšší soud České republiky rozhodl v senátě složeném z předsedy… takto: dovolání se odmítá. O d ů v o d n ě n í : text.</font>
+      <font face="Times New Roman">Citace rozhodnutí Nejvyššího soudu</font>
+    </body></html>`;
+    const decision = parseNsDecision(legacy, "0123456789ABCDEF0123456789ABCDEF");
+    expect(decision.text).toMatch(/^Nejvyšší soud České republiky rozhodl/);
+    expect(decision.text).not.toContain("Citace rozhodnutí");
+  });
+});
+
+describe("nsBodyMissing", () => {
+  it("flags the WebPrint metadata echo of a body-less rendition", () => {
+    // What htmlToText yields when WebPrint renders only the metadata table
+    // (observed on older decisions, e.g. 23 Cdo 3375/2011).
+    const echo = `Spisová značka: 23 Cdo 3375/2011 ECLI: ECLI:CZ:NS:2013:23.CDO.3375.2011.1
+      Typ rozhodnutí: ROZSUDEK Heslo: Smlouva o dílo Dotčené předpisy: § 536 obch. zák.
+      Kategorie rozhodnutí: C Datum rozhodnutí: 03/26/2013 ${"Další pole a hodnoty. ".repeat(10)}`;
+    expect(nsBodyMissing(echo)).toBe(true);
+  });
+
+  it("accepts real bodies, including short usnesení and spaced odůvodnění", () => {
+    expect(
+      nsBodyMissing(
+        `Nejvyšší soud České republiky rozhodl v senátě takto: dovolání se odmítá. O d ů v o d n ě n í : ${"soud uvádí. ".repeat(30)}`,
+      ),
+    ).toBe(false);
+  });
+
+  it("treats near-empty text as missing", () => {
+    expect(nsBodyMissing("")).toBe(true);
+    expect(nsBodyMissing("Nejvyšší soud rozhodl.")).toBe(true); // under the floor
   });
 });
 

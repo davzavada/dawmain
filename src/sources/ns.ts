@@ -196,7 +196,8 @@ export function parseNsDecision(html: string, unid: string): NsDecision {
   });
   let text = fontRuns.join("\n");
   if (!text.trim()) text = htmlToText(html);
-  const start = text.search(/Nejvyšší soud (?:rozhodl|jako soud)/);
+  // Older decisions (≲2013) open with "Nejvyšší soud České republiky rozhodl".
+  const start = text.search(/Nejvyšší soud(?: České republiky)? (?:rozhodl|jako soud)/);
   if (start > 0) text = text.slice(start);
   const end = text.indexOf("Citace rozhodnutí");
   if (end > 0) text = text.slice(0, end);
@@ -222,6 +223,21 @@ export function parseNsDecision(html: string, unid: string): NsDecision {
   }
 
   return { unid, metadata, text, url: `${BASE}/WebSearch/${unid}?openDocument` };
+}
+
+/**
+ * True when a parsed "text" is not a judgment body but a metadata echo: the
+ * WebPrint rendition of older decisions omits the body entirely, so the
+ * htmlToText fallback yields only the metadata table's text. A real body —
+ * even a short refusing usnesení — carries the operative formula or the
+ * odůvodnění heading; the metadata table never does. Pure — unit-tested.
+ */
+export function nsBodyMissing(text: string): boolean {
+  const clean = text.trim();
+  if (clean.length < 200) return true;
+  return !/rozhodl|takto\s*:|o\s*d\s*ů\s*v\s*o\s*d\s*n\s*ě\s*n\s*í|proti (?:rozsudku|usnesení)/iu.test(
+    clean,
+  );
 }
 
 /** MM/DD/YYYY → ISO (WebPrint date quirk). */
@@ -317,11 +333,25 @@ export async function getNsDecision(unid: string): Promise<NsDecision> {
       "Pass the 32-character hexadecimal id returned by ns_search.",
     );
   }
-  // WebPrint yields the cleanest HTML for extraction.
   return decisionCache.through(memoKey("ns-doc", [unid.toUpperCase()]), async () => {
-    const response = await fetchUpstream(SOURCE, `${BASE}/WebPrint/${unid}?openDocument`, {
-      headers: { referer: "https://rozhodnuti.nsoud.cz/" },
-    });
-    return parseNsDecision(await response.text(), unid.toUpperCase());
+    // WebPrint yields the cleanest HTML — but for older decisions (≲2013,
+    // e.g. 23 Cdo 3375/2011) it renders the metadata table WITHOUT the
+    // judgment body. When the parsed text is only a metadata echo, fall back
+    // to the WebSearch document view (the same page the hit URL points at).
+    const webPrint = await fetchNsRendition(unid, "WebPrint");
+    if (!nsBodyMissing(webPrint.text)) return webPrint;
+    const webSearch = await fetchNsRendition(unid, "WebSearch").catch(() => null);
+    if (webSearch && webSearch.text.length > webPrint.text.length) {
+      // Metadata from WebPrint wins where both renditions carry a field.
+      return { ...webSearch, metadata: { ...webSearch.metadata, ...webPrint.metadata } };
+    }
+    return webPrint;
   });
+}
+
+async function fetchNsRendition(unid: string, rendition: "WebPrint" | "WebSearch"): Promise<NsDecision> {
+  const response = await fetchUpstream(SOURCE, `${BASE}/${rendition}/${unid}?openDocument`, {
+    headers: { referer: "https://rozhodnuti.nsoud.cz/" },
+  });
+  return parseNsDecision(await response.text(), unid.toUpperCase());
 }

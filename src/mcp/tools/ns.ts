@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
-import { getNsDecision, searchNs } from "@/src/sources/ns";
+import { getNsDecision, nsBodyMissing, searchNs } from "@/src/sources/ns";
 import { SourceError, asSourceError, toToolError } from "@/src/sources/shared/errors";
 import { pageOrExcerpt } from "@/src/sources/shared/text";
 
@@ -133,13 +133,13 @@ export function registerNs(server: McpServer): void {
         const meta = Object.entries(decision.metadata)
           .map(([key, value]) => `${key}: ${value}`)
           .join("\n");
+        // Never hand back a silent metadata echo — say plainly that NS has
+        // no machine-readable body for this document.
+        const text = nsBodyMissing(decision.text)
+          ? `${meta}\n\n(NS did not publish a machine-readable judgment body for this document — neither the WebPrint nor the WebSearch rendition carries it. Only metadata is available; open ${decision.url} in a browser to check for an attached PDF.)`
+          : `${meta}\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — fetch ONLY what you need, without asking the user: full close reading → call again with page: ${paged.page + 1}; specific passages → call again with find: "term" for targeted excerpts instead of more pages)` : ""}`;
         return {
-          content: [
-            {
-              type: "text",
-              text: `${meta}\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — fetch ONLY what you need, without asking the user: full close reading → call again with page: ${paged.page + 1}; specific passages → call again with find: "term" for targeted excerpts instead of more pages)` : ""}`,
-            },
-          ],
+          content: [{ type: "text", text }],
           structuredContent: output,
         };
       } catch (error) {
