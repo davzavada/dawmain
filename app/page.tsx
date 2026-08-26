@@ -1,5 +1,5 @@
 import { headers } from "next/headers";
-import { SERVER_NAME, SERVER_VERSION } from "@/src/mcp/config";
+import { SERVER_NAME } from "@/src/mcp/config";
 
 export const dynamic = "force-dynamic";
 
@@ -14,8 +14,6 @@ const code: React.CSSProperties = {
   fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
   fontSize: "0.875rem",
 };
-
-const muted: React.CSSProperties = { color: "#6b7280", fontSize: "0.875rem" };
 
 export default async function Home() {
   const headerList = await headers();
@@ -38,16 +36,16 @@ export default async function Home() {
         <div>
           <h1 style={{ fontSize: "1.75rem", margin: 0, letterSpacing: "-0.01em" }}>{SERVER_NAME}</h1>
           <p style={{ color: "#6b7280", margin: 0, fontSize: "0.95rem" }}>
-            Verze {SERVER_VERSION} · Model Context Protocol přes Streamable HTTP
+            Model Context Protocol přes Streamable HTTP
           </p>
         </div>
       </header>
 
       <p style={{ marginTop: "1.75rem" }}>
         MCP server pro české a unijní právní rešerše. Nemá vlastní databázi — funguje jako
-        nachytřený Google: vyhledává živě přímo v oficiálních databázích judikatury a přes API je
-        napojený na e-Sbírku (právní předpisy) a EUR-Lex (unijní právo). Konkrétně je napojený na
-        judikaturu:
+        nachytřený Google: vyhledává živě přímo v oficiálních databázích. Právní předpisy bere přes
+        API e-Sbírky, unijní legislativu z Cellaru (strojové rozhraní Úřadu pro publikace EU, které
+        stojí za EUR-Lexem). Konkrétně je napojený na judikaturu:
       </p>
       <ul style={{ marginTop: "0.25rem", paddingLeft: "1.4rem", lineHeight: 1.9 }}>
         <li>Nejvyššího soudu</li>
@@ -60,15 +58,9 @@ export default async function Home() {
 
       <h2 style={{ fontSize: "1.1rem", marginTop: "2rem" }}>Endpoint</h2>
       <code style={code}>{endpoint}</code>
-      <p style={muted}>
-        Adresa odpovídá jen na MCP požadavky — po otevření v prohlížeči vrátí chybu, to je v
-        pořádku.
-      </p>
-
-      <h2 style={{ fontSize: "1.1rem", marginTop: "2rem" }}>Připojení do Claude</h2>
       <p>
         V aplikaci claude.ai: <strong>Nastavení → Konektory → Přidat vlastní konektor</strong> a
-        vložit adresu endpointu výše. V Claude Code:
+        vložit adresu výše. V Claude Code:
       </p>
       <code style={code}>{`claude mcp add --transport http dawmain ${endpoint}`}</code>
     </>
