@@ -173,6 +173,7 @@ Using them is the difference between 900 hits and five.
 | rozhodnutí, která ho citují | `query: "23 Cdo 116/2017"` | `[ARozhodnutiRT]` |
 | kdy soud rozhodl | `date_from` / `date_to` | `[datum_rozhodnuti]` |
 | co NS zveřejnil za poslední týden | `published_from` / `published_to` | `[datum_predani_na_web]` |
+| citaci v textu (kdo ho cituje) | `query: "\"31 Cdo 1945/2010\""` | `[ARozhodnutiRT]` |
 | meritorní vs. procesní | `type: "rozsudek"` / `"usnesení"` | `[TypRozhodnuti]` |
 | judikatura ze Sbírky | `category: "A"` | `[kategorie_rozhodnuti1]` |
 | text rozhodnutí | `query` | `[ARozhodnutiRT]` |
@@ -221,6 +222,10 @@ evaluates the full-text terms first and intersects the date range afterwards, so
 
 - narrow the **terms** — exact phrase, wildcard stem, `SENTENCE`/`NEAR` proximity, or
   add `type` / `category`. Do not just shorten the date range;
+- if the search was bounded by `published_from` / `published_to`, move it to
+  `date_from` / `date_to`: measured, `"31 Cdo 1945/2010"` over 2016 returns 22 hits on
+  the decision date and HTTP 500 on the publication date. Publication dates are for
+  listing what NS put up lately, not for full-text research;
 - the refusal is also intermittent under load — one retry is built into the tool, so a
   second failure means the query really is too broad;
 - if NS keeps refusing, finish NSS, ÚS and the statute first and come back to it. Never
@@ -257,13 +262,15 @@ Precision has a time dimension — check it before you cite:
 - **The break.** Case law decided under the previous wording (typically pre-2014 civil
   law) may still hold, but say which wording it was decided under.
 - **Later authority.** There is no citation graph, but decisions quote the sp. zn. they
-  follow — so full-text search the citation itself: `ns_search {query: "31 Cdo
-  1945/2010", date_from: "2016-01-01", date_to: "2016-12-31"}` returns the decisions
-  that cite it. Two rules: pass the **whole** sp. zn. (a fragment like "1945/2010"
-  matches nothing), and give NS a window of a year or two at a time — a wide one 500s,
-  and without dates the 12-month default hides the rest. NALUS and NSS take the same
-  query without a window. Then look for a velký senát decision, a sjednocující
-  stanovisko, or an ÚS nález derogating the provision.
+  follow — so full-text search the citation itself, **in quotes**:
+  `ns_search {query: "\"31 Cdo 1945/2010\"", date_from: "2016-01-01", date_to:
+  "2016-12-31"}` → 22 decisions citing it (verified). The quotes are what makes it work:
+  unquoted, the značka becomes four ordinary tokens (31, Cdo, 1945, 2010), the index
+  scans half the database and NS answers 500. Pass the whole značka, walk the years in
+  one- or two-year windows on the DECISION date, and remember that without dates the
+  12-month default hides everything older. NALUS and NSS take the same query without a
+  window. Then look for a velký senát decision, a sjednocující stanovisko, or an ÚS
+  nález derogating the provision.
 - **The date of the research.** Say which date the answer reflects.
 
 ## When to stop

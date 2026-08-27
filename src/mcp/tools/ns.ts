@@ -59,7 +59,9 @@ export function registerNs(server: McpServer): void {
         date_to: isoDate.optional().describe("Datum rozhodnutí to (ISO)."),
         published_from: isoDate
           .optional()
-          .describe("Datum předání na web from (ISO) — for 'what has NS published lately'."),
+          .describe(
+            "Datum předání na web from (ISO) — for 'what has NS published lately'. Use date_from/date_to for research: NS chokes on a full-text query bounded by the publication date, while the same query goes through on the decision date.",
+          ),
         published_to: isoDate.optional().describe("Datum předání na web to (ISO)."),
         limit: z.number().int().min(1).max(100).default(20),
         offset: z.number().int().min(0).max(899).default(0).describe("Offset within the 900-doc window."),

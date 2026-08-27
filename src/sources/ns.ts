@@ -471,6 +471,18 @@ async function runSearchNsWindowed(
       return { ...(await runNsSearch(input, start, count)), appliedWindowFrom: null };
     } catch (error) {
       if (error instanceof SourceError && error.kind === "UPSTREAM_ERROR") {
+        // Measured: a full-text term combined with a [datum_predani_na_web]
+        // range dies on windows the same query survives on [datum_rozhodnuti]
+        // ("31 Cdo 1945/2010" over 2016: 500 vs 22 hits). The publication date
+        // is for listing what NS put up lately, not for full-text research.
+        if (input.query && (input.publishedFrom || input.publishedTo)) {
+          throw new SourceError(
+            SOURCE,
+            "UPSTREAM_ERROR",
+            error.message,
+            "NS handles a full-text query badly when it is bounded by the PUBLICATION date. Use date_from/date_to (datum rozhodnutí) for research — the same query usually goes through — and keep published_from/published_to for listing what NS published lately, without a query or with a short window.",
+          );
+        }
         throw new SourceError(
           SOURCE,
           "UPSTREAM_ERROR",
