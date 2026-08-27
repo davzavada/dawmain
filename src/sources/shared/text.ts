@@ -179,6 +179,50 @@ export interface SearchPreview {
  * (diacritics-insensitive), else the head of the text. Small on purpose —
  * a preview earns a full *_get_decision read, it does not replace one.
  */
+/** Words that are search syntax, never document content. */
+const SEARCH_OPERATORS = new Set([
+  "AND",
+  "OR",
+  "NOT",
+  "NEAR",
+  "SENTENCE",
+  "PARAGRAPH",
+  "ACCRUE",
+  "EXACTCASE",
+  "TERMWEIGHT",
+]);
+
+/**
+ * Turn a search expression into strings that can be found inside a document.
+ * A query may carry engine syntax — "exact phrases", (grouping), wildcards,
+ * AND/OR/NOT — none of which appears in the text, so matching the raw query
+ * finds nothing and the preview falls back to the document head.
+ *
+ * Priority: quoted phrases first (most precise), then each expression stripped
+ * of syntax, then single words long enough to mean something. Pure.
+ */
+export function excerptTerms(queries: Array<string | undefined>): string[] {
+  const phrases: string[] = [];
+  const stripped: string[] = [];
+  const words: string[] = [];
+  for (const raw of queries) {
+    if (!raw?.trim()) continue;
+    for (const match of raw.matchAll(/"([^"]+)"/g)) phrases.push(match[1]);
+    const tokens = raw
+      .replace(/["()[\]{}*?]/g, " ")
+      .split(/\s+/)
+      .filter((token) => token && !SEARCH_OPERATORS.has(token.toUpperCase()));
+    if (tokens.length) stripped.push(tokens.join(" "));
+    for (const token of tokens) if (token.length >= 4) words.push(token);
+  }
+  const out: string[] = [];
+  for (const candidate of [...phrases, ...stripped, ...words]) {
+    const term = candidate.trim();
+    if (term.length >= 3 && !out.includes(term)) out.push(term);
+  }
+  return out;
+}
+
 export function previewExcerpt(
   text: string,
   terms: string[],

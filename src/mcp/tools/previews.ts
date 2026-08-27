@@ -1,4 +1,4 @@
-import { previewExcerpt } from "@/src/sources/shared/text";
+import { excerptTerms, previewExcerpt } from "@/src/sources/shared/text";
 
 /**
  * read_top support shared by the search tools: fetch the texts of the leading
@@ -39,7 +39,9 @@ export async function buildPreviews<T extends { id: string; caseNumber: string }
     targets.map(async (target) => {
       try {
         const text = await withDeadline(getText(target.id), PREVIEW_DEADLINE_MS);
-        return { ...target, ...previewExcerpt(text, terms) };
+        // The caller's terms are search expressions, not document text —
+        // a quoted phrase or a wildcard would match nothing verbatim.
+        return { ...target, ...previewExcerpt(text, excerptTerms(terms)) };
       } catch {
         return null;
       }

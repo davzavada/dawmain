@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { charPage, DOC_PAGE_CHARS, snippet, isoToCzech, czechToIso } from "@/src/sources/shared/text";
+import {
+  charPage,
+  DOC_PAGE_CHARS,
+  excerptTerms,
+  snippet,
+  isoToCzech,
+  czechToIso,
+} from "@/src/sources/shared/text";
 import { htmlToText, decodeBody, decodeJsStringLiteral } from "@/src/sources/shared/html";
 import { CookieSession } from "@/src/sources/shared/http";
 
@@ -247,5 +254,23 @@ describe("parallel-search helpers", () => {
     expect(miss.excerpt.length).toBeLessThanOrEqual(121);
     expect(miss.excerpt).toContain("Úvod rozhodnutí");
     expect(miss.excerpt.endsWith("…")).toBe(true);
+  });
+});
+
+describe("excerptTerms", () => {
+  it("puts quoted phrases first and drops the syntax around them", () => {
+    expect(excerptTerms(['nájem* AND "dobré mravy"'])).toEqual([
+      "dobré mravy",
+      "nájem dobré mravy",
+      "nájem",
+      "dobré",
+      "mravy",
+    ]);
+  });
+  it("keeps a plain query as one term", () => {
+    expect(excerptTerms(["náhrada škody"])).toEqual(["náhrada škody", "náhrada", "škody"]);
+  });
+  it("ignores empty variants and duplicates", () => {
+    expect(excerptTerms([undefined, "  ", "nájemce", "nájemce"])).toEqual(["nájemce"]);
   });
 });
