@@ -11,11 +11,16 @@ import { DOCUMENT_TTL_MS, SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cach
  * Search needs an antiforgery handshake: GET / (cookies + token + ALL form
  * fields — the model binder rejects partial posts), then POST /Home/Index
  * echoing everything plus the criteria. Field indices for the criteria are
- * NOT hardcoded: the live form is harvested and criteria are located by
- * name suffix (dates) or nearby label (full-text, spisová značka), because
- * the exact `vyhledavaciSekce[…]` indices were never verified publicly and
- * the form has shifted before. Document endpoints are sessionless; the
- * plain-text variant is UTF-16. See docs/research/cz-sources.json.
+ * NOT hardcoded: the live form is harvested and criteria are located by the
+ * hidden `…TechnickyNazev` sibling (verbatim technical names captured from a
+ * live browser POST, 2026-08), because the `vyhledavaciSekce[…]` indices
+ * shift between form versions. Codebook criteria (soud/senát, rejstřík,
+ * oblast úpravy) post `HodnotaCiselnikPolozkySelected` id lists resolved at
+ * runtime from the `ciselnikTreeData` blobs the form itself carries — the
+ * Selected field is absent from the raw HTML (the UI widget synthesizes it),
+ * so it is constructed from the TechnickyNazev prefix. Document endpoints
+ * are sessionless; the plain-text variant is UTF-16.
+ * See docs/research/cz-sources.json.
  */
 
 const SOURCE = "Nejvyšší správní soud";
@@ -104,6 +109,164 @@ export function findField(
     );
   }
   return undefined;
+}
+
+/**
+ * Strict variant of findField for the criteria whose technical names were
+ * captured verbatim: only the value-level TechnickyNazev route, no suffix or
+ * label fallback — a fallback here would silently file the criterion into a
+ * WRONG field of the same datatype (e.g. poř. č. instead of číslo předpisu).
+ */
+export function findFieldStrict(
+  form: NssForm,
+  technicalPattern: RegExp,
+  suffix: string,
+): NssFormField | undefined {
+  const prefix = findValuePrefix(form, technicalPattern);
+  return prefix ? form.fields.find((field) => field.name === prefix + suffix) : undefined;
+}
+
+/** Name prefix of the value-level entry (`…vyhledavaciPodminkaHodnota[j]`). */
+export function findValuePrefix(form: NssForm, technicalPattern: RegExp): string | undefined {
+  for (const field of form.fields) {
+    if (
+      field.name.endsWith(".TechnickyNazev") &&
+      field.name.includes("vyhledavaciPodminkaHodnota") &&
+      technicalPattern.test(field.value)
+    ) {
+      return field.name.slice(0, -".TechnickyNazev".length);
+    }
+  }
+  return undefined;
+}
+
+// ---------- codebooks (číselníky) ----------
+
+export interface CiselnikNode {
+  id: number;
+  title: string;
+  subs?: CiselnikNode[];
+}
+
+/** The codebooks ship as JS object literals (unquoted keys) in hidden inputs. */
+export function parseCiselnikTree(raw: string): CiselnikNode[] {
+  try {
+    const parsed = JSON.parse(raw.replace(/([{,])(id|title|subs):/g, '$1"$2":')) as CiselnikNode[];
+    if (!Array.isArray(parsed)) throw new Error("not an array");
+    return parsed;
+  } catch {
+    throw new SourceError(
+      SOURCE,
+      "PARSE_DRIFT",
+      "An NSS codebook (ciselnikTreeData) is no longer parseable.",
+      "The form markup changed — run dawmain_probe_sources (canary 'nss') and update parseCiselnikTree in src/sources/nss.ts.",
+    );
+  }
+}
+
+const fold = (value: string) =>
+  value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+/**
+ * Select codebook entries whose title satisfies `matches`; a matching node
+ * brings ALL its descendants along — mirroring the UI, where checking a
+ * parent checks the whole subtree (the captured POST for "krajské soudy"
+ * carries the group id plus every court and pobočka under it).
+ */
+export function selectFromCiselnik(
+  nodes: CiselnikNode[],
+  matches: (title: string) => boolean,
+): { ids: number[]; titles: string[] } {
+  const ids: number[] = [];
+  const titles: string[] = [];
+  const addSubtree = (node: CiselnikNode) => {
+    if (!ids.includes(node.id)) {
+      ids.push(node.id);
+      titles.push(node.title);
+    }
+    for (const sub of node.subs ?? []) addSubtree(sub);
+  };
+  const walk = (list: CiselnikNode[]) => {
+    for (const node of list) {
+      if (matches(node.title)) addSubtree(node);
+      else if (node.subs) walk(node.subs);
+    }
+  };
+  walk(nodes);
+  return { ids, titles };
+}
+
+/** Flat title list, for "no such value — pick one of:" error hints. */
+export function ciselnikTitles(nodes: CiselnikNode[]): string[] {
+  const titles: string[] = [];
+  const walk = (list: CiselnikNode[]) => {
+    for (const node of list) {
+      titles.push(node.title);
+      if (node.subs) walk(node.subs);
+    }
+  };
+  walk(nodes);
+  return titles;
+}
+
+// ---------- applied-provision references ----------
+
+export interface NssActRef {
+  cislo: string;
+  rok: string;
+}
+
+/**
+ * "číslo/rok" act reference. Czech Sb./Sb.m.s. citations put the year second
+ * ("106/1999 Sb."); modern EU citations put it first ("2016/679", "2004/48"),
+ * pre-2015 regulations second ("1049/2001") — with euStyle a leading 4-digit
+ * year wins, otherwise the trailing one.
+ */
+export function parseNssActRef(ref: string, euStyle: boolean): NssActRef {
+  const m = /^\s*(?:č\.\s*)?(\d{1,4})\s*\/\s*(\d{1,4})(?:\s*\/?\s*(?:EU|ES|EHS|EURATOM))?(?:\s*Sb\.?(?:\s*m\.?\s*s\.?)?)?\s*$/i.exec(
+    ref,
+  );
+  const isYear = (part: string) => /^\d{4}$/.test(part) && Number(part) >= 1900 && Number(part) <= 2099;
+  if (m) {
+    if (euStyle && isYear(m[1])) return { cislo: m[2], rok: m[1] };
+    if (isYear(m[2])) return { cislo: m[1], rok: m[2] };
+    if (isYear(m[1])) return { cislo: m[2], rok: m[1] };
+  }
+  throw new SourceError(
+    SOURCE,
+    "INPUT_INVALID",
+    `"${ref}" is not a recognizable act reference.`,
+    "Use 'číslo/rok': '106/1999' (Sb.), '209/1992' (Sb.m.s.), '2016/679' or '1049/2001' (EU).",
+  );
+}
+
+export interface NssProvision {
+  /** Explicit marker: § vs. článek. Unset = § for Sb., čl. elsewhere. */
+  kind?: "par" | "cl";
+  unit: string;
+  odst?: string;
+  pism?: string;
+}
+
+/** "§ 17 odst. 2 písm. a", "čl. 8 odst. 2", or compact "17(2)(a)". */
+export function parseNssProvision(ref: string): NssProvision {
+  const text = ref.trim().replace(/\s+/g, " ");
+  const kindMatch = /^(§|čl\.?|cl\.?|článek|art(?:icle)?\.?)\s*/iu.exec(text);
+  const kind = kindMatch ? (kindMatch[1] === "§" ? "par" : "cl") : undefined;
+  const rest = kindMatch ? text.slice(kindMatch[0].length) : text;
+  const m =
+    /^(\d+[a-z]*)(?:\s*\(\s*(\d+[a-z]*)\s*\)|\s+odst\.?\s*(\d+[a-z]*))?(?:\s*\(\s*([a-z]{1,2})\s*\)|\s+p[íi]sm\.?\s*([a-z]{1,2})\)?)?$/i.exec(
+      rest,
+    );
+  if (!m) {
+    throw new SourceError(
+      SOURCE,
+      "INPUT_INVALID",
+      `"${ref}" is not a recognizable provision reference.`,
+      "Use '§ 17 odst. 2 písm. a', 'čl. 8 odst. 2', or compact '17(2)(a)'.",
+    );
+  }
+  return { kind, unit: m[1], odst: m[2] ?? m[3], pism: m[4] ?? m[5] };
 }
 
 // ---------- results ----------
@@ -272,15 +435,44 @@ async function handshake(force = false): Promise<NssSession> {
 export interface NssSearchInput {
   query?: string;
   caseNumber?: string;
-  dateFrom?: string; // ISO
+  dateFrom?: string; // ISO — datum vydání rozhodnutí
   dateTo?: string; // ISO
+  publishedFrom?: string; // ISO — datum zpřístupnění (aktualizovano)
+  publishedTo?: string; // ISO
+  court?: "nss" | "rozsireny-senat" | "krajske" | "karne";
+  /** Rejstřík code, e.g. "Afs" — exact match against the dial codebook. */
+  registry?: string;
+  /** Oblast úpravy — substring; every matching area is selected (OR). */
+  area?: string;
+  appliesAct?: string; // Sb. — "106/1999"
+  appliesTreaty?: string; // Sb.m.s. — "209/1992"
+  appliesEuRegulation?: string; // "2016/679" or "1049/2001"
+  appliesEuDirective?: string; // "2004/48"
+  appliesProvision?: string; // "§ 17 odst. 2 písm. a" | "čl. 8" | "17(2)(a)"
 }
 
-async function postSearch(session: NssSession, input: NssSearchInput): Promise<string> {
-  const form = new URLSearchParams();
-  for (const field of session.fields) form.set(field.name, field.value);
+/** Codebook subtrees behind the `court` filter (titles verbatim from the live tree). */
+const NSS_COURT_GROUPS: Record<NonNullable<NssSearchInput["court"]>, string> = {
+  nss: "Nejvyšší správní soud",
+  "rozsireny-senat": "rozšířený senát NSS",
+  krajske: "krajské soudy",
+  karne: "kárné soudy",
+};
 
-  const formModel: NssForm = { fields: session.fields };
+/** Build the search POST body from the harvested form. Pure — unit-tested. */
+export function buildNssSearchForm(fields: NssFormField[], input: NssSearchInput): URLSearchParams {
+  const form = new URLSearchParams();
+  for (const field of fields) form.set(field.name, field.value);
+  const formModel: NssForm = { fields };
+
+  const drift = (criterion: string): never => {
+    throw new SourceError(
+      SOURCE,
+      "PARSE_DRIFT",
+      `Could not locate the NSS form field for ${criterion}.`,
+      "The search form changed. Run dawmain_probe_sources with discover:true and update the field mapping in src/sources/nss.ts; date-range search may still work.",
+    );
+  };
   const setCriterion = (
     criterion: string,
     value: string,
@@ -289,22 +481,43 @@ async function postSearch(session: NssSession, input: NssSearchInput): Promise<s
     technicalPattern?: RegExp,
   ) => {
     const field = findField(formModel, suffix, labelPattern, technicalPattern);
-    if (!field) {
-      throw new SourceError(
-        SOURCE,
-        "PARSE_DRIFT",
-        `Could not locate the NSS form field for ${criterion}.`,
-        "The search form changed. Run dawmain_probe_sources with discover:true and update the field mapping in src/sources/nss.ts; date-range search may still work.",
-      );
-    }
-    form.set(field.name, value);
+    if (!field) drift(criterion);
+    else form.set(field.name, value);
+  };
+  // Verbatim-captured technical names — never fall back to a same-suffix field.
+  const setStrict = (criterion: string, value: string, technicalPattern: RegExp, suffix: string) => {
+    const field = findFieldStrict(formModel, technicalPattern, suffix);
+    if (!field) drift(criterion);
+    else form.set(field.name, value);
+  };
+  const setDial = (
+    criterion: string,
+    technicalPattern: RegExp,
+    pick: (tree: CiselnikNode[]) => { ids: number[]; titles: string[] },
+  ) => {
+    const prefix = findValuePrefix(formModel, technicalPattern);
+    const treeField = prefix
+      ? fields.find((field) => field.name === `${prefix}.ciselnikTreeData`)
+      : undefined;
+    if (!prefix || !treeField) return drift(criterion);
+    const { ids, titles } = pick(parseCiselnikTree(treeField.value));
+    form.set(`${prefix}.HodnotaCiselnikPolozky`, titles.join(", "));
+    // Synthesized: the UI widget creates this field client-side on submit —
+    // it is absent from the raw HTML, but it is what the server filters by.
+    form.set(`${prefix}.HodnotaCiselnikPolozkySelected`, ids.join(","));
   };
 
   if (input.dateFrom) {
-    setCriterion("date from", isoToCzech(input.dateFrom), ".HodnotaDatumACasOd", null, /datumvydani/i);
+    setCriterion("date from", isoToCzech(input.dateFrom), ".HodnotaDatumACasOd", null, /^datumvydanirozhodnuti$/);
   }
   if (input.dateTo) {
-    setCriterion("date to", isoToCzech(input.dateTo), ".HodnotaDatumACasDo", null, /datumvydani/i);
+    setCriterion("date to", isoToCzech(input.dateTo), ".HodnotaDatumACasDo", null, /^datumvydanirozhodnuti$/);
+  }
+  if (input.publishedFrom) {
+    setStrict("published from", isoToCzech(input.publishedFrom), /^aktualizovano$/, ".HodnotaDatumACasOd");
+  }
+  if (input.publishedTo) {
+    setStrict("published to", isoToCzech(input.publishedTo), /^aktualizovano$/, ".HodnotaDatumACasDo");
   }
   if (input.query) {
     setCriterion(
@@ -324,6 +537,111 @@ async function postSearch(session: NssSession, input: NssSearchInput): Promise<s
       /oznacenivecivcelku|cislojednaci|spisovaznacka/i,
     );
   }
+  if (input.court) {
+    const wanted = fold(NSS_COURT_GROUPS[input.court]);
+    setDial("court", /^soudsenat$/, (tree) => {
+      const selection = selectFromCiselnik(tree, (title) => fold(title) === wanted);
+      if (!selection.ids.length) drift(`court group "${NSS_COURT_GROUPS[input.court!]}"`);
+      return selection;
+    });
+  }
+  if (input.registry) {
+    const wanted = fold(input.registry);
+    setDial("registry", /^oznacenivecidelenerejstrikovaznacka$/, (tree) => {
+      const selection = selectFromCiselnik(tree, (title) => fold(title) === wanted);
+      if (!selection.ids.length) {
+        throw new SourceError(
+          SOURCE,
+          "INPUT_INVALID",
+          `"${input.registry}" is not an NSS rejstřík code.`,
+          `Valid codes: ${ciselnikTitles(tree).join(", ")}.`,
+        );
+      }
+      return selection;
+    });
+  }
+  if (input.area) {
+    const wanted = fold(input.area);
+    setDial("area", /^oblastupravy$/, (tree) => {
+      const selection = selectFromCiselnik(tree, (title) => fold(title).includes(wanted));
+      if (!selection.ids.length) {
+        throw new SourceError(
+          SOURCE,
+          "INPUT_INVALID",
+          `No oblast úpravy matches "${input.area}".`,
+          `Available areas: ${ciselnikTitles(tree).join("; ")}.`,
+        );
+      }
+      return selection;
+    });
+  }
+
+  const actFilters = [
+    input.appliesAct,
+    input.appliesTreaty,
+    input.appliesEuRegulation,
+    input.appliesEuDirective,
+  ].filter(Boolean);
+  if (actFilters.length > 1) {
+    throw new SourceError(
+      SOURCE,
+      "INPUT_INVALID",
+      "Pass at most one of applies_act / applies_treaty / applies_eu_regulation / applies_eu_directive.",
+      "The NSS form has one row per act family — run separate searches to combine them.",
+    );
+  }
+  if (input.appliesProvision && !actFilters.length) {
+    throw new SourceError(
+      SOURCE,
+      "INPUT_INVALID",
+      "applies_provision needs an act to attach to.",
+      "Pair it with applies_act, applies_treaty, applies_eu_regulation, or applies_eu_directive.",
+    );
+  }
+  if (actFilters.length) {
+    // Field-name stem of the row this reference belongs to; Sb.m.s. has no
+    // písm. field and Sb. is the only row where a bare unit means §.
+    const row = input.appliesAct
+      ? { stem: "aplikovanepravnipredpisysb", ref: input.appliesAct, eu: false, par: "aplikovanepravnipredpisysb§", pism: true }
+      : input.appliesTreaty
+        ? { stem: "aplikovanepravnipredpisysbms", ref: input.appliesTreaty, eu: false, par: null, pism: false }
+        : input.appliesEuRegulation
+          ? { stem: "aplikovanepravnipredpisynarizenieu", ref: input.appliesEuRegulation, eu: true, par: null, pism: true }
+          : { stem: "aplikovanepravnipredpisysmerniceeu", ref: input.appliesEuDirective!, eu: true, par: null, pism: true };
+    const act = parseNssActRef(row.ref, row.eu);
+    const exact = (name: string) => new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
+    setStrict("applied act number", act.cislo, exact(`${row.stem}cislo`), ".HodnotaCislo");
+    setStrict("applied act year", act.rok, exact(`${row.stem}rok`), ".HodnotaCislo");
+    if (input.appliesProvision) {
+      const provision = parseNssProvision(input.appliesProvision);
+      const asParagraph = row.par !== null && provision.kind !== "cl";
+      if (asParagraph) {
+        setStrict("applied §", provision.unit, exact(row.par!), ".HodnotaText");
+      } else {
+        setStrict("applied čl.", provision.unit, exact(`${row.stem}cl`), ".HodnotaText");
+      }
+      if (provision.odst) {
+        setStrict("applied odst.", provision.odst, exact(`${row.stem}odst`), ".HodnotaText");
+      }
+      if (provision.pism) {
+        if (!row.pism) {
+          throw new SourceError(
+            SOURCE,
+            "INPUT_INVALID",
+            "The Sb.m.s. row has no písm. field.",
+            "Narrow a treaty reference to čl./odst. only.",
+          );
+        }
+        setStrict("applied písm.", provision.pism, exact(`${row.stem}pism`), ".HodnotaText");
+      }
+    }
+  }
+
+  return form;
+}
+
+async function postSearch(session: NssSession, input: NssSearchInput): Promise<string> {
+  const form = buildNssSearchForm(session.fields, input);
 
   const response = await fetchUpstream(SOURCE, `${BASE}/Home/Index`, {
     method: "POST",
@@ -352,12 +670,26 @@ export async function searchNss(input: NssSearchInput, page: number): Promise<Ns
 }
 
 async function runSearchNss(input: NssSearchInput, page: number): Promise<NssSearchResult> {
-  if (!input.query && !input.caseNumber && !input.dateFrom && !input.dateTo) {
+  const hasCriterion =
+    input.query ||
+    input.caseNumber ||
+    input.dateFrom ||
+    input.dateTo ||
+    input.publishedFrom ||
+    input.publishedTo ||
+    input.court ||
+    input.registry ||
+    input.area ||
+    input.appliesAct ||
+    input.appliesTreaty ||
+    input.appliesEuRegulation ||
+    input.appliesEuDirective;
+  if (!hasCriterion) {
     throw new SourceError(
       SOURCE,
       "INPUT_INVALID",
       "NSS search needs at least one criterion.",
-      "Provide query (full-text), case_number, or a date range.",
+      "Provide query (full-text), case_number, a date range, court, registry, area, or an applies_* filter.",
     );
   }
 

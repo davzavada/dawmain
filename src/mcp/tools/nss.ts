@@ -24,7 +24,7 @@ export function registerNss(server: McpServer): void {
     {
       title: "Nejvyšší správní soud: search decisions",
       description:
-        "FULL-TEXT search of Czech Supreme Administrative Court decisions (kasační stížnosti — tax, immigration, public procurement, administrative law) — plus spisová značka/čj. and decision-date range. Czech queries. 'queries' searches up to 3 variants IN PARALLEL in one call (Czech inflects — pass stems/synonyms) and merges deduplicated results. Page 1 returns up to 40 hits, later pages 20. Results carry a numeric document_id for nss_get_decision. read_top: N also returns excerpt previews of the N best hits — search + first reading in one call.",
+        "FULL-TEXT search of Czech Supreme Administrative Court decisions (kasační stížnosti — tax, immigration, public procurement, administrative law) — plus spisová značka/čj., decision/publication date ranges, court/senate (incl. rozšířený senát and KRAJSKÉ SOUDY — the index covers regional administrative courts too), rejstřík code, oblast úpravy, and applied-provision filters: applies_act '106/1999' + applies_provision '§ 17 odst. 2' finds decisions that APPLIED that provision (metadata-based — works without keywords; the citator Czech courts lack). Czech queries. 'queries' searches up to 3 variants IN PARALLEL in one call (Czech inflects — pass stems/synonyms) and merges deduplicated results. Page 1 returns up to 40 hits, later pages 20. Results carry a numeric document_id for nss_get_decision. read_top: N also returns excerpt previews of the N best hits — search + first reading in one call.",
       inputSchema: z.object({
         query: z.string().optional().describe("Czech full-text query."),
         queries: z
@@ -35,6 +35,52 @@ export function registerNss(server: McpServer): void {
         case_number: z.string().optional().describe("Spisová značka / čj., e.g. '1 Afs 25/2024'."),
         date_from: isoDate.optional().describe("Decision date from (ISO)."),
         date_to: isoDate.optional().describe("Decision date to (ISO)."),
+        published_from: isoDate
+          .optional()
+          .describe("Date the decision was published to the web, from (ISO) — monitor what is new."),
+        published_to: isoDate.optional().describe("Publication date to (ISO)."),
+        court: z
+          .enum(["nss", "rozsireny-senat", "krajske", "karne"])
+          .optional()
+          .describe(
+            "nss = NSS (all senates), rozsireny-senat = grand chamber (most authoritative), krajske = regional administrative courts, karne = disciplinary courts.",
+          ),
+        registry: z
+          .string()
+          .optional()
+          .describe(
+            "Docket registry (rejstřík) code — the agenda: 'Afs' tax, 'Azs' asylum, 'Ads' social security, 'As' general administrative, 'Ans' inaction, 'Aps' unlawful interference, 'Ao' measures of general nature, 'Ars' electoral, 'Vol' elections, 'Komp'/'Konf' competence disputes.",
+          ),
+        area: z
+          .string()
+          .optional()
+          .describe(
+            "Subject area (oblast úpravy), Czech substring — e.g. 'daň z přidané hodnoty', 'Pobyt cizinců', 'Právo na informace', 'Stavební zákon'; all matching areas are OR-ed. An invalid value returns the full list.",
+          ),
+        applies_act: z
+          .string()
+          .optional()
+          .describe(
+            "Only decisions applying this Sb. act — 'číslo/rok', e.g. '106/1999' (informace), '150/2002' (s.ř.s.), '280/2009' (daňový řád). Works without keywords.",
+          ),
+        applies_treaty: z
+          .string()
+          .optional()
+          .describe("Only decisions applying this Sb./Sb.m.s. treaty — e.g. '209/1992' (EÚLP)."),
+        applies_eu_regulation: z
+          .string()
+          .optional()
+          .describe("Only decisions applying this EU regulation — '2016/679' (GDPR) or '1049/2001'."),
+        applies_eu_directive: z
+          .string()
+          .optional()
+          .describe("Only decisions applying this EU directive — e.g. '2004/48', '2011/95'."),
+        applies_provision: z.coerce
+          .string()
+          .optional()
+          .describe(
+            "Narrow the applies_* act to one provision: '§ 17 odst. 2 písm. a', 'čl. 8 odst. 2', or compact '17(2)(a)'. Requires one applies_* filter.",
+          ),
         page: z.number().int().min(1).default(1),
         read_top: z
           .number()
@@ -72,7 +118,7 @@ export function registerNss(server: McpServer): void {
       }),
       annotations: READ_ONLY,
     },
-    async ({ query, queries, case_number, date_from, date_to, page, read_top }) => {
+    async ({ query, queries, case_number, date_from, date_to, published_from, published_to, court, registry, area, applies_act, applies_treaty, applies_eu_regulation, applies_eu_directive, applies_provision, page, read_top }) => {
       try {
         const variants = uniqueQueries(query, queries);
         // One upstream request per variant, in parallel; hits merged in
@@ -81,7 +127,22 @@ export function registerNss(server: McpServer): void {
         const results = await Promise.all(
           (variants.length ? variants : [undefined]).map((variant) =>
             searchNss(
-              { query: variant, caseNumber: case_number, dateFrom: date_from, dateTo: date_to },
+              {
+                query: variant,
+                caseNumber: case_number,
+                dateFrom: date_from,
+                dateTo: date_to,
+                publishedFrom: published_from,
+                publishedTo: published_to,
+                court,
+                registry,
+                area,
+                appliesAct: applies_act,
+                appliesTreaty: applies_treaty,
+                appliesEuRegulation: applies_eu_regulation,
+                appliesEuDirective: applies_eu_directive,
+                appliesProvision: applies_provision,
+              },
               page,
             ),
           ),

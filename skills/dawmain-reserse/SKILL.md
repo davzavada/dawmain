@@ -148,7 +148,9 @@ so re-running a search after reading is cheap.
   full-text box speaks Domino operators.
 - **ÚS (NALUS)** — `types: ["nález"]` cuts out the mass of odmítavá usnesení;
   `popular_name` ("Data retention"), `judge`, `ecli`, `case_number` for a known citation.
-- **NSS** — `case_number` for a known čj., dates for a period.
+- **NSS** — its own section below: the search form's dimensions are all exposed,
+  including decisions by applied provision (`applies_act` + `applies_provision`) and
+  the krajské správní soudy the index also covers.
 - **SDEU** — its own section below: the advanced-search dimensions are all exposed,
   including decisions citing a given article and preliminary references by member state.
 - **e-Sbírka** — `match: "phrase"` for a term of art, `all_words` for a combination,
@@ -230,6 +232,39 @@ answer and what you tried.
 
 **One precise expression beats three vague ones** at a court that publishes its case law
 for free. The operators are there so you rarely need the fan-out.
+
+## NSS: pole
+
+`nss_search` exposes the NSS Vyhledávač form field by field. Czech queries; the
+index carries NSS **and krajské správní soudy**.
+
+| Chci | Parametr |
+|---|---|
+| to konkrétní rozhodnutí | `case_number: "1 Afs 25/2024"` |
+| judikaturu k § 17 odst. 2 zák. č. 106/1999 Sb. | `applies_act: "106/1999", applies_provision: "§ 17 odst. 2"` |
+| aplikace EÚLP / GDPR / směrnice | `applies_treaty: "209/1992"` / `applies_eu_regulation: "2016/679"` / `applies_eu_directive: "2004/48"` + `applies_provision: "čl. 8"` |
+| jen rozšířený senát | `court: "rozsireny-senat"` |
+| praxi krajských soudů | `court: "krajske"` |
+| agendu podle rejstříku | `registry: "Afs"` (daně), `"Azs"` (azyl), `"Ads"` (sociální), `"As"` (obecná správní) |
+| věcnou oblast | `area: "daň z přidané hodnoty"` (substring; špatná hodnota vrátí celý seznam) |
+| kdy soud rozhodl | `date_from` / `date_to` |
+| co NSS zveřejnil za poslední týden | `published_from` / `published_to` |
+| text rozhodnutí | `query` |
+
+**`applies_act` + `applies_provision` is the NSS citator** — it filters on the
+provisions the decision *applied* (court-curated metadata, not a full-text match), so
+it works without keywords: `applies_act: "150/2002", applies_provision: "§ 82"` is the
+zásahová judikatura itself. One applies_* family per call — run a second search to
+combine Sb. with an EU act. Cross-check a thin result with the § as a full-text phrase
+(`query: "\"§ 17 odst. 2\""`).
+
+**`court: "rozsireny-senat"`** is where NSS settles its own conflicts — the answer with
+the most weight. And the same index holds the krajské správní soudy: `court: "krajske"`
+gives first-instance practice before the kasační filter, worth naming as such in the
+memo.
+
+**`applies_provision` syntax**: `"§ 17 odst. 2 písm. a"`, `"čl. 8 odst. 2"`, or compact
+`"17(2)(a)"` — a bare number means § for a Sb. act and čl. for treaties and EU acts.
 
 ## SDEU (InfoCuria): pole
 
