@@ -106,6 +106,19 @@ claude mcp add --transport http dawmain https://<deployment>.vercel.app/api/mcp 
 }
 ```
 
+## Skill pro Claude
+
+`skills/dawmain-reserse/SKILL.md` je rešeršní návod pro Claude nad tímto
+konektorem: jak z faktů udělat cílený dotaz (slovník předpisu místo slov
+klienta, tři varianty na jedno volání), které filtry zužují hledání u kterého
+soudu, kdy přestat hledat a jak vypadá výstupní memo. Instrukce serveru
+(`src/mcp/server.ts`) klient cachuje od initialize, skill se dá měnit hned —
+proto v něm žije to, co se ladí často.
+
+Instalace: nahrát adresář jako skill v claude.ai (Nastavení → Capabilities →
+Skills). Skill předpokládá připojený konektor Dawmain; bez něj se má ozvat,
+ne hádat.
+
 ## Výkon a šetrnost ke zdrojům
 
 - Neměnná data se cachují per warm instance: metadata a historie znění
