@@ -1,7 +1,7 @@
 import { SourceError } from "./shared/errors";
 import { fetchUpstream } from "./shared/http";
 import { htmlToText, loadHtml } from "./shared/html";
-import { czechToIso, isoToCzech } from "./shared/text";
+import { czechToIso } from "./shared/text";
 import { DOCUMENT_TTL_MS, SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
 
 /**
@@ -89,7 +89,25 @@ export function sanitizeNsFullText(raw: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
-/** Build the Domino FT query string from tool inputs. Pure — unit-tested. */
+/**
+ * Domino date literal in the form the NS search page itself sends:
+ * zero-padded DD.MM.YYYY (01.06.2025, not 1.6.2025). Pure.
+ */
+function nsDate(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!m) throw new Error(`Not an ISO date: ${iso}`);
+  return `${m[3]}.${m[2]}.${m[1]}`;
+}
+
+/**
+ * Build the Domino FT query string from tool inputs. Pure — unit-tested.
+ *
+ * The shape mirrors what rozhodnuti.nsoud.cz sends for the same search, down
+ * to the padding and the clause order: field conditions first, the full-text
+ * condition last as `([ARozhodnutiRT]=(…))`. That is not cosmetic — a query
+ * this box refuses when we compose it our own way goes through when it is
+ * written the way the form writes it.
+ */
 export function buildNsQuery(input: NsSearchInput): string {
   const clauses: string[] = [];
   if (input.caseNumber) {
@@ -107,19 +125,18 @@ export function buildNsQuery(input: NsSearchInput): string {
       clauses.push(`"${sanitized}"`);
     }
   }
-  if (input.query) {
-    clauses.push(`[ARozhodnutiRT]=((${sanitizeNsFullText(input.query)}))`);
-  }
   if (input.category) clauses.push(`[kategorie_rozhodnuti1]=${input.category.toUpperCase()}`);
   if (input.type) clauses.push(`[TypRozhodnuti]=${input.type}`);
   if (input.court) {
     const sanitized = input.court.replace(/[()[\]"{}\\]/g, " ").replace(/\s+/g, " ").trim();
     clauses.push(`[SoudCreate]="${sanitized}"`);
   }
-  if (input.dateFrom) clauses.push(`[datum_rozhodnuti]>=${isoToCzech(input.dateFrom)}`);
-  if (input.dateTo) clauses.push(`[datum_rozhodnuti]<=${isoToCzech(input.dateTo)}`);
-  if (input.publishedFrom) clauses.push(`[datum_predani_na_web]>=${isoToCzech(input.publishedFrom)}`);
-  if (input.publishedTo) clauses.push(`[datum_predani_na_web]<=${isoToCzech(input.publishedTo)}`);
+  if (input.dateFrom) clauses.push(`[datum_rozhodnuti]>=${nsDate(input.dateFrom)}`);
+  if (input.dateTo) clauses.push(`[datum_rozhodnuti]<=${nsDate(input.dateTo)}`);
+  if (input.publishedFrom) clauses.push(`[datum_predani_na_web]>=${nsDate(input.publishedFrom)}`);
+  if (input.publishedTo) clauses.push(`[datum_predani_na_web]<=${nsDate(input.publishedTo)}`);
+  // Last, exactly as the form writes it.
+  if (input.query) clauses.push(`([ARozhodnutiRT]=(${sanitizeNsFullText(input.query)}))`);
   if (!clauses.length) {
     throw new SourceError(
       SOURCE,

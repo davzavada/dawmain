@@ -31,7 +31,7 @@ describe("buildNsQuery", () => {
   });
   it("quotes the court name for the [SoudCreate] field", () => {
     expect(buildNsQuery({ query: "nájem", court: 'Vrchní soud v Praze"' })).toBe(
-      '[ARozhodnutiRT]=((nájem)) AND [SoudCreate]="Vrchní soud v Praze"',
+      '[SoudCreate]="Vrchní soud v Praze" AND ([ARozhodnutiRT]=(nájem))',
     );
   });
   it("falls back to a phrase for unparsable case numbers", () => {
@@ -46,8 +46,8 @@ describe("buildNsQuery", () => {
         publishedTo: "2026-01-01",
       }),
     ).toBe(
-      "[ARozhodnutiRT]=((nájem)) AND [TypRozhodnuti]=Rozsudek" +
-        " AND [datum_rozhodnuti]>=1.1.2025 AND [datum_predani_na_web]<=1.1.2026",
+      "[TypRozhodnuti]=Rozsudek AND [datum_rozhodnuti]>=01.01.2025" +
+        " AND [datum_predani_na_web]<=01.01.2026 AND ([ARozhodnutiRT]=(nájem))",
     );
   });
 
@@ -59,13 +59,14 @@ describe("buildNsQuery", () => {
     // Exactly two quotes: the ones we put around the sanitized phrase.
     expect(query.match(/"/g)).toHaveLength(2);
     expect(query).not.toContain("[kategorie_rozhodnuti1]");
-    expect(query).toContain("[ARozhodnutiRT]=((smlouva))");
+    expect(query).toContain("([ARozhodnutiRT]=(smlouva))");
   });
   it("wraps full text and appends date bounds in Czech format", () => {
     expect(
       buildNsQuery({ query: "náhrada škody", dateFrom: "2025-02-24", dateTo: "2025-03-01" }),
     ).toBe(
-      "[ARozhodnutiRT]=((náhrada škody)) AND [datum_rozhodnuti]>=24.2.2025 AND [datum_rozhodnuti]<=1.3.2025",
+      "[datum_rozhodnuti]>=24.02.2025 AND [datum_rozhodnuti]<=01.03.2025" +
+        " AND ([ARozhodnutiRT]=(náhrada škody))",
     );
   });
   it("rejects empty criteria", () => {
@@ -73,21 +74,21 @@ describe("buildNsQuery", () => {
   });
   it("keeps the operators a caller may legitimately use", () => {
     expect(buildNsQuery({ query: 'nájem* AND ("dobré mravy" OR ekvita) NOT výpověď' })).toBe(
-      '[ARozhodnutiRT]=((nájem* AND ("dobré mravy" OR ekvita) NOT výpověď))',
+      '([ARozhodnutiRT]=(nájem* AND ("dobré mravy" OR ekvita) NOT výpověď))',
     );
   });
   it("strips braces, and delimiters left unbalanced", () => {
     expect(buildNsQuery({ query: 'pojem "dobré mravy {test}' })).toBe(
-      "[ARozhodnutiRT]=((pojem dobré mravy test))",
+      "([ARozhodnutiRT]=(pojem dobré mravy test))",
     );
     expect(buildNsQuery({ query: "nájem AND (výpověď" })).toBe(
-      "[ARozhodnutiRT]=((nájem AND výpověď))",
+      "([ARozhodnutiRT]=(nájem AND výpověď))",
     );
   });
   it("never lets a query name a Domino field", () => {
     const query = buildNsQuery({ query: "x)) OR [kategorie_rozhodnuti1]=A OR ((y" });
     expect(query).not.toContain("[kategorie_rozhodnuti1]");
-    expect(query).toBe("[ARozhodnutiRT]=((x OR kategorie_rozhodnuti1 =A OR y))");
+    expect(query).toBe("([ARozhodnutiRT]=(x OR kategorie_rozhodnuti1 =A OR y))");
   });
 });
 
