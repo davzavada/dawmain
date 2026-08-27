@@ -10,7 +10,7 @@ Uživatelský popis je v [README](../README.md).
 | `esbirka_search` | e-Sbírka | fulltext v Sbírce zákonů |
 | `esbirka_get_act` | e-Sbírka | metadata a historie znění předpisu |
 | `esbirka_get_text` | e-Sbírka | konsolidovaný text k datu — celý předpis, nebo jeden § |
-| `ns_search` / `ns_get_decision` | rozhodnuti.nsoud.cz | judikatura Nejvyššího soudu |
+| `ns_search` / `ns_get_decision` | rozhodnuti.nsoud.cz | judikatura NS: fulltext s Domino operátory (AND/OR/NOT, fráze, `nájem*`, NEAR/SENTENCE/PARAGRAPH), přesná sp. zn. (`[spzn1]`–`[spzn4]`), typ rozhodnutí, kategorie A–E, datum rozhodnutí i datum předání na web |
 | `nss_search` / `nss_get_decision` | vyhledavac.nssoud.cz | judikatura NSS |
 | `nalus_search` / `nalus_get_decision` | nalus.usoud.cz | judikatura Ústavního soudu |
 | `cz_caselaw_search` | NSS + NS + ÚS | jeden dotaz paralelně přes tři vrcholné soudy |
@@ -21,7 +21,9 @@ Uživatelský popis je v [README](../README.md).
 | `dawmain_probe_sources` | — | diagnostika všech upstreamů z nasazené funkce; `include_raw` pro záchyt fixtures, `discover` pro hledání neověřených endpointů |
 
 Známá omezení (přiznaná i v popisech nástrojů): NS adresuje jen prvních 900
-výsledků dotazu (zužuj datem); justice.cz umí jen výpis po dnech.
+výsledků dotazu (zužuj dotazem, ne stránkováním); justice.cz umí jen výpis po dnech.
+Odkazy na rozhodnutí NS nesou `&Highlight=0,<termy>`, takže se dokument otevře
+rovnou na hledaném místě.
 **EUIPO** (eSearchCLW i Guidelines) je záměrně nedostupné: právní doložky EUIPO
 si výslovně vyhrazují zákaz TDM a scrapingu „jakýmikoli prostředky, včetně
 botů" mimo vědecký výzkum, takže nástroje nejsou registrované a probe na EUIPO

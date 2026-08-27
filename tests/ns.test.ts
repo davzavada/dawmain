@@ -4,6 +4,9 @@ import path from "node:path";
 import {
   buildNsQuery,
   isoDaysAgo,
+  parseSpisovaZnacka,
+  sanitizeNsFullText,
+  withHighlight,
   nsBodyMissing,
   parseNsDecision,
   parseNsSearch,
@@ -13,13 +16,34 @@ import {
 import { SourceError } from "@/src/sources/shared/errors";
 
 describe("buildNsQuery", () => {
-  it("splits a case number into senate + registry + phrase", () => {
-    expect(buildNsQuery({ caseNumber: "23 Cdo 1234/2025" })).toBe(
-      '[spzn1]=23 AND [spzn2]=cdo AND "1234/2025"',
+  it("splits a case number into the four indexed fields", () => {
+    expect(buildNsQuery({ caseNumber: "23 Cdo 116/2017" })).toBe(
+      "[spzn1]=23 AND [spzn2]=cdo AND [spzn3]=116 AND [spzn4]=2017",
+    );
+  });
+  it("handles a značka without a senate, and ignores trailing decorations", () => {
+    expect(buildNsQuery({ caseNumber: "Cpjn 202/2018" })).toBe(
+      "[spzn2]=cpjn AND [spzn3]=202 AND [spzn4]=2018",
+    );
+    expect(buildNsQuery({ caseNumber: "26 Cdo 2316/2020- II." })).toBe(
+      "[spzn1]=26 AND [spzn2]=cdo AND [spzn3]=2316 AND [spzn4]=2020",
     );
   });
   it("falls back to a phrase for unparsable case numbers", () => {
     expect(buildNsQuery({ caseNumber: "Pl. ÚS-st 1/93" })).toBe('"Pl. ÚS-st 1/93"');
+  });
+  it("filters by type and by decision date, publication date separately", () => {
+    expect(
+      buildNsQuery({
+        query: "nájem",
+        type: "Rozsudek",
+        dateFrom: "2025-01-01",
+        publishedTo: "2026-01-01",
+      }),
+    ).toBe(
+      "[ARozhodnutiRT]=((nájem)) AND [TypRozhodnuti]=Rozsudek" +
+        " AND [datum_rozhodnuti]>=1.1.2025 AND [datum_predani_na_web]<=1.1.2026",
+    );
   });
 
   it("sanitizes the fallback phrase — no breaking out into Domino operators", () => {
@@ -36,16 +60,58 @@ describe("buildNsQuery", () => {
     expect(
       buildNsQuery({ query: "náhrada škody", dateFrom: "2025-02-24", dateTo: "2025-03-01" }),
     ).toBe(
-      "[ARozhodnutiRT]=((náhrada škody)) AND [datum_predani_na_web]>=24.2.2025 AND [datum_predani_na_web]<=1.3.2025",
+      "[ARozhodnutiRT]=((náhrada škody)) AND [datum_rozhodnuti]>=24.2.2025 AND [datum_rozhodnuti]<=1.3.2025",
     );
   });
   it("rejects empty criteria", () => {
     expect(() => buildNsQuery({})).toThrowError(SourceError);
   });
-  it("strips quotes and braces that break Domino FT syntax", () => {
-    expect(buildNsQuery({ query: 'pojem "dobré mravy" {test}' })).toBe(
+  it("keeps the operators a caller may legitimately use", () => {
+    expect(buildNsQuery({ query: 'nájem* AND ("dobré mravy" OR ekvita) NOT výpověď' })).toBe(
+      '[ARozhodnutiRT]=((nájem* AND ("dobré mravy" OR ekvita) NOT výpověď))',
+    );
+  });
+  it("strips braces, and delimiters left unbalanced", () => {
+    expect(buildNsQuery({ query: 'pojem "dobré mravy {test}' })).toBe(
       "[ARozhodnutiRT]=((pojem dobré mravy test))",
     );
+    expect(buildNsQuery({ query: "nájem AND (výpověď" })).toBe(
+      "[ARozhodnutiRT]=((nájem AND výpověď))",
+    );
+  });
+  it("never lets a query name a Domino field", () => {
+    const query = buildNsQuery({ query: "x)) OR [kategorie_rozhodnuti1]=A OR ((y" });
+    expect(query).not.toContain("[kategorie_rozhodnuti1]");
+    expect(query).toBe("[ARozhodnutiRT]=((x OR kategorie_rozhodnuti1 =A OR y))");
+  });
+});
+
+describe("parseSpisovaZnacka", () => {
+  it("returns null for a string that is not a značka", () => {
+    expect(parseSpisovaZnacka("náhrada škody")).toBeNull();
+    expect(parseSpisovaZnacka("116/2017")).toBeNull();
+  });
+});
+
+describe("sanitizeNsFullText", () => {
+  it("collapses whitespace and keeps balanced quotes", () => {
+    expect(sanitizeNsFullText('  "dobré   mravy"  ')).toBe('"dobré mravy"');
+  });
+});
+
+describe("withHighlight", () => {
+  const url = "https://rozhodnuti.nsoud.cz/Judikatura/judikatura_ns.nsf/WebSearch/ABC?openDocument";
+
+  it("appends the query terms so the document opens at the passage", () => {
+    expect(withHighlight(url, ["dobré mravy"])).toBe(`${url}&Highlight=0,dobr%C3%A9,mravy`);
+  });
+  it("drops operators, short words and duplicates", () => {
+    expect(withHighlight(url, ["nájem AND nájem", "a NEAR výpověď"])).toBe(
+      `${url}&Highlight=0,n%C3%A1jem,v%C3%BDpov%C4%9B%C4%8F`,
+    );
+  });
+  it("leaves the url alone when there is nothing to highlight", () => {
+    expect(withHighlight(url, [undefined, "a"])).toBe(url);
   });
 });
 

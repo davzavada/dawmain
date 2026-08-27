@@ -29,33 +29,87 @@ export interface NsSearchInput {
   query?: string;
   caseNumber?: string;
   category?: string; // kategorie rozhodnutí A–E
-  dateFrom?: string; // ISO
-  dateTo?: string; // ISO
+  /** [TypRozhodnuti]: "Rozsudek" | "Usnesení" | "Stanovisko". */
+  type?: string;
+  dateFrom?: string; // ISO — [datum_rozhodnuti]
+  dateTo?: string; // ISO — [datum_rozhodnuti]
+  publishedFrom?: string; // ISO — [datum_predani_na_web]
+  publishedTo?: string; // ISO — [datum_predani_na_web]
+}
+
+export interface SpisovaZnacka {
+  /** Senát — absent in marks that carry none (Cpjn, Tpjn…). */
+  senate: string | null;
+  /** Rejstříková značka, lowercased for the [spzn2] field. */
+  mark: string;
+  number: string;
+  year: string;
+}
+
+/**
+ * Split "23 Cdo 116/2017" into the four fields Domino indexes separately.
+ * Trailing decorations ("- II.", "-1") are ignored: they are not part of the
+ * indexed značka. Pure — unit-tested.
+ */
+export function parseSpisovaZnacka(raw: string): SpisovaZnacka | null {
+  const m = /^\s*(?:(\d{1,3})\s+)?(\p{L}+)\s+(\d+)\s*\/\s*(\d{4})/u.exec(raw);
+  if (!m) return null;
+  return { senate: m[1] ?? null, mark: m[2].toLowerCase(), number: m[3], year: m[4] };
+}
+
+/** Balanced-delimiter check for the FT sanitizer. Pure. */
+function balancedParens(text: string): boolean {
+  let depth = 0;
+  for (const char of text) {
+    if (char === "(") depth += 1;
+    else if (char === ")" && --depth < 0) return false;
+  }
+  return depth === 0;
+}
+
+/**
+ * Keep the Domino full-text operators the caller may legitimately use —
+ * AND/OR/NOT, "exact phrases", (grouping), wildcards, proximity — while
+ * removing what would break out of the `[ARozhodnutiRT]=((…))` wrapper.
+ * Square brackets and braces go unconditionally: they are how Domino names
+ * fields, and a caller who could write them would own the whole query.
+ * Unbalanced quotes or parentheses are dropped rather than passed on —
+ * Domino answers those with a syntax error, not with results. Pure.
+ */
+export function sanitizeNsFullText(raw: string): string {
+  let text = raw.replace(/[[\]{}\\]/g, " ");
+  if ((text.match(/"/g)?.length ?? 0) % 2 === 1) text = text.replace(/"/g, " ");
+  if (!balancedParens(text)) text = text.replace(/[()]/g, " ");
+  return text.replace(/\s+/g, " ").trim();
 }
 
 /** Build the Domino FT query string from tool inputs. Pure — unit-tested. */
 export function buildNsQuery(input: NsSearchInput): string {
   const clauses: string[] = [];
   if (input.caseNumber) {
-    // "23 Cdo 1234/2025" → senate + registry fields + FT phrase for the rest.
-    const m = /^(\d{1,3})\s+([A-Za-zČř]+)\s+(\d+\/\d{4})$/u.exec(input.caseNumber.trim());
-    if (m) {
-      clauses.push(`[spzn1]=${m[1]}`, `[spzn2]=${m[2].toLowerCase()}`, `"${m[3]}"`);
+    // Domino indexes the značka in four fields. Matching them exactly is what
+    // separates "this decision" from "every decision that CITES it" — the
+    // phrase form used to return both.
+    const sz = parseSpisovaZnacka(input.caseNumber);
+    if (sz) {
+      if (sz.senate) clauses.push(`[spzn1]=${sz.senate}`);
+      clauses.push(`[spzn2]=${sz.mark}`, `[spzn3]=${sz.number}`, `[spzn4]=${sz.year}`);
     } else {
-      // Same sanitizer as the full-text path: an unescaped quote here would
-      // close the phrase and hand the caller Domino field selectors.
+      // Not a značka we can split — fall back to a phrase, with quotes and
+      // grouping stripped so the caller cannot close it and inject selectors.
       const sanitized = input.caseNumber.replace(/[()[\]"{}\\]/g, " ").replace(/\s+/g, " ").trim();
       clauses.push(`"${sanitized}"`);
     }
   }
   if (input.query) {
-    // Unbalanced quotes/braces break Domino FT syntax outright.
-    const sanitized = input.query.replace(/[()[\]"{}\\]/g, " ").replace(/\s+/g, " ").trim();
-    clauses.push(`[ARozhodnutiRT]=((${sanitized}))`);
+    clauses.push(`[ARozhodnutiRT]=((${sanitizeNsFullText(input.query)}))`);
   }
   if (input.category) clauses.push(`[kategorie_rozhodnuti1]=${input.category.toUpperCase()}`);
-  if (input.dateFrom) clauses.push(`[datum_predani_na_web]>=${isoToCzech(input.dateFrom)}`);
-  if (input.dateTo) clauses.push(`[datum_predani_na_web]<=${isoToCzech(input.dateTo)}`);
+  if (input.type) clauses.push(`[TypRozhodnuti]=${input.type}`);
+  if (input.dateFrom) clauses.push(`[datum_rozhodnuti]>=${isoToCzech(input.dateFrom)}`);
+  if (input.dateTo) clauses.push(`[datum_rozhodnuti]<=${isoToCzech(input.dateTo)}`);
+  if (input.publishedFrom) clauses.push(`[datum_predani_na_web]>=${isoToCzech(input.publishedFrom)}`);
+  if (input.publishedTo) clauses.push(`[datum_predani_na_web]<=${isoToCzech(input.publishedTo)}`);
   if (!clauses.length) {
     throw new SourceError(
       SOURCE,
@@ -81,7 +135,9 @@ export function withDefaultWindow(
   days: number,
   now = Date.now(),
 ): { input: NsSearchInput; appliedWindowFrom: string | null } {
-  if (input.dateFrom || input.dateTo) return { input, appliedWindowFrom: null };
+  if (input.dateFrom || input.dateTo || input.publishedFrom || input.publishedTo) {
+    return { input, appliedWindowFrom: null };
+  }
   const from = isoDaysAgo(days, now);
   return { input: { ...input, dateFrom: from }, appliedWindowFrom: from };
 }
@@ -90,6 +146,37 @@ export interface NsSearchHit {
   unid: string;
   caseNumbers: string[];
   url: string;
+}
+
+/** Domino FT operators — never worth highlighting. */
+const FT_OPERATORS = new Set([
+  "AND",
+  "OR",
+  "NOT",
+  "NEAR",
+  "SENTENCE",
+  "PARAGRAPH",
+  "ACCRUE",
+  "EXACTCASE",
+  "TERMWEIGHT",
+]);
+
+/**
+ * Domino highlights the query terms inside a document when the link carries
+ * `Highlight=0,<term>,<term>` — the reader lands on the passage instead of
+ * page one of a 40-page rozsudek. Terms only, no operators; Domino ignores
+ * what it cannot match. Pure — unit-tested.
+ */
+export function withHighlight(url: string, queries: Array<string | undefined>): string {
+  const words: string[] = [];
+  for (const query of queries) {
+    for (const word of (query ?? "").split(/[^\p{L}\p{N}*]+/u)) {
+      if (word.length < 3 || FT_OPERATORS.has(word.toUpperCase())) continue;
+      if (!words.includes(word)) words.push(word);
+    }
+  }
+  if (!words.length) return url;
+  return `${url}&Highlight=0,${words.slice(0, 8).map(encodeURIComponent).join(",")}`;
 }
 
 export interface NsSearchPage {
@@ -292,7 +379,12 @@ async function runNsSearch(input: NsSearchInput, start: number, count: number): 
     headers: { referer: "https://rozhodnuti.nsoud.cz/" },
     retry: false,
   });
-  return parseNsSearch(await response.text());
+  const page = parseNsSearch(await response.text());
+  if (!input.query) return page;
+  return {
+    ...page,
+    hits: page.hits.map((hit) => ({ ...hit, url: withHighlight(hit.url, [input.query]) })),
+  };
 }
 
 export interface NsSearchResult extends NsSearchPage {
@@ -322,7 +414,7 @@ async function runSearchNsWindowed(
   // the 500-guard window exists for unbounded FULL-TEXT queries. A sp. zn.
   // matches a handful of documents and must find them in ANY year (live
   // case: "23 Cdo 3375/2011" found nothing inside the 12-month window).
-  if (input.dateFrom || input.dateTo || input.caseNumber) {
+  if (input.dateFrom || input.dateTo || input.publishedFrom || input.publishedTo || input.caseNumber) {
     try {
       return { ...(await runNsSearch(input, start, count)), appliedWindowFrom: null };
     } catch (error) {

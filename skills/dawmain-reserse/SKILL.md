@@ -51,9 +51,13 @@ ECLI, § number or URL you did not read out of a tool response in this session. 
 fabricated case number is worse than an admitted gap, and a link you assembled
 yourself will 404 in front of the reader.
 
-**Keep the link with the decision as you go.** Hits carry a `url` pointing at the
-decision text — record it the moment it appears. Going back for links after the memo
-is written is how they get invented.
+**Link the document, cite the paragraph.** Hits carry a `url` that opens the decision
+itself — record it the moment it appears (going back for links after the memo is
+written is how they get invented). Never cite a search URL or a database homepage: the
+reader must land on the text. Then point at the passage you actually rely on — Czech
+supreme-court decisions number their paragraphs, so cite the bod (…, bod 24); where a
+decision has no numbering, quote the sentence in a blockquote instead. NS links come
+back with the search terms highlighted, so the reader opens at the passage.
 
 **Say what you did not find.** Thin case law, only lower courts, nothing after a
 statutory change — write that. A memo that admits there is no NS precedent beats one
@@ -140,12 +144,8 @@ so re-running a search after reading is cheap.
 
 ## Filters that narrow a search to what matters
 
-- **NS** — `category: "A"` = judikatura published in the Sbírka; it is a hard filter,
-  so if it empties an otherwise good result set, drop it (most decisions are not in the
-  Sbírka). `case_number` runs unwindowed across all years, while full text without dates
-  is auto-limited to the last 12 months — say so when it applies. `date_from` /
-  `date_to` also narrow NS's 900-result window, and NS answers HTTP 500 on windows that
-  are too wide: that is a signal to narrow the window, not a broken tool.
+- **NS** — its own section below: the search form's fields are all exposed, and the
+  full-text box speaks Domino operators.
 - **ÚS (NALUS)** — `types: ["nález"]` cuts out the mass of odmítavá usnesení;
   `popular_name` ("Data retention"), `judge`, `ecli`, `case_number` for a known citation.
 - **NSS** — `case_number` for a known čj., dates for a period.
@@ -161,6 +161,50 @@ so re-running a search after reading is cheap.
   this source cannot be searched by content.
 - **EU legislation** — `eurlex_search` matches titles and identifiers only; for the
   text of judgments use `curia_search`.
+
+## Nejvyšší soud: pole a operátory
+
+The NS box is a Domino full-text index and `ns_search` exposes its fields directly.
+Using them is the difference between 900 hits and five.
+
+| Chci | Parametr | Pole |
+|---|---|---|
+| to konkrétní rozhodnutí | `case_number: "23 Cdo 116/2017"` | `[spzn1]`–`[spzn4]` |
+| rozhodnutí, která ho citují | `query: "23 Cdo 116/2017"` | `[ARozhodnutiRT]` |
+| kdy soud rozhodl | `date_from` / `date_to` | `[datum_rozhodnuti]` |
+| co NS zveřejnil za poslední týden | `published_from` / `published_to` | `[datum_predani_na_web]` |
+| meritorní vs. procesní | `type: "rozsudek"` / `"usnesení"` | `[TypRozhodnuti]` |
+| judikatura ze Sbírky | `category: "A"` | `[kategorie_rozhodnuti1]` |
+| text rozhodnutí | `query` | `[ARozhodnutiRT]` |
+
+**`case_number` is exact** — it returns that decision, not the ones citing it. For the
+citing line, put the značka in `query`.
+
+**`type: "usnesení"` is mostly procedural** (odmítnutí dovolání); `"rozsudek"` is where
+the merits are. Filter to rozsudek when you want the holding, not the procedure.
+
+**`category: "A"` is a hard filter** — decisions selected for the Sbírka. If it empties
+an otherwise good result set, drop it: most decisions are not in the Sbírka.
+
+**Operators inside `query`** — the same Domino syntax the NS form uses:
+
+- `AND`, `OR`, `NOT` — `nájem AND výpověď NOT podnájem`
+- `"přesná fráze"` — `"zvlášť závažné porušení"`
+- `(závorky)` for grouping — `("dobré mravy" OR ekvita) AND nájem`
+- wildcards — `nájem*` catches nájemce, nájemné, nájemní; `?` stands for one character
+- proximity — `A NEAR B`, `A SENTENCE B`, `A PARAGRAPH B`. The sharpest instrument the
+  index has: two ordinary words required to meet in one sentence beat one rare word.
+- `TERMWEIGHT 80 term` pushes documents with that term up the list.
+
+If a proximity or weighting expression comes back empty where the plain `AND` version
+returns hits, the box did not take the operator — fall back, don't fight it. Field
+selectors (`[pole]=hodnota`) do not belong in `query`: the parameters above build them,
+and anything in square brackets is stripped.
+
+**The 900-document ceiling.** Any query addresses at most its first 900 documents;
+`matched` tells you how many really match. Paging deeper is not the fix — a narrower
+query is: add `type`, `category`, a date window, or a proximity operator. A window that
+is too wide answers HTTP 500; that is capacity, not a bug, so narrow it and go on.
 
 ## Screening and reading
 
