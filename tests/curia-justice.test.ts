@@ -129,6 +129,33 @@ describe("buildCuriaBody", () => {
       "2099-12-31",
     ]);
   });
+
+  it("moves the criteria into the filters once any constraint is active", () => {
+    // Next to advanced filters the backend silently ignores searchTerm
+    // (verified live: "Telia Finland" + a 2023 window returned the whole
+    // 2023 slice) — so the criteria must travel as filters, like the form.
+    const body = buildCuriaBody(
+      { parties: "Telia Finland", dateFrom: "2023-01-01", dateTo: "2023-12-31" },
+      0,
+      10,
+    ) as Record<string, unknown> & { advancedFiltersValue: Array<{ field: string; values: string[] }> };
+    expect(body.searchTerm).toBe("");
+    expect(body.usualName).toBe("");
+    expect(body.isSearchExact).toBe(true);
+    expect(body.advancedFiltersValue[0]).toEqual({
+      field: "affair",
+      values: ["Telia Finland"],
+      valuesWithFullHierarchy: ["Telia Finland"],
+    });
+    expect(body.advancedFiltersValue.some((f) => f.field === "docDate")).toBe(true);
+
+    const withQuery = buildCuriaBody({ query: "dobré mravy", docType: "judgment" }, 0, 10) as {
+      advancedFiltersValue: Array<{ field: string }>;
+      searchTerm: string;
+    };
+    expect(withQuery.searchTerm).toBe("");
+    expect(withQuery.advancedFiltersValue[0].field).toBe("text");
+  });
 });
 
 describe("buildCitationsMotif", () => {

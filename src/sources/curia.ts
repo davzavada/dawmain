@@ -149,35 +149,58 @@ export function buildCuriaBody(input: CuriaSearchInput, page: number, pageSize: 
   // (getAdvacedFiltersWithoutSuffix — both read from the app bundle). A
   // single "from,to" docDate value is what made the backend answer HTTP 500;
   // the captured payload sends two values.
-  const advancedFiltersValue: Array<Record<string, unknown>> = [];
-  const advanced = (field: string, values: string[], isMatchAll?: boolean) =>
-    advancedFiltersValue.push({
-      field,
-      values,
-      valuesWithFullHierarchy: values,
-      ...(isMatchAll === undefined ? {} : { isMatchAll }),
-    });
+  const filterEntry = (field: string, values: string[], isMatchAll?: boolean) => ({
+    field,
+    values,
+    valuesWithFullHierarchy: values,
+    ...(isMatchAll === undefined ? {} : { isMatchAll }),
+  });
+  const constraints: Array<Record<string, unknown>> = [];
   if (input.docType && input.docType !== "any") {
     const kind = CURIA_DOC_TYPES[input.docType];
-    if (kind) advanced("typeDoc", kind.typeDoc);
+    if (kind) constraints.push(filterEntry("typeDoc", kind.typeDoc));
   }
   if (input.referredFrom?.length) {
-    advanced(
-      "oqp",
-      input.referredFrom.map((code) => `NAT_${code.toUpperCase()}`),
+    constraints.push(
+      filterEntry(
+        "oqp",
+        input.referredFrom.map((code) => `NAT_${code.toUpperCase()}`),
+      ),
     );
   }
   if (input.citesCelex) {
     // isMatchAll mirrors the form's "match all citations" (vs "any") choice.
-    advanced("citationsMotif", [buildCitationsMotif(input.citesCelex, input.citesArticle)], true);
+    constraints.push(
+      filterEntry("citationsMotif", [buildCitationsMotif(input.citesCelex, input.citesArticle)], true),
+    );
   }
   if (input.dateFrom || input.dateTo) {
-    advanced("docDate", [input.dateFrom ?? "1952-01-01", input.dateTo ?? "2099-12-31"]);
+    constraints.push(
+      filterEntry("docDate", [input.dateFrom ?? "1952-01-01", input.dateTo ?? "2099-12-31"]),
+    );
   }
-  // The backend ignores usualName without a searchTerm — party names go
-  // through full text too (verified live: found C-201/22 for "Telia Finland").
-  const searchTerm =
-    input.query ?? (input.caseNumber ? `"${input.caseNumber}"` : (input.parties ?? ""));
+
+  // The backend runs EITHER a searchTerm search OR an advanced-filters
+  // search: with advancedFiltersValue non-empty it silently IGNORES
+  // searchTerm (verified live — "Telia Finland" + a 2023 date window
+  // returned the whole 2023 slice, byte-identical to any other text). The
+  // form therefore moves the criteria into the filters too — text, affair
+  // (number or name of the case), eCli — and leaves searchTerm and the
+  // top-level identifier keys empty; so do we whenever a constraint is on.
+  const useAdvanced = constraints.length > 0;
+  const criteria: Array<Record<string, unknown>> = [];
+  if (useAdvanced) {
+    if (input.query) criteria.push(filterEntry("text", [input.query]));
+    if (input.caseNumber) criteria.push(filterEntry("affair", [input.caseNumber]));
+    else if (input.parties) criteria.push(filterEntry("affair", [input.parties]));
+    if (input.ecli) criteria.push(filterEntry("eCli", [input.ecli]));
+  }
+  // Without constraints, party names go through full text — the backend
+  // ignores usualName without a searchTerm (verified live: found C-201/22
+  // for "Telia Finland").
+  const searchTerm = useAdvanced
+    ? ""
+    : (input.query ?? (input.caseNumber ? `"${input.caseNumber}"` : (input.parties ?? "")));
   return {
     searchTerm,
     multiSearchTerms: [],
@@ -199,14 +222,15 @@ export function buildCuriaBody(input: CuriaSearchInput, page: number, pageSize: 
     language: (input.language ?? "EN").toUpperCase(),
     tabName: "affair",
     isAllTabsRequest: false,
-    ecli: input.ecli ?? "",
-    publishedId: input.caseNumber ?? "",
-    usualName: input.parties ?? "",
+    ecli: useAdvanced ? "" : (input.ecli ?? ""),
+    publishedId: useAdvanced ? "" : (input.caseNumber ?? ""),
+    usualName: useAdvanced ? "" : (input.parties ?? ""),
     logicDocId: "",
     repJurExpand: true,
     filtersValue,
-    advancedFiltersValue,
-    isSearchExact: !input.query,
+    advancedFiltersValue: [...criteria, ...constraints],
+    // The captured advanced-search payload sends isSearchExact: true.
+    isSearchExact: useAdvanced ? true : !input.query,
     searchSources: ["document", "metadata"],
   };
 }
