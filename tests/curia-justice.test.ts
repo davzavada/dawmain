@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildCitationsMotif,
   buildCuriaBody,
   caseNumberToCelex,
   parseCuriaSearch,
@@ -74,15 +75,15 @@ describe("buildCuriaBody", () => {
     expect((body.pagination as { from: number; to: number }).from).toBe(1);
   });
 
-  it("sends doc_type as the form's typeDoc codes in advancedFiltersValue", () => {
+  it("builds advanced filters the way the SPA's createFilterWs does", () => {
     const body = buildCuriaBody({ query: "x", docType: "judgment" }, 0, 10) as {
       advancedFiltersValue: unknown[];
     };
+    // valuesWithFullHierarchy mirrors values; isMatchAll only when meaningful.
     expect(body.advancedFiltersValue).toContainEqual({
       field: "typeDoc",
       values: ["ARRET", "INF", "ARRET_EXT"],
-      valuesWithFullHierarchy: [],
-      isMatchAll: false,
+      valuesWithFullHierarchy: ["ARRET", "INF", "ARRET_EXT"],
     });
     const any = buildCuriaBody({ query: "x", docType: "any" }, 0, 10) as {
       advancedFiltersValue: unknown[];
@@ -90,21 +91,53 @@ describe("buildCuriaBody", () => {
     expect(any.advancedFiltersValue).toHaveLength(0);
   });
 
-  it("maps referring states to NAT_ codes; dates never go upstream", () => {
+  it("maps referring states, cited law and dates to their advanced filters", () => {
     const body = buildCuriaBody(
-      { referredFrom: ["CZ", "sk"], dateFrom: "2021-01-01", dateTo: "2025-01-01" },
+      {
+        referredFrom: ["CZ", "sk"],
+        citesCelex: "32004L0048",
+        citesArticle: "1",
+        dateFrom: "2021-01-01",
+        dateTo: "2025-01-01",
+      },
       0,
       10,
     ) as { advancedFiltersValue: Array<{ field: string; values: string[] }> };
     expect(body.advancedFiltersValue).toContainEqual({
       field: "oqp",
       values: ["NAT_CZ", "NAT_SK"],
-      valuesWithFullHierarchy: [],
-      isMatchAll: false,
+      valuesWithFullHierarchy: ["NAT_CZ", "NAT_SK"],
     });
-    // A docDate advanced filter made the backend answer HTTP 500 — dates
-    // must stay client-side.
-    expect(body.advancedFiltersValue.some((f) => f.field === "docDate")).toBe(false);
+    expect(body.advancedFiltersValue).toContainEqual({
+      field: "citationsMotif",
+      values: ["32004L0048*A01*"],
+      valuesWithFullHierarchy: ["32004L0048*A01*"],
+      isMatchAll: true,
+    });
+    // Two separate values, hierarchy mirrored, no isMatchAll — the captured
+    // payload; the earlier "from,to" single value drew HTTP 500.
+    expect(body.advancedFiltersValue).toContainEqual({
+      field: "docDate",
+      values: ["2021-01-01", "2025-01-01"],
+      valuesWithFullHierarchy: ["2021-01-01", "2025-01-01"],
+    });
+    const half = buildCuriaBody({ query: "x", dateFrom: "2023-06-01" }, 0, 10) as {
+      advancedFiltersValue: Array<{ field: string; values: string[] }>;
+    };
+    expect(half.advancedFiltersValue.find((f) => f.field === "docDate")?.values).toEqual([
+      "2023-06-01",
+      "2099-12-31",
+    ]);
+  });
+});
+
+describe("buildCitationsMotif", () => {
+  it("encodes CELEX + article the way the form's URL does", () => {
+    expect(buildCitationsMotif("32004L0048", "1")).toBe("32004L0048*A01*");
+    expect(buildCitationsMotif("32016R0679", "17")).toBe("32016R0679*A17*");
+    expect(buildCitationsMotif("32016R0679", "17(2)")).toBe("32016R0679*A17P2*");
+    expect(buildCitationsMotif("32016r0679", "a17p2")).toBe("32016R0679*A17P2*");
+    expect(buildCitationsMotif("32004L0048")).toBe("32004L0048*");
   });
 });
 

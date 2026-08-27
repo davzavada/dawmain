@@ -60,7 +60,11 @@ export interface CuriaSearchInput {
   docType?: "judgment" | "opinion" | "avis" | "order" | "request" | "any";
   /** Member states whose courts referred the preliminary question ("CZ", "SK"…). */
   referredFrom?: string[];
-  dateFrom?: string; // ISO, client-side on docDate
+  /** CELEX of an act the decision must cite in its grounds (e.g. "32004L0048"). */
+  citesCelex?: string;
+  /** Narrows citesCelex to one article ("1", "17", "17(2)"). */
+  citesArticle?: string;
+  dateFrom?: string; // ISO, docDate (server-side + client-side guard)
   dateTo?: string; // ISO
   sort?: "relevance" | "date";
   language?: string;
@@ -81,13 +85,18 @@ export const CURIA_DOC_TYPES: Record<string, { typeDoc: string[]; prefixes: stri
   request: { typeDoc: ["DDP"], prefixes: ["DDP"] },
 };
 
-// A citations filter (UI citationsMotif_a, "32004L0048*A01*") is NOT wired:
-// sent as top-level body keys the backend ignores it — the total stays the
-// whole database (59 163, verified live). Until the SPA's real payload is
-// captured, the honest route to "case law on act X" is the act's number as a
-// full-text phrase. An allLang key is equally pointless: the text search
-// already matches every language version (a Czech phrase scored 114 cases
-// with language "en", identical with and without the flag).
+/** "32004L0048" + "1" → "32004L0048*A01*" — one value of the citationsMotif
+ * filter, exactly as the SPA unpacks its citationsMotif_a URL parameter
+ * (decode, split on commas). Pure — unit-tested. */
+export function buildCitationsMotif(celex: string, article?: string): string {
+  const act = celex.trim().toUpperCase();
+  const raw = article?.trim().toUpperCase().replace(/\s+/g, "");
+  if (!raw) return `${act}*`;
+  // "1" → A01; "17(2)" → A17P2; an already-encoded "A17P2" passes through.
+  const m = /^(\d+)(?:\((\d+)\))?$/.exec(raw);
+  const code = m ? `A${m[1].padStart(2, "0")}${m[2] ? `P${m[2]}` : ""}` : raw.startsWith("A") ? raw : `A${raw}`;
+  return `${act}*${code}*`;
+}
 
 export interface CuriaHit {
   logicDocId?: string;
@@ -134,13 +143,20 @@ export function buildCuriaBody(input: CuriaSearchInput, page: number, pageSize: 
       valuesWithFullHierarchy: ["ENC"],
     });
   }
-  // Advanced-search filters. Both are verified live in this entry shape:
-  // typeDoc left "hidden by filters" at zero, oqp NAT_CZ matched exactly the
-  // 143 Czech references. A docDate entry is deliberately absent — it made
-  // the backend answer HTTP 500, so dates filter client-side only.
+  // Advanced-search filters, built exactly like the SPA's createFilterWs:
+  // {field, values, valuesWithFullHierarchy: values, isMatchAll?} with the
+  // field names stripped of their _a suffix on the wire
+  // (getAdvacedFiltersWithoutSuffix — both read from the app bundle). A
+  // single "from,to" docDate value is what made the backend answer HTTP 500;
+  // the captured payload sends two values.
   const advancedFiltersValue: Array<Record<string, unknown>> = [];
-  const advanced = (field: string, values: string[]) =>
-    advancedFiltersValue.push({ field, values, valuesWithFullHierarchy: [], isMatchAll: false });
+  const advanced = (field: string, values: string[], isMatchAll?: boolean) =>
+    advancedFiltersValue.push({
+      field,
+      values,
+      valuesWithFullHierarchy: values,
+      ...(isMatchAll === undefined ? {} : { isMatchAll }),
+    });
   if (input.docType && input.docType !== "any") {
     const kind = CURIA_DOC_TYPES[input.docType];
     if (kind) advanced("typeDoc", kind.typeDoc);
@@ -150,6 +166,13 @@ export function buildCuriaBody(input: CuriaSearchInput, page: number, pageSize: 
       "oqp",
       input.referredFrom.map((code) => `NAT_${code.toUpperCase()}`),
     );
+  }
+  if (input.citesCelex) {
+    // isMatchAll mirrors the form's "match all citations" (vs "any") choice.
+    advanced("citationsMotif", [buildCitationsMotif(input.citesCelex, input.citesArticle)], true);
+  }
+  if (input.dateFrom || input.dateTo) {
+    advanced("docDate", [input.dateFrom ?? "1952-01-01", input.dateTo ?? "2099-12-31"]);
   }
   // The backend ignores usualName without a searchTerm — party names go
   // through full text too (verified live: found C-201/22 for "Telia Finland").
@@ -293,12 +316,19 @@ async function runSearchCuria(
   page: number,
   pageSize: number,
 ): Promise<CuriaSearchPage & { filtered: number }> {
-  if (!input.query && !input.caseNumber && !input.ecli && !input.parties && !input.referredFrom?.length) {
+  if (
+    !input.query &&
+    !input.caseNumber &&
+    !input.ecli &&
+    !input.parties &&
+    !input.referredFrom?.length &&
+    !input.citesCelex
+  ) {
     throw new SourceError(
       SOURCE,
       "INPUT_INVALID",
       "CURIA search needs at least one criterion.",
-      "Provide query (full-text keywords), case_number (e.g. 'C-311/18'), ecli, parties, or referred_from.",
+      "Provide query (full-text keywords), case_number (e.g. 'C-311/18'), ecli, parties, referred_from, or cites_celex.",
     );
   }
   const response = await fetchUpstream(SOURCE, `${WS_BASE}/elastic-connector/search`, {

@@ -240,7 +240,7 @@ best; the index is the court's own and carries same-day decisions.
 |---|---|
 | tu konkrétní věc | `case_number: "C-311/18"` / `ecli` |
 | věc podle jména | `parties: "Telia Finland"` |
-| judikaturu k předpisu | `query: "\"2004/48\""` — číslo předpisu jako fráze |
+| judikaturu k čl. X předpisu | `cites_celex: "32004L0048", cites_article: "1"` |
 | předběžné otázky z ČR | `referred_from: ["CZ"], sort: "date"` |
 | jen rozsudky / stanoviska GA | `doc_type: "judgment"` / `"opinion"` |
 | jen uzavřené věci | `state: "closed"` |
@@ -251,10 +251,12 @@ best; the index is the court's own and carries same-day decisions.
 version at once, so a Czech phrase (`"dobré mravy"`) finds the case law directly, no
 flag needed. Pick the reading language separately (`language: "cs"` on the document).
 
-**Case law on a provision: search the act's number as a phrase.** `query:
-"\"2004/48\""` (with the article if you need it: `"\"čl. 13 směrnice 2004/48\""` /
-`"\"Article 13 of Directive 2004/48\""`) finds the decisions that discuss it. There is
-no citator field; the text is the citator.
+**`cites_celex` is the citator the CZ courts lack** — decisions citing an act in
+their grounds: directive 2004/48 = `32004L0048`, GDPR = `32016R0679`, a regulation
+YYYY/N = `3YYYYRNNNN`; `cites_article` narrows to one article. No keywords needed —
+pair with `sort: "date"` for the recent line. The act's number as a full-text phrase
+(`query: "\"2004/48\""`) is the cross-check when you suspect the citator missed
+something.
 
 **`referred_from: ["CZ"]`** answers "co už předložily české soudy" — every preliminary
 reference from Czech courts (~143 věcí), no keywords needed; sort by date for the
@@ -272,8 +274,7 @@ the case; a common word as a name will drown.
 
 **`total` counts cases, the items are documents** — one case brings its judgment, AG
 opinion and the referring request together, so "1 matching case, 5 documents" is
-normal, not a bug. Dates filter what was fetched client-side; if a date-limited search
-looks thin, widen the window rather than paging deep.
+normal, not a bug.
 
 ## Screening and reading
 
