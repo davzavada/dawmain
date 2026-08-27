@@ -146,8 +146,8 @@ so re-running a search after reading is cheap.
 
 - **NS** — its own section below: the search form's fields are all exposed, and the
   full-text box speaks Domino operators.
-- **ÚS (NALUS)** — `types: ["nález"]` cuts out the mass of odmítavá usnesení;
-  `popular_name` ("Data retention"), `judge`, `ecli`, `case_number` for a known citation.
+- **ÚS (NALUS)** — its own section below: výrok, navrhovatel, napadený akt
+  (abstract-review lookup by act number), disenty, datum zpřístupnění.
 - **NSS** — its own section below: the search form's main dimensions are exposed,
   including decisions by applied provision (`applies_act` + `applies_provision`) and
   the krajské správní soudy the index also covers.
@@ -271,6 +271,41 @@ memo.
 new this week" window will also surface older decisions NSS has just backfilled onto
 the web. That is the filter doing its job; don't read it as broken, and don't cite the
 publication date as the decision date.
+
+## ÚS (NALUS): pole
+
+`nalus_search` exposes the NALUS form's main dimensions. Czech queries.
+
+| Chci | Parametr |
+|---|---|
+| to konkrétní rozhodnutí | `case_number: "Pl. ÚS 24/10"` / `ecli` |
+| jen nálezy (meritum) | `types: ["nález"]` |
+| přezkum zákona č. X | `contested_act_kind: ["zákon"], contested_act_number: "106/1999"` (+ `contested_act_clause: "§ 17"`) |
+| jak dopadly stížnosti proti rozhodnutím FÚ | `contested_organ_type: ["FINANČNÍ ÚŘAD / ŘEDITELSTVÍ"]` + `outcome: ["vyhověno"]` |
+| co soudce X napsal v disentu k Y | `dissenting_judge: "Fiala", query: "Y", include_dissents: true` |
+| abstraktní kontrolu od politických aktérů | `petitioner: ["SKUPINA POSLANCŮ", "SKUPINA SENÁTORŮ"]` |
+| jen judikaturu ze Sbírky / SbNU | `only_published: true` |
+| co NALUS zpřístupnil za poslední týden | `published_from` / `published_to` |
+| nejrelevantnější k tématu | `query` + `sort: "relevance"` |
+| soudce zpravodaj / populární název | `judge` / `popular_name` |
+
+**`contested_act_*` is the abstract-review lookup**: kind `zákon` + number
+`106/1999` lists the decisions reviewing that act — no keywords needed. Kind
+`rozhodnutí soudu` + `contested_organ: "Nejvyšší soud"` turns it around: stížnosti
+proti rozhodnutím konkrétního soudu.
+
+**`outcome` reads the operative part**: `vyhověno`/`zamítnuto` are the merits;
+`odmítnuto pro zjevnou neopodstatněnost` is the mass of rejected complaints —
+filtering to `vyhověno` on a fact pattern is the fastest way to the successful
+constitutional arguments. An invalid value returns the complete menu of outcomes.
+
+**Dissents are a search space of their own**: `dissenting_judge` filters decisions
+where the judge dissented; `include_dissents: true` extends the full-text query into
+the dissents' text. Combined, they answer "kde soudce X nesouhlasil a proč". A
+dissent is not the law — cite it as argument, never as authority.
+
+**`types: ["nález"]`** still cuts the mass of odmítavá usnesení; a nález binds
+(čl. 89 odst. 2 Ústavy), an usnesení mostly does not.
 
 ## SDEU (InfoCuria): pole
 

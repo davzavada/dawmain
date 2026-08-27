@@ -5,6 +5,8 @@ import {
   buildNalusForm,
   ecliToSz,
   isValidSz,
+  NALUS_OUTCOMES,
+  resolveNalusValues,
   parseFormState,
   parseNalusDecision,
   parseNalusResults,
@@ -65,6 +67,80 @@ describe("buildNalusForm", () => {
     expect(form.get("ctl00$MainContent$citace")).toBe("Pl. ÚS 24/10");
     expect(form.get("ctl00$MainContent$nalezy")).toBe("on");
     expect(form.get("ctl00$MainContent$usneseni")).toBeNull();
+  });
+
+  it("include_dissents adds the odlišné stanovisko zone to a full-text query", () => {
+    const form = buildNalusForm(state, { query: "svoboda projevu", includeDissents: true }, 20);
+    expect(form.get("ctl00$MainContent$odlisne_stanovisko")).toBe("on");
+    expect(form.get("ctl00$MainContent$oduvodneni")).toBe("on");
+  });
+
+  it("dissenting judge, availability dates, only-published and relevance sort", () => {
+    const form = buildNalusForm(
+      state,
+      {
+        dissentingJudge: "Fiala Josef",
+        publishedFrom: "2026-08-21",
+        publishedTo: "2026-08-27",
+        onlyPublished: true,
+        sort: "relevance",
+      },
+      20,
+    );
+    expect(form.get("ctl00$MainContent$soudce_stanovisko")).toBe("Fiala Josef");
+    expect(form.get("ctl00$MainContent$availableFrom")).toBe("21.8.2026");
+    expect(form.get("ctl00$MainContent$availableTo")).toBe("27.8.2026");
+    expect(form.get("ctl00$MainContent$jen_publikovana")).toBe("on");
+    expect(form.get("ctl00$MainContent$razeni")).toBe("5");
+  });
+
+  it("outcome, petitioner and contested act/organ post canonical codebook values", () => {
+    const form = buildNalusForm(
+      state,
+      {
+        outcome: ["VYHOVĚNO", "zamitnuto"],
+        petitioner: ["skupina poslanců"],
+        contestedOrganType: ["soud"],
+        contestedOrgan: "Nejvyšší soud",
+        contestedActKind: ["zákon"],
+        contestedActNumber: "106/1999",
+        contestedActClause: "§ 17",
+      },
+      20,
+    );
+    expect(form.get("ctl00$MainContent$vyrok_multi")).toBe("vyhověno, zamítnuto");
+    expect(form.get("ctl00$MainContent$navrhovatel")).toBe("SKUPINA POSLANCŮ");
+    expect(form.get("ctl00$MainContent$affected_organ_type")).toBe("SOUD");
+    expect(form.get("ctl00$MainContent$affected_organ_spec")).toBe("Nejvyšší soud");
+    expect(form.get("ctl00$MainContent$actkind")).toBe("zákon");
+    expect(form.get("ctl00$MainContent$actkindnumber_txt")).toBe("106/1999");
+    expect(form.get("ctl00$MainContent$actkindclause_txt")).toBe("§ 17");
+    expect(form.get("ctl00$MainContent$razeni")).toBe("2");
+  });
+});
+
+describe("resolveNalusValues", () => {
+  it("maps case/diacritics-insensitive input onto canonical titles", () => {
+    expect(resolveNalusValues(["ODMITNUTO PRO ZJEVNOU NEOPODSTATNENOST"], NALUS_OUTCOMES, "výrok")).toEqual([
+      "odmítnuto pro zjevnou neopodstatněnost",
+    ]);
+    // Titles that themselves contain commas survive verbatim, double space included.
+    expect(resolveNalusValues(["procesní -  změna návrhu"], NALUS_OUTCOMES, "výrok")).toEqual([
+      "procesní -  změna návrhu",
+    ]);
+    expect(
+      resolveNalusValues(["procesní - svědečné, tlumočné, znalečné"], NALUS_OUTCOMES, "výrok"),
+    ).toEqual(["procesní - svědečné, tlumočné, znalečné"]);
+  });
+
+  it("rejects unknown values with the whole menu in the hint", () => {
+    try {
+      resolveNalusValues(["vyhráno"], NALUS_OUTCOMES, "výrok");
+      expect.unreachable();
+    } catch (error) {
+      expect((error as SourceError).kind).toBe("INPUT_INVALID");
+      expect((error as SourceError).hint).toContain("vyhověno");
+    }
   });
 });
 

@@ -24,7 +24,7 @@ export function registerNalus(server: McpServer): void {
     {
       title: "Ústavní soud: search NALUS",
       description:
-        "FULL-TEXT search of Czech Constitutional Court decisions (nálezy, usnesení, stanoviska pléna) in NALUS — plus citace (sp. zn. like 'Pl. ÚS 24/10'), ECLI, soudce zpravodaj, populární název, date range and decision-type filters. Czech queries; 'queries' searches up to 3 variants IN PARALLEL and merges deduplicated results. Each hit carries an 'sz' identifier for nalus_get_decision. read_top: N also returns excerpt previews of the N best hits. Costs 3 upstream requests per variant.",
+        "FULL-TEXT search of Czech Constitutional Court decisions (nálezy, usnesení, stanoviska pléna) in NALUS — plus citace (sp. zn. like 'Pl. ÚS 24/10'), ECLI, soudce zpravodaj AND dissenting judge, populární název, outcome (výrok), petitioner type, contested act (druh/číslo/ustanovení — e.g. every decision reviewing zákon č. 106/1999), contested organ, decision/publication dates, only-published filter, relevance sort, and dissent-scope full text. Czech queries; 'queries' searches up to 3 variants IN PARALLEL and merges deduplicated results. Each hit carries an 'sz' identifier for nalus_get_decision. read_top: N also returns excerpt previews of the N best hits. Costs 3 upstream requests per variant.",
       inputSchema: z.object({
         query: z.string().optional().describe("Czech full-text query (právní věta, výrok, odůvodnění…)."),
         queries: z
@@ -35,13 +35,70 @@ export function registerNalus(server: McpServer): void {
         case_number: z.string().optional().describe("Citace / sp. zn., e.g. 'Pl. ÚS 24/10' or 'I. ÚS 1169/26'."),
         ecli: z.string().optional().describe("ECLI, e.g. 'ECLI:CZ:US:2026:1.US.1169.26.1'."),
         judge: z.string().optional().describe("Soudce zpravodaj, e.g. 'Wagnerová'."),
+        dissenting_judge: z
+          .string()
+          .optional()
+          .describe("Judge who filed a dissent (soudce s odlišným stanoviskem), e.g. 'Fiala'."),
         popular_name: z.string().optional().describe("Populární název, e.g. 'Data retention'."),
         date_from: isoDate.optional().describe("Decision date from (ISO)."),
         date_to: isoDate.optional().describe("Decision date to (ISO)."),
+        published_from: isoDate
+          .optional()
+          .describe("Date the decision was made available in NALUS, from (ISO) — monitor what is new."),
+        published_to: isoDate.optional().describe("Availability date to (ISO)."),
         types: z
           .array(z.enum(["nález", "usnesení", "stanovisko"]))
           .optional()
           .describe("Restrict decision forms. Default: all."),
+        only_published: z
+          .boolean()
+          .default(false)
+          .describe("Only decisions published in Sbírka zákonů / Sbírka nálezů a usnesení."),
+        include_dissents: z
+          .boolean()
+          .default(false)
+          .describe("Extend the full-text query into odlišná stanoviska — pair with dissenting_judge to search what a judge argued in dissent."),
+        outcome: z
+          .array(z.string())
+          .max(6)
+          .optional()
+          .describe(
+            "Výrok filter (OR), e.g. ['vyhověno'], ['zamítnuto'], ['odmítnuto pro zjevnou neopodstatněnost']. An invalid value returns the full menu.",
+          ),
+        petitioner: z
+          .array(z.string())
+          .max(6)
+          .optional()
+          .describe(
+            "Petitioner type (OR): 'STĚŽOVATEL - FO', 'STĚŽOVATEL - PO', 'SKUPINA POSLANCŮ', 'SKUPINA SENÁTORŮ', 'SOUD', 'VLÁDA', 'VEŘEJNÝ OCHRÁNCE PRÁV'… Invalid value returns the full menu.",
+          ),
+        contested_organ_type: z
+          .array(z.string())
+          .max(6)
+          .optional()
+          .describe("Type of the organ whose act is contested (OR): 'SOUD', 'FINANČNÍ ÚŘAD / ŘEDITELSTVÍ', 'MINISTERSTVO / MINISTR'… Invalid value returns the full menu."),
+        contested_organ: z
+          .string()
+          .optional()
+          .describe("Contested organ specification, free text — e.g. 'Nejvyšší soud'."),
+        contested_act_kind: z
+          .array(z.string())
+          .max(4)
+          .optional()
+          .describe("Kind of the contested act (OR): 'rozhodnutí soudu', 'rozhodnutí správní', 'zákon', 'obecně závazná vyhláška obce/kraje', 'opatření obecné povahy'… Invalid value returns the full menu."),
+        contested_act_number: z
+          .string()
+          .optional()
+          .describe("Number of the contested act, e.g. '106/1999' — with kind 'zákon' this is abstract-review lookup: every decision reviewing that act."),
+        contested_act_name: z.string().optional().describe("Name of the contested act, free text."),
+        contested_act_clause: z
+          .string()
+          .optional()
+          .describe("Provision of the contested act, e.g. '§ 17' or 'čl. 36'."),
+        sort: z
+          .enum(["date", "relevance"])
+          .default("date")
+          .describe("date = newest first (default), relevance = NALUS 'význam' ranking for full-text queries."),
         page: z.number().int().min(0).default(0).describe("Result page (0-indexed, 20 hits per page)."),
         read_top: z
           .number()
@@ -81,7 +138,7 @@ export function registerNalus(server: McpServer): void {
       }),
       annotations: READ_ONLY,
     },
-    async ({ query, queries, case_number, ecli, judge, popular_name, date_from, date_to, types, page, read_top }) => {
+    async ({ query, queries, case_number, ecli, judge, dissenting_judge, popular_name, date_from, date_to, published_from, published_to, types, only_published, include_dissents, outcome, petitioner, contested_organ_type, contested_organ, contested_act_kind, contested_act_number, contested_act_name, contested_act_clause, sort, page, read_top }) => {
       try {
         const variants = uniqueQueries(query, queries);
         // One 3-step NALUS session per variant, in parallel; merged + deduped.
@@ -93,10 +150,24 @@ export function registerNalus(server: McpServer): void {
                 citace: case_number,
                 ecli,
                 judge,
+                dissentingJudge: dissenting_judge,
                 popularName: popular_name,
                 dateFrom: date_from,
                 dateTo: date_to,
+                publishedFrom: published_from,
+                publishedTo: published_to,
                 types,
+                onlyPublished: only_published,
+                includeDissents: include_dissents,
+                outcome,
+                petitioner,
+                contestedOrganType: contested_organ_type,
+                contestedOrgan: contested_organ,
+                contestedActKind: contested_act_kind,
+                contestedActNumber: contested_act_number,
+                contestedActName: contested_act_name,
+                contestedActClause: contested_act_clause,
+                sort,
               },
               page,
             ),

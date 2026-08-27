@@ -134,10 +134,201 @@ export interface NalusSearchInput {
   citace?: string;
   ecli?: string;
   judge?: string; // soudce zpravodaj (free text)
+  dissentingJudge?: string; // soudce s odlišným stanoviskem
   popularName?: string;
-  dateFrom?: string; // ISO
+  dateFrom?: string; // ISO — datum rozhodnutí
   dateTo?: string; // ISO
+  publishedFrom?: string; // ISO — datum zpřístupnění (availableFrom)
+  publishedTo?: string; // ISO
   types?: Array<"nález" | "usnesení" | "stanovisko">;
+  /** Jen rozhodnutí publikovaná ve Sbírce zákonů / SbNU. */
+  onlyPublished?: boolean;
+  /** Add odlišná stanoviska to the zones the full-text query searches. */
+  includeDissents?: boolean;
+  outcome?: string[]; // výrok — validated against NALUS_OUTCOMES
+  petitioner?: string[]; // navrhovatel (typ) — NALUS_PETITIONERS
+  contestedOrganType?: string[]; // dotčený orgán (typ) — NALUS_ORGAN_TYPES
+  contestedOrgan?: string; // dotčený orgán (specifikace, free text)
+  contestedActKind?: string[]; // napadený akt (druh) — NALUS_ACT_KINDS
+  contestedActNumber?: string; // napadený akt (číslo), e.g. "106/1999"
+  contestedActName?: string; // napadený akt (název), free text
+  contestedActClause?: string; // napadený akt (ustanovení), e.g. "§ 17"
+  sort?: "date" | "relevance";
+}
+
+// Codebook values verbatim from a captured browser POST (2026-08) where every
+// picker item was selected — including oddities like the double space in
+// "procesní -  změna návrhu". Some titles contain ", " themselves; the wire
+// format joins selections with ", " all the same, mirroring the UI.
+
+export const NALUS_OUTCOMES = [
+  "odmítnuto pro neodstraněné vady",
+  "odmítnuto pro nedodržení lhůty",
+  "odmítnuto pro neoprávněnost navrhovatele",
+  "odmítnuto pro nepříslušnost",
+  "odmítnuto pro nepřípustnost",
+  "odmítnuto pro zjevnou neopodstatněnost",
+  "odmítnuto - jiný procesní návrh",
+  "rozpor mezinárodní smlouvy s ústavou",
+  "soulad mezinárodní smlouvy s ústavou",
+  "vyhověno",
+  "výrok interpretativní",
+  "výrok aditivní",
+  "udělení výtky",
+  "vykonatelnost odložená - § 58/1",
+  "vykonatelnost dřívější - § 58/1",
+  "zamítnuto",
+  "zastaveno",
+  "procesní - atrahováno plénem",
+  "procesní - náhrada nákladů řízení - § 62",
+  "procesní - náhrada nákladů zastoupení - § 83, 84",
+  "procesní - naléhavost věci",
+  "procesní - odložení vykonatelnosti",
+  "procesní - opravné usnesení",
+  "procesní - pokračování v řízení",
+  "procesní - pořádková pokuta",
+  "procesní - postoupení",
+  "procesní - předběžné opatření",
+  "procesní - předběžná otázka",
+  "procesní - přerušení řízení - jiné",
+  "procesní - přerušení řízení - § 78/1",
+  "procesní - přerušení řízení - § 78/2",
+  "procesní - přibrání tlumočníka",
+  "procesní - spojení věcí",
+  "procesní - svědečné, tlumočné, znalečné",
+  "procesní - účastenství v řízení",
+  "procesní - uložení povinnosti",
+  "procesní - ustanovení opatrovníka",
+  "procesní - ustanovení znalce",
+  "procesní - volba kárného senátu (§ 139/2)",
+  "procesní - vrácení soudního poplatku",
+  "procesní - vyloučení k samostatnému řízení",
+  "procesní - vyloučení soudce, asistenta, apod.",
+  "procesní - zahájení řízení",
+  "procesní -  změna návrhu",
+  "procesní - návrh plénu na zrušení právního předpisu",
+  "odmítnuto - pro 2b",
+  "nevyřízeno",
+  "odloženo",
+  "vyřízeno jinak",
+] as const;
+
+export const NALUS_PETITIONERS = [
+  "STĚŽOVATEL - FO",
+  "STĚŽOVATEL - PO",
+  "SKUPINA POSLANCŮ",
+  "SKUPINA SENÁTORŮ",
+  "SOUD",
+  "MINISTERSTVO",
+  "KRAJ / ZASTUPITELSTVO KRAJE",
+  "OBEC / ZASTUPITELSTVO OBCE",
+  "PLÉNUM ÚS",
+  "POLITICKÁ / VOLEBNÍ STRANA",
+  "POSLANEC",
+  "PREZIDENT REPUBLIKY",
+  "PŘEDNOSTA OKRESNÍHO ÚŘADU",
+  "PŘEDSEDA POSLANECKÉ SNĚMOVNY PČR",
+  "PŘEDSEDA SENÁTU PČR",
+  "PŘEDSEDA ÚS",
+  "RADA PRO ROZHLASOVÉ A TELEVIZNÍ VYSÍLÁNÍ",
+  "ŘEDITEL KRAJSKÉHO ÚŘADU",
+  "SENÁT PARLAMENTU ČR",
+  "SENÁT ÚS",
+  "SENÁTOR",
+  "STÁTNÍ ORGÁN JINÝ",
+  "VEŘEJNÝ OCHRÁNCE PRÁV",
+  "VLÁDA",
+] as const;
+
+export const NALUS_ORGAN_TYPES = [
+  "SOUD",
+  "STÁTNÍ ZASTUPITELSTVÍ",
+  "POLICIE",
+  "ARMÁDA",
+  "VOJSKO",
+  "BEZPEČNOSTNÍ INFORMAČNÍ SLUŽBA",
+  "CELNÍ ÚŘAD / ŘEDITELSTVÍ",
+  "ČESKÁ INSPEKCE ŽIVOTNÍHO PROSTŘEDÍ",
+  "ČESKÁ NÁRODNÍ BANKA",
+  "ČESKÁ OBCHODNÍ INSPEKCE",
+  "ČESKÁ SPRÁVA SOCIÁLNÍHO ZABEZPEČENÍ",
+  "ČESKÝ BÁŇSKÝ ÚŘAD",
+  "ČESKÝ TELEKOMUNIKAČNÍ ÚŘAD",
+  "ČESKÝ ÚŘAD ZEMĚMĚŘICKÝ A KATASTRÁLNÍ",
+  "ENERGETICKÝ REGULAČNÍ ÚŘAD",
+  "FINANČNÍ ÚŘAD / ŘEDITELSTVÍ",
+  "KATASTRÁLNÍ ÚŘAD",
+  "KOMISE PRO CENNÉ PAPÍRY",
+  "KRAJ / KRAJSKÝ ÚŘAD",
+  "MINISTERSTVO / MINISTR",
+  "NÁRODNÍ BEZPEČNOSTNÍ ÚŘAD",
+  "NÁRODNÍ PAMÁTKOVÝ ÚSTAV",
+  "OBEC / OBECNÍ ÚŘAD / MAGISTRÁT",
+  "OCHRÁNCE PRÁV DĚTÍ",
+  "POSLANECKÁ SNĚMOVNA PARLAMENTU ČR",
+  "POZEMKOVÝ FOND",
+  "PREZIDENT REPUBLIKY",
+  "PROFESNÍ KOMORA",
+  "RADA PRO ROZHLASOVÉ A TELEVIZNÍ VYSÍLÁNÍ",
+  "SENÁT PARLAMENTU ČR",
+  "SOUDNÍ EXEKUTOR",
+  "STÁTNÍ ÚŘAD PRO JADERNOU BEZPEČNOST",
+  "ÚŘAD EVROPSKÉHO VEŘEJNÉHO ŽALOBCE",
+  "ÚŘAD PRÁCE",
+  "ÚŘAD PRO OCHRANU HOSPODÁŘSKÉ SOUTĚŽE",
+  "ÚŘAD PRO OCHRANU OSOBNÍCH ÚDAJŮ",
+  "ÚŘAD PRO ZASTUPOVÁNÍ STÁTU VE VĚCECH MAJETKOVÝCH",
+  "ÚŘAD PRŮMYSLOVÉHO VLASTNICTVÍ",
+  "ÚSTAVNÍ SOUD",
+  "VEŘEJNÝ OCHRÁNCE PRÁV",
+  "VĚZEŇSKÁ SLUŽBA",
+  "VLÁDA / PŘEDSEDA VLÁDY",
+  "ZDRAVOTNÍ POJIŠŤOVNA",
+  "JINÝ ORGÁN VEŘEJNÉ MOCI",
+] as const;
+
+export const NALUS_ACT_KINDS = [
+  "rozhodnutí soudu",
+  "rozhodnutí správní",
+  "rozhodnutí jiné",
+  "jiný zásah orgánu veřejné moci",
+  "zákon",
+  "jiný právní předpis",
+  "obecně závazná vyhláška obce/kraje",
+  "nařízení obce/kraje",
+  "mezinárodní smlouva",
+  "rozhodnutí Ústavního soudu",
+  "opatření obecné povahy",
+  "interní předpis (normativní instrukce)",
+  "ostatní (nezařaditelné)",
+] as const;
+
+const foldValue = (value: string) =>
+  value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+
+/**
+ * Map user-supplied values onto the canonical codebook titles the form posts
+ * (case/diacritics/whitespace-insensitive). Unknown values fail loudly with
+ * the whole menu — a typo must not degrade into an unfiltered search.
+ */
+export function resolveNalusValues(
+  values: string[],
+  canonical: readonly string[],
+  criterion: string,
+): string[] {
+  const byFold = new Map(canonical.map((title) => [foldValue(title), title]));
+  return values.map((value) => {
+    const match = byFold.get(foldValue(value));
+    if (!match) {
+      throw new SourceError(
+        SOURCE,
+        "INPUT_INVALID",
+        `"${value}" is not a NALUS ${criterion} value.`,
+        `Valid values: ${canonical.join("; ")}.`,
+      );
+    }
+    return match;
+  });
 }
 
 export interface NalusHit {
@@ -248,19 +439,51 @@ export function buildNalusForm(
 
   if (input.query) {
     form.set(`${MC}text`, input.query);
-    // Search the operative scopes; odlišné stanovisko stays out by default.
-    for (const scope of ["pravni_veta", "abstrakt", "naveti", "vyrok", "oduvodneni"]) {
+    // Search the operative scopes; odlišné stanovisko joins only on request.
+    const scopes = ["pravni_veta", "abstrakt", "naveti", "vyrok", "oduvodneni"];
+    if (input.includeDissents) scopes.push("odlisne_stanovisko");
+    for (const scope of scopes) {
       form.set(`${MC}${scope}`, "on");
     }
   }
   if (input.citace) form.set(`${MC}citace`, input.citace);
   if (input.ecli) form.set(`${MC}ecli`, input.ecli);
   if (input.judge) form.set(`${MC}soudce_zpravodaj`, input.judge);
+  if (input.dissentingJudge) form.set(`${MC}soudce_stanovisko`, input.dissentingJudge);
   if (input.popularName) form.set(`${MC}popularni_nazev`, input.popularName);
   if (input.dateFrom) form.set(`${MC}decidedFrom`, isoToCzech(input.dateFrom));
   if (input.dateTo) form.set(`${MC}decidedTo`, isoToCzech(input.dateTo));
+  if (input.publishedFrom) form.set(`${MC}availableFrom`, isoToCzech(input.publishedFrom));
+  if (input.publishedTo) form.set(`${MC}availableTo`, isoToCzech(input.publishedTo));
+  if (input.onlyPublished) form.set(`${MC}jen_publikovana`, "on");
+  if (input.outcome?.length) {
+    form.set(`${MC}vyrok_multi`, resolveNalusValues(input.outcome, NALUS_OUTCOMES, "výrok").join(", "));
+  }
+  if (input.petitioner?.length) {
+    form.set(
+      `${MC}navrhovatel`,
+      resolveNalusValues(input.petitioner, NALUS_PETITIONERS, "navrhovatel").join(", "),
+    );
+  }
+  if (input.contestedOrganType?.length) {
+    form.set(
+      `${MC}affected_organ_type`,
+      resolveNalusValues(input.contestedOrganType, NALUS_ORGAN_TYPES, "dotčený orgán").join(", "),
+    );
+  }
+  if (input.contestedOrgan) form.set(`${MC}affected_organ_spec`, input.contestedOrgan);
+  if (input.contestedActKind?.length) {
+    form.set(
+      `${MC}actkind`,
+      resolveNalusValues(input.contestedActKind, NALUS_ACT_KINDS, "napadený akt").join(", "),
+    );
+  }
+  if (input.contestedActNumber) form.set(`${MC}actkindnumber_txt`, input.contestedActNumber);
+  if (input.contestedActName) form.set(`${MC}actkindname_txt`, input.contestedActName);
+  if (input.contestedActClause) form.set(`${MC}actkindclause_txt`, input.contestedActClause);
 
-  form.set(`${MC}razeni`, "2"); // decision date, newest first
+  // razeni 2 = decision date desc, 5 = relevance ("významu").
+  form.set(`${MC}razeni`, input.sort === "relevance" ? "5" : "2");
   form.set(`${MC}resultsPageSize`, String(pageSize));
   form.set(`${MC}resultsFontSize`, "10");
   return form;
@@ -285,20 +508,31 @@ async function runSearchNalus(
   page: number,
   pageSize: 10 | 20 | 40 | 80,
 ): Promise<NalusSearchPage> {
-  if (
-    !input.query &&
-    !input.citace &&
-    !input.ecli &&
-    !input.judge &&
-    !input.popularName &&
-    !input.dateFrom &&
-    !input.dateTo
-  ) {
+  const hasCriterion =
+    input.query ||
+    input.citace ||
+    input.ecli ||
+    input.judge ||
+    input.dissentingJudge ||
+    input.popularName ||
+    input.dateFrom ||
+    input.dateTo ||
+    input.publishedFrom ||
+    input.publishedTo ||
+    input.outcome?.length ||
+    input.petitioner?.length ||
+    input.contestedOrganType?.length ||
+    input.contestedOrgan ||
+    input.contestedActKind?.length ||
+    input.contestedActNumber ||
+    input.contestedActName ||
+    input.contestedActClause;
+  if (!hasCriterion) {
     throw new SourceError(
       SOURCE,
       "INPUT_INVALID",
       "NALUS search needs at least one criterion.",
-      "Provide query (full-text), case_number (citace), ecli, judge, popular_name, or a date range.",
+      "Provide query (full-text), case_number (citace), ecli, judge, dissenting_judge, popular_name, a date range, outcome, petitioner, or a contested_act/organ filter.",
     );
   }
   const session = new CookieSession();
