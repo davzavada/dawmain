@@ -24,7 +24,7 @@ export function registerNs(server: McpServer): void {
     {
       title: "Nejvyšší soud: search decisions",
       description:
-        "FULL-TEXT search of Czech Supreme Court decisions (civil & criminal law: dovolání, sjednocující stanoviska), with the fields the NS search form exposes: spisová značka (exact), kategorie rozhodnutí A–E, typ rozhodnutí (rozsudek/usnesení/stanovisko), decision date and publication date. Czech queries; 'query' accepts Domino full-text operators — AND / OR / NOT, \"exact phrase\", (grouping), wildcards (nájem*), proximity (NEAR, SENTENCE, PARAGRAPH) — so one precise expression beats several vague searches; 'queries' searches up to 3 variants IN PARALLEL and merges deduplicated results. case_number matches the značka itself, NOT decisions citing it — to find those, pass the značka as 'query'. Broad queries without dates often fail upstream (HTTP 500) and any query addresses at most its first 900 documents — narrow with dates. Results carry a UNID for ns_get_decision, and their URLs open the decision with the query terms highlighted. read_top: N also returns excerpt previews of the N best hits.",
+        "FULL-TEXT search of Czech Supreme Court decisions (civil & criminal law: dovolání, sjednocující stanoviska), with the fields the NS search form exposes: spisová značka (exact), kategorie rozhodnutí A–E, typ rozhodnutí (rozsudek/usnesení/stanovisko), soud, decision date and publication date. The database also carries decisions of LOWER courts — they are in it because they were published in the Sbírka soudních rozhodnutí a stanovisek, so they carry comparable weight; keep them unless the user asked for NS only. Czech queries; 'query' accepts Domino full-text operators — AND / OR / NOT, \"exact phrase\", (grouping), wildcards (nájem*), proximity (NEAR, SENTENCE, PARAGRAPH) — so one precise expression beats several vague searches; 'queries' searches up to 3 variants IN PARALLEL and merges deduplicated results. case_number matches the značka itself, NOT decisions citing it — to find those, pass the značka as 'query'. Broad queries without dates often fail upstream (HTTP 500) and any query addresses at most its first 900 documents — narrow with dates. Results carry a UNID for ns_get_decision, and their URLs open the decision with the query terms highlighted. read_top: N also returns excerpt previews of the N best hits.",
       inputSchema: z.object({
         query: z.string().optional().describe("Czech full-text query over decision bodies."),
         queries: z
@@ -48,6 +48,12 @@ export function registerNs(server: McpServer): void {
           .optional()
           .describe(
             "Typ rozhodnutí. Rozsudek = meritorní rozhodnutí; usnesení = převážně procesní (odmítnutí dovolání).",
+          ),
+        court: z
+          .string()
+          .optional()
+          .describe(
+            "Soud, e.g. 'Nejvyšší soud' or 'Vrchní soud v Praze'. The database also holds decisions of lower courts — they are in it because they were selected for the Sbírka, so leave this empty to keep them.",
           ),
         date_from: isoDate.optional().describe("Datum rozhodnutí from (ISO) — when the court decided."),
         date_to: isoDate.optional().describe("Datum rozhodnutí to (ISO)."),
@@ -97,6 +103,7 @@ export function registerNs(server: McpServer): void {
       case_number,
       category,
       type,
+      court,
       date_from,
       date_to,
       published_from,
@@ -117,6 +124,7 @@ export function registerNs(server: McpServer): void {
                 category,
                 // The field carries the Czech label with its initial capital.
                 type: type && type.charAt(0).toUpperCase() + type.slice(1),
+                court,
                 dateFrom: date_from,
                 dateTo: date_to,
                 publishedFrom: published_from,

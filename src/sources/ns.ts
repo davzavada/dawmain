@@ -31,6 +31,12 @@ export interface NsSearchInput {
   category?: string; // kategorie rozhodnutí A–E
   /** [TypRozhodnuti]: "Rozsudek" | "Usnesení" | "Stanovisko". */
   type?: string;
+  /**
+   * [SoudCreate]: "Nejvyšší soud", "Vrchní soud v Praze", "Krajský soud v
+   * Brně"… The database is not NS-only — decisions of lower courts are in it
+   * because they were selected for the Sbírka, so the default is no filter.
+   */
+  court?: string;
   dateFrom?: string; // ISO — [datum_rozhodnuti]
   dateTo?: string; // ISO — [datum_rozhodnuti]
   publishedFrom?: string; // ISO — [datum_predani_na_web]
@@ -106,6 +112,10 @@ export function buildNsQuery(input: NsSearchInput): string {
   }
   if (input.category) clauses.push(`[kategorie_rozhodnuti1]=${input.category.toUpperCase()}`);
   if (input.type) clauses.push(`[TypRozhodnuti]=${input.type}`);
+  if (input.court) {
+    const sanitized = input.court.replace(/[()[\]"{}\\]/g, " ").replace(/\s+/g, " ").trim();
+    clauses.push(`[SoudCreate]="${sanitized}"`);
+  }
   if (input.dateFrom) clauses.push(`[datum_rozhodnuti]>=${isoToCzech(input.dateFrom)}`);
   if (input.dateTo) clauses.push(`[datum_rozhodnuti]<=${isoToCzech(input.dateTo)}`);
   if (input.publishedFrom) clauses.push(`[datum_predani_na_web]>=${isoToCzech(input.publishedFrom)}`);

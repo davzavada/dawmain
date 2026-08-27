@@ -176,9 +176,18 @@ Using them is the difference between 900 hits and five.
 | meritorní vs. procesní | `type: "rozsudek"` / `"usnesení"` | `[TypRozhodnuti]` |
 | judikatura ze Sbírky | `category: "A"` | `[kategorie_rozhodnuti1]` |
 | text rozhodnutí | `query` | `[ARozhodnutiRT]` |
+| jen jeden soud | `court: "Nejvyšší soud"` | `[SoudCreate]` |
 
 **`case_number` is exact** — it returns that decision, not the ones citing it. For the
 citing line, put the značka in `query`.
+
+**Rozhodnutí nižších soudů v této databázi jsou sbírková — nevyhazuj je.** The NS
+database is not NS-only: a decision of a krajský or vrchní soud is in it because it was
+selected for the Sbírka soudních rozhodnutí a stanovisek. That selection is what gives
+it weight, so treat such a hit as authority on a par with an NS decision — cite it,
+with the deciding court named, and never filter it out with `court` unless the user
+explicitly asked for NS decisions only. You will recognise them by the registry mark:
+Cdo, Tdo, Odo, Nd, Cpjn, Tpjn are NS; Co, To, Cm, Ca and the like are lower courts.
 
 **`type: "usnesení"` is mostly procedural** (odmítnutí dovolání); `"rozsudek"` is where
 the merits are. Filter to rozsudek when you want the holding, not the procedure.

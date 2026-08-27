@@ -29,6 +29,11 @@ describe("buildNsQuery", () => {
       "[spzn1]=26 AND [spzn2]=cdo AND [spzn3]=2316 AND [spzn4]=2020",
     );
   });
+  it("quotes the court name for the [SoudCreate] field", () => {
+    expect(buildNsQuery({ query: "nájem", court: 'Vrchní soud v Praze"' })).toBe(
+      '[ARozhodnutiRT]=((nájem)) AND [SoudCreate]="Vrchní soud v Praze"',
+    );
+  });
   it("falls back to a phrase for unparsable case numbers", () => {
     expect(buildNsQuery({ caseNumber: "Pl. ÚS-st 1/93" })).toBe('"Pl. ÚS-st 1/93"');
   });
