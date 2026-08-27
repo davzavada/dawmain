@@ -184,7 +184,9 @@ export function registerCuria(server: McpServer): void {
           ? [
               `${result.total} matching cases, showing ${result.hits.length} ${result.hits.some((h) => h.docType) ? "documents" : "case listings"}${variants.length > 1 ? ` (best of ${variants.length} variants, merged)` : ""}${result.filtered ? ` (${result.filtered} documents hidden by doc_type/state/date filters)` : ""}:`,
               ...lines,
-              "Full text: curia_get_document {ecli | case_number | logic_doc_id}.",
+              result.hits.some((h) => h.docType)
+                ? "Full text: curia_get_document {ecli | case_number | logic_doc_id}."
+                : "Case listings carry no document ids — fetch a case's documents with curia_search {case_number}, then texts with curia_get_document.",
               ...renderPreviews(previews, "curia_get_document"),
             ].join("\n")
           : result.total > 0

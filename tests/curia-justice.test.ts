@@ -148,13 +148,22 @@ describe("buildCuriaBody", () => {
       valuesWithFullHierarchy: ["Telia Finland"],
     });
     expect(body.advancedFiltersValue.some((f) => f.field === "docDate")).toBe(true);
+    // allLang widens only the text criterion — a name search doesn't need it.
+    expect(body.advancedFiltersValue.some((f) => f.field === "allLang")).toBe(false);
 
     const withQuery = buildCuriaBody({ query: "dobré mravy", docType: "judgment" }, 0, 10) as {
-      advancedFiltersValue: Array<{ field: string }>;
+      advancedFiltersValue: Array<{ field: string; values: string[] }>;
       searchTerm: string;
     };
     expect(withQuery.searchTerm).toBe("");
     expect(withQuery.advancedFiltersValue[0].field).toBe("text");
+    // The text criterion alone searches only the chosen language version —
+    // allLang keeps the advanced route as multilingual as the searchTerm one.
+    expect(withQuery.advancedFiltersValue).toContainEqual({
+      field: "allLang",
+      values: ["true"],
+      valuesWithFullHierarchy: ["true"],
+    });
   });
 });
 

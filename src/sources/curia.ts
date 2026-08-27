@@ -190,7 +190,14 @@ export function buildCuriaBody(input: CuriaSearchInput, page: number, pageSize: 
   const useAdvanced = constraints.length > 0;
   const criteria: Array<Record<string, unknown>> = [];
   if (useAdvanced) {
-    if (input.query) criteria.push(filterEntry("text", [input.query]));
+    if (input.query) {
+      criteria.push(filterEntry("text", [input.query]));
+      // Unlike the searchTerm route, the "text" criterion searches ONLY the
+      // chosen language version (verified live: a Czech phrase scored 0
+      // under EN, 5 under CS). allLang is the form's "extend to all language
+      // versions" checkbox — always on here, so both routes stay multilingual.
+      criteria.push(filterEntry("allLang", ["true"]));
+    }
     if (input.caseNumber) criteria.push(filterEntry("affair", [input.caseNumber]));
     else if (input.parties) criteria.push(filterEntry("affair", [input.parties]));
     if (input.ecli) criteria.push(filterEntry("eCli", [input.ecli]));
