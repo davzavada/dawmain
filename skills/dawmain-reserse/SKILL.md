@@ -148,7 +148,7 @@ so re-running a search after reading is cheap.
   full-text box speaks Domino operators.
 - **ÚS (NALUS)** — `types: ["nález"]` cuts out the mass of odmítavá usnesení;
   `popular_name` ("Data retention"), `judge`, `ecli`, `case_number` for a known citation.
-- **NSS** — its own section below: the search form's dimensions are all exposed,
+- **NSS** — its own section below: the search form's main dimensions are exposed,
   including decisions by applied provision (`applies_act` + `applies_provision`) and
   the krajské správní soudy the index also covers.
 - **SDEU** — its own section below: the advanced-search dimensions are all exposed,
@@ -235,8 +235,9 @@ for free. The operators are there so you rarely need the fan-out.
 
 ## NSS: pole
 
-`nss_search` exposes the NSS Vyhledávač form field by field. Czech queries; the
-index carries NSS **and krajské správní soudy**.
+`nss_search` exposes the NSS Vyhledávač form's main dimensions (not the split
+docket components — `case_number` covers those). Czech queries; the index carries
+NSS **and krajské správní soudy**.
 
 | Chci | Parametr |
 |---|---|

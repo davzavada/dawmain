@@ -74,7 +74,9 @@ export function registerNss(server: McpServer): void {
         applies_eu_directive: z
           .string()
           .optional()
-          .describe("Only decisions applying this EU directive — e.g. '2004/48', '2011/95'."),
+          .describe(
+            "Only decisions applying this EU directive — e.g. '2004/48', '2011/95'. A community qualifier ('2004/48/ES') narrows to that series.",
+          ),
         applies_provision: z.coerce
           .string()
           .optional()

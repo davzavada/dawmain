@@ -217,9 +217,9 @@ describe("parseNssActRef", () => {
     expect(parseNssActRef("209/1992 Sb. m. s.", false)).toEqual({ cislo: "209", rok: "1992" });
   });
 
-  it("reads EU citations: modern year-first, pre-2015 year-second", () => {
+  it("reads EU citations: modern year-first, pre-2015 year-second, druh kept", () => {
     expect(parseNssActRef("2016/679", true)).toEqual({ cislo: "679", rok: "2016" });
-    expect(parseNssActRef("2004/48/ES", true)).toEqual({ cislo: "48", rok: "2004" });
+    expect(parseNssActRef("2004/48/ES", true)).toEqual({ cislo: "48", rok: "2004", druh: "ES" });
     expect(parseNssActRef("1049/2001", true)).toEqual({ cislo: "1049", rok: "2001" });
   });
 
@@ -239,6 +239,7 @@ describe("parseNssProvision", () => {
     });
     expect(parseNssProvision("17(2)(a)")).toEqual({ kind: undefined, unit: "17", odst: "2", pism: "a" });
     expect(parseNssProvision("čl. 8 odst. 2")).toEqual({ kind: "cl", unit: "8", odst: "2", pism: undefined });
+    expect(parseNssProvision("článek 36")).toEqual({ kind: "cl", unit: "36", odst: undefined, pism: undefined });
     expect(parseNssProvision("§17a")).toEqual({ kind: "par", unit: "17a", odst: undefined, pism: undefined });
     expect(parseNssProvision("36")).toEqual({ kind: undefined, unit: "36", odst: undefined, pism: undefined });
   });
@@ -345,6 +346,44 @@ describe("buildNssSearchForm (live-captured form)", () => {
     ).toThrowError(SourceError);
   });
 
+  it("a community qualifier narrows the EU druh dial; on a Sb. act it is rejected", () => {
+    const form = buildNssSearchForm(SEARCH_FORM.fields, { appliesEuDirective: "2004/48/ES" });
+    expect(param(form, /^aplikovanepravnipredpisysmerniceeudruh$/, ".HodnotaCiselnikPolozkySelected")).toBe("342");
+    expect(param(form, /^aplikovanepravnipredpisysmerniceeudruh$/, ".HodnotaCiselnikPolozky")).toBe("ES");
+    const regulation = buildNssSearchForm(SEARCH_FORM.fields, { appliesEuRegulation: "2016/679/EU" });
+    expect(param(regulation, /^aplikovanepravnipredpisynarizenieudruh$/, ".HodnotaCiselnikPolozkySelected")).toBe("341");
+    expect(() =>
+      buildNssSearchForm(SEARCH_FORM.fields, { appliesAct: "106/1999/EU" }),
+    ).toThrowError(SourceError);
+  });
+
+  it("strict locators never fall back to a same-suffix field and drift loudly", () => {
+    // A form whose only .HodnotaCislo belongs to a DIFFERENT criterion:
+    // findField's suffix fallback would happily (and wrongly) return it.
+    const decoy = parseNssForm(`
+      <html><body><form method="post">
+      <input name="__RequestVerificationToken" type="hidden" value="tok" />
+      <input name="vyhledavaciSekce[0].vyhledavaciPodminka[0].vyhledavaciPodminkaHodnota[0].TechnickyNazev" type="hidden" value="oznacenivecideleneporadovecislo" />
+      <input name="vyhledavaciSekce[0].vyhledavaciPodminka[0].vyhledavaciPodminkaHodnota[0].HodnotaCislo" type="text" value="" />
+      </form></body></html>`);
+    expect(findField(decoy, ".HodnotaCislo", null, /^aplikovanepravnipredpisysbcislo$/)?.name).toContain(
+      "HodnotaCislo",
+    );
+    expect(findFieldStrict(decoy, /^aplikovanepravnipredpisysbcislo$/, ".HodnotaCislo")).toBeUndefined();
+    try {
+      buildNssSearchForm(decoy.fields, { appliesAct: "106/1999" });
+      expect.unreachable();
+    } catch (error) {
+      expect((error as SourceError).kind).toBe("PARSE_DRIFT");
+    }
+    try {
+      buildNssSearchForm(decoy.fields, { publishedFrom: "2026-08-01" });
+      expect.unreachable();
+    } catch (error) {
+      expect((error as SourceError).kind).toBe("PARSE_DRIFT");
+    }
+  });
+
   it("rejects two applies_* filters and a provision without an act", () => {
     expect(() =>
       buildNssSearchForm(SEARCH_FORM.fields, { appliesAct: "106/1999", appliesEuDirective: "2004/48" }),
@@ -360,11 +399,10 @@ describe("buildNssSearchForm (live-captured form)", () => {
       publishedTo: "2026-08-07",
       dateFrom: "2025-01-01",
     });
-    // isoToCzech emits unpadded dates ("1.8.2026") — accepted live by the
-    // existing datumvydanirozhodnuti search, so aktualizovano gets the same.
-    expect(param(form, /^aktualizovano$/, ".HodnotaDatumACasOd")).toBe("1.8.2026");
-    expect(param(form, /^aktualizovano$/, ".HodnotaDatumACasDo")).toBe("7.8.2026");
-    expect(param(form, /^datumvydanirozhodnuti$/, ".HodnotaDatumACasOd")).toBe("1.1.2025");
+    // Zero-padded DD.MM.YYYY — byte-identical to the captured browser POST.
+    expect(param(form, /^aktualizovano$/, ".HodnotaDatumACasOd")).toBe("01.08.2026");
+    expect(param(form, /^aktualizovano$/, ".HodnotaDatumACasDo")).toBe("07.08.2026");
+    expect(param(form, /^datumvydanirozhodnuti$/, ".HodnotaDatumACasOd")).toBe("01.01.2025");
   });
 
   it("full text and case number still target their captured fields", () => {

@@ -1,7 +1,7 @@
 import { SourceError } from "./shared/errors";
 import { CookieSession, fetchUpstream } from "./shared/http";
 import { decodeBody, decodeJsStringLiteral, htmlToText, loadHtml, looksLikeHtml } from "./shared/html";
-import { czechToIso, isoToCzech } from "./shared/text";
+import { czechToIso } from "./shared/text";
 import { DOCUMENT_TTL_MS, SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
 
 /**
@@ -214,23 +214,27 @@ export function ciselnikTitles(nodes: CiselnikNode[]): string[] {
 export interface NssActRef {
   cislo: string;
   rok: string;
+  /** Community qualifier of an EU citation ("ES" in "2004/48/ES"). */
+  druh?: string;
 }
 
 /**
  * "číslo/rok" act reference. Czech Sb./Sb.m.s. citations put the year second
  * ("106/1999 Sb."); modern EU citations put it first ("2016/679", "2004/48"),
  * pre-2015 regulations second ("1049/2001") — with euStyle a leading 4-digit
- * year wins, otherwise the trailing one.
+ * year wins, otherwise the trailing one. A community qualifier ("2004/48/ES")
+ * comes back as druh, to be posted into the EU row's druh dial.
  */
 export function parseNssActRef(ref: string, euStyle: boolean): NssActRef {
-  const m = /^\s*(?:č\.\s*)?(\d{1,4})\s*\/\s*(\d{1,4})(?:\s*\/?\s*(?:EU|ES|EHS|EURATOM))?(?:\s*Sb\.?(?:\s*m\.?\s*s\.?)?)?\s*$/i.exec(
+  const m = /^\s*(?:č\.\s*)?(\d{1,4})\s*\/\s*(\d{1,4})(?:\s*\/?\s*(EU|ES|EHS|EURATOM))?(?:\s*Sb\.?(?:\s*m\.?\s*s\.?)?)?\s*$/i.exec(
     ref,
   );
   const isYear = (part: string) => /^\d{4}$/.test(part) && Number(part) >= 1900 && Number(part) <= 2099;
   if (m) {
-    if (euStyle && isYear(m[1])) return { cislo: m[2], rok: m[1] };
-    if (isYear(m[2])) return { cislo: m[1], rok: m[2] };
-    if (isYear(m[1])) return { cislo: m[2], rok: m[1] };
+    const druh = m[3] ? { druh: m[3].toUpperCase() } : {};
+    if (euStyle && isYear(m[1])) return { cislo: m[2], rok: m[1], ...druh };
+    if (isYear(m[2])) return { cislo: m[1], rok: m[2], ...druh };
+    if (isYear(m[1])) return { cislo: m[2], rok: m[1], ...druh };
   }
   throw new SourceError(
     SOURCE,
@@ -251,7 +255,8 @@ export interface NssProvision {
 /** "§ 17 odst. 2 písm. a", "čl. 8 odst. 2", or compact "17(2)(a)". */
 export function parseNssProvision(ref: string): NssProvision {
   const text = ref.trim().replace(/\s+/g, " ");
-  const kindMatch = /^(§|čl\.?|cl\.?|článek|art(?:icle)?\.?)\s*/iu.exec(text);
+  // Longest alternatives first — "čl" would otherwise eat "článek"'s prefix.
+  const kindMatch = /^(§|článek|čl\.?|cl\.?|art(?:icle)?\.?)\s*/iu.exec(text);
   const kind = kindMatch ? (kindMatch[1] === "§" ? "par" : "cl") : undefined;
   const rest = kindMatch ? text.slice(kindMatch[0].length) : text;
   const m =
@@ -451,6 +456,15 @@ export interface NssSearchInput {
   appliesProvision?: string; // "§ 17 odst. 2 písm. a" | "čl. 8" | "17(2)(a)"
 }
 
+/**
+ * Every captured NSS POST carries dates zero-padded (DD.MM.YYYY) — pad here
+ * instead of using the shared unpadded isoToCzech (which mirrors NALUS).
+ */
+function isoToCzechPadded(iso: string): string {
+  const [year, month, day] = iso.split("-");
+  return `${day}.${month}.${year}`;
+}
+
 /** Codebook subtrees behind the `court` filter (titles verbatim from the live tree). */
 const NSS_COURT_GROUPS: Record<NonNullable<NssSearchInput["court"]>, string> = {
   nss: "Nejvyšší správní soud",
@@ -508,16 +522,16 @@ export function buildNssSearchForm(fields: NssFormField[], input: NssSearchInput
   };
 
   if (input.dateFrom) {
-    setCriterion("date from", isoToCzech(input.dateFrom), ".HodnotaDatumACasOd", null, /^datumvydanirozhodnuti$/);
+    setCriterion("date from", isoToCzechPadded(input.dateFrom), ".HodnotaDatumACasOd", null, /^datumvydanirozhodnuti$/);
   }
   if (input.dateTo) {
-    setCriterion("date to", isoToCzech(input.dateTo), ".HodnotaDatumACasDo", null, /^datumvydanirozhodnuti$/);
+    setCriterion("date to", isoToCzechPadded(input.dateTo), ".HodnotaDatumACasDo", null, /^datumvydanirozhodnuti$/);
   }
   if (input.publishedFrom) {
-    setStrict("published from", isoToCzech(input.publishedFrom), /^aktualizovano$/, ".HodnotaDatumACasOd");
+    setStrict("published from", isoToCzechPadded(input.publishedFrom), /^aktualizovano$/, ".HodnotaDatumACasOd");
   }
   if (input.publishedTo) {
-    setStrict("published to", isoToCzech(input.publishedTo), /^aktualizovano$/, ".HodnotaDatumACasDo");
+    setStrict("published to", isoToCzechPadded(input.publishedTo), /^aktualizovano$/, ".HodnotaDatumACasDo");
   }
   if (input.query) {
     setCriterion(
@@ -612,6 +626,22 @@ export function buildNssSearchForm(fields: NssFormField[], input: NssSearchInput
     const exact = (name: string) => new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
     setStrict("applied act number", act.cislo, exact(`${row.stem}cislo`), ".HodnotaCislo");
     setStrict("applied act year", act.rok, exact(`${row.stem}rok`), ".HodnotaCislo");
+    if (act.druh) {
+      if (!row.eu) {
+        throw new SourceError(
+          SOURCE,
+          "INPUT_INVALID",
+          `A community qualifier ("/${act.druh}") only belongs on an EU act reference.`,
+          "Drop it, or move the reference to applies_eu_regulation / applies_eu_directive.",
+        );
+      }
+      // "2004/48/ES" narrows the EU row's druh dial to that community series.
+      setDial("applied act druh", exact(`${row.stem}druh`), (tree) => {
+        const selection = selectFromCiselnik(tree, (title) => fold(title) === fold(act.druh!));
+        if (!selection.ids.length) drift(`druh "${act.druh}"`);
+        return selection;
+      });
+    }
     if (input.appliesProvision) {
       const provision = parseNssProvision(input.appliesProvision);
       const asParagraph = row.par !== null && provision.kind !== "cl";
