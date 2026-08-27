@@ -60,13 +60,7 @@ export interface CuriaSearchInput {
   docType?: "judgment" | "opinion" | "avis" | "order" | "request" | "any";
   /** Member states whose courts referred the preliminary question ("CZ", "SK"…). */
   referredFrom?: string[];
-  /** CELEX of an act the decision must cite (e.g. "32004L0048"). */
-  citesCelex?: string;
-  /** Narrows citesCelex to one article ("1", "17", "17(2)"). */
-  citesArticle?: string;
-  /** Extend the full-text search to every language version (UI "allLang"). */
-  allLanguages?: boolean;
-  dateFrom?: string; // ISO, docDate
+  dateFrom?: string; // ISO, client-side on docDate
   dateTo?: string; // ISO
   sort?: "relevance" | "date";
   language?: string;
@@ -87,17 +81,13 @@ export const CURIA_DOC_TYPES: Record<string, { typeDoc: string[]; prefixes: stri
   request: { typeDoc: ["DDP"], prefixes: ["DDP"] },
 };
 
-/** "32004L0048" + "1" → "32004L0048*A01*" — the citations pattern the advanced
- * search sends (citationsMotif: CELEX, then the article code). Pure — unit-tested. */
-export function buildCitationsMotif(celex: string, article?: string): string {
-  const act = celex.trim().toUpperCase();
-  const raw = article?.trim().toUpperCase().replace(/\s+/g, "");
-  if (!raw) return `${act}*`;
-  // "1" → A01; "17(2)" → A17P2; an already-encoded "A17P2" passes through.
-  const m = /^(\d+)(?:\((\d+)\))?$/.exec(raw);
-  const code = m ? `A${m[1].padStart(2, "0")}${m[2] ? `P${m[2]}` : ""}` : raw.startsWith("A") ? raw : `A${raw}`;
-  return `${act}*${code}*`;
-}
+// A citations filter (UI citationsMotif_a, "32004L0048*A01*") is NOT wired:
+// sent as top-level body keys the backend ignores it — the total stays the
+// whole database (59 163, verified live). Until the SPA's real payload is
+// captured, the honest route to "case law on act X" is the act's number as a
+// full-text phrase. An allLang key is equally pointless: the text search
+// already matches every language version (a Czech phrase scored 114 cases
+// with language "en", identical with and without the flag).
 
 export interface CuriaHit {
   logicDocId?: string;
@@ -144,10 +134,10 @@ export function buildCuriaBody(input: CuriaSearchInput, page: number, pageSize: 
       valuesWithFullHierarchy: ["ENC"],
     });
   }
-  // Advanced-search filters. The entry shape is the one captured live for
-  // typeDoc ({field, values, valuesWithFullHierarchy: [], isMatchAll: false});
-  // the oqp and docDate field names come verbatim from the advanced-search
-  // URL parameters (oqp_a, docDate_a) and reuse that shape.
+  // Advanced-search filters. Both are verified live in this entry shape:
+  // typeDoc left "hidden by filters" at zero, oqp NAT_CZ matched exactly the
+  // 143 Czech references. A docDate entry is deliberately absent — it made
+  // the backend answer HTTP 500, so dates filter client-side only.
   const advancedFiltersValue: Array<Record<string, unknown>> = [];
   const advanced = (field: string, values: string[]) =>
     advancedFiltersValue.push({ field, values, valuesWithFullHierarchy: [], isMatchAll: false });
@@ -160,11 +150,6 @@ export function buildCuriaBody(input: CuriaSearchInput, page: number, pageSize: 
       "oqp",
       input.referredFrom.map((code) => `NAT_${code.toUpperCase()}`),
     );
-  }
-  if (input.dateFrom || input.dateTo) {
-    // One "from,to" value, as docDate_a encodes it; open ends get the docket's
-    // bounds so the client-side date guard stays the arbiter of half-ranges.
-    advanced("docDate", [`${input.dateFrom ?? "1952-01-01"},${input.dateTo ?? "2099-12-31"}`]);
   }
   // The backend ignores usualName without a searchTerm — party names go
   // through full text too (verified live: found C-201/22 for "Telia Finland").
@@ -196,16 +181,6 @@ export function buildCuriaBody(input: CuriaSearchInput, page: number, pageSize: 
     usualName: input.parties ?? "",
     logicDocId: "",
     repJurExpand: true,
-    // Citations and all-language keys ride along only when asked for — their
-    // names come from the URL parameters (citationsMotif_a,
-    // selectionCitationMatch_a, allLang_a), not from a captured request.
-    ...(input.citesCelex
-      ? {
-          citationsMotif: buildCitationsMotif(input.citesCelex, input.citesArticle),
-          selectionCitationMatch: "all",
-        }
-      : {}),
-    ...(input.allLanguages ? { allLang: true } : {}),
     filtersValue,
     advancedFiltersValue,
     isSearchExact: !input.query,
@@ -244,7 +219,21 @@ export function parseCuriaSearch(json: unknown): CuriaSearchPage {
     const affairCaseNumber = affairStr("publishedId") ?? affairStr("publishedAffId");
     const stateCode = affairStr("affairStateCode");
 
-    for (const inner of outer.innerHits?.document?.searchHits ?? []) {
+    const innerDocs = outer.innerHits?.document?.searchHits ?? [];
+    if (!innerDocs.length && (affairCaseNumber || caseName)) {
+      // Keyword-less searches (referred_from alone…) score no documents, but
+      // the affair itself matched — surface it with its case-listing link.
+      hits.push({
+        caseNumber: affairCaseNumber,
+        caseName,
+        stateCode,
+        url: affairCaseNumber
+          ? `https://curia.europa.eu/juris/liste.jsf?num=${encodeURIComponent(affairCaseNumber)}&language=cs`
+          : null,
+      });
+      continue;
+    }
+    for (const inner of innerDocs) {
       const doc = (inner.document ?? inner.content ?? {}) as Record<string, unknown>;
       const str = (key: string) => (typeof doc[key] === "string" ? (doc[key] as string) : undefined);
       const ecli = str("ecli") ?? str("docEcli");
@@ -304,19 +293,12 @@ async function runSearchCuria(
   page: number,
   pageSize: number,
 ): Promise<CuriaSearchPage & { filtered: number }> {
-  if (
-    !input.query &&
-    !input.caseNumber &&
-    !input.ecli &&
-    !input.parties &&
-    !input.citesCelex &&
-    !input.referredFrom?.length
-  ) {
+  if (!input.query && !input.caseNumber && !input.ecli && !input.parties && !input.referredFrom?.length) {
     throw new SourceError(
       SOURCE,
       "INPUT_INVALID",
       "CURIA search needs at least one criterion.",
-      "Provide query (full-text keywords), case_number (e.g. 'C-311/18'), ecli, parties, cites_celex, or referred_from.",
+      "Provide query (full-text keywords), case_number (e.g. 'C-311/18'), ecli, parties, or referred_from.",
     );
   }
   const response = await fetchUpstream(SOURCE, `${WS_BASE}/elastic-connector/search`, {

@@ -22,7 +22,7 @@ export function registerCuria(server: McpServer): void {
     {
       title: "CJEU: search case law",
       description:
-        "FULL-TEXT search of CJEU case law (Court of Justice 'C', General Court 'T') via the court's own live InfoCuria index — the advanced-search surface: text of judgments/opinions + metadata, case number (C-311/18), case/party name, ECLI, case status (closed/pending), document type, court and date filters, relevance/date sort. Beyond keywords: cites_celex (+cites_article) finds decisions citing a given act or article; referred_from finds preliminary rulings referred by a given member state's courts (e.g. ['CZ']); all_languages extends the text search to every language version. Includes same-day decisions. 'queries' searches up to 3 variants IN PARALLEL and merges deduplicated results; read_top: N also returns excerpt previews of the N best hits. Fetch texts with curia_get_document.",
+        "FULL-TEXT search of CJEU case law (Court of Justice 'C', General Court 'T') via the court's own live InfoCuria index — the advanced-search surface: text of judgments/opinions + metadata, case number (C-311/18), case/party name, ECLI, case status (closed/pending), document type, court and date filters, relevance/date sort. The text search matches EVERY language version at once — Czech phrases work directly. referred_from lists preliminary rulings referred by a given member state's courts (e.g. ['CZ']) even without keywords; for case law ON a provision, search the act's number as a phrase (query: '\"2004/48\"'). Includes same-day decisions. 'queries' searches up to 3 variants IN PARALLEL and merges deduplicated results; read_top: N also returns excerpt previews of the N best hits. Fetch texts with curia_get_document.",
       inputSchema: z.object({
         query: z.string().optional().describe("Keywords (any EU language; English works best)."),
         queries: z
@@ -58,22 +58,6 @@ export function registerCuria(server: McpServer): void {
           .optional()
           .describe(
             "Only preliminary rulings referred by courts of these states — e.g. ['CZ'] for Czech references. EL = Greece, UK = pre-Brexit references, XB = Benelux Court of Justice. Works alone (no query needed) — combine with sort: 'date'.",
-          ),
-        cites_celex: z
-          .string()
-          .optional()
-          .describe(
-            "Only decisions citing this act — CELEX number: directive 2004/48 = '32004L0048', GDPR = '32016R0679'. Works alone (no query needed).",
-          ),
-        cites_article: z
-          .string()
-          .optional()
-          .describe("Narrow cites_celex to one article: '1', '17' or '17(2)'."),
-        all_languages: z
-          .boolean()
-          .default(false)
-          .describe(
-            "Extend the full-text search to ALL language versions (by default only the 'language' version is searched — set this for Czech phrases).",
           ),
         date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Document date from (ISO)."),
         date_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Document date to (ISO)."),
@@ -120,7 +104,7 @@ export function registerCuria(server: McpServer): void {
       }),
       annotations: READ_ONLY,
     },
-    async ({ query, queries, case_number, ecli, parties, court, state, doc_type, referred_from, cites_celex, cites_article, all_languages, date_from, date_to, sort, limit, page, language, read_top }) => {
+    async ({ query, queries, case_number, ecli, parties, court, state, doc_type, referred_from, date_from, date_to, sort, limit, page, language, read_top }) => {
       try {
         const variants = uniqueQueries(query, queries);
         // One InfoCuria request per variant, in parallel; merged + deduped.
@@ -136,9 +120,6 @@ export function registerCuria(server: McpServer): void {
                 state,
                 docType: doc_type,
                 referredFrom: referred_from,
-                citesCelex: cites_celex,
-                citesArticle: cites_article,
-                allLanguages: all_languages,
                 dateFrom: date_from,
                 dateTo: date_to,
                 sort,
@@ -183,11 +164,13 @@ export function registerCuria(server: McpServer): void {
         };
         const lines = result.hits.map(
           (hit, i) =>
-            `${page * limit + i + 1}. ${hit.caseNumber ?? "?"} ${hit.caseName ?? hit.parties ?? ""} [${hit.docType ?? "?"}]${hit.date ? ` (${hit.date})` : ""}${hit.ecli ? ` — ${hit.ecli}` : ""}${hit.url ? `\n   ${hit.url}` : ""}`,
+            `${page * limit + i + 1}. ${hit.caseNumber ?? "?"} ${hit.caseName ?? hit.parties ?? ""}${hit.docType ? ` [${hit.docType}]` : ""}${hit.date ? ` (${hit.date})` : ""}${hit.ecli ? ` — ${hit.ecli}` : ""}${hit.url ? `\n   ${hit.url}` : ""}`,
         );
+        // total counts matching CASES (affairs); the listed items are the
+        // documents (or bare case listings) inside them — say both.
         const text = result.hits.length
           ? [
-              `${result.total} matching cases${variants.length > 1 ? ` (best of ${variants.length} variants, merged)` : ""}${result.filtered ? ` (${result.filtered} documents hidden by doc_type/state/date filters)` : ""}:`,
+              `${result.total} matching cases, showing ${result.hits.length} ${result.hits.some((h) => h.docType) ? "documents" : "case listings"}${variants.length > 1 ? ` (best of ${variants.length} variants, merged)` : ""}${result.filtered ? ` (${result.filtered} documents hidden by doc_type/state/date filters)` : ""}:`,
               ...lines,
               "Full text: curia_get_document {ecli | case_number | logic_doc_id}.",
               ...renderPreviews(previews, "curia_get_document"),

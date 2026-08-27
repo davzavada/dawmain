@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildCitationsMotif,
   buildCuriaBody,
   caseNumberToCelex,
   parseCuriaSearch,
@@ -91,7 +90,7 @@ describe("buildCuriaBody", () => {
     expect(any.advancedFiltersValue).toHaveLength(0);
   });
 
-  it("maps referring states to NAT_ codes and dates to one from,to value", () => {
+  it("maps referring states to NAT_ codes; dates never go upstream", () => {
     const body = buildCuriaBody(
       { referredFrom: ["CZ", "sk"], dateFrom: "2021-01-01", dateTo: "2025-01-01" },
       0,
@@ -103,42 +102,9 @@ describe("buildCuriaBody", () => {
       valuesWithFullHierarchy: [],
       isMatchAll: false,
     });
-    expect(body.advancedFiltersValue).toContainEqual({
-      field: "docDate",
-      values: ["2021-01-01,2025-01-01"],
-      valuesWithFullHierarchy: [],
-      isMatchAll: false,
-    });
-    const half = buildCuriaBody({ query: "x", dateFrom: "2023-06-01" }, 0, 10) as {
-      advancedFiltersValue: Array<{ field: string; values: string[] }>;
-    };
-    expect(half.advancedFiltersValue.find((f) => f.field === "docDate")?.values).toEqual([
-      "2023-06-01,2099-12-31",
-    ]);
-  });
-
-  it("adds citations and all-language keys only when asked for", () => {
-    const cited = buildCuriaBody(
-      { citesCelex: "32004L0048", citesArticle: "1", allLanguages: true },
-      0,
-      10,
-    ) as Record<string, unknown>;
-    expect(cited.citationsMotif).toBe("32004L0048*A01*");
-    expect(cited.selectionCitationMatch).toBe("all");
-    expect(cited.allLang).toBe(true);
-    const plain = buildCuriaBody({ query: "x" }, 0, 10) as Record<string, unknown>;
-    expect("citationsMotif" in plain).toBe(false);
-    expect("allLang" in plain).toBe(false);
-  });
-});
-
-describe("buildCitationsMotif", () => {
-  it("encodes CELEX + article the way the form's URL does", () => {
-    expect(buildCitationsMotif("32004L0048", "1")).toBe("32004L0048*A01*");
-    expect(buildCitationsMotif("32016R0679", "17")).toBe("32016R0679*A17*");
-    expect(buildCitationsMotif("32016R0679", "17(2)")).toBe("32016R0679*A17P2*");
-    expect(buildCitationsMotif("32016r0679", "a17p2")).toBe("32016R0679*A17P2*");
-    expect(buildCitationsMotif("32004L0048")).toBe("32004L0048*");
+    // A docDate advanced filter made the backend answer HTTP 500 — dates
+    // must stay client-side.
+    expect(body.advancedFiltersValue.some((f) => f.field === "docDate")).toBe(false);
   });
 });
 
@@ -200,6 +166,27 @@ describe("parseCuriaSearch", () => {
 
   it("throws PARSE_DRIFT on shape mismatch", () => {
     expect(() => parseCuriaSearch({ different: true })).toThrowError(SourceError);
+  });
+
+  it("surfaces the affair itself when a keyword-less search scores no documents", () => {
+    const page = parseCuriaSearch({
+      totalHits: 143,
+      searchHits: [
+        {
+          content: {
+            publishedId: "C-57/21",
+            affairStateCode: "CLOTPUB",
+            usualNameML: [{ en: "RegioJet" }],
+          },
+          innerHits: { document: { searchHits: [] } },
+        },
+      ],
+    });
+    expect(page.hits).toHaveLength(1);
+    expect(page.hits[0].caseNumber).toBe("C-57/21");
+    expect(page.hits[0].caseName).toBe("RegioJet");
+    expect(page.hits[0].docType).toBeUndefined();
+    expect(page.hits[0].url).toBe("https://curia.europa.eu/juris/liste.jsf?num=C-57%2F21&language=cs");
   });
 });
 

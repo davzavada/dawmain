@@ -240,23 +240,27 @@ best; the index is the court's own and carries same-day decisions.
 |---|---|
 | tu konkrétní věc | `case_number: "C-311/18"` / `ecli` |
 | věc podle jména | `parties: "Telia Finland"` |
-| judikaturu k čl. X předpisu | `cites_celex: "32004L0048", cites_article: "1"` |
+| judikaturu k předpisu | `query: "\"2004/48\""` — číslo předpisu jako fráze |
 | předběžné otázky z ČR | `referred_from: ["CZ"], sort: "date"` |
 | jen rozsudky / stanoviska GA | `doc_type: "judgment"` / `"opinion"` |
 | jen uzavřené věci | `state: "closed"` |
-| českou frázi napříč jazyky | `query` + `all_languages: true` |
 | Soudní dvůr vs. Tribunál | `court: "C"` / `"T"` |
 | období | `date_from` / `date_to` |
 
-**`cites_celex` is the citator the CZ courts lack** — it finds the case law *on* a
-provision of EU law directly: directive 2004/48 = `32004L0048`, GDPR = `32016R0679`,
-a regulation YYYY/N = `3YYYYRNNNN`. With `cites_article` it narrows to one article.
-It works with no keywords at all; pair it with `sort: "date"` for the recent line.
+**The full text is multilingual by default** — one query matches every language
+version at once, so a Czech phrase (`"dobré mravy"`) finds the case law directly, no
+flag needed. Pick the reading language separately (`language: "cs"` on the document).
+
+**Case law on a provision: search the act's number as a phrase.** `query:
+"\"2004/48\""` (with the article if you need it: `"\"čl. 13 směrnice 2004/48\""` /
+`"\"Article 13 of Directive 2004/48\""`) finds the decisions that discuss it. There is
+no citator field; the text is the citator.
 
 **`referred_from: ["CZ"]`** answers "co už předložily české soudy" — every preliminary
-reference from Czech courts, again no keywords needed. The Czech angle on an EU
-question often starts here: an existing Czech reference means a Czech factual setting
-and often Czech commentary.
+reference from Czech courts (~143 věcí), no keywords needed; sort by date for the
+recent line. Keyword-less searches return case listings, not documents — follow up on
+a picked case with `case_number` to reach its texts. The Czech angle on an EU question
+often starts here: an existing Czech reference means a Czech factual setting.
 
 **`doc_type`**: a `judgment` settles the law; an `opinion` (AG) argues it — cite the
 judgment as authority and the opinion for the reasoning when the judgment is terse.
@@ -266,9 +270,10 @@ judgment as authority and the opinion for the reasoning when the judgment is ter
 case_number or an ecli. Party names alone ride on the full text, so a rare name finds
 the case; a common word as a name will drown.
 
-If a filtered search comes back visibly unfiltered — pending cases despite
-`state: "closed"`, dates outside the range — say so in the memo rather than presenting
-the result as filtered; the tool reports what it hid client-side in its summary line.
+**`total` counts cases, the items are documents** — one case brings its judgment, AG
+opinion and the referring request together, so "1 matching case, 5 documents" is
+normal, not a bug. Dates filter what was fetched client-side; if a date-limited search
+looks thin, widen the window rather than paging deep.
 
 ## Screening and reading
 
