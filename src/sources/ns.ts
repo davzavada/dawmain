@@ -418,12 +418,28 @@ async function nsGate<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
+/**
+ * Smallest Count worth sending. Domino answers HTTP 500 to this view when
+ * Count is small — measured: the identical search returns 2 hits at Count=20
+ * and 500 at Count=3, and the same query alternated between working and
+ * failing all morning purely by the caller's limit. (The view has the same
+ * allergy to a small SearchMax, which is why SearchMax stays at 1000.) So we
+ * always ask for a full page and cut the result to size locally; a smaller
+ * limit costs the court nothing extra.
+ */
+export const NS_MIN_COUNT = 20;
+
+/** Count to send upstream for a caller's page size. Pure — unit-tested. */
+export function nsFetchCount(count: number): number {
+  return Math.max(count, NS_MIN_COUNT);
+}
+
 async function runNsSearch(input: NsSearchInput, start: number, count: number): Promise<NsSearchPage> {
   const query = buildNsQuery(input);
   const url =
     `${BASE}/$$WebSearch1?SearchView&Query=${encodeURIComponent(query)}` +
     // SearchMax must stay large: SearchMax=1 provokes HTTP 500 upstream.
-    `&SearchMax=1000&SearchOrder=4&Start=${start}&Count=${count}&pohled=1`;
+    `&SearchMax=1000&SearchOrder=4&Start=${start}&Count=${nsFetchCount(count)}&pohled=1`;
   // No automatic 5xx retry: NS 500s are deterministic for the given window
   // (capacity, not flakiness) — re-sending the same query just hammers the box;
   // the caller falls back to a narrower window instead.
@@ -450,10 +466,12 @@ async function runNsSearch(input: NsSearchInput, start: number, count: number): 
     }
   });
   const page = parseNsSearch(await response.text());
-  if (!input.query) return page;
+  // We asked for a full page even when the caller wanted three rows.
+  const hits = page.hits.slice(0, count);
+  if (!input.query) return { ...page, hits };
   return {
     ...page,
-    hits: page.hits.map((hit) => ({ ...hit, url: withHighlight(hit.url, [input.query]) })),
+    hits: hits.map((hit) => ({ ...hit, url: withHighlight(hit.url, [input.query]) })),
   };
 }
 

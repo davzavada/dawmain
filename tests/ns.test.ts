@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   buildNsQuery,
   isoDaysAgo,
+  nsFetchCount,
   parseSpisovaZnacka,
   sanitizeNsFullText,
   withHighlight,
@@ -288,5 +289,14 @@ describe("usToIso", () => {
   it("converts MM/DD/YYYY", () => {
     expect(usToIso("05/20/2026")).toBe("2026-05-20");
     expect(usToIso("20. 5. 2026")).toBeNull();
+  });
+});
+
+describe("nsFetchCount", () => {
+  it("never asks Domino for a small page — it answers 500 to those", () => {
+    expect(nsFetchCount(1)).toBe(20);
+    expect(nsFetchCount(3)).toBe(20);
+    expect(nsFetchCount(20)).toBe(20);
+    expect(nsFetchCount(100)).toBe(100);
   });
 });
