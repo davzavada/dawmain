@@ -410,13 +410,14 @@ async function runNsSearch(input: NsSearchInput, start: number, count: number): 
   // No automatic 5xx retry: NS 500s are deterministic for the given window
   // (capacity, not flakiness) — re-sending the same query just hammers the box;
   // the caller falls back to a narrower window instead.
-  // Live behaviour (measured 2026-08-27): NS answers 500 to full-text searches
-  // whose TERMS are broad — a common phrase costs the same whether or not a
-  // date range is attached, because the FT engine evaluates the terms first
-  // and intersects afterwards. Those 500s are also intermittent: the identical
-  // query alternates between 19 hits and 500 as the box's search capacity
-  // comes and goes. So one spaced retry, and no more — a genuinely oversized
-  // query fails twice and the caller gets told to narrow the TERMS.
+  // Live behaviour (measured 2026-08-27): NS refuses full-text searches with
+  // HTTP 500 intermittently — the identical query alternated between 19 hits
+  // and 500 within minutes — while field-only searches (spisová značka, typ,
+  // dates) kept working throughout. Common terms are refused more often than
+  // rare ones, and a date range does not reliably help; a range on
+  // [datum_predani_na_web] reliably hurts (see the hint below). So one spaced
+  // retry, and no more: hammering a box that is already refusing is exactly
+  // what we should not do to a court that publishes its case law for free.
   const response = await nsGate(async () => {
     const send = () =>
       fetchUpstream(SOURCE, url, {
@@ -487,7 +488,7 @@ async function runSearchNsWindowed(
           SOURCE,
           "UPSTREAM_ERROR",
           error.message,
-          "NS answers HTTP 500 when the full-text TERMS are too broad — a date range does not make the query cheaper, because the terms are evaluated first. Narrow the terms instead: an exact \"phrase\", a wildcard stem (nájem*), proximity (A SENTENCE B), or add type/category. The box also refuses intermittently under load, so an unchanged query may work a minute later.",
+          "NS refuses full-text searches intermittently, and the more common the TERMS the more often — a date range does not reliably make a query cheaper. One retry already happened. Narrow the terms (an exact \"phrase\", a wildcard stem, proximity A SENTENCE B) or come back to this search after the other courts; field-only searches (case_number, type, category, dates) keep working while full text is refused.",
         );
       }
       throw error;

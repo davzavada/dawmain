@@ -215,13 +215,14 @@ and anything in square brackets is stripped.
 `matched` tells you how many really match. Paging deeper is not the fix — a narrower
 query is.
 
-**HTTP 500 means the terms are too broad, not the dates.** Measured live: the box
-evaluates the full-text terms first and intersects the date range afterwards, so
-`"dobré mravy"` fails the same way with a one-month window as without one, while
-`nájem* AND "dobré mravy"` goes through. When NS refuses:
+**HTTP 500 is NS refusing a full-text search, and dates will not fix it.** Measured
+live: the same query alternated between 19 hits and 500 within minutes, common terms
+were refused far more often than rare ones, and `"dobré mravy"` failed with a one-month
+window exactly as it did without one. Field-only searches — sp. zn., `type`, `category`,
+dates — kept working the whole time. When NS refuses:
 
-- narrow the **terms** — exact phrase, wildcard stem, `SENTENCE`/`NEAR` proximity, or
-  add `type` / `category`. Do not just shorten the date range;
+- narrow the **terms** — exact phrase, wildcard stem, `SENTENCE`/`NEAR` proximity.
+  Shortening the date range is not the lever it looks like;
 - if the search was bounded by `published_from` / `published_to`, move it to
   `date_from` / `date_to`: measured, `"31 Cdo 1945/2010"` over 2016 returns 22 hits on
   the decision date and HTTP 500 on the publication date. Publication dates are for
