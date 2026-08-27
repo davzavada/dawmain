@@ -434,7 +434,12 @@ export function nsFetchCount(count: number): number {
   return Math.max(count, NS_MIN_COUNT);
 }
 
-async function runNsSearch(input: NsSearchInput, start: number, count: number): Promise<NsSearchPage> {
+async function runNsSearch(
+  input: NsSearchInput,
+  start: number,
+  count: number,
+  retryOnce = true,
+): Promise<NsSearchPage> {
   const query = buildNsQuery(input);
   const url =
     `${BASE}/$$WebSearch1?SearchView&Query=${encodeURIComponent(query)}` +
@@ -443,14 +448,10 @@ async function runNsSearch(input: NsSearchInput, start: number, count: number): 
   // No automatic 5xx retry: NS 500s are deterministic for the given window
   // (capacity, not flakiness) — re-sending the same query just hammers the box;
   // the caller falls back to a narrower window instead.
-  // Live behaviour (measured 2026-08-27): NS refuses full-text searches with
-  // HTTP 500 intermittently — the identical query alternated between 19 hits
-  // and 500 within minutes — while field-only searches (spisová značka, typ,
-  // dates) kept working throughout. Common terms are refused more often than
-  // rare ones, and a date range does not reliably help; a range on
-  // [datum_predani_na_web] reliably hurts (see the hint below). So one spaced
-  // retry, and no more: hammering a box that is already refusing is exactly
-  // what we should not do to a court that publishes its case law for free.
+  // One spaced retry, and no more: hammering a box that is already refusing is
+  // exactly what we should not do to a court that publishes its case law for
+  // free. (The morning's flood of 500s was our own small Count — NS_MIN_COUNT
+  // — not the court's capacity; with a full page they have not recurred.)
   const response = await nsGate(async () => {
     const send = () =>
       fetchUpstream(SOURCE, url, {
@@ -460,6 +461,7 @@ async function runNsSearch(input: NsSearchInput, start: number, count: number): 
     try {
       return await send();
     } catch (error) {
+      if (!retryOnce) throw error;
       if (!(error instanceof SourceError && error.kind === "UPSTREAM_ERROR")) throw error;
       await new Promise((resolve) => setTimeout(resolve, 1500 + Math.random() * 1000));
       return send();
@@ -498,10 +500,7 @@ async function runSearchNsWindowed(
   start: number,
   count: number,
 ): Promise<NsSearchResult> {
-  // Explicit dates — and unique keys like a spisová značka — run as-given;
-  // the 500-guard window exists for unbounded FULL-TEXT queries. A sp. zn.
-  // matches a handful of documents and must find them in ANY year (live
-  // case: "23 Cdo 3375/2011" found nothing inside the 12-month window).
+  // Explicit dates — and unique keys like a spisová značka — run as given.
   if (input.dateFrom || input.dateTo || input.publishedFrom || input.publishedTo || input.caseNumber) {
     try {
       return { ...(await runNsSearch(input, start, count)), appliedWindowFrom: null };
@@ -511,30 +510,32 @@ async function runSearchNsWindowed(
         // range dies on windows the same query survives on [datum_rozhodnuti]
         // ("31 Cdo 1945/2010" over 2016: 500 vs 22 hits). The publication date
         // is for listing what NS put up lately, not for full-text research.
-        if (input.query && (input.publishedFrom || input.publishedTo)) {
-          throw new SourceError(
-            SOURCE,
-            "UPSTREAM_ERROR",
-            error.message,
-            "NS handles a full-text query badly when it is bounded by the PUBLICATION date. Use date_from/date_to (datum rozhodnutí) for research — the same query usually goes through — and keep published_from/published_to for listing what NS published lately, without a query or with a short window.",
-          );
-        }
         throw new SourceError(
           SOURCE,
           "UPSTREAM_ERROR",
           error.message,
-          "NS refuses full-text searches intermittently, and the more common the TERMS the more often — a date range does not reliably make a query cheaper. One retry already happened. Narrow the terms (an exact \"phrase\", a wildcard stem, proximity A SENTENCE B) or come back to this search after the other courts; field-only searches (case_number, type, category, dates) keep working while full text is refused.",
+          "The NS server refused this search and a retry did not help. Try a narrower query — add a term, a date range, type or category — or come back to it in a minute; the other courts are unaffected, so finish the rešerše there and say in the memo that NS did not answer.",
         );
       }
       throw error;
     }
   }
 
-  // No dates: the box 500s on unbounded queries — apply 12 months, then 90 days.
+  // No dates: search the whole database. The 12-month default this used to
+  // apply was a workaround for 500s that turned out to be our own Count (see
+  // NS_MIN_COUNT) — and it silently hid everything older from every dateless
+  // search, which for case-law research is the wrong failure. Verified after
+  // the fix: "dobré mravy" with no upper bound reports 1224 matches. The
+  // windows survive as a rescue, announced through appliedWindowFrom.
+  try {
+    return { ...(await runNsSearch(input, start, count, false)), appliedWindowFrom: null };
+  } catch (error) {
+    if (!(error instanceof SourceError && error.kind === "UPSTREAM_ERROR")) throw error;
+  }
   const yearly = withDefaultWindow(input, 365);
   try {
     return {
-      ...(await runNsSearch(yearly.input, start, count)),
+      ...(await runNsSearch(yearly.input, start, count, false)),
       appliedWindowFrom: yearly.appliedWindowFrom,
     };
   } catch (error) {

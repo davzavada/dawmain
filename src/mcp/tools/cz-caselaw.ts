@@ -72,7 +72,7 @@ export function registerCzCaselaw(server: McpServer): void {
     {
       title: "Case law: search all top courts at once",
       description:
-        "FULL-TEXT search across NSS (administrative), NS (civil/criminal) and Ústavní soud (constitutional) in parallel — optionally also the CJEU (include_eu). Takes up to 3 query variants at once ('queries' — Czech inflects, so pass stems/synonyms: [\"bezpečný přístav\", \"bezpečného přístavu\", \"safe harbour\"]); results are merged and deduplicated per court. With read_top: N the response ALSO carries excerpt previews of the N best hits — search + first reading in one call. NS full-text is auto-limited to the last 12 months unless dates are given. For deeper digging use nss_search/ns_search/nalus_search/curia_search; fetch full texts with the *_get_* tool named in each hit.",
+        "FULL-TEXT search across NSS (administrative), NS (civil/criminal) and Ústavní soud (constitutional) in parallel — optionally also the CJEU (include_eu). Takes up to 3 query variants at once ('queries' — Czech inflects, so pass stems/synonyms: [\"bezpečný přístav\", \"bezpečného přístavu\", \"safe harbour\"]); results are merged and deduplicated per court. With read_top: N the response ALSO carries excerpt previews of the N best hits — search + first reading in one call. Every court is searched across its whole archive — pass date_from/date_to only when the question has a time frame. For deeper digging use nss_search/ns_search/nalus_search/curia_search; fetch full texts with the *_get_* tool named in each hit.",
       inputSchema: z.object({
         query: z.string().min(2).optional().describe("Czech full-text query."),
         queries: z

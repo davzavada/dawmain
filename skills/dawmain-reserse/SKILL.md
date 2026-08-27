@@ -215,28 +215,22 @@ and anything in square brackets is stripped.
 `matched` tells you how many really match. Paging deeper is not the fix — a narrower
 query is.
 
-**HTTP 500 is NS refusing a full-text search, and dates will not fix it.** Measured
-live: the same query alternated between 19 hits and 500 within minutes, common terms
-were refused far more often than rare ones, and `"dobré mravy"` failed with a one-month
-window exactly as it did without one. Field-only searches — sp. zn., `type`, `category`,
-dates — kept working the whole time. When NS refuses:
+A full-text search covers the **whole** database — there is no hidden recency window,
+so a dateless search reaches judgments from the 1990s as readily as last month's. If
+`applied_window_from` comes back set, NS refused the open search and the server fell
+back to a window; say so if it matters to the answer.
 
-- narrow the **terms** — exact phrase, wildcard stem, `SENTENCE`/`NEAR` proximity.
-  Shortening the date range is not the lever it looks like;
-- if the search was bounded by `published_from` / `published_to`, move it to
-  `date_from` / `date_to`: measured, `"31 Cdo 1945/2010"` over 2016 returns 22 hits on
-  the decision date and HTTP 500 on the publication date. Publication dates are for
-  listing what NS put up lately, not for full-text research;
-- the refusal is also intermittent under load — one retry is built into the tool, so a
-  second failure means the query really is too broad;
-- if NS keeps refusing, finish NSS, ÚS and the statute first and come back to it. Never
-  present a memo as complete while one court silently dropped out — say NS was
-  unavailable and what you tried.
+**When the ceiling bites, narrow — don't page.** `matched` above 900 means the query is
+too wide to address: add a term, a date range, `type` or `category`. Paging to offset
+880 only walks the same truncated window.
 
-**Don't burst NS.** It is a single box: three broad `queries` variants plus `read_top`
-is five requests in one breath, and that is what tips it into a stretch of 500s. With
-operators you rarely need the fan-out — one precise expression beats three vague ones
-here, and it is kinder to a court that publishes its case law for free.
+**If NS answers HTTP 500,** it refused that search; one retry already happened inside
+the tool. Try a narrower query, or finish NSS, ÚS and the statute and come back — and
+never present a memo as complete while one court silently dropped out. Say NS did not
+answer and what you tried.
+
+**One precise expression beats three vague ones** at a court that publishes its case law
+for free. The operators are there so you rarely need the fan-out.
 
 ## Screening and reading
 
@@ -263,15 +257,14 @@ Precision has a time dimension — check it before you cite:
 - **The break.** Case law decided under the previous wording (typically pre-2014 civil
   law) may still hold, but say which wording it was decided under.
 - **Later authority.** There is no citation graph, but decisions quote the sp. zn. they
-  follow — so full-text search the citation itself, **in quotes**:
-  `ns_search {query: "\"31 Cdo 1945/2010\"", date_from: "2016-01-01", date_to:
-  "2016-12-31"}` → 22 decisions citing it (verified). The quotes are what makes it work:
-  unquoted, the značka becomes four ordinary tokens (31, Cdo, 1945, 2010), the index
-  scans half the database and NS answers 500. Pass the whole značka, walk the years in
-  one- or two-year windows on the DECISION date, and remember that without dates the
-  12-month default hides everything older. NALUS and NSS take the same query without a
-  window. Then look for a velký senát decision, a sjednocující stanovisko, or an ÚS
-  nález derogating the provision.
+  follow — so full-text search the citation itself: `ns_search {query: "31 Cdo
+  1945/2010", date_from: "2016-01-01", date_to: "2016-12-31"}` → 22 decisions citing it
+  (verified). Pass the whole značka; a fragment like "1945/2010" matches nothing. Quotes
+  make it an exact phrase, which is worth it for a wording but changes nothing for a
+  značka. Where the citing line is long, walk it in date slices — the 900-document
+  ceiling applies here as everywhere. NALUS and NSS take the same query. Then look for a
+  velký senát decision, a sjednocující stanovisko, or an ÚS nález derogating the
+  provision.
 - **The date of the research.** Say which date the answer reflects.
 
 ## When to stop

@@ -126,8 +126,10 @@ ne hádat.
 - Neměnná data se cachují per warm instance: metadata a historie znění
   e-Sbírky (10 min), NSS handshake (10 min), texty dokumentů (10 min)
   a výsledky hledání (5 min).
-- NS: deterministická 500 se neopakuje — místo retry se zužuje datové okno
-  (bez zadaných dat automaticky 12 měsíců → 90 dnů).
+- NS: fulltext hledá v celé databázi; okno (12 měsíců → 90 dnů) se nasadí jen
+  když server odmítne, a odpověď to přizná v `applied_window_from`. Domino
+  odmítá malé `Count` (HTTP 500), takže se vždy žádá aspoň 20 řádků a ořezává
+  se lokálně.
 - Procházení justice.cz je stropované 20 stránkami na volání, scan § v
   e-Sbírce 15 stránkami; vše končí hned po naplnění limitu.
 - Texty dokumentů se vracejí po stránkách 45 000 znaků (bezpečně pod limity klientů) — typické rozhodnutí
