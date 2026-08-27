@@ -37,13 +37,15 @@ export function registerNss(server: McpServer): void {
         date_to: isoDate.optional().describe("Decision date to (ISO)."),
         published_from: isoDate
           .optional()
-          .describe("Date the decision was published to the web, from (ISO) — monitor what is new."),
+          .describe(
+            "Date the decision was PUBLISHED to the web, from (ISO) — monitor what is new. Results still sort by DECISION date, so a fresh publication window legitimately surfaces older, just-published decisions (backfill) — not a broken filter.",
+          ),
         published_to: isoDate.optional().describe("Publication date to (ISO)."),
         court: z
           .enum(["nss", "rozsireny-senat", "krajske", "karne"])
           .optional()
           .describe(
-            "nss = NSS (all senates), rozsireny-senat = grand chamber (most authoritative), krajske = regional administrative courts, karne = disciplinary courts.",
+            "nss = NSS (all senates), rozsireny-senat = grand chamber (most authoritative), krajske = regional administrative courts incl. Městský soud v Praze, karne = disciplinary courts.",
           ),
         registry: z
           .string()

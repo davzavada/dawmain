@@ -14,6 +14,7 @@ import {
   parseNssProvision,
   parseNssResults,
   selectFromCiselnik,
+  validateNssApplies,
 } from "@/src/sources/nss";
 import { SourceError } from "@/src/sources/shared/errors";
 
@@ -391,6 +392,18 @@ describe("buildNssSearchForm (live-captured form)", () => {
     expect(() =>
       buildNssSearchForm(SEARCH_FORM.fields, { appliesProvision: "§ 17" }),
     ).toThrowError(SourceError);
+  });
+
+  it("validateNssApplies names the missing act — the message the generic guard must not shadow", () => {
+    try {
+      validateNssApplies({ appliesProvision: "§ 17" });
+      expect.unreachable();
+    } catch (error) {
+      expect((error as SourceError).message).toContain("applies_provision needs an act");
+      expect((error as SourceError).hint).toContain("applies_act");
+    }
+    expect(validateNssApplies({ appliesAct: "106/1999", appliesProvision: "§ 17" })).toEqual(["106/1999"]);
+    expect(validateNssApplies({ query: "cokoli" })).toEqual([]);
   });
 
   it("published dates land in aktualizovano, decision dates in datumvydanirozhodnuti", () => {

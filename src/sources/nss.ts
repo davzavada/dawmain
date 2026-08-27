@@ -473,6 +473,38 @@ const NSS_COURT_GROUPS: Record<NonNullable<NssSearchInput["court"]>, string> = {
   karne: "kárné soudy",
 };
 
+/**
+ * Applies_* family consistency. Runs BEFORE the generic empty-criteria guard
+ * (and before any network I/O): a caller who DID pass applies_provision must
+ * hear what is missing, not "provide at least one criterion". Returns the
+ * act filters that are set.
+ */
+export function validateNssApplies(input: NssSearchInput): string[] {
+  const actFilters = [
+    input.appliesAct,
+    input.appliesTreaty,
+    input.appliesEuRegulation,
+    input.appliesEuDirective,
+  ].filter((value): value is string => Boolean(value));
+  if (actFilters.length > 1) {
+    throw new SourceError(
+      SOURCE,
+      "INPUT_INVALID",
+      "Pass at most one of applies_act / applies_treaty / applies_eu_regulation / applies_eu_directive.",
+      "The NSS form has one row per act family — run separate searches to combine them.",
+    );
+  }
+  if (input.appliesProvision && !actFilters.length) {
+    throw new SourceError(
+      SOURCE,
+      "INPUT_INVALID",
+      "applies_provision needs an act to attach to.",
+      "Pair it with applies_act, applies_treaty, applies_eu_regulation, or applies_eu_directive.",
+    );
+  }
+  return actFilters;
+}
+
 /** Build the search POST body from the harvested form. Pure — unit-tested. */
 export function buildNssSearchForm(fields: NssFormField[], input: NssSearchInput): URLSearchParams {
   const form = new URLSearchParams();
@@ -590,28 +622,7 @@ export function buildNssSearchForm(fields: NssFormField[], input: NssSearchInput
     });
   }
 
-  const actFilters = [
-    input.appliesAct,
-    input.appliesTreaty,
-    input.appliesEuRegulation,
-    input.appliesEuDirective,
-  ].filter(Boolean);
-  if (actFilters.length > 1) {
-    throw new SourceError(
-      SOURCE,
-      "INPUT_INVALID",
-      "Pass at most one of applies_act / applies_treaty / applies_eu_regulation / applies_eu_directive.",
-      "The NSS form has one row per act family — run separate searches to combine them.",
-    );
-  }
-  if (input.appliesProvision && !actFilters.length) {
-    throw new SourceError(
-      SOURCE,
-      "INPUT_INVALID",
-      "applies_provision needs an act to attach to.",
-      "Pair it with applies_act, applies_treaty, applies_eu_regulation, or applies_eu_directive.",
-    );
-  }
+  const actFilters = validateNssApplies(input);
   if (actFilters.length) {
     // Field-name stem of the row this reference belongs to; Sb.m.s. has no
     // písm. field and Sb. is the only row where a bare unit means §.
@@ -700,6 +711,7 @@ export async function searchNss(input: NssSearchInput, page: number): Promise<Ns
 }
 
 async function runSearchNss(input: NssSearchInput, page: number): Promise<NssSearchResult> {
+  validateNssApplies(input);
   const hasCriterion =
     input.query ||
     input.caseNumber ||

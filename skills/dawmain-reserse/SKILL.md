@@ -267,6 +267,11 @@ memo.
 **`applies_provision` syntax**: `"§ 17 odst. 2 písm. a"`, `"čl. 8 odst. 2"`, or compact
 `"17(2)(a)"` — a bare number means § for a Sb. act and čl. for treaties and EU acts.
 
+**`published_from` filters by publication, results sort by decision date** — a "what's
+new this week" window will also surface older decisions NSS has just backfilled onto
+the web. That is the filter doing its job; don't read it as broken, and don't cite the
+publication date as the decision date.
+
 ## SDEU (InfoCuria): pole
 
 `curia_search` exposes the advanced-search form of InfoCuria. English keywords work
