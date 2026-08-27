@@ -149,9 +149,8 @@ so re-running a search after reading is cheap.
 - **ÚS (NALUS)** — `types: ["nález"]` cuts out the mass of odmítavá usnesení;
   `popular_name` ("Data retention"), `judge`, `ecli`, `case_number` for a known citation.
 - **NSS** — `case_number` for a known čj., dates for a period.
-- **SDEU** — `doc_type: "judgment"` unless you specifically want AG opinions;
-  `court: "C"` vs `"T"`; `parties` for a case name; `state: "closed"` to skip pending
-  proceedings; `case_number` / `ecli` when you already have the citation.
+- **SDEU** — its own section below: the advanced-search dimensions are all exposed,
+  including decisions citing a given article and preliminary references by member state.
 - **e-Sbírka** — `match: "phrase"` for a term of art, `all_words` for a combination,
   `exclude_words` to shake off a homonym; `esbirka_get_text {date}` for the wording in
   force at the relevant time.
@@ -231,6 +230,45 @@ answer and what you tried.
 
 **One precise expression beats three vague ones** at a court that publishes its case law
 for free. The operators are there so you rarely need the fan-out.
+
+## SDEU (InfoCuria): pole
+
+`curia_search` exposes the advanced-search form of InfoCuria. English keywords work
+best; the index is the court's own and carries same-day decisions.
+
+| Chci | Parametr |
+|---|---|
+| tu konkrétní věc | `case_number: "C-311/18"` / `ecli` |
+| věc podle jména | `parties: "Telia Finland"` |
+| judikaturu k čl. X předpisu | `cites_celex: "32004L0048", cites_article: "1"` |
+| předběžné otázky z ČR | `referred_from: ["CZ"], sort: "date"` |
+| jen rozsudky / stanoviska GA | `doc_type: "judgment"` / `"opinion"` |
+| jen uzavřené věci | `state: "closed"` |
+| českou frázi napříč jazyky | `query` + `all_languages: true` |
+| Soudní dvůr vs. Tribunál | `court: "C"` / `"T"` |
+| období | `date_from` / `date_to` |
+
+**`cites_celex` is the citator the CZ courts lack** — it finds the case law *on* a
+provision of EU law directly: directive 2004/48 = `32004L0048`, GDPR = `32016R0679`,
+a regulation YYYY/N = `3YYYYRNNNN`. With `cites_article` it narrows to one article.
+It works with no keywords at all; pair it with `sort: "date"` for the recent line.
+
+**`referred_from: ["CZ"]`** answers "co už předložily české soudy" — every preliminary
+reference from Czech courts, again no keywords needed. The Czech angle on an EU
+question often starts here: an existing Czech reference means a Czech factual setting
+and often Czech commentary.
+
+**`doc_type`**: a `judgment` settles the law; an `opinion` (AG) argues it — cite the
+judgment as authority and the opinion for the reasoning when the judgment is terse.
+`avis` is the rare Opinion of the Court on an envisaged international agreement.
+
+**A case matched but no document scored?** The tool says so — add keywords, a
+case_number or an ecli. Party names alone ride on the full text, so a rare name finds
+the case; a common word as a name will drown.
+
+If a filtered search comes back visibly unfiltered — pending cases despite
+`state: "closed"`, dates outside the range — say so in the memo rather than presenting
+the result as filtered; the tool reports what it hid client-side in its summary line.
 
 ## Screening and reading
 

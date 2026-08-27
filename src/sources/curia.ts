@@ -56,22 +56,48 @@ export interface CuriaSearchInput {
   court?: "C" | "T";
   /** Case status of the main proceedings (InfoCuria "Case status"). */
   state?: "all" | "closed" | "pending";
-  /** Client-side filter over docTypeCode of the returned documents. */
-  docType?: "judgment" | "opinion" | "order" | "request" | "any";
-  dateFrom?: string; // ISO, client-side on docDate
+  /** Document kind — server-side typeDoc filter + client-side docTypeCode guard. */
+  docType?: "judgment" | "opinion" | "avis" | "order" | "request" | "any";
+  /** Member states whose courts referred the preliminary question ("CZ", "SK"…). */
+  referredFrom?: string[];
+  /** CELEX of an act the decision must cite (e.g. "32004L0048"). */
+  citesCelex?: string;
+  /** Narrows citesCelex to one article ("1", "17", "17(2)"). */
+  citesArticle?: string;
+  /** Extend the full-text search to every language version (UI "allLang"). */
+  allLanguages?: boolean;
+  dateFrom?: string; // ISO, docDate
   dateTo?: string; // ISO
   sort?: "relevance" | "date";
   language?: string;
 }
 
-/** docTypeCode prefixes per docType (codes observed live: ARRET, ARRET_SOM,
- * ARRET_EXT, CONCL, DDP, DDP_COMM, DDP_ADD, RES, ARR_COMM, ORD…). */
-const DOC_TYPE_PREFIXES: Record<string, string[]> = {
-  judgment: ["ARRET"],
-  opinion: ["CONCL"],
-  order: ["ORD", "RES"],
-  request: ["DDP"],
+/** Advanced-search "Document type" codes per kind. `typeDoc` = the form's own
+ * values (ARRET=Judgment, INF=Judgment (Information), ARRET_EXT=Judgment
+ * (extracts), AVIS=Opinions of the Court, CONCL=Opinion, ORD=Order, REF=Order
+ * (Information), ORD_EXT=Order (extracts), DDP=Request for a preliminary
+ * ruling; also DECISION, DELI, POSITION, OBSRP_PUB, JO, RES=Summary/Abstract).
+ * `prefixes` = docTypeCode prefixes of the returned documents, which are finer
+ * (ARRET_SOM, DDP_COMM…) — the client-side guard behind the server filter. */
+export const CURIA_DOC_TYPES: Record<string, { typeDoc: string[]; prefixes: string[] }> = {
+  judgment: { typeDoc: ["ARRET", "INF", "ARRET_EXT"], prefixes: ["ARRET", "INF"] },
+  opinion: { typeDoc: ["CONCL"], prefixes: ["CONCL"] },
+  avis: { typeDoc: ["AVIS"], prefixes: ["AVIS"] },
+  order: { typeDoc: ["ORD", "REF", "ORD_EXT"], prefixes: ["ORD", "REF"] },
+  request: { typeDoc: ["DDP"], prefixes: ["DDP"] },
 };
+
+/** "32004L0048" + "1" → "32004L0048*A01*" — the citations pattern the advanced
+ * search sends (citationsMotif: CELEX, then the article code). Pure — unit-tested. */
+export function buildCitationsMotif(celex: string, article?: string): string {
+  const act = celex.trim().toUpperCase();
+  const raw = article?.trim().toUpperCase().replace(/\s+/g, "");
+  if (!raw) return `${act}*`;
+  // "1" → A01; "17(2)" → A17P2; an already-encoded "A17P2" passes through.
+  const m = /^(\d+)(?:\((\d+)\))?$/.exec(raw);
+  const code = m ? `A${m[1].padStart(2, "0")}${m[2] ? `P${m[2]}` : ""}` : raw.startsWith("A") ? raw : `A${raw}`;
+  return `${act}*${code}*`;
+}
 
 export interface CuriaHit {
   logicDocId?: string;
@@ -118,6 +144,28 @@ export function buildCuriaBody(input: CuriaSearchInput, page: number, pageSize: 
       valuesWithFullHierarchy: ["ENC"],
     });
   }
+  // Advanced-search filters. The entry shape is the one captured live for
+  // typeDoc ({field, values, valuesWithFullHierarchy: [], isMatchAll: false});
+  // the oqp and docDate field names come verbatim from the advanced-search
+  // URL parameters (oqp_a, docDate_a) and reuse that shape.
+  const advancedFiltersValue: Array<Record<string, unknown>> = [];
+  const advanced = (field: string, values: string[]) =>
+    advancedFiltersValue.push({ field, values, valuesWithFullHierarchy: [], isMatchAll: false });
+  if (input.docType && input.docType !== "any") {
+    const kind = CURIA_DOC_TYPES[input.docType];
+    if (kind) advanced("typeDoc", kind.typeDoc);
+  }
+  if (input.referredFrom?.length) {
+    advanced(
+      "oqp",
+      input.referredFrom.map((code) => `NAT_${code.toUpperCase()}`),
+    );
+  }
+  if (input.dateFrom || input.dateTo) {
+    // One "from,to" value, as docDate_a encodes it; open ends get the docket's
+    // bounds so the client-side date guard stays the arbiter of half-ranges.
+    advanced("docDate", [`${input.dateFrom ?? "1952-01-01"},${input.dateTo ?? "2099-12-31"}`]);
+  }
   // The backend ignores usualName without a searchTerm — party names go
   // through full text too (verified live: found C-201/22 for "Telia Finland").
   const searchTerm =
@@ -148,8 +196,18 @@ export function buildCuriaBody(input: CuriaSearchInput, page: number, pageSize: 
     usualName: input.parties ?? "",
     logicDocId: "",
     repJurExpand: true,
+    // Citations and all-language keys ride along only when asked for — their
+    // names come from the URL parameters (citationsMotif_a,
+    // selectionCitationMatch_a, allLang_a), not from a captured request.
+    ...(input.citesCelex
+      ? {
+          citationsMotif: buildCitationsMotif(input.citesCelex, input.citesArticle),
+          selectionCitationMatch: "all",
+        }
+      : {}),
+    ...(input.allLanguages ? { allLang: true } : {}),
     filtersValue,
-    advancedFiltersValue: [],
+    advancedFiltersValue,
     isSearchExact: !input.query,
     searchSources: ["document", "metadata"],
   };
@@ -218,7 +276,7 @@ export function parseCuriaSearch(json: unknown): CuriaSearchPage {
 export function refineCuriaHits(hits: CuriaHit[], input: CuriaSearchInput): CuriaHit[] {
   return hits.filter((hit) => {
     if (input.docType && input.docType !== "any") {
-      const prefixes = DOC_TYPE_PREFIXES[input.docType] ?? [];
+      const prefixes = CURIA_DOC_TYPES[input.docType]?.prefixes ?? [];
       if (!prefixes.some((prefix) => (hit.docType ?? "").startsWith(prefix))) return false;
     }
     if (input.state === "closed" && hit.stateCode && !hit.stateCode.startsWith("CLOT")) return false;
@@ -246,12 +304,19 @@ async function runSearchCuria(
   page: number,
   pageSize: number,
 ): Promise<CuriaSearchPage & { filtered: number }> {
-  if (!input.query && !input.caseNumber && !input.ecli && !input.parties) {
+  if (
+    !input.query &&
+    !input.caseNumber &&
+    !input.ecli &&
+    !input.parties &&
+    !input.citesCelex &&
+    !input.referredFrom?.length
+  ) {
     throw new SourceError(
       SOURCE,
       "INPUT_INVALID",
       "CURIA search needs at least one criterion.",
-      "Provide query (full-text keywords), case_number (e.g. 'C-311/18'), ecli, or parties.",
+      "Provide query (full-text keywords), case_number (e.g. 'C-311/18'), ecli, parties, cites_celex, or referred_from.",
     );
   }
   const response = await fetchUpstream(SOURCE, `${WS_BASE}/elastic-connector/search`, {

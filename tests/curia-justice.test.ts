@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildCitationsMotif,
   buildCuriaBody,
   caseNumberToCelex,
   parseCuriaSearch,
@@ -72,6 +73,72 @@ describe("buildCuriaBody", () => {
     expect((body.sortTermList as Array<{ sortTerm: string }>)[0].sortTerm).toBe("INTRODUCTION_DATE");
     expect((body.filtersValue as Array<{ field: string }>)[0].field).toBe("jurisdiction");
     expect((body.pagination as { from: number; to: number }).from).toBe(1);
+  });
+
+  it("sends doc_type as the form's typeDoc codes in advancedFiltersValue", () => {
+    const body = buildCuriaBody({ query: "x", docType: "judgment" }, 0, 10) as {
+      advancedFiltersValue: unknown[];
+    };
+    expect(body.advancedFiltersValue).toContainEqual({
+      field: "typeDoc",
+      values: ["ARRET", "INF", "ARRET_EXT"],
+      valuesWithFullHierarchy: [],
+      isMatchAll: false,
+    });
+    const any = buildCuriaBody({ query: "x", docType: "any" }, 0, 10) as {
+      advancedFiltersValue: unknown[];
+    };
+    expect(any.advancedFiltersValue).toHaveLength(0);
+  });
+
+  it("maps referring states to NAT_ codes and dates to one from,to value", () => {
+    const body = buildCuriaBody(
+      { referredFrom: ["CZ", "sk"], dateFrom: "2021-01-01", dateTo: "2025-01-01" },
+      0,
+      10,
+    ) as { advancedFiltersValue: Array<{ field: string; values: string[] }> };
+    expect(body.advancedFiltersValue).toContainEqual({
+      field: "oqp",
+      values: ["NAT_CZ", "NAT_SK"],
+      valuesWithFullHierarchy: [],
+      isMatchAll: false,
+    });
+    expect(body.advancedFiltersValue).toContainEqual({
+      field: "docDate",
+      values: ["2021-01-01,2025-01-01"],
+      valuesWithFullHierarchy: [],
+      isMatchAll: false,
+    });
+    const half = buildCuriaBody({ query: "x", dateFrom: "2023-06-01" }, 0, 10) as {
+      advancedFiltersValue: Array<{ field: string; values: string[] }>;
+    };
+    expect(half.advancedFiltersValue.find((f) => f.field === "docDate")?.values).toEqual([
+      "2023-06-01,2099-12-31",
+    ]);
+  });
+
+  it("adds citations and all-language keys only when asked for", () => {
+    const cited = buildCuriaBody(
+      { citesCelex: "32004L0048", citesArticle: "1", allLanguages: true },
+      0,
+      10,
+    ) as Record<string, unknown>;
+    expect(cited.citationsMotif).toBe("32004L0048*A01*");
+    expect(cited.selectionCitationMatch).toBe("all");
+    expect(cited.allLang).toBe(true);
+    const plain = buildCuriaBody({ query: "x" }, 0, 10) as Record<string, unknown>;
+    expect("citationsMotif" in plain).toBe(false);
+    expect("allLang" in plain).toBe(false);
+  });
+});
+
+describe("buildCitationsMotif", () => {
+  it("encodes CELEX + article the way the form's URL does", () => {
+    expect(buildCitationsMotif("32004L0048", "1")).toBe("32004L0048*A01*");
+    expect(buildCitationsMotif("32016R0679", "17")).toBe("32016R0679*A17*");
+    expect(buildCitationsMotif("32016R0679", "17(2)")).toBe("32016R0679*A17P2*");
+    expect(buildCitationsMotif("32016r0679", "a17p2")).toBe("32016R0679*A17P2*");
+    expect(buildCitationsMotif("32004L0048")).toBe("32004L0048*");
   });
 });
 
@@ -159,6 +226,16 @@ describe("refineCuriaHits", () => {
     expect(refineCuriaHits(hits, { docType: "judgment" })).toHaveLength(1);
     expect(refineCuriaHits(hits, { docType: "opinion" })[0].docType).toBe("CONCL");
     expect(refineCuriaHits(hits, { docType: "any" })).toHaveLength(3);
+  });
+
+  it("keeps summaries out of orders and knows avis", () => {
+    const extra = [
+      { ...hits[0], docType: "RES" },
+      { ...hits[0], docType: "ORD" },
+      { ...hits[0], docType: "AVIS" },
+    ];
+    expect(refineCuriaHits(extra, { docType: "order" }).map((h) => h.docType)).toEqual(["ORD"]);
+    expect(refineCuriaHits(extra, { docType: "avis" }).map((h) => h.docType)).toEqual(["AVIS"]);
   });
 
   it("filters by document dates and state guard", () => {

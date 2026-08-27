@@ -22,7 +22,7 @@ export function registerCuria(server: McpServer): void {
     {
       title: "CJEU: search case law",
       description:
-        "FULL-TEXT search of CJEU case law (Court of Justice 'C', General Court 'T') via the court's own live InfoCuria index — the advanced-search surface: text of judgments/opinions + metadata, case number (C-311/18), case/party name, ECLI, case status (closed/pending), document type, court and date filters, relevance/date sort. Includes same-day decisions. 'queries' searches up to 3 variants IN PARALLEL and merges deduplicated results; read_top: N also returns excerpt previews of the N best hits. Fetch texts with curia_get_document.",
+        "FULL-TEXT search of CJEU case law (Court of Justice 'C', General Court 'T') via the court's own live InfoCuria index — the advanced-search surface: text of judgments/opinions + metadata, case number (C-311/18), case/party name, ECLI, case status (closed/pending), document type, court and date filters, relevance/date sort. Beyond keywords: cites_celex (+cites_article) finds decisions citing a given act or article; referred_from finds preliminary rulings referred by a given member state's courts (e.g. ['CZ']); all_languages extends the text search to every language version. Includes same-day decisions. 'queries' searches up to 3 variants IN PARALLEL and merges deduplicated results; read_top: N also returns excerpt previews of the N best hits. Fetch texts with curia_get_document.",
       inputSchema: z.object({
         query: z.string().optional().describe("Keywords (any EU language; English works best)."),
         queries: z
@@ -42,9 +42,39 @@ export function registerCuria(server: McpServer): void {
           .default("all")
           .describe("Case status of the main proceedings (InfoCuria 'Case status')."),
         doc_type: z
-          .enum(["any", "judgment", "opinion", "order", "request"])
+          .enum(["any", "judgment", "opinion", "avis", "order", "request"])
           .default("any")
-          .describe("Restrict document kinds: judgments, AG opinions, orders, preliminary-ruling requests."),
+          .describe(
+            "Restrict document kinds: judgment (incl. extracts/information), opinion = AG opinions, avis = Opinions of the Court (e.g. on international agreements), order, request = preliminary-ruling requests.",
+          ),
+        referred_from: z
+          .array(
+            z.enum([
+              "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "EL", "HU", "IE", "IT",
+              "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE", "UK", "XB",
+            ]),
+          )
+          .max(10)
+          .optional()
+          .describe(
+            "Only preliminary rulings referred by courts of these states — e.g. ['CZ'] for Czech references. EL = Greece, UK = pre-Brexit references, XB = Benelux Court of Justice. Works alone (no query needed) — combine with sort: 'date'.",
+          ),
+        cites_celex: z
+          .string()
+          .optional()
+          .describe(
+            "Only decisions citing this act — CELEX number: directive 2004/48 = '32004L0048', GDPR = '32016R0679'. Works alone (no query needed).",
+          ),
+        cites_article: z
+          .string()
+          .optional()
+          .describe("Narrow cites_celex to one article: '1', '17' or '17(2)'."),
+        all_languages: z
+          .boolean()
+          .default(false)
+          .describe(
+            "Extend the full-text search to ALL language versions (by default only the 'language' version is searched — set this for Czech phrases).",
+          ),
         date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Document date from (ISO)."),
         date_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Document date to (ISO)."),
         sort: z.enum(["relevance", "date"]).default("relevance"),
@@ -90,7 +120,7 @@ export function registerCuria(server: McpServer): void {
       }),
       annotations: READ_ONLY,
     },
-    async ({ query, queries, case_number, ecli, parties, court, state, doc_type, date_from, date_to, sort, limit, page, language, read_top }) => {
+    async ({ query, queries, case_number, ecli, parties, court, state, doc_type, referred_from, cites_celex, cites_article, all_languages, date_from, date_to, sort, limit, page, language, read_top }) => {
       try {
         const variants = uniqueQueries(query, queries);
         // One InfoCuria request per variant, in parallel; merged + deduped.
@@ -105,6 +135,10 @@ export function registerCuria(server: McpServer): void {
                 court,
                 state,
                 docType: doc_type,
+                referredFrom: referred_from,
+                citesCelex: cites_celex,
+                citesArticle: cites_article,
+                allLanguages: all_languages,
                 dateFrom: date_from,
                 dateTo: date_to,
                 sort,
