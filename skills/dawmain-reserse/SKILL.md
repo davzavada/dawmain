@@ -212,8 +212,25 @@ and anything in square brackets is stripped.
 
 **The 900-document ceiling.** Any query addresses at most its first 900 documents;
 `matched` tells you how many really match. Paging deeper is not the fix — a narrower
-query is: add `type`, `category`, a date window, or a proximity operator. A window that
-is too wide answers HTTP 500; that is capacity, not a bug, so narrow it and go on.
+query is.
+
+**HTTP 500 means the terms are too broad, not the dates.** Measured live: the box
+evaluates the full-text terms first and intersects the date range afterwards, so
+`"dobré mravy"` fails the same way with a one-month window as without one, while
+`nájem* AND "dobré mravy"` goes through. When NS refuses:
+
+- narrow the **terms** — exact phrase, wildcard stem, `SENTENCE`/`NEAR` proximity, or
+  add `type` / `category`. Do not just shorten the date range;
+- the refusal is also intermittent under load — one retry is built into the tool, so a
+  second failure means the query really is too broad;
+- if NS keeps refusing, finish NSS, ÚS and the statute first and come back to it. Never
+  present a memo as complete while one court silently dropped out — say NS was
+  unavailable and what you tried.
+
+**Don't burst NS.** It is a single box: three broad `queries` variants plus `read_top`
+is five requests in one breath, and that is what tips it into a stretch of 500s. With
+operators you rarely need the fan-out — one precise expression beats three vague ones
+here, and it is kinder to a court that publishes its case law for free.
 
 ## Screening and reading
 

@@ -376,6 +376,31 @@ export function usToIso(raw: string): string | null {
 
 // ---------- I/O ----------
 
+/**
+ * NS is one Domino box, and it answers a burst the way it answers an
+ * oversized result set: HTTP 500, for minutes, even to a query that matches
+ * three documents. Our own fan-out is the likeliest source of such a burst —
+ * three `queries` variants plus `read_top` documents leave in the same tick —
+ * so every NS request queues behind this gate. It bounds one invocation, which
+ * is where the bursts come from; other warm instances are on their own.
+ */
+const NS_CONCURRENCY = 2;
+let nsInFlight = 0;
+const nsWaiting: Array<() => void> = [];
+
+async function nsGate<T>(run: () => Promise<T>): Promise<T> {
+  if (nsInFlight >= NS_CONCURRENCY) {
+    await new Promise<void>((resolve) => nsWaiting.push(resolve));
+  }
+  nsInFlight += 1;
+  try {
+    return await run();
+  } finally {
+    nsInFlight -= 1;
+    nsWaiting.shift()?.();
+  }
+}
+
 async function runNsSearch(input: NsSearchInput, start: number, count: number): Promise<NsSearchPage> {
   const query = buildNsQuery(input);
   const url =
@@ -385,9 +410,26 @@ async function runNsSearch(input: NsSearchInput, start: number, count: number): 
   // No automatic 5xx retry: NS 500s are deterministic for the given window
   // (capacity, not flakiness) — re-sending the same query just hammers the box;
   // the caller falls back to a narrower window instead.
-  const response = await fetchUpstream(SOURCE, url, {
-    headers: { referer: "https://rozhodnuti.nsoud.cz/" },
-    retry: false,
+  // Live behaviour (measured 2026-08-27): NS answers 500 to full-text searches
+  // whose TERMS are broad — a common phrase costs the same whether or not a
+  // date range is attached, because the FT engine evaluates the terms first
+  // and intersects afterwards. Those 500s are also intermittent: the identical
+  // query alternates between 19 hits and 500 as the box's search capacity
+  // comes and goes. So one spaced retry, and no more — a genuinely oversized
+  // query fails twice and the caller gets told to narrow the TERMS.
+  const response = await nsGate(async () => {
+    const send = () =>
+      fetchUpstream(SOURCE, url, {
+        headers: { referer: "https://rozhodnuti.nsoud.cz/" },
+        retry: false,
+      });
+    try {
+      return await send();
+    } catch (error) {
+      if (!(error instanceof SourceError && error.kind === "UPSTREAM_ERROR")) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 1500 + Math.random() * 1000));
+      return send();
+    }
   });
   const page = parseNsSearch(await response.text());
   if (!input.query) return page;
@@ -433,7 +475,7 @@ async function runSearchNsWindowed(
           SOURCE,
           "UPSTREAM_ERROR",
           error.message,
-          "The NS server rejects large result sets with HTTP 500 — narrow date_from/date_to and try again.",
+          "NS answers HTTP 500 when the full-text TERMS are too broad — a date range does not make the query cheaper, because the terms are evaluated first. Narrow the terms instead: an exact \"phrase\", a wildcard stem (nájem*), proximity (A SENTENCE B), or add type/category. The box also refuses intermittently under load, so an unchanged query may work a minute later.",
         );
       }
       throw error;
@@ -483,9 +525,11 @@ export async function getNsDecision(unid: string): Promise<NsDecision> {
 }
 
 async function fetchNsRendition(unid: string, rendition: "WebPrint" | "WebSearch"): Promise<NsDecision> {
-  const response = await fetchUpstream(SOURCE, `${BASE}/${rendition}/${unid}?openDocument`, {
-    headers: { referer: "https://rozhodnuti.nsoud.cz/" },
-  });
+  const response = await nsGate(() =>
+    fetchUpstream(SOURCE, `${BASE}/${rendition}/${unid}?openDocument`, {
+      headers: { referer: "https://rozhodnuti.nsoud.cz/" },
+    }),
+  );
   // fetchUpstream only throws on 429/5xx — a Domino "Entry not found" page
   // comes back as 404 HTML and would otherwise parse into a bogus decision.
   if (response.status === 404) {
