@@ -242,8 +242,15 @@ export function buildCuriaBody(input: CuriaSearchInput, page: number, pageSize: 
   };
 }
 
-/** Extract hits from the nested innerHits shape. Pure — unit-tested. */
-export function parseCuriaSearch(json: unknown): CuriaSearchPage {
+/** The citable human page of one document on curia.europa.eu — the classic
+ * interface's docid deep link, which the elastic logicDocId numbers match. */
+function curiaDocumentUrl(docId: string, language: string): string {
+  return `https://curia.europa.eu/juris/document/document.jsf?text=&docid=${encodeURIComponent(docId)}&doclang=${language.toUpperCase().slice(0, 2)}`;
+}
+
+/** Extract hits from the nested innerHits shape; `language` only shapes the
+ * verification links. Pure — unit-tested. */
+export function parseCuriaSearch(json: unknown, language = "en"): CuriaSearchPage {
   const data = json as {
     totalHits?: number;
     searchHits?: Array<{
@@ -282,7 +289,7 @@ export function parseCuriaSearch(json: unknown): CuriaSearchPage {
         caseName,
         stateCode,
         url: affairCaseNumber
-          ? `https://curia.europa.eu/juris/liste.jsf?num=${encodeURIComponent(affairCaseNumber)}&language=cs`
+          ? `https://curia.europa.eu/juris/liste.jsf?num=${encodeURIComponent(affairCaseNumber)}&language=${encodeURIComponent(language.toLowerCase().slice(0, 2))}`
           : null,
       });
       continue;
@@ -292,6 +299,8 @@ export function parseCuriaSearch(json: unknown): CuriaSearchPage {
       const str = (key: string) => (typeof doc[key] === "string" ? (doc[key] as string) : undefined);
       const ecli = str("ecli") ?? str("docEcli");
       const caseNumber = str("docNoPart") ?? str("idPublished") ?? affairCaseNumber;
+      const rawDocId = str("logicDocId")?.replace(/^id_/, "");
+      const docId = rawDocId && rawDocId !== "null" ? rawDocId : undefined;
       hits.push({
         logicDocId: str("logicDocId"),
         docType: str("docTypeCode"),
@@ -301,13 +310,14 @@ export function parseCuriaSearch(json: unknown): CuriaSearchPage {
         caseNumber,
         caseName,
         stateCode,
-        // Prefer a link that opens the TEXT of the document itself.
-        url: ecli
-          ? `https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=ecli:${encodeURIComponent(ecli)}`
-          : str("logicDocId")
-            ? `${WS_BASE}/blob/download-file/${encodeURIComponent(str("logicDocId")!.replace(/^id_/, ""))}/EN/html`
+        // The citable curia.europa.eu page of the document itself; EUR-Lex
+        // by ECLI and the case listing are the fallbacks.
+        url: docId
+          ? curiaDocumentUrl(docId, language)
+          : ecli
+            ? `https://eur-lex.europa.eu/legal-content/${language.toUpperCase().slice(0, 2)}/TXT/?uri=ecli:${encodeURIComponent(ecli)}`
             : caseNumber
-              ? `https://curia.europa.eu/juris/liste.jsf?num=${encodeURIComponent(caseNumber)}&language=cs`
+              ? `https://curia.europa.eu/juris/liste.jsf?num=${encodeURIComponent(caseNumber)}&language=${encodeURIComponent(language.toLowerCase().slice(0, 2))}`
               : null,
       });
     }
@@ -376,7 +386,7 @@ async function runSearchCuria(
       "Try again in a minute; if it persists the backend may have changed — run dawmain_probe_sources.",
     );
   }
-  const parsed = parseCuriaSearch(await response.json());
+  const parsed = parseCuriaSearch(await response.json(), input.language ?? "en");
   const refined = refineCuriaHits(parsed.hits, input);
   return { total: parsed.total, hits: refined, filtered: parsed.hits.length - refined.length };
 }

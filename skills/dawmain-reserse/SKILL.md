@@ -251,6 +251,10 @@ best; the index is the court's own and carries same-day decisions.
 version at once, so a Czech phrase (`"dobré mravy"`) finds the case law directly, no
 flag needed. Pick the reading language separately (`language: "cs"` on the document).
 
+**Every hit links straight to the document's page on curia.europa.eu — cite that
+link.** No SDEU decision goes into the memo without it; the `ecli` in the item gives
+the EUR-Lex mirror if a second link is ever needed.
+
 **`cites_celex` is the citator the CZ courts lack** — decisions citing an act in
 their grounds: directive 2004/48 = `32004L0048`, GDPR = `32016R0679`, a regulation
 YYYY/N = `3YYYYRNNNN`; `cites_article` narrows to one article. No keywords needed —

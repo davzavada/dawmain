@@ -212,6 +212,26 @@ describe("parseCuriaSearch", () => {
     expect(page.hits[0].logicDocId).toBe("id_C2020559");
   });
 
+  it("links each document to its curia.europa.eu page in the search language", () => {
+    const page = parseCuriaSearch(payload, "cs");
+    expect(page.hits[0].url).toBe(
+      "https://curia.europa.eu/juris/document/document.jsf?text=&docid=C2020559&doclang=CS",
+    );
+    // Without a logicDocId the ECLI falls back to EUR-Lex in the same language.
+    const noId = parseCuriaSearch(
+      {
+        totalHits: 1,
+        searchHits: [
+          { innerHits: { document: { searchHits: [{ document: { ecli: "ECLI:EU:C:2020:559" } }] } } },
+        ],
+      },
+      "cs",
+    );
+    expect(noId.hits[0].url).toBe(
+      "https://eur-lex.europa.eu/legal-content/CS/TXT/?uri=ecli:ECLI%3AEU%3AC%3A2020%3A559",
+    );
+  });
+
   it("lifts affair-level case name, number and state code", () => {
     const page = parseCuriaSearch({
       totalHits: 1,
@@ -238,19 +258,22 @@ describe("parseCuriaSearch", () => {
   });
 
   it("surfaces the affair itself when a keyword-less search scores no documents", () => {
-    const page = parseCuriaSearch({
-      totalHits: 143,
-      searchHits: [
-        {
-          content: {
-            publishedId: "C-57/21",
-            affairStateCode: "CLOTPUB",
-            usualNameML: [{ en: "RegioJet" }],
+    const page = parseCuriaSearch(
+      {
+        totalHits: 143,
+        searchHits: [
+          {
+            content: {
+              publishedId: "C-57/21",
+              affairStateCode: "CLOTPUB",
+              usualNameML: [{ en: "RegioJet" }],
+            },
+            innerHits: { document: { searchHits: [] } },
           },
-          innerHits: { document: { searchHits: [] } },
-        },
-      ],
-    });
+        ],
+      },
+      "cs",
+    );
     expect(page.hits).toHaveLength(1);
     expect(page.hits[0].caseNumber).toBe("C-57/21");
     expect(page.hits[0].caseName).toBe("RegioJet");
