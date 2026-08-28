@@ -6,16 +6,29 @@ export const SERVER_VERSION = "0.1.0";
 
 /**
  * Optional shared-secret auth. When `MCP_BEARER_TOKEN` is set the endpoint
- * requires `Authorization: Bearer <token>`; when it is unset the endpoint is
- * public.
- *
- * A shared secret is deliberately simple. For real OAuth 2.1 (RFC 9728
- * protected-resource metadata, CIMD clients) swap this out for
- * `withMcpAuth` + `protectedResourceHandler` from `mcp-handler`.
+ * accepts `Authorization: Bearer <token>` — alongside, not instead of, OAuth
+ * (see `getAuthKitIssuer`), so existing access codes keep working while
+ * clients migrate to the OAuth login.
  */
 export function getBearerToken(): string | undefined {
   const token = process.env.MCP_BEARER_TOKEN?.trim();
   return token ? token : undefined;
+}
+
+/**
+ * OAuth 2.1 via WorkOS AuthKit. `AUTHKIT_DOMAIN` holds the AuthKit domain
+ * from the WorkOS dashboard — `https://<slug>.authkit.app` or a custom auth
+ * domain; a bare hostname is accepted too. When set, /api/mcp accepts
+ * AuthKit-issued JWT access tokens and the RFC 9728 protected-resource
+ * metadata advertises this issuer so MCP clients can discover the login.
+ * The server only verifies signatures against the issuer's public JWKS —
+ * no WorkOS API key is needed anywhere.
+ */
+export function getAuthKitIssuer(): string | undefined {
+  const raw = process.env.AUTHKIT_DOMAIN?.trim();
+  if (!raw) return undefined;
+  const url = raw.includes("://") ? raw : `https://${raw}`;
+  return url.replace(/\/+$/, "");
 }
 
 /**

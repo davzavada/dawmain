@@ -202,8 +202,35 @@ async function checkLive(client) {
   ok("ns_search", `last 7 days → ${ns.structuredContent?.count} hits of ${ns.structuredContent?.total ?? "?"}`);
 }
 
+/**
+ * OAuth discovery (RFC 9728). Passes in both states: 404 = OAuth not
+ * configured (AUTHKIT_DOMAIN unset), 200 = metadata must name the /api/mcp
+ * resource and at least one authorization server.
+ */
+async function checkOAuthMetadata() {
+  const origin = new URL(url).origin;
+  const response = await fetch(`${origin}/.well-known/oauth-protected-resource`);
+  if (response.status === 404) {
+    ok("oauth discovery", "not configured (AUTHKIT_DOMAIN unset)");
+    return;
+  }
+  if (!response.ok) {
+    throw new Error(`oauth-protected-resource → HTTP ${response.status}`);
+  }
+  const metadata = await response.json();
+  if (!Array.isArray(metadata.authorization_servers) || metadata.authorization_servers.length === 0) {
+    throw new Error(`oauth-protected-resource lists no authorization_servers: ${JSON.stringify(metadata)}`);
+  }
+  if (typeof metadata.resource !== "string" || !metadata.resource.endsWith("/api/mcp")) {
+    throw new Error(`oauth-protected-resource resource is not the MCP endpoint: ${JSON.stringify(metadata)}`);
+  }
+  ok("oauth discovery", `${metadata.resource} → ${metadata.authorization_servers.join(", ")}`);
+}
+
 async function main() {
   console.log(`\nSmoke-testing ${url}${token ? " (with bearer token)" : ""}`);
+
+  await checkOAuthMetadata();
 
   console.log(`\n${MODERN_VERSION} (stateless, no handshake)`);
   const modern = new McpClient("modern");
