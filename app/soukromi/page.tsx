@@ -90,10 +90,9 @@ export default function Soukromi() {
           jiného po vás nechci.
         </p>
         <p>
-          <strong>Dotazy a dočasná paměť.</strong> Samotné vyřízení dotazu je to, oč jste mě
-          požádali, a stojí tedy na naší dohodě. Že si server dotaz a odpověď na pár minut podrží,
-          stojí na mém oprávněném zájmu na tom, aby opakovaná rešerše nezatěžovala cizí veřejné
-          databáze víc, než je nutné.
+          <strong>Dotazy a dočasná paměť.</strong> Vyřízení dotazu je to, oč jste mě požádali, a i
+          to, že si server dotaz s odpovědí na pár minut podrží, k poskytování služby patří - šetří
+          to zdroje, ze kterých se čerpá. Obojí tedy stojí na plnění naší smlouvy.
         </p>
         <p>
           <strong>Provoz a bezpečnost.</strong> Technické záznamy hostingu zpracovávám na základě
@@ -102,9 +101,8 @@ export default function Soukromi() {
           ohrozila provoz nebo zdroje, ze kterých se čerpá, a odhalil pokusy o neoprávněný přístup.
         </p>
         <p>
-          <strong>Vaše zprávy.</strong> Napíšete-li mi, zpracuji vaši adresu a obsah zprávy, abych
-          vám mohl odpovědět. Týká-li se zpráva vašeho účtu, je to součást naší dohody; jinak jde o
-          můj oprávněný zájem na tom vyřídit, s čím se na mě obracíte.
+          <strong>Analytika.</strong> Kde údaje zpracovávám pro analytiku, dělám to na základě svého
+          oprávněného zájmu na tom, aby služba dobře fungovala.
         </p>
         <p>
           Proti zpracování, které stojí na oprávněném zájmu, můžete kdykoli vznést námitku na{" "}
