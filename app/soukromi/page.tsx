@@ -24,9 +24,10 @@ export default function Soukromi() {
         <p>
           <strong>Údaje o účtu.</strong> Účty vede poskytovatel přihlášení Clerk. Drží vaši
           e-mailovou adresu, kterou vás rozlišuji od ostatních a na kterou vám mohu napsat, a
-          identifikátor vašeho účtu. Přihlásíte-li se přes účet jiné služby, předá jí zvolený
-          poskytovatel to, co s takovým přihlášením předává. Můj vlastní server si o vás od Clerku
-          nic nenačítá; z každého požadavku pozná jen to, že patří ověřenému účtu.
+          identifikátor vašeho účtu. Přihlásíte-li se přes účet jiné služby, předá tento
+          poskytovatel do Clerku to, co s takovým přihlášením předává - zpravidla e-mailovou adresu
+          a identifikátor. Můj vlastní server si o vás od Clerku nic nenačítá; z každého požadavku
+          pozná jen to, že patří ověřenému účtu.
         </p>
         <p>
           <strong>Připojení bez účtu.</strong> Server přijímá také starší sdílený přístupový kód.
@@ -38,29 +39,45 @@ export default function Soukromi() {
           provozu a bezpečnosti.
         </p>
         <p>
-          <strong>Co se děje s vašimi dotazy.</strong> Vlastní databázi nemám a dotazy neukládám.
-          Dotaz serverem projde do veřejné databáze a odpověď se vrátí. Aby opakovaný dotaz zbytečně
-          nezatěžoval zdroje, drží server dotaz i odpověď krátce v dočasné paměti: výsledky
-          vyhledávání nejdéle pět minut, texty rozhodnutí a předpisů nejdéle deset. Není to spojeno s
-          vaším účtem, paměť o něm nic neví, a po uplynutí té doby záznam mizí. Nikam dál se
-          neukládá.
+          <strong>Co se děje s vašimi dotazy.</strong> Vlastní databázi nevedu a dotazy si do žádné
+          trvalé evidence neukládám. Dotaz serverem projde do veřejné databáze a odpověď se vrátí
+          zpět. Aby opakovaný dotaz zbytečně nezatěžoval zdroje, drží server dotaz i odpověď krátce
+          v dočasné paměti: výsledky vyhledávání nejdéle pět minut, texty rozhodnutí a předpisů
+          nejdéle deset. Po tu dobu jsou u mě a jsem jejich správcem i já - nejsou ale spojeny
+          s vaším účtem, paměť o něm nic neví, a po uplynutí uvedené doby záznam mizí. Nikam dál se
+          neukládá a nikomu ho nepředávám.
         </p>
         <p>
-          Neuchovávám hesla, protože přihlášení zajišťuje poskytovatel. Nemám žádné analytické ani
-          reklamní nástroje, údaje neprodávám a nepředávám je pro marketing. Nic o vás automaticky
-          nevyhodnocuji ani neprofiluji. Citlivé údaje, jako je zdravotní stav, náboženské vyznání
-          nebo politické názory, cíleně nezpracovávám. Protože ale jde o právní rešerše, může je
-          obsahovat text vašeho dotazu; pak serverem projdou a po tu krátkou dobu leží v dočasné
-          paměti jako každý jiný dotaz. Zvažte prosím proto, co do dotazu píšete.
+          Neuchovávám hesla, protože přihlášení zajišťuje poskytovatel. Nemám žádné reklamní ani
+          analytické nástroje, údaje neprodávám a nepředávám je pro marketing. Kdybych někdy chtěl
+          vědět, kolik dotazů server odbaví a jak dopadají, sledoval bych to na základě svého
+          oprávněného zájmu na provozu služby a jen v souhrnné podobě, ze které jednotlivého
+          uživatele určit nelze. Nic o vás automaticky nevyhodnocuji ani neprofiluji. Citlivé údaje,
+          jako je zdravotní stav, náboženské vyznání nebo politické názory, cíleně nezpracovávám.
+          Protože ale jde o právní rešerše, může je obsahovat text vašeho dotazu; pak serverem
+          projdou a po tu krátkou dobu leží v dočasné paměti jako každý jiný dotaz. Zvažte prosím
+          proto, co do dotazu píšete.
         </p>
       </Section>
 
       <Section heading="3. Účel zpracování">
         <ul style={list}>
-          <li>umožnění přihlášení a přístupu ke službě,</li>
-          <li>udržení přihlašovací relace,</li>
-          <li>vyřízení dotazu, který mi pošlete e-mailem,</li>
-          <li>zajištění provozu a bezpečnosti služby a prevence jejího zneužití.</li>
+          <li>
+            <strong>e-mailová adresa a identifikátor účtu</strong> - umožnění přihlášení a přístupu
+            ke službě a udržení přihlašovací relace,
+          </li>
+          <li>
+            <strong>e-mailová adresa a obsah zprávy, kterou mi napíšete</strong> - vyřízení toho, s
+            čím se na mě obracíte, a odpověď vám,
+          </li>
+          <li>
+            <strong>text dotazu a odpověď v dočasné paměti serveru</strong> - vyřízení samotné
+            rešerše a šetrné zacházení se zdroji, ze kterých se čerpá,
+          </li>
+          <li>
+            <strong>provozní záznamy hostingu</strong> - zajištění provozu a bezpečnosti služby a
+            prevence jejího zneužití.
+          </li>
         </ul>
       </Section>
 
@@ -71,6 +88,12 @@ export default function Soukromi() {
           Skutečnost, že je služba bezúplatná, na tom nic nemění. Žádný zákon vám poskytnutí těchto
           údajů neukládá, ale bez e-mailové adresy nelze účet založit a přihlášení nefunguje. Nic
           jiného po vás nechci.
+        </p>
+        <p>
+          <strong>Dotazy a dočasná paměť.</strong> Samotné vyřízení dotazu je to, oč jste mě
+          požádali, a stojí tedy na naší dohodě. Že si server dotaz a odpověď na pár minut podrží,
+          stojí na mém oprávněném zájmu na tom, aby opakovaná rešerše nezatěžovala cizí veřejné
+          databáze víc, než je nutné.
         </p>
         <p>
           <strong>Provoz a bezpečnost.</strong> Technické záznamy hostingu zpracovávám na základě
@@ -143,9 +166,11 @@ export default function Soukromi() {
           na kterých předání stojí, si můžete napsat na <Mail />.
         </p>
         <p>
-          Přihlásíte-li se přes účet jiné služby, například přes Google, rozhoduje tento poskytovatel
-          o zpracování při ověření vaší totožnosti sám za sebe a řídí se vlastními pravidly. Není
-          mým zpracovatelem.
+          Přihlásíte-li se přes účet jiné služby, například přes Google, řídí se samotné ověření
+          vaší totožnosti pravidly tohoto poskytovatele - rozhoduje o něm sám za sebe a není mým
+          zpracovatelem. To, co mi o vás při přihlášení předá, tedy zpravidla e-mailovou adresu a
+          identifikátor, pak zpracovávám já jako správce úplně stejně, jako byste se registrovali
+          e-mailem.
         </p>
         <p>
           Vaše dotazy server odesílá do veřejných databází (e-Sbírka, Nejvyšší soud, Nejvyšší správní
