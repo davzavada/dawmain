@@ -23,7 +23,13 @@ import { PREVIEW_DEADLINE_MS, buildPreviews, withDeadline } from "./previews";
 const SOURCES = ["nss", "ns", "nalus", "curia"] as const;
 type SourceId = (typeof SOURCES)[number];
 const CZ_SOURCES: SourceId[] = ["nss", "ns", "nalus"];
-const PER_SOURCE_DEADLINE_MS = 20_000;
+/**
+ * The whole fan-out answers as fast as its SLOWEST court, so this deadline IS
+ * the tool's latency ceiling. 5 s is deliberate: a court that has not answered
+ * by then almost never contributes, and the per-court *_search tools keep the
+ * full patient timeout for a deliberate retry.
+ */
+const PER_SOURCE_DEADLINE_MS = 5_000;
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use ISO format YYYY-MM-DD");
 
@@ -40,6 +46,8 @@ interface SourceStatus {
   source: SourceId;
   ok: boolean;
   total: number | null;
+  /** Wall-clock time this court's search took — how the slow court gets named. */
+  ms: number;
   error?: string;
 }
 
@@ -72,7 +80,7 @@ export function registerCzCaselaw(server: McpServer): void {
     {
       title: "Case law: search all top courts at once",
       description:
-        "FULL-TEXT search across NSS (administrative), NS (civil/criminal) and Ústavní soud (constitutional) in parallel — optionally also the CJEU (include_eu). Takes up to 3 query variants at once ('queries' — Czech inflects, so pass stems/synonyms: [\"bezpečný přístav\", \"bezpečného přístavu\", \"safe harbour\"]); results are merged and deduplicated per court. With read_top: N the response ALSO carries excerpt previews of the N best hits — search + first reading in one call. Every court is searched across its whole archive — pass date_from/date_to only when the question has a time frame. For deeper digging use nss_search/ns_search/nalus_search/curia_search; fetch full texts with the *_get_* tool named in each hit.",
+        "FULL-TEXT search across NSS (administrative), NS (civil/criminal) and Ústavní soud (constitutional) in parallel — optionally also the CJEU (include_eu). Takes up to 3 query variants at once ('queries' — Czech inflects, so pass stems/synonyms: [\"bezpečný přístav\", \"bezpečného přístavu\", \"safe harbour\"]); results are merged and deduplicated per court. With read_top: N the response ALSO carries excerpt previews of the N best hits — search + first reading in one call. Every court is searched across its whole archive — pass date_from/date_to only when the question has a time frame. For deeper digging use nss_search/ns_search/nalus_search/curia_search; fetch full texts with the *_get_* tool named in each hit. Looking for ONE decision the user already cites by spisová značka or ECLI? cz_caselaw_get fetches it in a single call instead.",
       inputSchema: z.object({
         query: z.string().min(2).optional().describe("Czech full-text query."),
         queries: z
@@ -108,6 +116,7 @@ export function registerCzCaselaw(server: McpServer): void {
             source: z.enum(SOURCES),
             ok: z.boolean(),
             total: z.number().nullable(),
+            ms: z.number().describe("Wall-clock time this court's search took."),
             error: z.string().optional(),
           }),
         ),
@@ -258,19 +267,32 @@ export function registerCzCaselaw(server: McpServer): void {
 
       const settled = await Promise.all(
         active.map(async (source) => {
+          const started = Date.now();
           try {
             const result = await withDeadline(runners[source](), PER_SOURCE_DEADLINE_MS);
-            return { source, status: { source, ok: true, total: result.total }, hits: result.hits };
+            return {
+              source,
+              status: { source, ok: true, total: result.total, ms: Date.now() - started },
+              hits: result.hits,
+            };
           } catch (error) {
             const message =
               error instanceof SourceError
                 ? `${error.message} ${error.hint}`
-                : error instanceof Error
-                  ? error.message
-                  : String(error);
+                : error instanceof Error && /timed out after/.test(error.message)
+                  ? `no answer within ${PER_SOURCE_DEADLINE_MS / 1000} s — skipped so the other courts need not wait; for a patient retry use ${source}_search directly`
+                  : error instanceof Error
+                    ? error.message
+                    : String(error);
             return {
               source,
-              status: { source, ok: false, total: null, error: message } satisfies SourceStatus,
+              status: {
+                source,
+                ok: false,
+                total: null,
+                ms: Date.now() - started,
+                error: message,
+              } satisfies SourceStatus,
               hits: [] as AggregatedHit[],
             };
           }
@@ -303,7 +325,7 @@ export function registerCzCaselaw(server: McpServer): void {
       statuses.sort((a, b) => SOURCES.indexOf(a.source) - SOURCES.indexOf(b.source));
       const statusLines = statuses.map(
         (status) =>
-          `${status.ok ? "✓" : "✗"} ${status.source.toUpperCase()}: ${status.ok ? `${status.total ?? "?"} matches${variants.length > 1 ? " (best variant)" : ""}` : status.error}`,
+          `${status.ok ? "✓" : "✗"} ${status.source.toUpperCase()}: ${status.ok ? `${status.total ?? "?"} matches${variants.length > 1 ? " (best variant)" : ""}` : status.error} (${(status.ms / 1000).toFixed(1)}s)`,
       );
       const hitLines = items.map(
         (hit, i) =>

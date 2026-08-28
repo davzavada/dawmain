@@ -40,6 +40,16 @@ export async function fetchUpstream(
   const retry = options.retry ?? method === "GET";
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
+  // One health record and one log line per upstream request, with its
+  // wall-clock time — the function logs are the ground truth for "which
+  // source is slow", which no status page can show after the fact.
+  const startedAt = Date.now();
+  const record = (ok: boolean, detail?: string): void => {
+    const ms = Date.now() - startedAt;
+    recordSourceResult(source, ok, detail, ms);
+    console.log(`[upstream] ${source}: ${detail ?? "ok"} in ${ms} ms (${method} ${url.split("?")[0]})`);
+  };
+
   const attempt = async (): Promise<Response> =>
     fetch(url, {
       method,
@@ -54,14 +64,14 @@ export async function fetchUpstream(
     response = await attempt();
   } catch (error) {
     if (!retry) {
-      recordSourceResult(source, false, errorLabel(error));
+      record(false, errorLabel(error));
       throw asSourceError(source, error);
     }
     await delay(500 + Math.random() * 1000);
     try {
       response = await attempt();
     } catch (secondError) {
-      recordSourceResult(source, false, errorLabel(secondError));
+      record(false, errorLabel(secondError));
       throw asSourceError(source, secondError);
     }
   }
@@ -71,13 +81,13 @@ export async function fetchUpstream(
     try {
       response = await attempt();
     } catch (error) {
-      recordSourceResult(source, false, errorLabel(error));
+      record(false, errorLabel(error));
       throw asSourceError(source, error);
     }
   }
 
   if (response.status === 429 || response.status >= 500) {
-    recordSourceResult(source, false, `HTTP ${response.status}`);
+    record(false, `HTTP ${response.status}`);
     throw new SourceError(
       source,
       "UPSTREAM_ERROR",
@@ -93,7 +103,7 @@ export async function fetchUpstream(
   const declared = Number(response.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > maxBytes) {
     // The source answered - this is our own size guard, not an outage.
-    recordSourceResult(source, true);
+    record(true);
     throw new SourceError(
       source,
       "UPSTREAM_ERROR",
@@ -102,7 +112,7 @@ export async function fetchUpstream(
     );
   }
 
-  recordSourceResult(source, response.ok, response.ok ? undefined : `HTTP ${response.status}`);
+  record(response.ok, response.ok ? undefined : `HTTP ${response.status}`);
   return response;
 }
 

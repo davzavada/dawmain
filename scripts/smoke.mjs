@@ -121,6 +121,7 @@ const EXPECTED_TOOLS = [
   "nss_search",
   "nss_get_decision",
   "cz_caselaw_search",
+  "cz_caselaw_get",
   "justice_list_decisions",
   "justice_get_decision",
   "curia_search",
@@ -200,6 +201,29 @@ async function checkLive(client) {
   });
   if (ns.isError) throw new Error(`ns_search failed: ${ns.content?.[0]?.text}`);
   ok("ns_search", `last 7 days → ${ns.structuredContent?.count} hits of ${ns.structuredContent?.total ?? "?"}`);
+
+  // The one-call lookup: routing + search + text fetch end to end, per court.
+  for (const [caseNumber, court] of [
+    ["23 Cdo 116/2017", "ns"],
+    ["1 Afs 25/2024", "nss"],
+    ["Pl. ÚS 24/10", "nalus"],
+    ["C-311/18", "curia"],
+  ]) {
+    const lookup = await client.request("tools/call", {
+      name: "cz_caselaw_get",
+      arguments: { case_number: caseNumber },
+    });
+    if (lookup.isError) throw new Error(`cz_caselaw_get ${caseNumber} failed: ${lookup.content?.[0]?.text}`);
+    if (lookup.structuredContent?.court !== court) {
+      throw new Error(
+        `cz_caselaw_get ${caseNumber} routed to ${lookup.structuredContent?.court}, expected ${court}`,
+      );
+    }
+    ok(
+      "cz_caselaw_get",
+      `${caseNumber} → ${lookup.structuredContent?.court_label}, ${lookup.structuredContent?.total_pages} text pages`,
+    );
+  }
 }
 
 /**

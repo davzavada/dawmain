@@ -81,6 +81,7 @@ quoted passages stay in the original.
 | Need | Tool |
 |---|---|
 | Case law on a topic (start here) | `cz_caselaw_search` — NSS + NS + ÚS in parallel, `include_eu` adds the CJEU |
+| A decision cited by sp. zn. / ECLI | `cz_caselaw_get {case_number \| ecli}` — resolves the court and returns the text in ONE call |
 | Deeper digging in one court | `ns_search`, `nss_search`, `nalus_search` |
 | Full text of a decision | `ns_get_decision {unid}`, `nss_get_decision {document_id}`, `nalus_get_decision {sz}` |
 | Which act, and its wording | `esbirka_search` → `esbirka_get_act` → `esbirka_get_text` (whole act, or one § via `section: "§ 12"`, any date) |

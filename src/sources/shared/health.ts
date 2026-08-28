@@ -21,13 +21,26 @@ export interface SourceHealth {
   at: number;
   /** Short reason when !ok - an HTTP status or the error name. */
   detail?: string;
+  /** Wall-clock ms of the observed request - how slow the source has been. */
+  durationMs?: number;
 }
 
 const observations = new Map<string, SourceHealth>();
 
 /** Called by `fetchUpstream` for every upstream request, success or failure. */
-export function recordSourceResult(source: string, ok: boolean, detail?: string): void {
-  observations.set(source, { source, ok, at: Date.now(), ...(detail ? { detail } : {}) });
+export function recordSourceResult(
+  source: string,
+  ok: boolean,
+  detail?: string,
+  durationMs?: number,
+): void {
+  observations.set(source, {
+    source,
+    ok,
+    at: Date.now(),
+    ...(detail ? { detail } : {}),
+    ...(durationMs !== undefined ? { durationMs } : {}),
+  });
 }
 
 /** The last observation for a source, or undefined if this instance has none. */

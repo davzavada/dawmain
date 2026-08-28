@@ -6,6 +6,7 @@ import { registerNs } from "./ns";
 import { registerNalus } from "./nalus";
 import { registerNss } from "./nss";
 import { registerCzCaselaw } from "./cz-caselaw";
+import { registerCzCaselawGet } from "./cz-caselaw-get";
 import { registerCuria } from "./curia";
 import { registerEurlex } from "./eurlex";
 import { registerJustice } from "./justice";
@@ -37,6 +38,7 @@ const registrars: Array<(server: McpServer) => void> = [
   registerNalus,
   registerNss,
   registerCzCaselaw,
+  registerCzCaselawGet,
   registerJustice,
   registerCuria,
   registerEurlex,
