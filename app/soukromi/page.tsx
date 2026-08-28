@@ -1,224 +1,217 @@
-import { LegalHeader, Mail, Section, list } from "../_legal";
+import { LegalHeader, Mail, Section } from "../_legal";
 
 export const metadata = {
   title: "Zásady ochrany osobních údajů - Dawmain",
   description: "Jaké osobní údaje Dawmain zpracovává, proč, jak dlouho a jaká máte práva.",
 };
 
+const table: React.CSSProperties = {
+  width: "100%",
+  borderCollapse: "collapse",
+  fontSize: "0.85rem",
+  lineHeight: 1.5,
+  marginTop: "0.6rem",
+};
+
+const cell: React.CSSProperties = {
+  border: "1px solid #e5e7eb",
+  padding: "0.45rem 0.6rem",
+  verticalAlign: "top",
+  textAlign: "left",
+};
+
+const head: React.CSSProperties = {
+  ...cell,
+  background: "#f9fafb",
+  fontWeight: 600,
+};
+
+/** Tables get more columns than a phone has width; each scrolls by itself. */
+function Scroll({ children }: { children: React.ReactNode }) {
+  return <div style={{ overflowX: "auto" }}>{children}</div>;
+}
+
 export default function Soukromi() {
   return (
     <>
       <LegalHeader title="Zásady ochrany osobních údajů" />
 
-      <Section heading="1. Správce osobních údajů">
+      <p>
+        Správcem je <strong>David Závada</strong>, kontakt <Mail />. Pověřence pro ochranu osobních
+        údajů nemám a vzhledem k povaze a rozsahu zpracování ho mít nemusím.
+      </p>
+      <p>
+        Vlastní databázi nevedu a nic si trvale neukládám. Reklamu nemám, údaje neprodávám a
+        nepředávám je pro marketing. Nic o vás automaticky nevyhodnocuji ani neprofiluji.
+      </p>
+
+      <Section heading="1. Co zpracovávám, proč a jak dlouho">
+        <Scroll>
+          <table style={table}>
+            <thead>
+              <tr>
+                <th style={head}>Údaj</th>
+                <th style={head}>Účel</th>
+                <th style={head}>Právní základ</th>
+                <th style={head}>Doba uchování</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td style={cell}>E-mailová adresa a identifikátor účtu</td>
+                <td style={cell}>Přihlášení, přístup ke službě, udržení relace</td>
+                <td style={cell}>Plnění smlouvy — čl. 6 odst. 1 písm. b) GDPR</td>
+                <td style={cell}>Dokud trvá účet; relace do svého vypršení</td>
+              </tr>
+              <tr>
+                <td style={cell}>
+                  Strojové volání nástroje a odpověď zdroje v dočasné paměti serveru
+                </td>
+                <td style={cell}>
+                  Vyřízení rešerše; krátká mezipaměť šetří veřejné zdroje, ze kterých se čerpá
+                </td>
+                <td style={cell}>Plnění smlouvy — čl. 6 odst. 1 písm. b) GDPR</td>
+                <td style={cell}>
+                  Vyhledávání nejdéle 5 minut, texty rozhodnutí a předpisů nejdéle 10 minut
+                </td>
+              </tr>
+              <tr>
+                <td style={cell}>
+                  Údaje o používání služby (která volání server odbaví, kolik jich je a jak
+                  dopadnou)
+                </td>
+                <td style={cell}>
+                  Přehled o tom, jak se služba používá, a její další zlepšování
+                </td>
+                <td style={cell}>Oprávněný zájem — čl. 6 odst. 1 písm. f) GDPR</td>
+                <td style={cell}>Nejdéle 12 měsíců</td>
+              </tr>
+              <tr>
+                <td style={cell}>
+                  Provozní záznamy hostingu (IP adresa, čas, typ požadavku, chybová hlášení)
+                </td>
+                <td style={cell}>
+                  Provoz a bezpečnost služby, dohledání příčiny výpadku, odhalení nepřiměřené
+                  zátěže a pokusů o neoprávněný přístup
+                </td>
+                <td style={cell}>Oprávněný zájem — čl. 6 odst. 1 písm. f) GDPR</td>
+                <td style={cell}>Krátkodobě, v řádu dnů až týdnů</td>
+              </tr>
+              <tr>
+                <td style={cell}>E-mailová adresa a obsah zprávy, kterou mi napíšete</td>
+                <td style={cell}>Vyřízení toho, s čím se na mě obracíte, a odpověď vám</td>
+                <td style={cell}>Oprávněný zájem — čl. 6 odst. 1 písm. f) GDPR</td>
+                <td style={cell}>Po dobu potřebnou k vyřízení věci, nejdéle rok</td>
+              </tr>
+            </tbody>
+          </table>
+        </Scroll>
         <p>
-          Správcem osobních údajů je <strong>David Závada</strong>, fyzická osoba, která službu
-          Dawmain provozuje mimo rámec podnikatelské činnosti.
+          <strong>Účet.</strong> Účty vede poskytovatel přihlášení Clerk; drží vaši e-mailovou
+          adresu a identifikátor účtu. Přihlásíte-li se přes účet jiné služby, předá tento
+          poskytovatel do Clerku zpravidla totéž. Můj vlastní server si o vás od Clerku nic
+          nenačítá — z každého požadavku pozná jen to, že patří ověřenému účtu. Hesla u sebe
+          neuchovávám.
         </p>
         <p>
-          Kontaktní e-mail: <Mail />
+          <strong>Co se k serveru vůbec dostane.</strong> Vaši konverzaci s AI asistentem nevidím —
+          server ji nedostává. Dostane jen strojové volání, které asistent provede.
         </p>
       </Section>
 
-      <Section heading="2. Jaké údaje zpracovávám">
+      <Section heading="2. Komu se údaje dostanou">
+        <Scroll>
+          <table style={table}>
+            <thead>
+              <tr>
+                <th style={head}>Příjemce</th>
+                <th style={head}>Role</th>
+                <th style={head}>Co se k němu dostane</th>
+                <th style={head}>Kde</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td style={cell}>Clerk, Inc.</td>
+                <td style={cell}>Můj zpracovatel — přihlašování a správa účtů</td>
+                <td style={cell}>E-mailová adresa, identifikátor účtu</td>
+                <td style={cell}>USA</td>
+              </tr>
+              <tr>
+                <td style={cell}>Vercel, Inc.</td>
+                <td style={cell}>Můj zpracovatel — hosting serveru</td>
+                <td style={cell}>Provozní záznamy</td>
+                <td style={cell}>
+                  Server v evropském regionu (Frankfurt), platforma americké společnosti přístupná
+                  z USA
+                </td>
+              </tr>
+              <tr>
+                <td style={cell}>
+                  Poskytovatel přihlášení účtem jiné služby (např. Google)
+                </td>
+                <td style={cell}>
+                  Samostatný správce — ověří vaši totožnost a předá mi e-mail a identifikátor
+                </td>
+                <td style={cell}>Řídí se jeho vlastními pravidly</td>
+                <td style={cell}>Dle jeho pravidel</td>
+              </tr>
+            </tbody>
+          </table>
+        </Scroll>
         <p>
-          <strong>Údaje o účtu.</strong> Účty vede poskytovatel přihlášení Clerk. Drží vaši
-          e-mailovou adresu, kterou vás rozlišuji od ostatních a na kterou vám mohu napsat, a
-          identifikátor vašeho účtu. Přihlásíte-li se přes účet jiné služby, předá tento
-          poskytovatel do Clerku to, co s takovým přihlášením předává - zpravidla e-mailovou adresu
-          a identifikátor. Můj vlastní server si o vás od Clerku nic nenačítá; z každého požadavku
-          pozná jen to, že patří ověřenému účtu.
+          S Clerkem i Vercelem mám uzavřenou smlouvu o zpracování osobních údajů. Oba si k plnění
+          své role přibírají vlastní dodavatele (infrastruktura datových center, služba pro
+          odesílání ověřovacích e-mailů), které váže stejná povinnost mlčenlivosti a stejná
+          pravidla.
         </p>
         <p>
-          <strong>Připojení bez účtu.</strong> Server přijímá také starší sdílený přístupový kód.
-          Kdo se připojí jím, nemá u mě žádný účet a kromě provozních záznamů níže o něm nevím nic.
-        </p>
-        <p>
-          <strong>Provozní údaje.</strong> Server běží na hostingu, který o požadavcích vede
-          standardní technický záznam: IP adresa, čas, typ požadavku a chybová hlášení. Slouží k
-          provozu a bezpečnosti.
-        </p>
-        <p>
-          <strong>Co se děje s vašimi dotazy.</strong> Vlastní databázi nevedu a dotazy si do žádné
-          trvalé evidence neukládám. Dotaz serverem projde do veřejné databáze a odpověď se vrátí
-          zpět. Aby opakovaný dotaz zbytečně nezatěžoval zdroje, drží server dotaz i odpověď krátce
-          v dočasné paměti: výsledky vyhledávání nejdéle pět minut, texty rozhodnutí a předpisů
-          nejdéle deset. Po tu dobu jsou u mě a jsem jejich správcem i já - nejsou ale spojeny
-          s vaším účtem, paměť o něm nic neví, a po uplynutí uvedené doby záznam mizí. Nikam dál se
-          neukládá a nikomu ho nepředávám.
-        </p>
-        <p>
-          Neuchovávám hesla, protože přihlášení zajišťuje poskytovatel. Nemám žádné reklamní ani
-          analytické nástroje, údaje neprodávám a nepředávám je pro marketing. Kdybych někdy chtěl
-          vědět, kolik dotazů server odbaví a jak dopadají, sledoval bych to na základě svého
-          oprávněného zájmu na provozu služby a jen v souhrnné podobě, ze které jednotlivého
-          uživatele určit nelze. Nic o vás automaticky nevyhodnocuji ani neprofiluji. Citlivé údaje,
-          jako je zdravotní stav, náboženské vyznání nebo politické názory, cíleně nezpracovávám.
-          Protože ale jde o právní rešerše, může je obsahovat text vašeho dotazu; pak serverem
-          projdou a po tu krátkou dobu leží v dočasné paměti jako každý jiný dotaz. Zvažte prosím
-          proto, co do dotazu píšete.
-        </p>
-      </Section>
-
-      <Section heading="3. Účel zpracování">
-        <ul style={list}>
-          <li>
-            <strong>e-mailová adresa a identifikátor účtu</strong> - umožnění přihlášení a přístupu
-            ke službě a udržení přihlašovací relace,
-          </li>
-          <li>
-            <strong>e-mailová adresa a obsah zprávy, kterou mi napíšete</strong> - vyřízení toho, s
-            čím se na mě obracíte, a odpověď vám,
-          </li>
-          <li>
-            <strong>text dotazu a odpověď v dočasné paměti serveru</strong> - vyřízení samotné
-            rešerše a šetrné zacházení se zdroji, ze kterých se čerpá,
-          </li>
-          <li>
-            <strong>provozní záznamy hostingu</strong> - zajištění provozu a bezpečnosti služby a
-            prevence jejího zneužití.
-          </li>
-        </ul>
-      </Section>
-
-      <Section heading="4. Právní základ zpracování">
-        <p>
-          <strong>Účet.</strong> E-mailovou adresu a identifikátor účtu zpracovávám proto, abych vám
-          mohl službu vůbec poskytnout, tedy pro splnění toho, na čem jsme se přihlášením dohodli.
-          Skutečnost, že je služba bezúplatná, na tom nic nemění. Žádný zákon vám poskytnutí těchto
-          údajů neukládá, ale bez e-mailové adresy nelze účet založit a přihlášení nefunguje. Nic
-          jiného po vás nechci.
-        </p>
-        <p>
-          <strong>Dotazy a dočasná paměť.</strong> Vyřízení dotazu je to, oč jste mě požádali, a i
-          to, že si server dotaz s odpovědí na pár minut podrží, k poskytování služby patří - šetří
-          to zdroje, ze kterých se čerpá. Obojí tedy stojí na plnění naší smlouvy.
-        </p>
-        <p>
-          <strong>Provoz a bezpečnost.</strong> Technické záznamy hostingu zpracovávám na základě
-          svého oprávněného zájmu na tom, aby služba běžela a nebyla zneužita. Konkrétně mi slouží k
-          tomu, abych dohledal příčinu výpadku nebo chyby, poznal nepřiměřenou zátěž, která by
-          ohrozila provoz nebo zdroje, ze kterých se čerpá, a odhalil pokusy o neoprávněný přístup.
-        </p>
-        <p>
-          <strong>Analytika.</strong> Kde údaje zpracovávám pro analytiku, dělám to na základě svého
-          oprávněného zájmu na tom, aby služba dobře fungovala.
-        </p>
-        <p>
-          Proti zpracování, které stojí na oprávněném zájmu, můžete kdykoli vznést námitku na{" "}
-          <Mail />.
+          Předání do Spojených států se opírá o rozhodnutí Evropské komise o odpovídající ochraně
+          pro EU-US Data Privacy Framework; obě společnosti jsou v tomto rámci zapsány. Nikomu
+          dalšímu údaje k jeho vlastním účelům nepředávám a neprodávám je. Údaje předám jen tehdy,
+          uloží-li mi to zákon.
         </p>
       </Section>
 
-      <Section heading="5. Cookies">
+      <Section heading="3. Cookies">
+        <p>Tyto stránky nenastavují žádné cookies.</p>
         <p>
-          Tyto stránky nenastavují žádné cookies. Ani samotné připojení AI asistenta ke službě na
-          cookies nestojí, přístupový token cestuje v hlavičce požadavku.
-        </p>
-        <p>
-          Přihlašovací okno provozuje na své vlastní adrese poskytovatel Clerk a cookies nutné k
-          udržení přihlášení nastavuje on. Bez nich by přihlášení nefungovalo, proto se k nim souhlas
-          nevyžaduje. Žádné analytické ani reklamní cookies ve hře nejsou.
+          Přihlašovací okno provozuje na své vlastní adrese Clerk a cookies nutné k udržení
+          přihlášení nastavuje on.
         </p>
       </Section>
 
-      <Section heading="6. Doba uchování">
-        <ul style={list}>
-          <li>údaje o účtu - dokud účet trvá,</li>
-          <li>přihlašovací relace - do jejího vypršení,</li>
-          <li>dotazy v dočasné paměti serveru - nejdéle pět minut u vyhledávání a deset u textů,</li>
-          <li>provozní záznamy hostingu - krátkodobě, v řádu dnů až týdnů,</li>
-          <li>e-mailová korespondence - po dobu, po kterou je potřeba k vyřízení věci, nejdéle rok.</li>
-        </ul>
+      <Section heading="4. Vaše práva">
         <p>
-          O zrušení účtu a smazání všech souvisejících údajů můžete požádat na <Mail />. Provedu je
-          bez zbytečného odkladu.
+          Máte právo na přístup ke svým údajům a na jejich kopii, na opravu, na výmaz, na omezení
+          zpracování a na přenositelnost. Uplatníte je na <Mail /> — zdarma a bez zbytečného
+          odkladu, nejpozději do měsíce od doručení žádosti. Je-li žádost složitá, mohu lhůtu
+          prodloužit až o další dva měsíce; do měsíce vám pak dám vědět, že ji prodlužuji a proč. O
+          zrušení účtu a smazání všech souvisejících údajů požádejte tamtéž.
+        </p>
+        <p>
+          <strong>Právo vznést námitku.</strong> Proti zpracování, které stojí na mém oprávněném
+          zájmu, můžete kdykoli vznést námitku na <Mail />. Údaje pak dál zpracovávat nebudu,
+          ledaže prokážu závažné oprávněné důvody, které převažují nad vašimi zájmy, právy a
+          svobodami.
+        </p>
+        <p>
+          Máte také právo podat stížnost u Úřadu pro ochranu osobních údajů, Pplk. Sochora 27, 170
+          00 Praha 7, <a href="https://uoou.gov.cz">uoou.gov.cz</a>.
         </p>
       </Section>
 
-      <Section heading="7. Sdílení údajů s třetími stranami">
+      <Section heading="5. Zabezpečení">
         <p>
-          Vaše osobní údaje nepředávám nikomu k jeho vlastním účelům a neprodávám je. Na provozu
-          služby se za mě podílejí dva poskytovatelé, se kterými mám uzavřenou smlouvu o zpracování
-          osobních údajů:
-        </p>
-        <ul style={list}>
-          <li>
-            <strong>Clerk, Inc.</strong> - přihlašování a správa uživatelských účtů. Společnost sídlí
-            ve Spojených státech a účty vede tam.
-          </li>
-          <li>
-            <strong>Vercel, Inc.</strong> - hosting serveru. Server běží v evropském regionu ve
-            Frankfurtu, provozovatelem je ale americká společnost, takže provozní záznamy jsou
-            v její platformě a z USA přístupné.
-          </li>
-        </ul>
-        <p>
-          Oba poskytovatelé si k plnění své role přibírají vlastní dodavatele, například
-          infrastrukturu datových center a službu pro odesílání ověřovacích e-mailů. Váže je stejná
-          povinnost mlčenlivosti a stejná pravidla ochrany údajů.
-        </p>
-        <p>
-          Obě společnosti jsou zapsány v rámci EU-US Data Privacy Framework, takže se předání do
-          Spojených států opírá o rozhodnutí Evropské komise o odpovídající ochraně. O kopii záruk,
-          na kterých předání stojí, si můžete napsat na <Mail />.
-        </p>
-        <p>
-          Přihlásíte-li se přes účet jiné služby, například přes Google, řídí se samotné ověření
-          vaší totožnosti pravidly tohoto poskytovatele - rozhoduje o něm sám za sebe a není mým
-          zpracovatelem. To, co mi o vás při přihlášení předá, tedy zpravidla e-mailovou adresu a
-          identifikátor, pak zpracovávám já jako správce úplně stejně, jako byste se registrovali
-          e-mailem.
-        </p>
-        <p>
-          Vaše dotazy server odesílá do veřejných databází (e-Sbírka, Nejvyšší soud, Nejvyšší správní
-          soud, Ústavní soud, rozhodnuti.justice.cz, InfoCuria, EUR-Lex). Putuje k nim pouze samotný
-          dotaz, nikoli to, kdo jste. Tyto instituce jsou samostatnými správci a řídí se vlastními
-          pravidly. Údaje dále předám jen tehdy, uloží-li mi to zákon.
-        </p>
-      </Section>
-
-      <Section heading="8. Zabezpečení údajů">
-        <p>
-          Komunikace probíhá výhradně přes šifrované spojení (HTTPS). Server odmítá neověřené
+          Komunikace probíhá výhradně přes šifrované spojení (HTTPS), server odmítá neověřené
           požadavky a hesla u sebe neuchovávám. Kromě mě mají k údajům přístup jen poskytovatelé
           uvedení výše a jejich dodavatelé, a to v rozsahu nutném k tomu, aby služba běžela.
         </p>
       </Section>
 
-      <Section heading="9. Pověřenec pro ochranu osobních údajů">
+      <Section heading="6. Změny těchto zásad">
         <p>
-          Vzhledem k povaze a rozsahu zpracování nemám povinnost jmenovat pověřence pro ochranu
-          osobních údajů a nejmenoval jsem jej. Ve všech věcech ochrany osobních údajů se proto
-          obracejte přímo na <Mail />.
-        </p>
-      </Section>
-
-      <Section heading="10. Vaše práva">
-        <p>Máte právo:</p>
-        <ul style={list}>
-          <li>na přístup ke svým osobním údajům a na jejich kopii,</li>
-          <li>na opravu nepřesných údajů,</li>
-          <li>na výmaz údajů (právo být zapomenut),</li>
-          <li>na omezení zpracování,</li>
-          <li>na přenositelnost údajů,</li>
-          <li>vznést námitku proti zpracování založenému na oprávněném zájmu,</li>
-          <li>
-            podat stížnost u Úřadu pro ochranu osobních údajů, Pplk. Sochora 27, 170 00 Praha 7,{" "}
-            <a href="https://uoou.gov.cz">uoou.gov.cz</a>.
-          </li>
-        </ul>
-        <p>
-          Pro uplatnění svých práv mě kontaktujte na <Mail />. Vyřídím je zdarma a bez zbytečného
-          odkladu, nejpozději do měsíce od doručení žádosti. Kdyby byla žádost složitá, mohu tuto
-          lhůtu prodloužit až o další dva měsíce; v takovém případě vám do měsíce dám vědět, že ji
-          prodlužuji a proč.
-        </p>
-      </Section>
-
-      <Section heading="11. Změny těchto zásad">
-        <p>
-          Zásady mohu upravit, pokud se změní fungování služby nebo právní úprava. Aktuální znění je
+          Zásady mohu upravit, změní-li se fungování služby nebo právní úprava. Aktuální znění je
           vždy na této stránce a o podstatné změně vás budu informovat e-mailem.
         </p>
       </Section>
