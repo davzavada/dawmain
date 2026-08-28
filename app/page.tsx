@@ -1,20 +1,10 @@
 import { Suspense } from "react";
 import { headers } from "next/headers";
 import { databaseStatuses, formatTime } from "@/src/mcp/status";
+import { Endpoint } from "./_endpoint";
 
 export const dynamic = "force-dynamic";
 
-const code: React.CSSProperties = {
-  display: "block",
-  whiteSpace: "pre-wrap",
-  wordBreak: "break-all",
-  background: "#f3f4f6",
-  border: "1px solid #e5e7eb",
-  borderRadius: "0.5rem",
-  padding: "0.75rem 1rem",
-  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-  fontSize: "0.875rem",
-};
 
 const sourceRow: React.CSSProperties = {
   display: "flex",
@@ -117,9 +107,9 @@ export default async function Home() {
       </header>
 
       <p style={{ marginTop: "1.75rem" }}>
-        Přístup k judikatuře a právním předpisům s AI by podle mě neměl vést jen přes komerční
-        nástroje. Data jsou dnes dobře dostupná a provoz je v zásadě zdarma. Proto jsem vytvořil
-        nekomerční alternativu. Budu rád, když ji vyzkoušíte :)
+        Právní rešerše s AI jsou super. Přístup k judikatuře a právním předpisům s AI by ale podle
+        mě neměl vést jen přes komerční nástroje. Data jsou dnes dobře dostupná a provoz je v zásadě
+        zdarma. Proto jsem vytvořil nekomerční alternativu. Budu rád, když ji vyzkoušíte :)
       </p>
 
       <h2 style={{ fontSize: "1.1rem", marginTop: "2rem" }}>Jak to funguje?</h2>
@@ -134,14 +124,13 @@ export default async function Home() {
       </Suspense>
 
       <h2 style={{ fontSize: "1.1rem", marginTop: "2rem" }}>Jak se připojit?</h2>
-      <code style={code}>{endpoint}</code>
+      <Endpoint endpoint={endpoint} />
       <ol style={{ paddingLeft: "1.4rem", lineHeight: 1.9 }}>
         <li>
           V aplikaci claude.ai otevřete <strong>Nastavení → Konektory</strong>.
         </li>
         <li>
-          Zvolte <strong>Přidat vlastní konektor</strong> a vložte adresu výše. Pole pro
-          přístupový kód nechte prázdné.
+          Zvolte <strong>Přidat vlastní konektor</strong> a vložte adresu výše.
         </li>
         <li>
           Otevře se přihlašovací okno - stačí se zaregistrovat e-mailem (nebo přihlásit, pokud už
