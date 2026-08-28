@@ -1,4 +1,4 @@
-import { auth } from "@clerk/nextjs/server";
+import { clerkClient } from "@clerk/nextjs/server";
 import { verifyClerkToken } from "@clerk/mcp-tools/next";
 import {
   fetchClerkAuthorizationServerMetadata,
@@ -87,12 +87,20 @@ export async function verifyRequestAuth(
   }
   if (bearerToken && clerkConfigured()) {
     try {
-      const clerkAuth = await auth({ acceptsToken: "oauth_token" });
-      return verifyClerkToken(clerkAuth, bearerToken) ?? undefined;
+      // authenticateRequest (instead of the middleware-backed auth()) keeps
+      // verification self-contained in this route AND surfaces the concrete
+      // rejection reason, which auth() swallows — without it a failing
+      // deployment logs nothing but "Invalid OAuth access token".
+      const client = await clerkClient();
+      const state = await client.authenticateRequest(request, { acceptsToken: "oauth_token" });
+      if (!state.isAuthenticated) {
+        console.warn(`Clerk rejected the OAuth token: ${state.reason ?? "?"} — ${state.message ?? ""}`);
+        return undefined;
+      }
+      return verifyClerkToken(state.toAuth(), bearerToken) ?? undefined;
     } catch (error) {
-      // An invalid token surfaces as `undefined` above, not a throw — a throw
-      // means something operational (Clerk unreachable, proxy.ts not running
-      // on this route) and is worth a log line. Either way: 401.
+      // A throw means something operational (Clerk unreachable, bad secret
+      // key) rather than a bad token. Either way: 401.
       console.warn("Clerk token verification failed unexpectedly:", error);
       return undefined;
     }
