@@ -139,9 +139,8 @@ export default function Soukromi() {
         </p>
         <p>
           Obě společnosti jsou zapsány v rámci EU-US Data Privacy Framework, takže se předání do
-          Spojených států opírá o rozhodnutí Evropské komise o odpovídající ochraně; smlouvy s nimi
-          navíc obsahují vzorové doložky schválené Evropskou komisí, které se uplatní, kdyby toto
-          rozhodnutí přestalo platit. O kopii těchto záruk si můžete napsat na <Mail />.
+          Spojených států opírá o rozhodnutí Evropské komise o odpovídající ochraně. O kopii záruk,
+          na kterých předání stojí, si můžete napsat na <Mail />.
         </p>
         <p>
           Přihlásíte-li se přes účet jiné služby, například přes Google, rozhoduje tento poskytovatel
