@@ -35,9 +35,10 @@ probe kanárky (`upv`, `upv-legacy`) zůstávají, kdyby se zdroj zpřístupnil.
 ## Architektura
 
 ```
-app/api/mcp/route.ts        HTTP route + autentizace (OAuth přes AuthKit / sdílený kód)
-app/.well-known/…/route.ts  RFC 9728 metadata — jak si klient najde OAuth login
-src/mcp/auth.ts             ověřování tokenů (JWT přes JWKS, sdílený kód), metadata
+app/api/mcp/route.ts        HTTP route + autentizace (OAuth přes Clerk / sdílený kód)
+app/.well-known/…/route.ts  RFC 9728/8414 metadata — jak si klient najde OAuth login
+proxy.ts                    Clerk proxy (jen /api + /__clerk; no-op bez klíčů)
+src/mcp/auth.ts             ověřování tokenů (Clerk OAuth, sdílený kód), metadata
 src/mcp/tools/<zdroj>.ts    tenké MCP nástroje (schema → klient → tvar odpovědi)
 src/sources/<zdroj>.ts      klient zdroje; fetchX() (I/O) oddělené od parseX() (pure)
 src/sources/shared/         fetchUpstream, CookieSession, chybová taxonomie, char-paging
@@ -81,9 +82,10 @@ produkci. Bez `vercel.json`; Next.js si Vercel detekuje sám.
 
 **Po prvním nasazení:**
 
-1. *Project Settings → Environment Variables*: `AUTHKIT_DOMAIN` a/nebo
-   `MCP_BEARER_TOKEN`, `ESBIRKA_API_KEY` (viz `.env.example`); *Functions →
-   Region*: `fra1`. Po změně env je potřeba Redeploy.
+1. *Project Settings → Environment Variables*: `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
+   + `CLERK_SECRET_KEY` a/nebo `MCP_BEARER_TOKEN`, `ESBIRKA_API_KEY` (viz
+   `.env.example`); *Functions → Region*: `fra1`. Po změně env je potřeba
+   Redeploy.
 2. Spusť smoke proti nasazení (viz výše), pak `SMOKE_LIVE=1`.
 3. Zavolej `dawmain_probe_sources` — ověří všechny upstreamy z nasazení.
 4. `dawmain_probe_sources {discover: true}` vypíše (a) kandidátní search
@@ -153,50 +155,47 @@ ne hádat.
 Endpoint přijímá dvě credentials naráz (stačí kterákoli); logika žije v
 `src/mcp/auth.ts`:
 
-1. **OAuth 2.1 přes WorkOS AuthKit** (`AUTHKIT_DOMAIN`) — klient dostane na
-   `401` hlavičku `WWW-Authenticate` s odkazem na
-   `/.well-known/oauth-protected-resource`, tam najde autorizační server
-   (AuthKit), sám se u něj zaregistruje (Dynamic Client Registration) a
-   provede uživatele přihlášením — e-mail + heslo či Magic Auth, případně
-   SSO, podle toho, co je v WorkOS zapnuté. Server pak jen ověřuje podpis,
-   issuer a expiraci JWT proti veřejnému JWKS (`<issuer>/oauth2/jwks`) —
-   **žádný WorkOS API klíč nikde nefiguruje**.
+1. **OAuth 2.1 přes Clerk** (`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` +
+   `CLERK_SECRET_KEY`, musí být OBĚ) — klient dostane na `401` hlavičku
+   `WWW-Authenticate` s odkazem na `/.well-known/oauth-protected-resource`,
+   tam najde autorizační server (Clerk instance, doména je zakódovaná v
+   publishable key), sám se u něj zaregistruje (Dynamic Client Registration)
+   a provede uživatele přihlášením — e-mail + heslo, e-mailový kód či SSO,
+   podle toho, co je v Clerku zapnuté. Přihlašovací stránku hostuje Clerk
+   Account Portal; server jen ověřuje předložené OAuth tokeny přes Clerk
+   (`verifyClerkToken`), k čemuž potřebuje secret key. `proxy.ts` (Clerk
+   middleware, jen na `/api` a `/__clerk`) je to, co `auth()` v route
+   zprovozňuje; bez klíčů je no-op.
 2. **Sdílený přístupový kód** (`MCP_BEARER_TOKEN`) — původní schéma,
    ponechané pro existující klienty; token se přijímá z `Authorization`,
    `X-API-Key` i `cf-aig-authorization` (stačí, když sedí kterákoli).
 
-**Bez obou proměnných se na Vercelu odmítne všechno** — prázdná nebo chybějící
+**Bez těchto proměnných se na Vercelu odmítne všechno** — prázdná nebo chybějící
 konfigurace by jinak tiše zveřejnila celý server, a to i na preview adresách;
 proto proměnné zaškrtni pro Production i Preview. Anonymní provoz je možný jen
 lokálně. Aktuální stav hlásí `dawmain_ping` polem `auth`
 (`oauth+token` / `oauth` / `token` / `open`).
 
-### Nastavení WorkOS AuthKit (jednorázově, dashboard.workos.com)
+### Nastavení Clerku (jednorázově, dashboard.clerk.com)
 
-1. **Registrace e-mailem**: *Authentication → Email + Password* (heslo),
-   případně *Magic Auth* (jednorázový kód na e-mail). Co je zapnuté, to
-   AuthKit na přihlašovací stránce nabídne — beze změn v kódu.
-2. *(Volitelně — aktuálně vypnuto)* **Google SSO**: *Authentication → OAuth
-   providers → Google → Manage*. Ve stagingu fungují výchozí WorkOS
-   credentials hned; pro produkci vlož vlastní Google Client ID + Secret
-   (Google Cloud Console → Auth Platform → Clients → Web application; do
-   *Authorized redirect URIs* patří Redirect URI z tohohle WorkOS dialogu,
-   *JavaScript origins* zůstávají prázdné; nakonec *Audience → Publish app*).
-   Návod: <https://workos.com/docs/integrations/google-oauth>. Zapnutí je
-   čistě dashboardová věc, kód se nemění.
-3. **Dynamic Client Registration** (nutné pro MCP klienty typu claude.ai):
-   *Applications → Configuration → Dynamic Client Registration → Enable*.
-4. **AuthKit doména**: zkopíruj z dashboardu (např.
-   `https://<slug>.authkit.app`) do `AUTHKIT_DOMAIN` na Vercelu
-   (Production i Preview) a Redeploy.
-5. **Kdo se smí registrovat**: veřejná registrace pustí dovnitř kohokoli.
-   Adresné rozdávání přístupu = vypnout sign-ups v AuthKitu (*Authentication →
-   Sign-up*) a uživatele zvát z dashboardu (*Users → Invite*).
+1. **Přihlašovací metody**: v aplikaci *Configure → Email, phone, username*
+   nech zapnutý e-mail (heslo a/nebo e-mailový kód). Sociální přihlášení
+   (Google apod.) jde kdykoli přidat v *SSO connections* — čistě dashboard,
+   kód se nemění.
+2. **Dynamic Client Registration** (nutné pro MCP klienty typu claude.ai):
+   *Configure → OAuth applications → povolit Dynamic Client Registration*.
+3. **API klíče**: *Configure → API keys* → `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
+   a `CLERK_SECRET_KEY` vlož na Vercelu (Production i Preview) a Redeploy.
+4. **Kdo se smí registrovat**: veřejná registrace pustí dovnitř kohokoli.
+   Adresné rozdávání přístupu = *Configure → Restrictions* (allowlist /
+   vypnout sign-up) a uživatele zvát z dashboardu (*Users → Invite*).
 
 Ověření: `curl https://<host>/.well-known/oauth-protected-resource` musí
-vrátit `authorization_servers: ["<AuthKit doména>"]`; pak připoj konektor v
-claude.ai bez přístupového kódu — má se otevřít přihlašovací okno. Diskovery
-kontroluje i `npm run smoke` (krok `oauth discovery`).
+vrátit `authorization_servers` s doménou tvé Clerk instance (tvar
+`https://<slug>.clerk.accounts.dev`, u produkce `https://clerk.<doména>`);
+pak připoj konektor v claude.ai bez přístupového kódu — má se otevřít
+přihlašovací okno. Diskovery kontroluje i `npm run smoke` (krok
+`oauth discovery`).
 
 ## Přidání zdroje
 

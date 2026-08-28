@@ -16,19 +16,20 @@ export function getBearerToken(): string | undefined {
 }
 
 /**
- * OAuth 2.1 via WorkOS AuthKit. `AUTHKIT_DOMAIN` holds the AuthKit domain
- * from the WorkOS dashboard — `https://<slug>.authkit.app` or a custom auth
- * domain; a bare hostname is accepted too. When set, /api/mcp accepts
- * AuthKit-issued JWT access tokens and the RFC 9728 protected-resource
- * metadata advertises this issuer so MCP clients can discover the login.
- * The server only verifies signatures against the issuer's public JWKS —
- * no WorkOS API key is needed anywhere.
+ * OAuth 2.1 via Clerk, configured by the two standard Clerk env vars.
+ * The publishable key identifies the Clerk instance AND encodes the
+ * authorization-server domain advertised in the RFC 9728 metadata; the
+ * secret key is what lets the server verify OAuth access tokens against
+ * Clerk. Only with BOTH present is OAuth advertised — a publishable key
+ * alone would send clients into a login whose tokens could never verify.
  */
-export function getAuthKitIssuer(): string | undefined {
-  const raw = process.env.AUTHKIT_DOMAIN?.trim();
-  if (!raw) return undefined;
-  const url = raw.includes("://") ? raw : `https://${raw}`;
-  return url.replace(/\/+$/, "");
+export function getClerkPublishableKey(): string | undefined {
+  const key = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim();
+  return key ? key : undefined;
+}
+
+export function clerkConfigured(): boolean {
+  return Boolean(getClerkPublishableKey() && process.env.CLERK_SECRET_KEY?.trim());
 }
 
 /**

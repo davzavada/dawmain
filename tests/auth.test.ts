@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { getAuthKitIssuer, tokenMatches } from "@/src/mcp/config";
-import { authInfoFromClaims, authMode, verifyRequestAuth } from "@/src/mcp/auth";
+import { clerkConfigured, tokenMatches } from "@/src/mcp/config";
+import { authMode, verifyRequestAuth } from "@/src/mcp/auth";
 
 /**
  * The endpoint's gate (src/mcp/auth.ts): shared token + AuthKit OAuth. These
@@ -31,50 +31,20 @@ describe("tokenMatches", () => {
   });
 });
 
-describe("getAuthKitIssuer", () => {
+describe("clerkConfigured", () => {
   afterEach(() => {
-    delete process.env.AUTHKIT_DOMAIN;
+    delete process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+    delete process.env.CLERK_SECRET_KEY;
   });
 
-  it("is undefined when unset or blank", () => {
-    delete process.env.AUTHKIT_DOMAIN;
-    expect(getAuthKitIssuer()).toBeUndefined();
-    process.env.AUTHKIT_DOMAIN = "   ";
-    expect(getAuthKitIssuer()).toBeUndefined();
-  });
-
-  it("normalizes a bare hostname and trailing slashes", () => {
-    process.env.AUTHKIT_DOMAIN = "dawmain.authkit.app";
-    expect(getAuthKitIssuer()).toBe("https://dawmain.authkit.app");
-    process.env.AUTHKIT_DOMAIN = "https://dawmain.authkit.app/";
-    expect(getAuthKitIssuer()).toBe("https://dawmain.authkit.app");
-  });
-});
-
-describe("authInfoFromClaims", () => {
-  const token = "eyJ.fake.jwt";
-
-  it("maps sub, exp and the RFC 6749 scope string", () => {
-    const info = authInfoFromClaims(
-      { sub: "user_01ABC", sid: "session_01X", exp: 1_900_000_000, scope: "openid profile  email" },
-      token,
-    );
-    expect(info.token).toBe(token);
-    expect(info.scopes).toEqual(["openid", "profile", "email"]);
-    expect(info.expiresAt).toBe(1_900_000_000);
-    expect(info.extra).toMatchObject({ method: "oauth", userId: "user_01ABC", sessionId: "session_01X" });
-  });
-
-  it("tolerates missing scope/client claims", () => {
-    const info = authInfoFromClaims({ sub: "user_01ABC" }, token);
-    expect(info.scopes).toEqual([]);
-    expect(info.clientId).toBe("authkit");
-    expect(info.expiresAt).toBeUndefined();
-  });
-
-  it("prefers client_id, then azp, for the client identity", () => {
-    expect(authInfoFromClaims({ client_id: "client_1", azp: "client_2" }, token).clientId).toBe("client_1");
-    expect(authInfoFromClaims({ azp: "client_2" }, token).clientId).toBe("client_2");
+  it("requires BOTH keys — a publishable key alone must not advertise OAuth", () => {
+    expect(clerkConfigured()).toBe(false);
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = "pk_test_x";
+    expect(clerkConfigured()).toBe(false);
+    process.env.CLERK_SECRET_KEY = "sk_test_x";
+    expect(clerkConfigured()).toBe(true);
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = "   ";
+    expect(clerkConfigured()).toBe(false);
   });
 });
 
@@ -83,7 +53,8 @@ describe("verifyRequestAuth + authMode", () => {
 
   afterEach(() => {
     delete process.env.MCP_BEARER_TOKEN;
-    delete process.env.AUTHKIT_DOMAIN;
+    delete process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+    delete process.env.CLERK_SECRET_KEY;
   });
 
   it("accepts the shared token from any supported header", async () => {
@@ -95,7 +66,7 @@ describe("verifyRequestAuth + authMode", () => {
     expect(info?.clientId).toBe("shared-token");
   });
 
-  it("rejects a wrong shared token without touching the network (no issuer set)", async () => {
+  it("rejects a wrong shared token without touching the network (Clerk unconfigured)", async () => {
     process.env.MCP_BEARER_TOKEN = shared;
     const bad = new Request("http://localhost/api/mcp", {
       headers: { authorization: `Bearer ${shared}x` },
@@ -107,7 +78,8 @@ describe("verifyRequestAuth + authMode", () => {
     expect(authMode()).toBe("open");
     process.env.MCP_BEARER_TOKEN = shared;
     expect(authMode()).toBe("token");
-    process.env.AUTHKIT_DOMAIN = "dawmain.authkit.app";
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = "pk_test_x";
+    process.env.CLERK_SECRET_KEY = "sk_test_x";
     expect(authMode()).toBe("oauth+token");
     delete process.env.MCP_BEARER_TOKEN;
     expect(authMode()).toBe("oauth");
