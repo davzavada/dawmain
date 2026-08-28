@@ -1,3 +1,4 @@
+import { unstable_cache } from "next/cache";
 import { canaries, runCanary } from "./tools/probe";
 import { allSourceResults, type SourceHealth } from "@/src/sources/shared/health";
 
@@ -7,23 +8,36 @@ import { allSourceResults, type SourceHealth } from "@/src/sources/shared/health
  * Cheap by construction, in three tiers:
  *  1. Real traffic. Every tool call already records how its source answered
  *     (src/sources/shared/health.ts), so an active server needs no probing
- *     at all — the light reports the last genuine call and when it happened.
+ *     at all - the light reports the last genuine call and when it happened.
  *  2. A cached canary. Only when no real call has been seen for
- *     FRESH_MS does the page fire the probe canary for that source, and the
- *     result is reused for CANARY_TTL_MS. On serverless the page function
- *     rarely shares memory with the MCP function, so in practice this is what
- *     a visitor sees — capped at one lightweight request per source per
- *     5 minutes per instance, all sources in parallel.
+ *     FRESH_MS does the page fire the probe canary for that source. The page
+ *     function rarely shares memory with the MCP function, so in practice
+ *     this is what a visitor sees - which is why the result goes through
+ *     Next's data cache rather than module memory: on Vercel that cache is
+ *     shared across instances and visitors, so ONE canary per source per
+ *     5 minutes serves everybody, not one per instance.
  *  3. Nothing. If a canary cannot run, the row simply says "neověřeno"
  *     rather than claiming an outage we did not observe.
  */
 
 /** A real observation stays authoritative for this long. */
 const FRESH_MS = 15 * 60 * 1000;
-/** How long a canary result is reused before another one may run. */
-const CANARY_TTL_MS = 5 * 60 * 1000;
-/** Page renders must not hang on a dead upstream. */
-const CANARY_TIMEOUT_MS = 6000;
+/**
+ * How long a canary result is reused before another one may run. Short on
+ * purpose: the page function and the MCP function are different instances, so
+ * a visitor almost never sees tier 1, and the light would otherwise sit on a
+ * five-minute-old check after a source came back. One minute keeps it honest
+ * while still costing at most one request per source per minute for everyone
+ * together, because the cache below is shared, not per instance.
+ */
+const CANARY_TTL_MS = 60 * 1000;
+/**
+ * Matches the probe's own timeout. A shorter one produced FALSE REDS: the NS
+ * Domino search regularly needs more than a few seconds, so a tight deadline
+ * reported a healthy source as down. The page never waits on this anyway,
+ * the status list streams in its own Suspense boundary.
+ */
+const CANARY_TIMEOUT_MS = 12_000;
 
 export interface DatabaseStatus {
   /** Display name of the database. */
@@ -93,16 +107,14 @@ interface CachedCanary {
   detail?: string;
 }
 
-const canaryCache = new Map<string, CachedCanary>();
-
 function fresh(entry: { at: number } | undefined, ttl: number): boolean {
   return Boolean(entry && Date.now() - entry.at < ttl);
 }
 
 /** One canary, with its own timeout, never throwing. */
-async function checkCanary(canaryId: string): Promise<CachedCanary | undefined> {
+async function runOneCanary(canaryId: string): Promise<CachedCanary> {
   const canary = canaries().find((item) => item.id === canaryId);
-  if (!canary) return undefined;
+  if (!canary) return { ok: false, at: Date.now(), detail: "neznámý zdroj" };
   try {
     const result = await Promise.race([
       runCanary(canary),
@@ -110,63 +122,70 @@ async function checkCanary(canaryId: string): Promise<CachedCanary | undefined> 
         setTimeout(() => reject(new Error("timeout")), CANARY_TIMEOUT_MS),
       ),
     ]);
-    const entry: CachedCanary = {
+    return {
       ok: result.ok,
       at: Date.now(),
-      ...(result.ok ? {} : { detail: result.http_status ? `HTTP ${result.http_status}` : "nedostupné" }),
+      ...(result.ok
+        ? {}
+        : { detail: result.http_status ? `HTTP ${result.http_status}` : "nedostupné" }),
     };
-    canaryCache.set(canaryId, entry);
-    return entry;
   } catch {
-    const entry: CachedCanary = { ok: false, at: Date.now(), detail: "nedostupné" };
-    canaryCache.set(canaryId, entry);
-    return entry;
+    return { ok: false, at: Date.now(), detail: "nedostupné" };
   }
 }
 
 /**
- * Status of every displayed database. Never throws — a status widget must not
+ * The same canary behind Next's data cache. On Vercel that cache is shared
+ * across instances and visitors, so a busy page costs one request per source
+ * per CANARY_TTL_MS in total - not one per visitor and not one per instance,
+ * which is what module memory would have given us.
+ */
+const cachedCanary = unstable_cache(runOneCanary, ["dawmain-source-canary"], {
+  revalidate: CANARY_TTL_MS / 1000,
+});
+
+/**
+ * Status of every displayed database. Never throws - a status widget must not
  * be able to take the page down.
  */
 export async function databaseStatuses(): Promise<DatabaseStatus[]> {
   const observed = new Map<string, SourceHealth>();
   for (const entry of allSourceResults()) observed.set(entry.source, entry);
 
-  // Which rows need a canary: no fresh real call AND no fresh cached canary.
-  const needed = DATABASES.filter(
-    ({ source, canaryId }) =>
-      !fresh(observed.get(source), FRESH_MS) && !fresh(canaryCache.get(canaryId), CANARY_TTL_MS),
+  return Promise.all(
+    DATABASES.map(async ({ label, href, source, canaryId }): Promise<DatabaseStatus> => {
+      // A real call this instance saw recently beats any canary - it is the
+      // genuine article and costs nothing.
+      const live = observed.get(source);
+      if (live && fresh(live, FRESH_MS)) {
+        return {
+          label,
+          href,
+          ok: live.ok,
+          at: live.at,
+          via: "provoz",
+          ...(live.detail ? { detail: live.detail } : {}),
+        };
+      }
+      try {
+        const canary = await cachedCanary(canaryId);
+        return {
+          label,
+          href,
+          ok: canary.ok,
+          at: canary.at,
+          via: "kontrola",
+          ...(canary.detail ? { detail: canary.detail } : {}),
+        };
+      } catch {
+        // A status widget must never take the page down.
+        return { label, href, ok: null, at: null, via: null };
+      }
+    }),
   );
-  await Promise.all(needed.map(({ canaryId }) => checkCanary(canaryId)));
-
-  return DATABASES.map(({ label, href, source, canaryId }) => {
-    const live = observed.get(source);
-    if (fresh(live, FRESH_MS) && live) {
-      return {
-        label,
-        href,
-        ok: live.ok,
-        at: live.at,
-        via: "provoz" as const,
-        ...(live.detail ? { detail: live.detail } : {}),
-      };
-    }
-    const canary = canaryCache.get(canaryId);
-    if (canary) {
-      return {
-        label,
-        href,
-        ok: canary.ok,
-        at: canary.at,
-        via: "kontrola" as const,
-        ...(canary.detail ? { detail: canary.detail } : {}),
-      };
-    }
-    return { label, href, ok: null, at: null, via: null };
-  });
 }
 
-/** "14:07" in Prague time — what the light is as of. */
+/** "14:07" in Prague time - what the light is as of. */
 export function formatTime(at: number): string {
   return new Intl.DateTimeFormat("cs-CZ", {
     hour: "2-digit",

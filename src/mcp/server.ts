@@ -1,8 +1,6 @@
 import { createMcpHandler } from "mcp-handler";
-import type { McpServer } from "@modelcontextprotocol/server";
 import { SERVER_NAME, SERVER_VERSION } from "./config";
 import { registerAllTools } from "./tools";
-import { countToolCall } from "./usage";
 
 /**
  * The MCP server as a web-standard `(Request) => Promise<Response>` handler.
@@ -57,38 +55,8 @@ OUTPUT RULES
 5. Render every verbatim quotation (právní věta, passage from a decision) as a Markdown blockquote, immediately followed by its citation.
 6. An empty result is not an error — follow the hint in the response (broaden dates, other keywords, different tool) and say what you changed.`;
 
-/**
- * Wraps `registerTool` so every tool handler counts its call against the
- * user's account before running (src/mcp/usage.ts). Done here, once, rather
- * than in each of the ten tool modules — a tool must not be able to forget it,
- * and counting stays a concern of the server, not of the sources.
- *
- * The MCP SDK hands the handler `(args, extra)` — or just `(extra)` for a
- * tool without an input schema — so the request context is always the last
- * argument, and that is where mcp-handler puts `authInfo`.
- */
-type AnyToolHandler = (...args: unknown[]) => unknown;
-
-function countingRegistrar(server: McpServer): void {
-  const register = server.registerTool.bind(server) as unknown as (
-    name: string,
-    config: unknown,
-    handler: AnyToolHandler,
-  ) => unknown;
-
-  const counting = (name: string, config: unknown, handler: AnyToolHandler) =>
-    register(name, config, (...args: unknown[]) => {
-      const context = args.at(-1) as { authInfo?: unknown } | undefined;
-      countToolCall(context?.authInfo);
-      return handler(...args);
-    });
-
-  (server as unknown as { registerTool: unknown }).registerTool = counting;
-}
-
 export const mcpHandler = createMcpHandler(
   (server) => {
-    countingRegistrar(server);
     registerAllTools(server);
   },
   {

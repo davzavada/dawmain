@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { headers } from "next/headers";
 import { databaseStatuses, formatTime } from "@/src/mcp/status";
 
@@ -15,13 +16,89 @@ const code: React.CSSProperties = {
   fontSize: "0.875rem",
 };
 
+const sourceRow: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "0.6rem",
+  padding: "0.35rem 0",
+  borderBottom: "1px solid #f3f4f6",
+  fontSize: "0.95rem",
+};
+
+/**
+ * The database list with its status lights. Its own async component so the
+ * page shell streams immediately - a slow upstream check can then only delay
+ * the lights, never the text around them.
+ */
+async function SourceList() {
+  const statuses = await databaseStatuses();
+  return (
+    <ul style={{ padding: 0, margin: "0.5rem 0 0", listStyle: "none", textAlign: "left" }}>
+      {statuses.map((status) => (
+        <li key={status.label} style={sourceRow}>
+          <span
+            aria-hidden="true"
+            style={{
+              width: "0.6rem",
+              height: "0.6rem",
+              borderRadius: "50%",
+              flexShrink: 0,
+              background: status.ok === null ? "#d1d5db" : status.ok ? "#16a34a" : "#dc2626",
+            }}
+          />
+          <a href={status.href} style={{ color: "#111827", textDecoration: "none" }}>
+            {status.label}
+          </a>
+          <span style={{ marginLeft: "auto", color: "#9ca3af", fontSize: "0.8rem" }}>
+            {status.ok === null
+              ? "neověřeno"
+              : `${status.ok ? "dostupné" : (status.detail ?? "nedostupné")} · ${formatTime(status.at!)}`}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** What stands in while the lights are still being checked. */
+function SourceListFallback() {
+  const names = [
+    "Nejvyšší soud",
+    "Nejvyšší správní soud",
+    "Ústavní soud (NALUS)",
+    "obecné soudy",
+    "Soudní dvůr EU (InfoCuria)",
+    "e-Sbírka",
+    "EUR-Lex (Cellar)",
+  ];
+  return (
+    <ul style={{ padding: 0, margin: "0.5rem 0 0", listStyle: "none", textAlign: "left" }}>
+      {names.map((name) => (
+        <li key={name} style={sourceRow}>
+          <span
+            aria-hidden="true"
+            style={{
+              width: "0.6rem",
+              height: "0.6rem",
+              borderRadius: "50%",
+              flexShrink: 0,
+              background: "#e5e7eb",
+            }}
+          />
+          <span>{name}</span>
+          <span style={{ marginLeft: "auto", color: "#d1d5db", fontSize: "0.8rem" }}>zjišťuji…</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export default async function Home() {
   const headerList = await headers();
   const host = headerList.get("x-forwarded-host") ?? headerList.get("host") ?? "localhost:3000";
   const proto =
     headerList.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
   const endpoint = `${proto}://${host}/api/mcp`;
-  const statuses = await databaseStatuses();
 
   return (
     <>
@@ -52,52 +129,9 @@ export default async function Home() {
         Cellaru (strojové rozhraní Úřadu pro publikace EU, které stojí za EUR-Lexem). Konkrétně je
         napojený na tyto zdroje:
       </p>
-      <ul
-        style={{
-          marginTop: "0.5rem",
-          padding: 0,
-          margin: "0.5rem 0 0",
-          listStyle: "none",
-          textAlign: "left",
-        }}
-      >
-        {statuses.map((status) => (
-          <li
-            key={status.label}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.6rem",
-              padding: "0.35rem 0",
-              borderBottom: "1px solid #f3f4f6",
-              fontSize: "0.95rem",
-            }}
-          >
-            <span
-              aria-hidden="true"
-              style={{
-                width: "0.6rem",
-                height: "0.6rem",
-                borderRadius: "50%",
-                flexShrink: 0,
-                background:
-                  status.ok === null ? "#d1d5db" : status.ok ? "#16a34a" : "#dc2626",
-              }}
-            />
-            <a href={status.href} style={{ color: "#111827", textDecoration: "none" }}>
-              {status.label}
-            </a>
-            <span style={{ marginLeft: "auto", color: "#9ca3af", fontSize: "0.8rem" }}>
-              {status.ok === null
-                ? "neověřeno"
-                : `${status.ok ? "dostupné" : (status.detail ?? "nedostupné")} · ${formatTime(status.at!)}`}
-            </span>
-          </li>
-        ))}
-      </ul>
-      <p style={{ marginTop: "0.6rem", fontSize: "0.78rem", color: "#9ca3af" }}>
-        Kontrolky ukazují, jak zdroj odpověděl naposledy — čas je v pražském pásmu.
-      </p>
+      <Suspense fallback={<SourceListFallback />}>
+        <SourceList />
+      </Suspense>
 
       <h2 style={{ fontSize: "1.1rem", marginTop: "2rem" }}>Jak se připojit?</h2>
       <code style={code}>{endpoint}</code>

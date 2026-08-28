@@ -3,10 +3,10 @@ import type { ReactNode } from "react";
 
 export const metadata: Metadata = {
   title: "Dawmain - MCP server",
-  description: "MCP server pro české a unijní právní rešerše — živé dotazy do oficiálních databází.",
+  description: "MCP server pro české a unijní právní rešerše - živé dotazy do oficiálních databází.",
 };
 
-/** Matches the top of the logo's dawn sky — tints mobile browser chrome. */
+/** Matches the top of the logo's dawn sky - tints mobile browser chrome. */
 export const viewport: Viewport = { themeColor: "#0E1938" };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
@@ -23,7 +23,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           background: "#ffffff",
         }}
       >
-        {/* Justified text only where lines are long enough — on narrow
+        {/* Justified text only where lines are long enough - on narrow
             phone columns block justification produces ugly word gaps. */}
         <style>{`
           main { text-align: justify; }
@@ -42,7 +42,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             color: "#9ca3af",
           }}
         >
-          <a href="/">Hlavní stránka</a> · <a href="/ucet">Správa účtu</a> ·{" "}
+          <a href="/">Hlavní stránka</a> ·{" "}
           <a href="/podminky">Podmínky užití</a> ·{" "}
           <a href="/soukromi">Zásady ochrany osobních údajů</a>
         </footer>

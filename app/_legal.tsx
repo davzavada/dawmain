@@ -2,13 +2,13 @@ import type { ReactNode } from "react";
 
 /**
  * Shared furniture for the two legal pages. Underscore-prefixed, so Next
- * never routes it — it is a component file that happens to live in app/.
+ * never routes it: a component file that happens to live in app/.
  */
 
 /** Both documents state the same effective date; bump it when they change. */
 export const EFFECTIVE = "28. 8. 2026";
 
-/** Where the controller / operator is reachable — the one contact for both. */
+/** Where the controller / operator is reachable: the one contact for both. */
 export const CONTACT = "davzavada@gmail.com";
 
 export function LegalHeader({ title }: { title: string }) {

@@ -15,7 +15,6 @@ const clerkConfigured = Boolean(
 export default clerkConfigured ? clerkMiddleware() : () => NextResponse.next();
 
 export const config = {
-  // The MCP endpoint and the account page need Clerk (auth() only works where
-  // the middleware ran), plus Clerk's own auto-proxy path.
-  matcher: ["/(api|trpc)(.*)", "/ucet(.*)", "/__clerk/:path*"],
+  // Only the MCP endpoint needs Clerk, plus Clerk's own auto-proxy path.
+  matcher: ["/(api|trpc)(.*)", "/__clerk/:path*"],
 };

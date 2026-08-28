@@ -92,13 +92,13 @@ export async function fetchUpstream(
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
   const declared = Number(response.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > maxBytes) {
-    // The source answered — this is our own size guard, not an outage.
+    // The source answered - this is our own size guard, not an outage.
     recordSourceResult(source, true);
     throw new SourceError(
       source,
       "UPSTREAM_ERROR",
       `${source} returned ${Math.round(declared / 1024 / 1024)} MB, over the ${Math.round(maxBytes / 1024 / 1024)} MB limit.`,
-      "Narrow the request — this server does not download whole datasets.",
+      "Narrow the request - this server does not download whole datasets.",
     );
   }
 
@@ -106,7 +106,7 @@ export async function fetchUpstream(
   return response;
 }
 
-/** Short, log-safe label for what went wrong — an error name, not its text. */
+/** Short, log-safe label for what went wrong - an error name, not its text. */
 function errorLabel(error: unknown): string {
   if (error instanceof Error) return error.name === "TimeoutError" ? "timeout" : error.name;
   return "chyba spojení";
