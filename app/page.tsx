@@ -1,4 +1,5 @@
 import { headers } from "next/headers";
+import { databaseStatuses, formatTime } from "@/src/mcp/status";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,7 @@ export default async function Home() {
   const proto =
     headerList.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
   const endpoint = `${proto}://${host}/api/mcp`;
+  const statuses = await databaseStatuses();
 
   return (
     <>
@@ -48,15 +50,54 @@ export default async function Home() {
         Server nemá vlastní databázi - funguje jako nachytřený Google: vyhledává živě přímo v
         oficiálních databázích. Právní předpisy bere přes API e-Sbírky, unijní legislativu z
         Cellaru (strojové rozhraní Úřadu pro publikace EU, které stojí za EUR-Lexem). Konkrétně je
-        napojený na judikaturu:
+        napojený na tyto zdroje:
       </p>
-      <ul style={{ marginTop: "0.25rem", paddingLeft: "1.4rem", lineHeight: 1.9 }}>
-        <li>Nejvyššího soudu</li>
-        <li>Nejvyššího správního soudu</li>
-        <li>Ústavního soudu (NALUS)</li>
-        <li>obecných soudů</li>
-        <li>Soudního dvora EU (InfoCuria)</li>
+      <ul
+        style={{
+          marginTop: "0.5rem",
+          padding: 0,
+          margin: "0.5rem 0 0",
+          listStyle: "none",
+          textAlign: "left",
+        }}
+      >
+        {statuses.map((status) => (
+          <li
+            key={status.label}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0.6rem",
+              padding: "0.35rem 0",
+              borderBottom: "1px solid #f3f4f6",
+              fontSize: "0.95rem",
+            }}
+          >
+            <span
+              aria-hidden="true"
+              style={{
+                width: "0.6rem",
+                height: "0.6rem",
+                borderRadius: "50%",
+                flexShrink: 0,
+                background:
+                  status.ok === null ? "#d1d5db" : status.ok ? "#16a34a" : "#dc2626",
+              }}
+            />
+            <a href={status.href} style={{ color: "#111827", textDecoration: "none" }}>
+              {status.label}
+            </a>
+            <span style={{ marginLeft: "auto", color: "#9ca3af", fontSize: "0.8rem" }}>
+              {status.ok === null
+                ? "neověřeno"
+                : `${status.ok ? "dostupné" : (status.detail ?? "nedostupné")} · ${formatTime(status.at!)}`}
+            </span>
+          </li>
+        ))}
       </ul>
+      <p style={{ marginTop: "0.6rem", fontSize: "0.78rem", color: "#9ca3af" }}>
+        Kontrolky ukazují, jak zdroj odpověděl naposledy — čas je v pražském pásmu.
+      </p>
 
       <h2 style={{ fontSize: "1.1rem", marginTop: "2rem" }}>Jak se připojit?</h2>
       <code style={code}>{endpoint}</code>

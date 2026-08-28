@@ -25,8 +25,27 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       >
         {/* Justified text only where lines are long enough — on narrow
             phone columns block justification produces ugly word gaps. */}
-        <style>{`main { text-align: justify; } @media (max-width: 640px) { main { text-align: left; } }`}</style>
+        <style>{`
+          main { text-align: justify; }
+          @media (max-width: 640px) { main { text-align: left; } }
+          footer a { color: #6b7280; text-decoration: none; }
+          footer a:hover { text-decoration: underline; }
+        `}</style>
         <main style={{ maxWidth: "44rem", margin: "0 auto" }}>{children}</main>
+        <footer
+          style={{
+            maxWidth: "44rem",
+            margin: "3rem auto 0",
+            paddingTop: "1rem",
+            borderTop: "1px solid #e5e7eb",
+            fontSize: "0.78rem",
+            color: "#9ca3af",
+          }}
+        >
+          <a href="/">Hlavní stránka</a> · <a href="/ucet">Správa účtu</a> ·{" "}
+          <a href="/podminky">Podmínky užití</a> ·{" "}
+          <a href="/soukromi">Zásady ochrany osobních údajů</a>
+        </footer>
       </body>
     </html>
   );

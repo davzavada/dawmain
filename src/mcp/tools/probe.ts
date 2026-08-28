@@ -15,7 +15,7 @@ import { USER_AGENT } from "@/src/sources/shared/http";
 const RAW_CAP = 20_000;
 const PROBE_TIMEOUT_MS = 12_000;
 
-interface Canary {
+export interface Canary {
   id: string;
   source: string;
   note: string;
@@ -35,7 +35,7 @@ function jsonPost(url: string, body: unknown, headers: Record<string, string> = 
   };
 }
 
-function canaries(): Canary[] {
+export function canaries(): Canary[] {
   const esbirkaKey = getEsbirkaApiKey();
   const keyHeader: Record<string, string> = esbirkaKey ? { "esel-api-access-key": esbirkaKey } : {};
   // A well-known act: občanský zákoník 89/2012 Sb.
@@ -196,7 +196,7 @@ function canaries(): Canary[] {
   ];
 }
 
-interface ProbeResult {
+export interface ProbeResult {
   id: string;
   source: string;
   note: string;
@@ -209,7 +209,7 @@ interface ProbeResult {
   raw?: string;
 }
 
-async function runCanary(canary: Canary, includeRaw: boolean): Promise<ProbeResult> {
+export async function runCanary(canary: Canary, includeRaw = false): Promise<ProbeResult> {
   const { url, init } = canary.request();
   const started = Date.now();
   try {

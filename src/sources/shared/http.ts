@@ -1,4 +1,5 @@
 import { SourceError, asSourceError } from "./errors";
+import { recordSourceResult } from "./health";
 
 /**
  * All upstream I/O goes through here: per-request timeout, a browser-like UA
@@ -52,11 +53,15 @@ export async function fetchUpstream(
   try {
     response = await attempt();
   } catch (error) {
-    if (!retry) throw asSourceError(source, error);
+    if (!retry) {
+      recordSourceResult(source, false, errorLabel(error));
+      throw asSourceError(source, error);
+    }
     await delay(500 + Math.random() * 1000);
     try {
       response = await attempt();
     } catch (secondError) {
+      recordSourceResult(source, false, errorLabel(secondError));
       throw asSourceError(source, secondError);
     }
   }
@@ -66,11 +71,13 @@ export async function fetchUpstream(
     try {
       response = await attempt();
     } catch (error) {
+      recordSourceResult(source, false, errorLabel(error));
       throw asSourceError(source, error);
     }
   }
 
   if (response.status === 429 || response.status >= 500) {
+    recordSourceResult(source, false, `HTTP ${response.status}`);
     throw new SourceError(
       source,
       "UPSTREAM_ERROR",
@@ -85,6 +92,8 @@ export async function fetchUpstream(
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
   const declared = Number(response.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > maxBytes) {
+    // The source answered — this is our own size guard, not an outage.
+    recordSourceResult(source, true);
     throw new SourceError(
       source,
       "UPSTREAM_ERROR",
@@ -93,7 +102,14 @@ export async function fetchUpstream(
     );
   }
 
+  recordSourceResult(source, response.ok, response.ok ? undefined : `HTTP ${response.status}`);
   return response;
+}
+
+/** Short, log-safe label for what went wrong — an error name, not its text. */
+function errorLabel(error: unknown): string {
+  if (error instanceof Error) return error.name === "TimeoutError" ? "timeout" : error.name;
+  return "chyba spojení";
 }
 
 /**
