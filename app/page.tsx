@@ -142,13 +142,11 @@ export default async function Home() {
         Kdyby vás přihlášení nepustilo, ozvěte se mi.
       </p>
 
-      <h2 style={{ fontSize: "1.1rem", marginTop: "2rem" }}>Skill: naučte asistenta rešeršit</h2>
+      <h2 style={{ fontSize: "1.1rem", marginTop: "2rem" }}>Skill - naučte asistenta rešeršovat</h2>
       <p>
         Konektor dává asistentovi nástroje, skill ho učí s nimi pracovat - jak se ptát, které
-        databáze projít a jak výsledek citovat. K optimálnímu fungování služby proto doporučuji
-        přidat i skill: <a href="/dawmain-reserse.md">stáhnout skill</a> (soubor SKILL.md). V
-        aplikaci claude.ai ho nahrajete v nastavení mezi dovednosti (Skills), v Claude Code patří
-        do složky <code style={{ fontFamily: "inherit" }}>~/.claude/skills/dawmain-reserse/</code>.
+        databáze projít a jak výsledek citovat. K optimálnímu fungování proto doporučuji přidat i
+        skill - <a href="/dawmain-reserse.md">ke stažení zde</a>.
       </p>
     </>
   );
