@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
-import { SleepingCat } from "./_cat";
 
 export const metadata: Metadata = {
   title: "Dawmain - MCP server",
@@ -47,7 +46,6 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <a href="/podminky">Podmínky užití</a> ·{" "}
           <a href="/soukromi">Zásady ochrany osobních údajů</a>
         </footer>
-        <SleepingCat />
       </body>
     </html>
   );
