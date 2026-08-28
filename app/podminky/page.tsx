@@ -15,19 +15,21 @@ export default function Podminky() {
       <Section heading="Kdo to provozuje">
         <p>
           David Závada, fyzická osoba, mimo podnikání. Napsat mi můžete na <Mail />. Smlouva mezi
-          námi vzniká založením uživatelského účtu a je bezúplatná.
+          námi vzniká založením uživatelského účtu, a připojíte-li se starším sdíleným přístupovým
+          kódem, prvním použitím služby. Tak jako tak je bezúplatná.
         </p>
       </Section>
 
       <Section heading="Účet a slušné užívání">
         <p>
           Používejte prosím svůj vlastní účet a nepůjčujte ho dál. Za to, co se pod ním děje, včetně
-          volání vašeho asistenta, odpovídáte vy.
+          volání vašeho asistenta, odpovídáte vy. Totéž platí pro přístupový kód, pokud se
+          připojujete ještě jím.
         </p>
         <p>
           Služba je na běžné rešerše. Nedělejte z ní prosím hromadné stahování databází - zdroje
-          jsou cizí a jejich přetížení odnesou všichni ostatní. Když to někdo přežene, můžu jeho
-          účet dočasně přibrzdit; dám mu vědět a domluvíme se.
+          jsou cizí a jejich přetížení odnesou všichni ostatní. Když by někdo provoz ohrožoval, můžu
+          jeho přístup dočasně omezit; ozvu se mu a domluvíme se.
         </p>
       </Section>
 
