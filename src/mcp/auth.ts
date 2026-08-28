@@ -11,8 +11,9 @@ import { getAuthKitIssuer, getBearerToken, tokenMatches } from "./config";
  * 2. An OAuth 2.1 access token issued by WorkOS AuthKit (`AUTHKIT_DOMAIN`) —
  *    a JWT verified against the issuer's public JWKS. AuthKit handles the
  *    whole authorization-server side (dynamic client registration, PKCE,
- *    Google SSO login, refresh), so this server never talks to WorkOS —
- *    it only checks signatures.
+ *    the hosted login page with whatever methods are enabled in WorkOS,
+ *    refresh), so this server never talks to WorkOS — it only checks
+ *    signatures.
  */
 
 /**

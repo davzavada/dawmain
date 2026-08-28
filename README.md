@@ -34,8 +34,8 @@ https://dawmain.davidzavada.cz/api/mcp
 V aplikaci claude.ai: **Nastavení → Konektory → Přidat vlastní konektor** a
 vložit adresu výše.
 
-Po přidání konektoru se otevře přihlášení - stačí Google účet, nebo klasická
-registrace e-mailem. Starší přístupové kódy fungují dál.
+Po přidání konektoru se otevře přihlášení - stačí registrace e-mailem.
+Starší přístupové kódy fungují dál.
 
 ---
 

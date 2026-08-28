@@ -157,10 +157,10 @@ Endpoint přijímá dvě credentials naráz (stačí kterákoli); logika žije v
    `401` hlavičku `WWW-Authenticate` s odkazem na
    `/.well-known/oauth-protected-resource`, tam najde autorizační server
    (AuthKit), sám se u něj zaregistruje (Dynamic Client Registration) a
-   provede uživatele přihlášením — Google SSO, e-mail + heslo či Magic Auth,
-   podle toho, co je v WorkOS zapnuté. Server pak jen ověřuje podpis, issuer
-   a expiraci JWT proti veřejnému JWKS (`<issuer>/oauth2/jwks`) — **žádný
-   WorkOS API klíč nikde nefiguruje**.
+   provede uživatele přihlášením — e-mail + heslo či Magic Auth, případně
+   SSO, podle toho, co je v WorkOS zapnuté. Server pak jen ověřuje podpis,
+   issuer a expiraci JWT proti veřejnému JWKS (`<issuer>/oauth2/jwks`) —
+   **žádný WorkOS API klíč nikde nefiguruje**.
 2. **Sdílený přístupový kód** (`MCP_BEARER_TOKEN`) — původní schéma,
    ponechané pro existující klienty; token se přijímá z `Authorization`,
    `X-API-Key` i `cf-aig-authorization` (stačí, když sedí kterákoli).
@@ -173,16 +173,17 @@ lokálně. Aktuální stav hlásí `dawmain_ping` polem `auth`
 
 ### Nastavení WorkOS AuthKit (jednorázově, dashboard.workos.com)
 
-1. **Google SSO**: *Authentication → OAuth providers → Google → Manage*.
-   Ve stagingu fungují výchozí WorkOS credentials hned; pro produkci vlož
-   vlastní Google Client ID + Secret (Google Cloud Console → Auth Platform →
-   Clients → Web application; do *Authorized redirect URIs* patří Redirect
-   URI z tohohle WorkOS dialogu, *JavaScript origins* zůstávají prázdné;
-   nakonec *Audience → Publish app*). Návod:
-   <https://workos.com/docs/integrations/google-oauth>.
-2. **Klasická registrace e-mailem**: *Authentication → Email + Password*
-   (heslo), případně *Magic Auth* (jednorázový kód na e-mail). Co je zapnuté,
-   to AuthKit na přihlašovací stránce nabídne — beze změn v kódu.
+1. **Registrace e-mailem**: *Authentication → Email + Password* (heslo),
+   případně *Magic Auth* (jednorázový kód na e-mail). Co je zapnuté, to
+   AuthKit na přihlašovací stránce nabídne — beze změn v kódu.
+2. *(Volitelně — aktuálně vypnuto)* **Google SSO**: *Authentication → OAuth
+   providers → Google → Manage*. Ve stagingu fungují výchozí WorkOS
+   credentials hned; pro produkci vlož vlastní Google Client ID + Secret
+   (Google Cloud Console → Auth Platform → Clients → Web application; do
+   *Authorized redirect URIs* patří Redirect URI z tohohle WorkOS dialogu,
+   *JavaScript origins* zůstávají prázdné; nakonec *Audience → Publish app*).
+   Návod: <https://workos.com/docs/integrations/google-oauth>. Zapnutí je
+   čistě dashboardová věc, kód se nemění.
 3. **Dynamic Client Registration** (nutné pro MCP klienty typu claude.ai):
    *Applications → Configuration → Dynamic Client Registration → Enable*.
 4. **AuthKit doména**: zkopíruj z dashboardu (např.
