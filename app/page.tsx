@@ -75,7 +75,7 @@ export default async function Home() {
         <li>V nové konverzaci pak stačí napsat, co potřebujete najít.</li>
       </ol>
       <p>
-        Starší osobní přístupové kódy fungují dál. Kdyby vás přihlášení nepustilo, ozvěte se mi.
+        Kdyby vás přihlášení nepustilo, ozvěte se mi.
       </p>
     </>
   );
