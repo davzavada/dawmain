@@ -111,27 +111,40 @@ function fresh(entry: { at: number } | undefined, ttl: number): boolean {
   return Boolean(entry && Date.now() - entry.at < ttl);
 }
 
-/** One canary, with its own timeout, never throwing. */
+/**
+ * One canary, with its own timeout. Red means THE SOURCE answered wrong - an
+ * HTTP error, or a page the parsers would no longer understand. When the
+ * request itself dies (DNS, egress, timeout) we observed nothing about the
+ * source, so this THROWS: unstable_cache then caches nothing and the row
+ * shows "neověřeno" instead of an outage we did not see. Getting that wrong
+ * once painted every row red at the same minute a probe from the MCP
+ * function saw all sources healthy.
+ */
 async function runOneCanary(canaryId: string): Promise<CachedCanary> {
   const canary = canaries().find((item) => item.id === canaryId);
   if (!canary) return { ok: false, at: Date.now(), detail: "neznámý zdroj" };
-  try {
-    const result = await Promise.race([
-      runCanary(canary),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("timeout")), CANARY_TIMEOUT_MS),
-      ),
-    ]);
-    return {
-      ok: result.ok,
-      at: Date.now(),
-      ...(result.ok
-        ? {}
-        : { detail: result.http_status ? `HTTP ${result.http_status}` : "nedostupné" }),
-    };
-  } catch {
-    return { ok: false, at: Date.now(), detail: "nedostupné" };
-  }
+  const result = await Promise.race([
+    runCanary(canary),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("timeout")), CANARY_TIMEOUT_MS),
+    ),
+  ]);
+  // runCanary never throws; error is set exactly when the fetch itself failed.
+  if (result.error !== null) throw new Error(result.error);
+  return {
+    ok: result.ok,
+    at: Date.now(),
+    ...(result.ok
+      ? {}
+      : {
+          // The source answered: either with an error status, or with a 2xx
+          // body missing the marker the parsers rely on (parse drift).
+          detail:
+            result.http_status && (result.http_status < 200 || result.http_status >= 300)
+              ? `HTTP ${result.http_status}`
+              : "neočekávaná odpověď",
+        }),
+  };
 }
 
 /**
