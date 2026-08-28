@@ -65,13 +65,17 @@ export default async function Home() {
           V aplikaci claude.ai otevřete <strong>Nastavení → Konektory</strong>.
         </li>
         <li>
-          Zvolte <strong>Přidat vlastní konektor</strong> a vložte adresu výše.
+          Zvolte <strong>Přidat vlastní konektor</strong> a vložte adresu výše. Pole pro
+          přístupový kód nechte prázdné.
         </li>
-        <li>Při autentizaci vložte svůj přístupový kód.</li>
+        <li>
+          Otevře se přihlašovací okno - stačí se zaregistrovat e-mailem (nebo přihlásit, pokud už
+          účet máte).
+        </li>
         <li>V nové konverzaci pak stačí napsat, co potřebujete najít.</li>
       </ol>
       <p>
-        Přístupový kód je osobní - pokud byste chtěli nástroj vyzkoušet, ozvěte se mi.
+        Starší osobní přístupové kódy fungují dál. Kdyby vás přihlášení nepustilo, ozvěte se mi.
       </p>
     </>
   );
