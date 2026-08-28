@@ -29,8 +29,8 @@ si výslovně vyhrazují zákaz TDM a scrapingu „jakýmikoli prostředky, vče
 botů" mimo vědecký výzkum, takže nástroje nejsou registrované a probe na EUIPO
 nesahá; klienti zůstávají v `src/sources/` pro případ písemného svolení.
 **ÚPV** (isdv.upv.gov.cz) zahazuje spojení z datacentrových IP (ověřeno živě z regionu fra1 na obou hostech),
-takže nástroje `upv_browse`/`upv_get_decision` nejsou registrované — kód i
-probe kanárky (`upv`, `upv-legacy`) zůstávají, kdyby se zdroj zpřístupnil.
+takže nástroje `upv_browse`/`upv_get_decision` nejsou registrované a probe na
+ÚPV nesahá; kód zůstává v `src/`, kdyby se zdroj zpřístupnil.
 
 ## Architektura
 

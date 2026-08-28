@@ -4,7 +4,7 @@ import { ESBIRKA_CACHE_BASE, getEsbirkaApiBase, getEsbirkaApiKey } from "../conf
 import { USER_AGENT } from "@/src/sources/shared/http";
 
 /**
- * Diagnostics for the nine upstream databases. This is the only integration
+ * Diagnostics for the upstream databases the tools query. This is the only integration
  * test that can run where egress actually works (the deployed function), so
  * it does more than ping: every canary is a real request whose response must
  * contain a marker the parsers depend on. `include_raw` returns the head of
@@ -173,26 +173,6 @@ export function canaries(): Canary[] {
       }),
       marker: /<html|<HTML|xhtml/,
     },
-    {
-      id: "upv",
-      source: "ÚPV (ISDV)",
-      note: "decisions browse (gov.cz host; connections from cloud IPs may be dropped)",
-      request: () => ({
-        url: "https://isdv.upv.gov.cz/webapp/rozhodnuti.prochazet",
-        init: {},
-      }),
-      marker: /rozhodnut/i,
-    },
-    {
-      id: "upv-legacy",
-      source: "ÚPV (ISDV)",
-      note: "legacy host isdv.upv.cz (may have different filtering)",
-      request: () => ({
-        url: "https://isdv.upv.cz/webapp/rozhodnuti.prochazet",
-        init: {},
-      }),
-      marker: /rozhodnut/i,
-    },
   ];
 }
 
@@ -344,8 +324,6 @@ const ALLOWED_FETCH_HOSTS = [
   "infocuria.curia.europa.eu",
   "curia.europa.eu",
   "publications.europa.eu",
-  "isdv.upv.gov.cz",
-  "isdv.upv.cz",
 ];
 
 /** Echoed remote bodies are data, never instructions — fence them so a model

@@ -113,7 +113,7 @@ export async function browseUpv(categoryUrl?: string): Promise<UpvBrowseResult> 
       SOURCE,
       "PARSE_DRIFT",
       "No navigable links found on the ISDV page.",
-      "The app layout may differ from research — run dawmain_probe_sources (canary 'upv') with include_raw and inspect the real markup.",
+      "The app layout may differ from research — open https://isdv.upv.gov.cz/webapp/rozhodnuti.prochazet in a browser and inspect the real markup.",
     );
   }
   return {

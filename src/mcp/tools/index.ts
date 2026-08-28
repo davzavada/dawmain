@@ -24,9 +24,10 @@ import { registerJustice } from "./justice";
  * authorisation or publishes case law through its API Portal.
  *
  * NOT registered: ./upv.ts — isdv.upv.gov.cz (and the legacy isdv.upv.cz)
- * drops TCP connections from datacenter IPs, verified from the fra1
- * deployment (probe canaries 'upv'/'upv-legacy' both fail with no HTTP
- * status). Re-add registerUpv here if a canary ever comes back healthy.
+ * drops TCP connections from datacenter IPs, verified live from the fra1
+ * deployment. Its probe canaries were removed as dead noise; re-add
+ * registerUpv here only after verifying by hand that the host accepts
+ * connections from the deployment again.
  */
 const registrars: Array<(server: McpServer) => void> = [
   registerPing,
