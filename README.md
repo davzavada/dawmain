@@ -13,7 +13,8 @@ Budu rád, pokud nástroj vyzkoušíte :)
 
 Server nemá vlastní databázi - funguje jako nachytřený Google: vyhledává živě
 přímo v oficiálních databázích. Právní předpisy bere přes API e-Sbírky, unijní
-legislativu z Cellaru (strojové rozhraní Úřadu pro publikace EU, které stojí za
+legislativu i legislativní materiály (návrhy, stanoviska, postoje EP a Rady)
+z Cellaru (strojové rozhraní Úřadu pro publikace EU, které stojí za
 EUR-Lexem). Konkrétně je napojený na judikaturu:
 
 - Nejvyššího soudu - dostupné [zde](https://rozhodnuti.nsoud.cz)
@@ -22,8 +23,8 @@ EUR-Lexem). Konkrétně je napojený na judikaturu:
 - obecných soudů - dostupné [zde](https://rozhodnuti.justice.cz)
 - Soudního dvora EU (InfoCuria) - dostupné [zde](https://infocuria.curia.europa.eu)
 
-Právní předpisy: [e-Sbírka](https://www.e-sbirka.cz), unijní legislativa a
-judikatura: [EUR-Lex](https://eur-lex.europa.eu).
+Právní předpisy: [e-Sbírka](https://www.e-sbirka.cz), unijní legislativa,
+judikatura a legislativní materiály: [EUR-Lex](https://eur-lex.europa.eu).
 
 ## Endpoint
 

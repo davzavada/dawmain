@@ -87,6 +87,7 @@ quoted passages stay in the original.
 | Lower courts (okresní/krajské/vrchní) | `justice_list_decisions` → `justice_get_decision` — lists by PUBLICATION date only, there is no server-side search |
 | CJEU | `curia_search` → `curia_get_document` (`language: "cs"` falls back to English) |
 | EU legislation | `eurlex_search` (titles/CELEX/ECLI only, NOT full text) → `eurlex_get_document` |
+| EU legislative materials (travaux) | `eurlex_legislative_history {celex}` — the act's whole dossier: proposal + explanatory memorandum, impact assessments, EESC/CoR opinions, EP/Council positions; or `eurlex_search` with `types: ["proposal", "opinion", …]` |
 | A source misbehaves | `dawmain_probe_sources` |
 
 Not covered: EUIPO and ÚPV. If the question needs them, say so and point at
@@ -162,6 +163,12 @@ so re-running a search after reading is cheap.
   this source cannot be searched by content.
 - **EU legislation** — `eurlex_search` matches titles and identifiers only; for the
   text of judgments use `curia_search`.
+- **EU legislative materials** — when the question turns on purpose or history of an
+  EU act (proč to tam je, co chtěl normotvůrce), `eurlex_legislative_history {celex}`
+  returns the whole procedure dossier from the adopted act's CELEX: the proposal
+  (its text opens with the explanatory memorandum — the EU důvodová zpráva),
+  impact assessments, EESC/CoR opinions and EP/Council positions. Read them with
+  `eurlex_get_document {celex}`; cite the CELEX + date + link like any authority.
 
 ## Nejvyšší soud: pole a operátory
 

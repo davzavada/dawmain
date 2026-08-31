@@ -127,6 +127,7 @@ const EXPECTED_TOOLS = [
   "curia_get_document",
   "eurlex_search",
   "eurlex_get_document",
+  "eurlex_legislative_history",
   // Deliberately unregistered (see src/mcp/tools/index.ts): the EUIPO tools
   // (their legal notices opt out of automated access) and the ÚPV tools (the
   // portal drops datacenter connections).

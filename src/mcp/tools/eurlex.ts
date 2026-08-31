@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
-import { getEurlexDocument, searchEurlex } from "@/src/sources/eurlex";
+import { getEurlexDocument, getLegislativeHistory, searchEurlex } from "@/src/sources/eurlex";
 import { SourceError, asSourceError, toToolError } from "@/src/sources/shared/errors";
 import { pageOrExcerpt, snippet } from "@/src/sources/shared/text";
 
@@ -23,15 +23,35 @@ export function registerEurlex(server: McpServer): void {
     {
       title: "EUR-Lex: search EU law",
       description:
-        "Search EU legislation (regulations, directives, decisions) and CJEU case law through the official Publications Office Cellar SPARQL endpoint — the machine interface behind EUR-Lex. Matches TITLES, identifiers (CELEX/ECLI) and dates; document bodies are not full-text indexed here — for full-text search of CJEU judgments use curia_search. Fetch texts with eurlex_get_document (legislation) or curia_get_document (case law).",
+        "Search EU legislation (regulations, directives, decisions), CJEU case law AND legislative materials (Commission proposals, communications, green/white papers, staff working documents, impact assessments, EESC/CoR opinions, EP and Council positions) through the official Publications Office Cellar SPARQL endpoint — the machine interface behind EUR-Lex. Matches TITLES, identifiers (CELEX/ECLI) and dates; document bodies are not full-text indexed here — for full-text search of CJEU judgments use curia_search. Fetch texts with eurlex_get_document (legislation and legislative materials) or curia_get_document (case law). For ALL travaux préparatoires of one act at once, use eurlex_legislative_history.",
       inputSchema: z.object({
         query: z.string().optional().describe("Title keywords, e.g. 'data protection'. English titles by default."),
-        celex: z.string().optional().describe("Exact CELEX, e.g. '32016R0679' (GDPR)."),
+        celex: z.string().optional().describe("Exact CELEX, e.g. '32016R0679' (GDPR) or '52012PC0011' (its proposal)."),
         ecli: z.string().optional().describe("Exact ECLI, e.g. 'ECLI:EU:C:2020:559'."),
         types: z
-          .array(z.enum(["regulation", "directive", "decision", "judgment", "order", "ag_opinion"]))
+          .array(
+            z.enum([
+              "regulation",
+              "directive",
+              "decision",
+              "judgment",
+              "order",
+              "ag_opinion",
+              "proposal",
+              "communication",
+              "green_paper",
+              "white_paper",
+              "staff_working_document",
+              "impact_assessment",
+              "opinion",
+              "ep_position",
+              "council_position",
+            ]),
+          )
           .optional()
-          .describe("Restrict document types. Default: all."),
+          .describe(
+            "Restrict document types. Default: all. Legislative materials: proposal (COM proposals incl. explanatory memorandum), communication, green_paper, white_paper, staff_working_document (SWD/SEC), impact_assessment, opinion (EESC/CoR/EDPS — not AG opinions), ep_position (EP legislative resolutions), council_position (incl. statements of reasons).",
+          ),
         date_from: isoDate.optional(),
         date_to: isoDate.optional(),
         language: z.string().default("en").describe("Language of the titles searched (en, cs, …)."),
@@ -88,9 +108,9 @@ export function registerEurlex(server: McpServer): void {
     {
       title: "EUR-Lex: document text",
       description:
-        "Full text of an EU legal act or judgment from the official Cellar dissemination API, by CELEX (e.g. '32016R0679' for GDPR) or ECLI. Prefers the requested language and falls back to English. Long texts come in ~45k-character pages. Token economy: to locate specific passages use 'find' (returns excerpts around matches); fetch further pages only when you genuinely need the whole text. Continue on your own — never ask the user whether to keep reading.",
+        "Full text of an EU legal act, judgment or legislative material from the official Cellar dissemination API, by CELEX (e.g. '32016R0679' for GDPR, '52012PC0011' for its proposal — a proposal's text opens with the explanatory memorandum) or ECLI. Prefers the requested language and falls back to English. Long texts come in ~45k-character pages. Token economy: to locate specific passages use 'find' (returns excerpts around matches); fetch further pages only when you genuinely need the whole text. Continue on your own — never ask the user whether to keep reading.",
       inputSchema: z.object({
-        celex: z.string().optional().describe("CELEX, e.g. '32016R0679' or '62018CJ0311'."),
+        celex: z.string().optional().describe("CELEX, e.g. '32016R0679', '62018CJ0311' or '52012PC0011'."),
         ecli: z.string().optional().describe("ECLI, e.g. 'ECLI:EU:C:2020:559'."),
         language: z.string().default("en").describe("Preferred language (cs, en, …)."),
         find: z
@@ -140,6 +160,109 @@ export function registerEurlex(server: McpServer): void {
           ],
           structuredContent: output,
         };
+      } catch (error) {
+        return fail(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "eurlex_legislative_history",
+    {
+      title: "EUR-Lex: legislative history of an act",
+      description:
+        "All legislative materials (travaux préparatoires) of one EU act in a single call, from the official Cellar dossier of its interinstitutional procedure: the Commission proposal (with explanatory memorandum), impact assessments, EESC/CoR/EDPS opinions, EP positions, Council positions with statements of reasons, and the adopted act — each with CELEX, type, date, title and link, plus the procedure's number, legal basis and adopted/pending/withdrawn state. Anchor by the CELEX of the ADOPTED ACT or of ANY procedure document (e.g. 32016R0679 or 52012PC0011 both yield the GDPR dossier), or by the procedure reference. Read the texts with eurlex_get_document {celex}.",
+      inputSchema: z.object({
+        celex: z
+          .string()
+          .optional()
+          .describe("CELEX of the adopted act or of any procedure document, e.g. '32016R0679' or '52012PC0011'."),
+        procedure: z
+          .string()
+          .optional()
+          .describe("Interinstitutional procedure reference, e.g. '2012/0011(COD)'."),
+        language: z
+          .string()
+          .default("en")
+          .describe("Language of the titles (cs, en, …); falls back to English where a version is missing."),
+      }),
+      outputSchema: z.object({
+        count: z.number().describe("Number of dossiers (procedures) found."),
+        truncated: z
+          .boolean()
+          .describe("True when the row cap was hit — the newest documents may be missing; the procedure page has the complete list."),
+        dossiers: z.array(
+          z.object({
+            procedure: z.string().optional(),
+            procedure_type: z.string().optional().describe("e.g. OLP = ordinary legislative procedure."),
+            legal_basis: z.string().optional(),
+            status: z.enum(["adopted", "pending", "withdrawn", "unknown"]),
+            date_adopted: z.string().optional(),
+            title: z.string().optional(),
+            url: z.string().optional().describe("EUR-Lex procedure page."),
+            documents: z.array(
+              z.object({
+                celex: z.string().optional(),
+                type: z.string().optional().describe("Cellar resource-type code, e.g. PROP_REG, IMPACT_ASSESS, OPIN, RES_LEGIS, POSIT, REG."),
+                date: z.string().optional(),
+                title: z.string().optional(),
+                url: z.string(),
+              }),
+            ),
+          }),
+        ),
+      }),
+      annotations: READ_ONLY,
+    },
+    async ({ celex, procedure, language }) => {
+      try {
+        const { dossiers, truncated } = await getLegislativeHistory({ celex, procedure, language });
+        const output = { count: dossiers.length, truncated, dossiers };
+        if (!dossiers.length) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "No legislative dossier found. Not every act has one (some older or non-legislative acts) — check the CELEX, or search the materials directly: eurlex_search with types like ['proposal','opinion','impact_assessment'] and title keywords.",
+              },
+            ],
+            structuredContent: output,
+          };
+        }
+        const blocks = dossiers.map((dossier) => {
+          const header = [
+            `Procedure ${dossier.procedure ?? "?"}`,
+            dossier.procedure_type ? `[${dossier.procedure_type}]` : "",
+            dossier.status !== "unknown"
+              ? `${dossier.status}${dossier.date_adopted ? ` ${dossier.date_adopted}` : ""}`
+              : "",
+            dossier.legal_basis ? `— legal basis: ${dossier.legal_basis}` : "",
+          ]
+            .filter(Boolean)
+            .join(" ");
+          const lines = dossier.documents.map(
+            (doc, i) =>
+              `${i + 1}. ${doc.celex ?? "(no CELEX)"}${doc.type ? ` [${doc.type}]` : ""}${doc.date ? ` ${doc.date}` : ""} — ${snippet(doc.title ?? "", 140) || "(untitled)"}\n   ${doc.url}`,
+          );
+          return [
+            header,
+            dossier.title ? snippet(dossier.title, 200) : "",
+            dossier.url ?? "",
+            ...lines,
+          ]
+            .filter(Boolean)
+            .join("\n");
+        });
+        const text = [
+          ...blocks,
+          ...(truncated
+            ? [
+                "WARNING: the listing hit the row cap — the NEWEST documents may be missing. The procedure page above has the complete list.",
+              ]
+            : []),
+          "Texts: eurlex_get_document {celex}. Documents without a CELEX (Council working documents) link to their Cellar record.",
+        ].join("\n\n");
+        return { content: [{ type: "text" as const, text }], structuredContent: output };
       } catch (error) {
         return fail(error);
       }

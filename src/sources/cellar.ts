@@ -12,8 +12,11 @@ import { DOCUMENT_TTL_MS, TtlCache, memoKey } from "./shared/cache";
 
 export const CELLAR_BASE = "https://publications.europa.eu/resource";
 
-/** Tool language input (cs/en/…) → Cellar's 3-letter ISO 639-2/T codes. */
-export const CELLAR_LANGS: Record<string, string> = {
+/** Tool language input (cs/en/…) → Cellar's 3-letter ISO 639-2/T codes.
+ * Null prototype: lookups use raw user input as the key, and on a plain
+ * object crafted keys ("constructor", "__proto__") would hit inherited
+ * Object.prototype members instead of missing to the English fallback. */
+export const CELLAR_LANGS: Record<string, string> = Object.assign(Object.create(null), {
   cs: "ces",
   en: "eng",
   de: "deu",
@@ -22,7 +25,7 @@ export const CELLAR_LANGS: Record<string, string> = {
   pl: "pol",
   es: "spa",
   it: "ita",
-};
+});
 
 /** Texts are big — keep the entry count low; the TTL bounds memory, not staleness. */
 const textCache = new TtlCache<string>(DOCUMENT_TTL_MS, 24);
