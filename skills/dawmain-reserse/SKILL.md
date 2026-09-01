@@ -157,17 +157,8 @@ so re-running a search after reading is cheap.
 - **e-Sbírka** — `match: "phrase"` for a term of art, `all_words` for a combination,
   `exclude_words` to shake off a homonym; `esbirka_get_text {date}` for the wording in
   force at the relevant time.
-- **Obecné soudy** — `justice_search` is a real full-text search (`match`:
-  `all_words` / `any_word` / `phrase`), plus `court_codes`, `types`, decision and
-  publication dates. Its sharpest filter needs no keywords at all:
-  `applies_act: "89/2012"` + `applies_section: "§ 2201"` returns the decisions that
-  APPLIED that provision — the citator these courts otherwise lack. Every hit carries
-  `affects`: what the decision did to the ruling below it (CHANGE / CONFIRM / CANCEL),
-  which is how you tell a confirmed line from a reversed one. Use it for lower-court
-  practice, for how a provision is applied day to day, and when the top courts are
-  silent. Two honest caveats for the memo: the index starts 10/2020 and is mostly
-  first-instance civil, and it is persuasive practice, not binding authority — never
-  let it outrank NS/NSS/ÚS. Unbounded full text is slow; add dates.
+- **Obecné soudy** — its own section below: full text, spisová značka, kódy soudů,
+  druh rozhodnutí, obě data, a rozhodnutí podle aplikovaného ustanovení.
 - **EU legislation** — `eurlex_search` matches titles and identifiers only; for the
   text of judgments use `curia_search`.
 - **EU legislative materials** — when the question turns on purpose or history of an
@@ -320,6 +311,55 @@ dissent is not the law — cite it as argument, never as authority.
 **`types: ["nález"]`** still cuts the mass of odmítavá usnesení; a nález binds
 (čl. 89 odst. 2 Ústavy), an usnesení mostly does not.
 
+## Obecné soudy (rozhodnuti.justice.cz): pole
+
+`justice_search` is a real full-text search over okresní, krajské and vrchní soudy —
+the practice below the top courts, which no other tool here reaches. Czech queries.
+
+| Chci | Parametr |
+|---|---|
+| to konkrétní rozhodnutí | `case_number: "8 Co 60/2025"` |
+| jak se § skutečně aplikuje | `applies_act: "89/2012", applies_section: "§ 2201"` |
+| text rozhodnutí | `query` + `match: "all_words"` / `"any_word"` / `"phrase"` |
+| jeden soud nebo skupinu soudů | `court_codes: ["KSOS", "OSPH08"]` |
+| jen meritum | `types: ["JUDGEMENT"]` (rozsudek); `"RESOLUTION"` usnesení, `"ORDER_T"` trestní příkaz |
+| kdy soud rozhodl | `date_from` / `date_to` |
+| co přibylo za poslední týden | `published_from` / `published_to` |
+| pořadí | `sort: "decided"` místo výchozího `"published"` |
+
+**Read the two caveats into the memo, every time.** The index starts 10/2020 and is
+overwhelmingly first-instance civil — absence here is not absence of law. And these are
+persuasive practice, not binding authority: never let an okresní rozsudek outrank an NS
+decision, and say plainly when the lower courts are all you found.
+
+**`applies_act` + `applies_section` is the citator these courts otherwise lack.** It
+filters on the provision the decision applied, so it needs no keywords at all:
+`applies_act: "89/2012", applies_section: "§ 2201"` is the nájemní judikatura itself.
+This is the one question the top courts cannot answer — how a provision is applied day
+to day, in the ordinary case that never reaches dovolání. Pair it with `court_codes`
+for one region's practice, or with dates for the line since an amendment.
+
+**`affects` tells you whether the ruling survived.** Every hit carries what the decision
+did to the one below it: `CONFIRM` (potvrzeno), `CHANGE` (změněno), `CANCEL` (zrušeno),
+and the rarer `CORRECT`, `COMPLETE`, `REPLACE`, each with the lower court and its sp.
+zn. So an appellate hit tells you the fate of the first-instance decision without a
+second search — and a first-instance decision you are about to cite deserves a check
+that no odvolací soud changed it. Cite a reversed decision as reversed, or not at all.
+
+**Court codes follow a pattern**: `OS…` okresní, `OSPH01`–`OSPH10` obvodní soudy pro
+Prahu 1–10, `KS…` krajské, `MSPH`/`MSBR` městské, `VSPH`/`VSOL` vrchní, plus `NS`,
+`NSS`, `US`. The krajské are `KSBR` Brno, `KSCB` České Budějovice, `KSHK` Hradec
+Králové, `KSOS` Ostrava, `KSPH` Praha, `KSPL` Plzeň, `KSUL` Ústí nad Labem, and a
+pobočka appends its city (`KSBRJI` Jihlava, `KSBRZL` Zlín, `KSCBTA` Tábor, `KSHKPA`
+Pardubice, `KSOSOL` Olomouc, `KSPLKV` Karlovy Vary, `KSULLI` Liberec). Guessing an
+okresní code is fine — an invalid one comes back with the complete list, which costs
+one round trip and no wrong results. What it will never do is silently return nothing.
+
+**Unbounded full text is slow.** A query with no date range can take tens of seconds
+over ~600k decisions. Add `date_from`/`date_to` whenever the question has a period at
+all; the metadata filters (`applies_act`, `court_codes`, `case_number`) are fast on
+their own.
+
 ## SDEU (InfoCuria): pole
 
 `curia_search` exposes the advanced-search form of InfoCuria. English keywords work
@@ -393,9 +433,14 @@ Precision has a time dimension — check it before you cite:
   amendment, fetch the text with `date` and cite that version.
 - **The break.** Case law decided under the previous wording (typically pre-2014 civil
   law) may still hold, but say which wording it was decided under.
-- **Later authority.** There is no citation graph, but decisions quote the sp. zn. they
-  follow — so full-text search the citation itself: `ns_search {query: "31 Cdo
-  1945/2010", date_from: "2016-01-01", date_to: "2016-12-31"}` → 22 decisions citing it
+- **Was it reversed?** For obecné soudy, `justice_search` answers this directly: the
+  `affects` field on an appellate hit names the decision below and what happened to it
+  (CONFIRM / CHANGE / CANCEL). Do not cite a first-instance rozsudek as practice
+  without checking that it stood.
+- **Later authority.** For the top courts there is no citation graph, but decisions
+  quote the sp. zn. they follow — so full-text search the citation itself:
+  `ns_search {query: "31 Cdo 1945/2010", date_from: "2016-01-01",
+  date_to: "2016-12-31"}` → 22 decisions citing it
   (verified). Pass the whole značka; a fragment like "1945/2010" matches nothing. Quotes
   make it an exact phrase, which is worth it for a wording but changes nothing for a
   značka. Where the citing line is long, walk it in date slices — the 900-document
@@ -421,7 +466,11 @@ Most wasted time is a round that adds nothing. Stop when:
 1. **Write the brief.** Four slots above; state assumptions instead of asking, unless a
    question would change where you search.
 2. **Open wide, in one turn.** `cz_caselaw_search` with variants and `read_top`, plus
-   `esbirka_search` for the governing provision if wording matters.
+   `esbirka_search` for the governing provision if wording matters. Add
+   `justice_search` to the same turn when the question is about everyday practice
+   rather than doctrine ("jak to soudy běžně řeší", "co dostanu za…"), or when you
+   already know the provision — `applies_act` + `applies_section` costs nothing extra
+   and needs no keywords.
 3. **Read the statute you cite.** `esbirka_get_text` with `section` — never paraphrase a
    provision you have not read. Historical matters: pass the reference `date`.
 4. **Read the decisions that decide it.** Full text of the two or three that matter,
