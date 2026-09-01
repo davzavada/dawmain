@@ -1,22 +1,25 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
+import {
+  FIND_DESCRIPTION,
+  READING_DESCRIPTION,
+  READ_ONLY,
+  continuationHint,
+  isoDate,
+  readTopSchema,
+  toolFailure,
+} from "./shared";
 import { getNsDecision, nsBodyMissing, searchNs, withHighlight } from "@/src/sources/ns";
-import { SourceError, asSourceError, toToolError } from "@/src/sources/shared/errors";
-import { dedupeBy, maxTotal, pageOrExcerpt, uniqueQueries } from "@/src/sources/shared/text";
+import {
+  dedupeBy,
+  maxTotal,
+  narrowestWindow,
+  pageOrExcerpt,
+  uniqueQueries,
+} from "@/src/sources/shared/text";
 import { buildPreviews, renderPreviews } from "./previews";
 
-const READ_ONLY = {
-  readOnlyHint: true,
-  destructiveHint: false,
-  idempotentHint: true,
-  openWorldHint: true,
-} as const;
-
-const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use ISO format YYYY-MM-DD");
-
-function fail(error: unknown) {
-  return toToolError(error instanceof SourceError ? error : asSourceError("Nejvyšší soud", error));
-}
+const fail = toolFailure("Nejvyšší soud");
 
 export function registerNs(server: McpServer): void {
   server.registerTool(
@@ -65,13 +68,7 @@ export function registerNs(server: McpServer): void {
         published_to: isoDate.optional().describe("Datum předání na web to (ISO)."),
         limit: z.number().int().min(1).max(100).default(20),
         offset: z.number().int().min(0).max(899).default(0).describe("Offset within the 900-doc window."),
-        read_top: z
-          .number()
-          .int()
-          .min(0)
-          .max(3)
-          .default(0)
-          .describe("Fetch the N best hits' texts in parallel and return excerpts around the query."),
+        read_top: readTopSchema,
       }),
       outputSchema: z.object({
         total: z.number().nullable(),
@@ -141,7 +138,10 @@ export function registerNs(server: McpServer): void {
           total: maxTotal(results.map((r) => r.total)),
           matched: maxTotal(results.map((r) => r.matched)),
           truncated: results.some((r) => r.truncated),
-          appliedWindowFrom: results[0].appliedWindowFrom,
+          // Each variant falls back on its own, so the window must be reported
+          // across ALL of them: naming only the first variant's would say
+          // "whole archive" while two of three were quietly cut to 90 days.
+          appliedWindowFrom: narrowestWindow(results.map((r) => r.appliedWindowFrom)),
           empty: results.every((r) => r.empty),
           hits: dedupeBy(
             results.flatMap((r) => r.hits),
@@ -152,7 +152,7 @@ export function registerNs(server: McpServer): void {
           page.hits
             .slice(0, read_top)
             .map((hit) => ({ id: hit.unid, caseNumber: hit.caseNumbers.join("; ") })),
-          (id) => getNsDecision(id).then((d) => d.text),
+          ({ id }) => getNsDecision(id).then((d) => d.text),
           variants,
         );
         const output = {
@@ -190,15 +190,10 @@ export function registerNs(server: McpServer): void {
     {
       title: "Nejvyšší soud: decision text",
       description:
-        "Full text and metadata (spisová značka, ECLI, právní věta, heslo, dotčené předpisy) of one Supreme Court decision, by the 32-hex UNID from ns_search. The returned url opens the decision itself (and with 'find' it opens scrolled to the term) — cite that link, never a search URL. Long texts come in ~45k-character pages. Token economy: to locate specific passages use 'find' (returns excerpts around matches); fetch further pages only when you genuinely need the whole text. Continue on your own — never ask the user whether to keep reading.",
+        `Full text and metadata (spisová značka, ECLI, právní věta, heslo, dotčené předpisy) of one Supreme Court decision, by the 32-hex UNID from ns_search. The returned url opens the decision itself (and with 'find' it opens scrolled to the term) — cite that link, never a search URL. ${READING_DESCRIPTION}`,
       inputSchema: z.object({
         unid: z.string().regex(/^[0-9A-Fa-f]{32}$/, "32-hex UNID from ns_search"),
-        find: z
-          .string()
-          .optional()
-          .describe(
-            "Return only excerpts around matches of this term (diacritics-insensitive) instead of pages — the cheap way to locate specific passages in a long text.",
-          ),
+        find: z.string().optional().describe(FIND_DESCRIPTION),
         page: z.number().int().min(1).default(1),
       }),
       outputSchema: z.object({
@@ -237,7 +232,7 @@ export function registerNs(server: McpServer): void {
         // no machine-readable body for this document.
         const text = nsBodyMissing(decision.text)
           ? `${meta}\n\n(NS did not publish a machine-readable judgment body for this document — neither the WebPrint nor the WebSearch rendition carries it. Only metadata is available; open ${url} in a browser to check for an attached PDF.)`
-          : `${meta}\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — fetch ONLY what you need, without asking the user: full close reading → call again with page: ${paged.page + 1}; specific passages → call again with find: "term" for targeted excerpts instead of more pages)` : ""}`;
+          : `${meta}\n\n${paged.text}${continuationHint(paged)}`;
         return {
           content: [{ type: "text", text }],
           structuredContent: output,

@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { ESBIRKA_CACHE_BASE, getEsbirkaApiBase, getEsbirkaApiKey } from "../config";
 import { USER_AGENT } from "@/src/sources/shared/http";
+import { READ_ONLY } from "./shared";
 
 /**
  * Diagnostics for the upstream databases the tools query. This is the only integration
@@ -399,12 +400,7 @@ export function registerProbe(server: McpServer): void {
       description:
         "Diagnose connectivity to the legal databases this server scrapes/queries, from the deployment itself. Each canary makes one real request and checks the response for a marker the parsers rely on. Use when any source tool fails unexpectedly, after deploying, or to capture raw upstream bodies as fixtures (include_raw). The discover mode scans for endpoints not yet wired up (justice.cz search, NSS form fields).",
       inputSchema,
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: true,
-      },
+      annotations: READ_ONLY,
     },
     async ({ sources, include_raw, discover: discoverMode, fetch_url }) => {
       if (fetch_url) {

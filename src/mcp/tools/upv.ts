@@ -6,20 +6,17 @@
  */
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
+import {
+  FIND_DESCRIPTION,
+  READING_DESCRIPTION,
+  READ_ONLY,
+  continuationHint,
+  toolFailure,
+} from "./shared";
 import { browseUpv, getUpvDecision } from "@/src/sources/upv";
-import { SourceError, asSourceError, toToolError } from "@/src/sources/shared/errors";
 import { pageOrExcerpt } from "@/src/sources/shared/text";
 
-const READ_ONLY = {
-  readOnlyHint: true,
-  destructiveHint: false,
-  idempotentHint: true,
-  openWorldHint: true,
-} as const;
-
-function fail(error: unknown) {
-  return toToolError(error instanceof SourceError ? error : asSourceError("ÚPV (ISDV)", error));
-}
+const fail = toolFailure("ÚPV (ISDV)");
 
 export function registerUpv(server: McpServer): void {
   server.registerTool(
@@ -75,15 +72,10 @@ export function registerUpv(server: McpServer): void {
     {
       title: "ÚPV: decision text",
       description:
-        "Full text of one ÚPV decision by its p_id token from upv_browse. Tokens are opaque and may expire — always take them fresh. Long texts come in ~45k-character pages. Token economy: to locate specific passages use 'find' (returns excerpts around matches); fetch further pages only when you genuinely need the whole text. Continue on your own — never ask the user whether to keep reading.",
+        `Full text of one ÚPV decision by its p_id token from upv_browse. Tokens are opaque and may expire — always take them fresh. ${READING_DESCRIPTION}`,
       inputSchema: z.object({
         p_id: z.string().regex(/^[A-Za-z0-9]{4,16}$/, "Token from upv_browse"),
-        find: z
-          .string()
-          .optional()
-          .describe(
-            "Return only excerpts around matches of this term (diacritics-insensitive) instead of pages — the cheap way to locate specific passages in a long text.",
-          ),
+        find: z.string().optional().describe(FIND_DESCRIPTION),
         page: z.number().int().min(1).default(1),
       }),
       outputSchema: z.object({
@@ -112,7 +104,7 @@ export function registerUpv(server: McpServer): void {
           content: [
             {
               type: "text",
-              text: `${decision.url}\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — fetch ONLY what you need, without asking the user: full close reading → call again with page: ${paged.page + 1}; specific passages → call again with find: "term" for targeted excerpts instead of more pages)` : ""}`,
+              text: `${decision.url}\n\n${paged.text}${continuationHint(paged)}`,
             },
           ],
           structuredContent: output,

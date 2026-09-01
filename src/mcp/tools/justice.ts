@@ -1,21 +1,17 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
+import {
+  FIND_DESCRIPTION,
+  READING_DESCRIPTION,
+  READ_ONLY,
+  continuationHint,
+  isoDate,
+  toolFailure,
+} from "./shared";
 import { getJusticeDecision, listJusticeDecisions } from "@/src/sources/justice";
-import { SourceError, asSourceError, toToolError } from "@/src/sources/shared/errors";
 import { pageOrExcerpt, snippet } from "@/src/sources/shared/text";
 
-const READ_ONLY = {
-  readOnlyHint: true,
-  destructiveHint: false,
-  idempotentHint: true,
-  openWorldHint: true,
-} as const;
-
-const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use ISO format YYYY-MM-DD");
-
-function fail(error: unknown) {
-  return toToolError(error instanceof SourceError ? error : asSourceError("rozhodnuti.justice.cz", error));
-}
+const fail = toolFailure("rozhodnuti.justice.cz");
 
 export function registerJustice(server: McpServer): void {
   server.registerTool(
@@ -91,15 +87,10 @@ export function registerJustice(server: McpServer): void {
     {
       title: "Obecné soudy: decision text",
       description:
-        "Full anonymized text of one general-court decision by its UUID from justice_list_decisions. Long texts come in ~45k-character pages. Token economy: to locate specific passages use 'find' (returns excerpts around matches); fetch further pages only when you genuinely need the whole text. Continue on your own — never ask the user whether to keep reading.",
+        `Full anonymized text of one general-court decision by its UUID from justice_list_decisions. ${READING_DESCRIPTION}`,
       inputSchema: z.object({
         uuid: z.string().uuid().describe("Decision UUID from justice_list_decisions."),
-        find: z
-          .string()
-          .optional()
-          .describe(
-            "Return only excerpts around matches of this term (diacritics-insensitive) instead of pages — the cheap way to locate specific passages in a long text.",
-          ),
+        find: z.string().optional().describe(FIND_DESCRIPTION),
         page: z.number().int().min(1).default(1),
       }),
       outputSchema: z.object({
@@ -132,7 +123,7 @@ export function registerJustice(server: McpServer): void {
           content: [
             {
               type: "text",
-              text: `${decision.url}\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — fetch ONLY what you need, without asking the user: full close reading → call again with page: ${paged.page + 1}; specific passages → call again with find: "term" for targeted excerpts instead of more pages)` : ""}`,
+              text: `${decision.url}\n\n${paged.text}${continuationHint(paged)}`,
             },
           ],
           structuredContent: output,

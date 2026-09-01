@@ -16,7 +16,7 @@ const outputSchema = z.object({
   auth: z
     .enum(["oauth+token", "oauth", "token", "open"])
     .describe(
-      "What this deployment accepts: OAuth login (AuthKit), a shared bearer token, both, or 'open' = anyone can call it.",
+      "What this deployment accepts: OAuth login (via Clerk), a shared bearer token, both, or 'open' = anyone can call it.",
     ),
 });
 

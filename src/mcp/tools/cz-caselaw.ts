@@ -5,8 +5,9 @@ import { getNalusDecision, searchNalus } from "@/src/sources/nalus";
 import { getNssDecision, searchNss } from "@/src/sources/nss";
 import { getCuriaDocument, searchCuria } from "@/src/sources/curia";
 import { SourceError } from "@/src/sources/shared/errors";
-import { dedupeBy, maxTotal, uniqueQueries } from "@/src/sources/shared/text";
-import { PREVIEW_DEADLINE_MS, buildPreviews, withDeadline } from "./previews";
+import { dedupeBy, maxTotal, narrowestWindow, uniqueQueries } from "@/src/sources/shared/text";
+import { buildPreviews, withDeadline } from "./previews";
+import { READ_ONLY, isoDate } from "./shared";
 
 /**
  * One call, many searches: up to 3 query variants across the three top Czech
@@ -25,8 +26,6 @@ type SourceId = (typeof SOURCES)[number];
 const CZ_SOURCES: SourceId[] = ["nss", "ns", "nalus"];
 const PER_SOURCE_DEADLINE_MS = 20_000;
 
-const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use ISO format YYYY-MM-DD");
-
 interface AggregatedHit {
   source: SourceId;
   id: string;
@@ -40,12 +39,15 @@ interface SourceStatus {
   source: SourceId;
   ok: boolean;
   total: number | null;
+  /** A narrowing the source imposed on itself — must reach the reader. */
+  note?: string;
   error?: string;
 }
 
 interface RunnerResult {
   total: number | null;
   hits: AggregatedHit[];
+  note?: string;
 }
 
 async function fetchPreviewText(hit: AggregatedHit): Promise<string> {
@@ -108,6 +110,7 @@ export function registerCzCaselaw(server: McpServer): void {
             source: z.enum(SOURCES),
             ok: z.boolean(),
             total: z.number().nullable(),
+            note: z.string().optional(),
             error: z.string().optional(),
           }),
         ),
@@ -133,12 +136,7 @@ export function registerCzCaselaw(server: McpServer): void {
           )
           .optional(),
       }),
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: true,
-      },
+      annotations: READ_ONLY,
     },
     async ({ query, queries, date_from, date_to, per_source_limit, sources, include_eu, read_top }) => {
       const variants = uniqueQueries(query, queries);
@@ -188,8 +186,15 @@ export function registerCzCaselaw(server: McpServer): void {
               searchNs({ query: v, dateFrom: date_from, dateTo: date_to }, 0, per_source_limit),
             ),
           );
+          // NS narrows to a 12-month, then 90-day window when it refuses the
+          // open search. Silence here would present a 90-day slice as the
+          // whole archive — the one thing a rešerše must never be told wrong.
+          const windowed = narrowestWindow(results.map((r) => r.appliedWindowFrom));
           return {
             total: maxTotal(results.map((r) => r.matched ?? r.total)),
+            ...(windowed
+              ? { note: `only decisions decided since ${windowed} — NS refused the open search` }
+              : {}),
             hits: dedupeBy(
               results.flatMap((r) => r.hits),
               (hit) => hit.unid,
@@ -260,7 +265,16 @@ export function registerCzCaselaw(server: McpServer): void {
         active.map(async (source) => {
           try {
             const result = await withDeadline(runners[source](), PER_SOURCE_DEADLINE_MS);
-            return { source, status: { source, ok: true, total: result.total }, hits: result.hits };
+            return {
+              source,
+              status: {
+                source,
+                ok: true,
+                total: result.total,
+                ...(result.note ? { note: result.note } : {}),
+              } satisfies SourceStatus,
+              hits: result.hits,
+            };
           } catch (error) {
             const message =
               error instanceof SourceError
@@ -290,20 +304,16 @@ export function registerCzCaselaw(server: McpServer): void {
 
       // read_top: shared preview machinery over the leading hits; a failed
       // preview skips silently and the full read stays one tool call away.
-      const previews = await buildPreviews(
-        items.slice(0, read_top),
-        (id) => {
-          const hit = items.find((item) => item.id === id);
-          if (!hit) throw new Error("hit vanished");
-          return withDeadline(fetchPreviewText(hit), PREVIEW_DEADLINE_MS);
-        },
-        variants,
-      );
+      // buildPreviews applies its own deadline per target; hand it the hit
+      // itself rather than looking the id back up (two sources can mint the
+      // same id string, and a curia hit with neither ECLI nor logicDocId
+      // carries the placeholder "?").
+      const previews = await buildPreviews(items.slice(0, read_top), fetchPreviewText, variants);
 
       statuses.sort((a, b) => SOURCES.indexOf(a.source) - SOURCES.indexOf(b.source));
       const statusLines = statuses.map(
         (status) =>
-          `${status.ok ? "✓" : "✗"} ${status.source.toUpperCase()}: ${status.ok ? `${status.total ?? "?"} matches${variants.length > 1 ? " (best variant)" : ""}` : status.error}`,
+          `${status.ok ? "✓" : "✗"} ${status.source.toUpperCase()}: ${status.ok ? `${status.total ?? "?"} matches${variants.length > 1 ? " (best variant)" : ""}${status.note ? ` — ${status.note}` : ""}` : status.error}`,
       );
       const hitLines = items.map(
         (hit, i) =>

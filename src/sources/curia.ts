@@ -217,9 +217,6 @@ export function buildCuriaBody(input: CuriaSearchInput, page: number, pageSize: 
         sortTerm: input.sort === "date" ? "INTRODUCTION_DATE" : "SCORE",
       },
     ],
-    // Free-text keyword search behaves better non-exact (raglex production
-    // client); identifiers stay exact.
-    
     pagination: {
       pageNumber: page,
       pageSize,
@@ -236,7 +233,8 @@ export function buildCuriaBody(input: CuriaSearchInput, page: number, pageSize: 
     repJurExpand: true,
     filtersValue,
     advancedFiltersValue: [...criteria, ...constraints],
-    // The captured advanced-search payload sends isSearchExact: true.
+    // The captured advanced-search payload sends isSearchExact: true. On the
+    // searchTerm route free-text behaves better non-exact, identifiers exact.
     isSearchExact: useAdvanced ? true : !input.query,
     searchSources: ["document", "metadata"],
   };

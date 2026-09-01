@@ -41,18 +41,27 @@ app/.well-known/…/route.ts  RFC 9728/8414 metadata — jak si klient najde OAu
 proxy.ts                    Clerk proxy (jen /api + /__clerk; no-op bez klíčů)
 src/mcp/auth.ts             ověřování tokenů (Clerk OAuth, sdílený kód), metadata
 src/mcp/tools/<zdroj>.ts    tenké MCP nástroje (schema → klient → tvar odpovědi)
+src/mcp/tools/shared.ts     společné pro všechny nástroje: READ_ONLY anotace,
+                            isoDate, toolFailure(), texty popisů (`find`,
+                            stránkování) - popisy čte model před každým
+                            voláním, takže kopie by ho učila dvě různá pravidla
+src/mcp/tools/previews.ts   read_top: paralelní načtení textů nejlepších hitů
 src/sources/<zdroj>.ts      klient zdroje; fetchX() (I/O) oddělené od parseX() (pure)
 src/sources/shared/         fetchUpstream, CookieSession, chybová taxonomie, char-paging
 docs/research/*.json        verbatim rešerše endpointů všech zdrojů
-tests/                      unit testy parserů proti fixtures
+tests/                      unit testy parserů a fetchUpstream proti fixtures
 scripts/smoke.mjs           end-to-end test po drátě (obě generace protokolu)
-scripts/fetch-fixtures.mjs  stáhne reálné fixtures z veřejných GitHub rep
+scripts/fetch-fixtures.mjs  jednorázový bootstrap fixtures z veřejných GitHub rep
+                            (fixtures jsou commitnuté; lepší zdroj je dnes
+                            dawmain_probe_sources {include_raw: true})
 ```
 
 Zásady: každý nástroj má `annotations` (vše read-only), stránkování
 (`limit`/`offset` či `page`, `has_more`), `structuredContent` + čitelný text a
 chybové hlášky, které říkají, co zkusit jinak (`PARSE_DRIFT` = upstream změnil
-layout → spusť probe). Rychlost: opakovaná identická volání jdou z per-instance
+layout → spusť probe). Kde se dá kritérium ztratit (přejmenovaná pole
+formuláře NSS), se raději hlásí `PARSE_DRIFT` než tipuje podle datového typu:
+tichá odpověď na jinou otázku je pro rešerši horší než chyba. Rychlost: opakovaná identická volání jdou z per-instance
 cache (5 min hledání, 10 min texty rozhodnutí — stránka 2 dokumentu už text
 nestahuje znovu) a vícestránkové smyčky (e-Sbírka §-scan, justice day-walk,
 vícedílné dokumenty v Cellaru) běží v malých paralelních dávkách — stejný
@@ -97,7 +106,7 @@ produkci. Bez `vercel.json`; Next.js si Vercel detekuje sám.
 
 ## Připojení klienta
 
-S OAuth (AuthKit) stačí URL — klient si při prvním použití řekne o přihlášení
+S OAuth (Clerk) stačí URL — klient si při prvním použití řekne o přihlášení
 (`/mcp` → authenticate v Claude Code, v claude.ai se okno otevře samo):
 
 ```bash
@@ -141,9 +150,12 @@ ne hádat.
   e-Sbírky (10 min), NSS handshake (10 min), texty dokumentů (10 min)
   a výsledky hledání (5 min).
 - NS: fulltext hledá v celé databázi; okno (12 měsíců → 90 dnů) se nasadí jen
-  když server odmítne, a odpověď to přizná v `applied_window_from`. Domino
-  odmítá malé `Count` (HTTP 500), takže se vždy žádá aspoň 20 řádků a ořezává
-  se lokálně.
+  když server odmítne, a odpověď to přizná v `applied_window_from`. Každá
+  varianta dotazu se zužuje samostatně, takže se hlásí nejpozdější okno ze
+  všech (`narrowestWindow`) - jinak by odpověď tvrdila „celý archiv", zatímco
+  dvě ze tří variant viděly 90 dnů. `cz_caselaw_search` totéž hlásí v `note`
+  u stavu NS. Domino odmítá malé `Count` (HTTP 500), takže se vždy žádá aspoň
+  20 řádků a ořezává se lokálně.
 - Procházení justice.cz je stropované 20 stránkami na volání, scan § v
   e-Sbírce 15 stránkami; vše končí hned po naplnění limitu.
 - Texty dokumentů se vracejí po stránkách 45 000 znaků (bezpečně pod limity klientů) — typické rozhodnutí
@@ -204,3 +216,7 @@ přihlašovací okno. Diskovery kontroluje i `npm run smoke` (krok
 2. `src/mcp/tools/<zdroj>.ts` — `register<Zdroj>(server)`.
 3. Řádka v `src/mcp/tools/index.ts`, kanárek do `src/mcp/tools/probe.ts`,
    testy do `tests/`, jméno nástroje do `EXPECTED_TOOLS` v `scripts/smoke.mjs`.
+4. Pokud se zdroj má objevit na stránce se semaforem, řádka do `DATABASES`
+   v `src/mcp/status.ts` — stránka i její fallback čtou ten samý seznam.
+5. Anotace, `isoDate`, `find`/stránkovací popisy a `fail()` ber
+   z `src/mcp/tools/shared.ts`, nekopíruj je.

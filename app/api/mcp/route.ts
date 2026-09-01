@@ -9,7 +9,7 @@ export const maxDuration = 60;
 
 /**
  * Auth (see src/mcp/auth.ts): accepts the shared access code and
- * AuthKit-issued OAuth tokens; fails closed on Vercel when neither is
+ * Clerk-issued OAuth tokens; fails closed on Vercel when neither is
  * configured. The 401 challenge carries a WWW-Authenticate header pointing at
  * /.well-known/oauth-protected-resource, which is what lets an MCP client
  * discover the OAuth login on its own.

@@ -358,18 +358,21 @@ describe("buildNssSearchForm (live-captured form)", () => {
     ).toThrowError(SourceError);
   });
 
-  it("strict locators never fall back to a same-suffix field and drift loudly", () => {
-    // A form whose only .HodnotaCislo belongs to a DIFFERENT criterion:
-    // findField's suffix fallback would happily (and wrongly) return it.
+  it("locators never fall back to a same-suffix field and drift loudly", () => {
+    // A form whose only .HodnotaCislo belongs to a DIFFERENT criterion. A
+    // fallback by datatype would file our value into it and NSS would answer
+    // a different question with a plausible result set.
     const decoy = parseNssForm(`
       <html><body><form method="post">
       <input name="__RequestVerificationToken" type="hidden" value="tok" />
       <input name="vyhledavaciSekce[0].vyhledavaciPodminka[0].vyhledavaciPodminkaHodnota[0].TechnickyNazev" type="hidden" value="oznacenivecideleneporadovecislo" />
       <input name="vyhledavaciSekce[0].vyhledavaciPodminka[0].vyhledavaciPodminkaHodnota[0].HodnotaCislo" type="text" value="" />
       </form></body></html>`);
-    expect(findField(decoy, ".HodnotaCislo", null, /^aplikovanepravnipredpisysbcislo$/)?.name).toContain(
-      "HodnotaCislo",
-    );
+    // A named technical pattern that the form no longer answers: findField
+    // reports the criterion as lost rather than guessing by suffix.
+    expect(findField(decoy, ".HodnotaCislo", null, /^aplikovanepravnipredpisysbcislo$/)).toBeUndefined();
+    // Without a technical pattern the suffix route is all there is, so it stays.
+    expect(findField(decoy, ".HodnotaCislo", null)?.name).toContain("HodnotaCislo");
     expect(findFieldStrict(decoy, /^aplikovanepravnipredpisysbcislo$/, ".HodnotaCislo")).toBeUndefined();
     try {
       buildNssSearchForm(decoy.fields, { appliesAct: "106/1999" });
@@ -383,6 +386,21 @@ describe("buildNssSearchForm (live-captured form)", () => {
     } catch (error) {
       expect((error as SourceError).kind).toBe("PARSE_DRIFT");
     }
+  });
+
+  it("refuses to let two criteria land in the same input", () => {
+    // A form carrying ONE text input whose label answers both the full-text
+    // and the case-number label patterns. Writing both there would silently
+    // drop the query and search NSS for a spisová značka instead.
+    const collide = parseNssForm(`
+      <html><body><form method="post">
+      <input name="__RequestVerificationToken" type="hidden" value="tok" />
+      <div><label>Plný text / spisová značka</label>
+      <input name="vyhledavaciSekce[0].vyhledavaciPodminka[0].HodnotaText" type="text" value="" /></div>
+      </form></body></html>`);
+    expect(() =>
+      buildNssSearchForm(collide.fields, { query: "dobré mravy", caseNumber: "1 Afs 25/2024" }),
+    ).toThrowError(/resolved to the same input/);
   });
 
   it("rejects two applies_* filters and a provision without an act", () => {

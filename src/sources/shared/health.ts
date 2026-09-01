@@ -30,11 +30,6 @@ export function recordSourceResult(source: string, ok: boolean, detail?: string)
   observations.set(source, { source, ok, at: Date.now(), ...(detail ? { detail } : {}) });
 }
 
-/** The last observation for a source, or undefined if this instance has none. */
-export function lastSourceResult(source: string): SourceHealth | undefined {
-  return observations.get(source);
-}
-
 /** Every observation this instance holds. */
 export function allSourceResults(): SourceHealth[] {
   return [...observations.values()];

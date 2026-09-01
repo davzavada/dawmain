@@ -3,7 +3,7 @@ import { clerkConfigured, tokenMatches } from "@/src/mcp/config";
 import { authMode, verifyRequestAuth } from "@/src/mcp/auth";
 
 /**
- * The endpoint's gate (src/mcp/auth.ts): shared token + AuthKit OAuth. These
+ * The endpoint's gate (src/mcp/auth.ts): shared token + Clerk OAuth. These
  * assertions pin the pure pieces the route handler relies on — the JWT
  * signature check needs the issuer's JWKS and is exercised against a
  * deployment, as is the fail-closed behaviour (scripts/smoke.mjs).

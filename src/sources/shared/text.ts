@@ -158,6 +158,17 @@ export function maxTotal(totals: Array<number | null>): number | null {
   return known.length ? Math.max(...known) : null;
 }
 
+/**
+ * The narrowing to report when variants were windowed independently: the
+ * LATEST start date among them, because that is the one that hid the most.
+ * Null only when no variant was windowed — reporting one variant's null as
+ * the answer would claim the whole archive was searched when it was not.
+ */
+export function narrowestWindow(windows: Array<string | null>): string | null {
+  const applied = windows.filter((from): from is string => from !== null).sort();
+  return applied.at(-1) ?? null;
+}
+
 /** First occurrence wins; order preserved. */
 export function dedupeBy<T>(items: T[], key: (item: T) => string): T[] {
   const seen = new Set<string>();
@@ -179,8 +190,10 @@ export interface SearchPreview {
  * (diacritics-insensitive), else the head of the text. Small on purpose —
  * a preview earns a full *_get_decision read, it does not replace one.
  */
-/** Words that are search syntax, never document content. */
-const SEARCH_OPERATORS = new Set([
+/** Words that are search syntax, never document content — the Domino/Verity
+ * operator vocabulary the NS box speaks, shared with the NS query builder so
+ * the two can never fall out of step. */
+export const SEARCH_OPERATORS = new Set([
   "AND",
   "OR",
   "NOT",

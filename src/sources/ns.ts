@@ -1,7 +1,7 @@
 import { SourceError } from "./shared/errors";
 import { fetchUpstream } from "./shared/http";
 import { htmlToText, loadHtml } from "./shared/html";
-import { czechToIso } from "./shared/text";
+import { SEARCH_OPERATORS, czechToIso } from "./shared/text";
 import { DOCUMENT_TTL_MS, SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
 
 /**
@@ -175,19 +175,6 @@ export interface NsSearchHit {
   url: string;
 }
 
-/** Domino FT operators — never worth highlighting. */
-const FT_OPERATORS = new Set([
-  "AND",
-  "OR",
-  "NOT",
-  "NEAR",
-  "SENTENCE",
-  "PARAGRAPH",
-  "ACCRUE",
-  "EXACTCASE",
-  "TERMWEIGHT",
-]);
-
 /**
  * Domino highlights the query terms inside a document when the link carries
  * `Highlight=0,<term>,<term>` — the reader lands on the passage instead of
@@ -198,7 +185,7 @@ export function withHighlight(url: string, queries: Array<string | undefined>): 
   const words: string[] = [];
   for (const query of queries) {
     for (const word of (query ?? "").split(/[^\p{L}\p{N}*]+/u)) {
-      if (word.length < 3 || FT_OPERATORS.has(word.toUpperCase())) continue;
+      if (word.length < 3 || SEARCH_OPERATORS.has(word.toUpperCase())) continue;
       if (!words.includes(word)) words.push(word);
     }
   }

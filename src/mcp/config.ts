@@ -7,7 +7,7 @@ export const SERVER_VERSION = "0.1.0";
 /**
  * Optional shared-secret auth. When `MCP_BEARER_TOKEN` is set the endpoint
  * accepts `Authorization: Bearer <token>` — alongside, not instead of, OAuth
- * (see `getAuthKitIssuer`), so existing access codes keep working while
+ * (see `clerkConfigured`), so existing access codes keep working while
  * clients migrate to the OAuth login.
  */
 export function getBearerToken(): string | undefined {

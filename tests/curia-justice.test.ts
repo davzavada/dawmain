@@ -366,6 +366,27 @@ describe("parseJusticeListing", () => {
     expect(listing.items[0].soud).toBe("Okresní soud v Mostě");
   });
 
+  it("finds the uuid even behind a trailing slash or query string", () => {
+    const listing = parseJusticeListing({
+      items: [
+        { odkaz: "https://rozhodnuti.justice.cz/api/finaldoc/1d6380c9-0364-498a-b494-d162a90121cb/?v=2" },
+      ],
+      totalPages: 1,
+    });
+    expect(listing.items[0].uuid).toBe("1d6380c9-0364-498a-b494-d162a90121cb");
+  });
+
+  it("drops rows with no uuid — justice_get_decision has no other handle", () => {
+    const listing = parseJusticeListing({
+      items: [
+        { jednaciCislo: "1 C 1/2020", odkaz: "" },
+        { jednaciCislo: "2 C 2/2020", odkaz: "https://rozhodnuti.justice.cz/api/finaldoc/1d6380c9-0364-498a-b494-d162a90121cb" },
+      ],
+      totalPages: 1,
+    });
+    expect(listing.items.map((item) => item.jednaciCislo)).toEqual(["2 C 2/2020"]);
+  });
+
   it("throws PARSE_DRIFT without items", () => {
     expect(() => parseJusticeListing({})).toThrowError(SourceError);
   });

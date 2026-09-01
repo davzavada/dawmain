@@ -77,7 +77,17 @@ export function parseNssForm(html: string): NssForm {
  * indices in the names shift between form versions. Strategy: find a
  * TechnickyNazev (value-level, then condition-level) whose value matches
  * `technicalPattern`, take its prefix, and return the input `prefix + suffix`.
- * Fallbacks: first field with the suffix, then a label match. Pure.
+ * Fallback: a label match, which still identifies the criterion by meaning.
+ *
+ * The blind "first field carrying this suffix" fallback applies ONLY when the
+ * caller named no technical pattern. Where one was named and the form no
+ * longer answers it, the criterion is genuinely lost, and guessing by
+ * datatype is worse than saying so: every text criterion ends in
+ * `.HodnotaText` and every date in `.HodnotaDatumACasOd`, so the guess files
+ * the full text into "číslo jednací", or a decision-date bound onto the
+ * publication date — and NSS answers that with a plausible, wrong result set
+ * instead of an error. A rešerše may fail loudly; it must not quietly answer
+ * a different question. Pure.
  */
 export function findField(
   form: NssForm,
@@ -99,7 +109,7 @@ export function findField(
       if (nested) return nested;
     }
   }
-  if (suffix) {
+  if (suffix && !technicalPattern) {
     const bySuffix = form.fields.find((field) => field.name.endsWith(suffix));
     if (bySuffix) return bySuffix;
   }
@@ -519,6 +529,24 @@ export function buildNssSearchForm(fields: NssFormField[], input: NssSearchInput
       "The search form changed. Run dawmain_probe_sources with discover:true and update the field mapping in src/sources/nss.ts; date-range search may still work.",
     );
   };
+  // No two criteria may end up in the same input. Every setter goes through
+  // this: a lookup that lands on an input another criterion already owns is
+  // drift, not a search — otherwise the second value silently overwrites the
+  // first and NSS answers a question nobody asked.
+  const claimed = new Map<string, string>();
+  const claim = (criterion: string, name: string, value: string): void => {
+    const owner = claimed.get(name);
+    if (owner && owner !== criterion) {
+      throw new SourceError(
+        SOURCE,
+        "PARSE_DRIFT",
+        `The NSS form fields for "${owner}" and "${criterion}" resolved to the same input (${name}).`,
+        "The search form changed. Run dawmain_probe_sources with discover:true and update the field mapping in src/sources/nss.ts; searching on one criterion at a time may still work.",
+      );
+    }
+    claimed.set(name, criterion);
+    form.set(name, value);
+  };
   const setCriterion = (
     criterion: string,
     value: string,
@@ -528,13 +556,13 @@ export function buildNssSearchForm(fields: NssFormField[], input: NssSearchInput
   ) => {
     const field = findField(formModel, suffix, labelPattern, technicalPattern);
     if (!field) drift(criterion);
-    else form.set(field.name, value);
+    else claim(criterion, field.name, value);
   };
   // Verbatim-captured technical names — never fall back to a same-suffix field.
   const setStrict = (criterion: string, value: string, technicalPattern: RegExp, suffix: string) => {
     const field = findFieldStrict(formModel, technicalPattern, suffix);
     if (!field) drift(criterion);
-    else form.set(field.name, value);
+    else claim(criterion, field.name, value);
   };
   const setDial = (
     criterion: string,
@@ -547,10 +575,10 @@ export function buildNssSearchForm(fields: NssFormField[], input: NssSearchInput
       : undefined;
     if (!prefix || !treeField) return drift(criterion);
     const { ids, titles } = pick(parseCiselnikTree(treeField.value));
-    form.set(`${prefix}.HodnotaCiselnikPolozky`, titles.join(", "));
+    claim(criterion, `${prefix}.HodnotaCiselnikPolozky`, titles.join(", "));
     // Synthesized: the UI widget creates this field client-side on submit —
     // it is absent from the raw HTML, but it is what the server filters by.
-    form.set(`${prefix}.HodnotaCiselnikPolozkySelected`, ids.join(","));
+    claim(criterion, `${prefix}.HodnotaCiselnikPolozkySelected`, ids.join(","));
   };
 
   if (input.dateFrom) {

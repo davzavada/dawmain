@@ -31,14 +31,17 @@ export function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T> {
 
 export async function buildPreviews<T extends { id: string; caseNumber: string }>(
   targets: T[],
-  getText: (id: string) => Promise<string>,
+  /** Takes the whole target, not just its id: an id is not unique across
+   * sources, so a caller that had to look the target back up by id could
+   * preview the wrong document. */
+  getText: (target: T) => Promise<string>,
   terms: string[],
 ): Promise<Array<T & { matches: number; excerpt: string }> | undefined> {
   if (!targets.length) return undefined;
   const settled = await Promise.all(
     targets.map(async (target) => {
       try {
-        const text = await withDeadline(getText(target.id), PREVIEW_DEADLINE_MS);
+        const text = await withDeadline(getText(target), PREVIEW_DEADLINE_MS);
         // The caller's terms are search expressions, not document text —
         // a quoted phrase or a wildcard would match nothing verbatim.
         return { ...target, ...previewExcerpt(text, excerptTerms(terms)) };

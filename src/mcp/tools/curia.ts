@@ -1,20 +1,19 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
+import {
+  FIND_DESCRIPTION,
+  READING_DESCRIPTION,
+  READ_ONLY,
+  continuationHint,
+  readTopSchema,
+  toolFailure,
+} from "./shared";
 import { caseNumberToCelex, getCuriaDocument, searchCuria } from "@/src/sources/curia";
-import { SourceError, asSourceError, toToolError } from "@/src/sources/shared/errors";
+import { SourceError } from "@/src/sources/shared/errors";
 import { dedupeBy, maxTotal, pageOrExcerpt, uniqueQueries } from "@/src/sources/shared/text";
 import { buildPreviews, renderPreviews } from "./previews";
 
-const READ_ONLY = {
-  readOnlyHint: true,
-  destructiveHint: false,
-  idempotentHint: true,
-  openWorldHint: true,
-} as const;
-
-function fail(error: unknown) {
-  return toToolError(error instanceof SourceError ? error : asSourceError("CJEU (InfoCuria)", error));
-}
+const fail = toolFailure("CJEU (InfoCuria)");
 
 export function registerCuria(server: McpServer): void {
   server.registerTool(
@@ -75,13 +74,7 @@ export function registerCuria(server: McpServer): void {
         limit: z.number().int().min(1).max(20).default(10),
         page: z.number().int().min(0).default(0),
         language: z.string().default("en").describe("UI language for the search (en, cs, …)."),
-        read_top: z
-          .number()
-          .int()
-          .min(0)
-          .max(3)
-          .default(0)
-          .describe("Fetch the N best hits' texts in parallel and return excerpts around the query."),
+        read_top: readTopSchema,
       }),
       outputSchema: z.object({
         total: z.number(),
@@ -160,7 +153,7 @@ export function registerCuria(server: McpServer): void {
           .filter((target) => target.id);
         const previews = await buildPreviews(
           previewTargets,
-          (id) =>
+          ({ id }) =>
             getCuriaDocument(
               id.toUpperCase().startsWith("ECLI:") ? { ecli: id, language } : { logicDocId: id, language },
             ).then((d) => d.text),
@@ -204,7 +197,7 @@ export function registerCuria(server: McpServer): void {
     {
       title: "CJEU: document text",
       description:
-        "Full text of a CJEU judgment, order or AG opinion. Identify it by CELEX (62018CJ0311), ECLI (ECLI:EU:C:2020:559), or by case_number + doc_type (the CELEX is derived). For very recent documents not yet in Cellar, pass the logic_doc_id from curia_search. Long texts come in ~45k-character pages. Token economy: to locate specific passages use 'find' (returns excerpts around matches); fetch further pages only when you genuinely need the whole text. Continue on your own — never ask the user whether to keep reading.",
+        `Full text of a CJEU judgment, order or AG opinion. Identify it by CELEX (62018CJ0311), ECLI (ECLI:EU:C:2020:559), or by case_number + doc_type (the CELEX is derived). For very recent documents not yet in Cellar, pass the logic_doc_id from curia_search. ${READING_DESCRIPTION}`,
       inputSchema: z.object({
         celex: z.string().optional().describe("CELEX number, e.g. '62018CJ0311'."),
         ecli: z.string().optional().describe("E.g. 'ECLI:EU:C:2020:559'."),
@@ -212,12 +205,7 @@ export function registerCuria(server: McpServer): void {
         doc_type: z.enum(["judgment", "order", "opinion"]).default("judgment"),
         logic_doc_id: z.string().optional().describe("From curia_search, for very recent documents."),
         language: z.string().default("en").describe("Preferred language (cs, en, …); falls back to English."),
-        find: z
-          .string()
-          .optional()
-          .describe(
-            "Return only excerpts around matches of this term (diacritics-insensitive) instead of pages — the cheap way to locate specific passages in a long text.",
-          ),
+        find: z.string().optional().describe(FIND_DESCRIPTION),
         page: z.number().int().min(1).default(1),
       }),
       outputSchema: z.object({
@@ -265,7 +253,7 @@ export function registerCuria(server: McpServer): void {
           content: [
             {
               type: "text",
-              text: `${document.url} (via ${document.via})\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — fetch ONLY what you need, without asking the user: full close reading → call again with page: ${paged.page + 1}; specific passages → call again with find: "term" for targeted excerpts instead of more pages)` : ""}`,
+              text: `${document.url} (via ${document.via})\n\n${paged.text}${continuationHint(paged)}`,
             },
           ],
           structuredContent: output,

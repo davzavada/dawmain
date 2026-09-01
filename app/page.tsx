@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { headers } from "next/headers";
-import { databaseStatuses, formatTime } from "@/src/mcp/status";
+import { DATABASES, databaseStatuses, formatTime } from "@/src/mcp/status";
 import { Endpoint } from "./_endpoint";
 
 export const dynamic = "force-dynamic";
@@ -50,20 +50,13 @@ async function SourceList() {
   );
 }
 
-/** What stands in while the lights are still being checked. */
+/** What stands in while the lights are still being checked. The names come
+ * from the same list the real rows do - a hand-kept copy would go on
+ * promising a database the server no longer queries. */
 function SourceListFallback() {
-  const names = [
-    "Nejvyšší soud",
-    "Nejvyšší správní soud",
-    "Ústavní soud (NALUS)",
-    "obecné soudy",
-    "Soudní dvůr EU (InfoCuria)",
-    "e-Sbírka",
-    "EUR-Lex (Cellar)",
-  ];
   return (
     <ul style={{ padding: 0, margin: "0.5rem 0 0", listStyle: "none", textAlign: "left" }}>
-      {names.map((name) => (
+      {DATABASES.map(({ label: name }) => (
         <li key={name} style={sourceRow}>
           <span
             aria-hidden="true"

@@ -49,15 +49,22 @@ export function parseJusticeListing(json: unknown): { totalPages: number; items:
       "The API shape may have changed — run dawmain_probe_sources (canary 'justice') with include_raw.",
     );
   }
+  // Rows whose 'odkaz' holds no UUID are dropped: the uuid is the ONLY handle
+  // justice_get_decision accepts, so listing such a row would hand the model
+  // an id its next call is bound to reject.
   return {
     totalPages: typeof data.totalPages === "number" ? data.totalPages : 1,
     items: data.items.map((item) => {
       const str = (key: string) => (typeof item[key] === "string" ? (item[key] as string) : undefined);
       const arr = (key: string) =>
         Array.isArray(item[key]) ? (item[key] as unknown[]).map(String) : undefined;
-      // The 'odkaz' field carries the finaldoc URL; the UUID is its last segment.
+      // The 'odkaz' field carries the finaldoc URL; the UUID is its last
+      // segment. Matched by its exact shape rather than "36 hex-or-dash
+      // characters at the end", so a trailing slash or query string does not
+      // lose the id and a run of dashes cannot pass for one.
       const odkaz = str("odkaz") ?? "";
-      const uuid = /([0-9a-f-]{36})\s*$/i.exec(odkaz)?.[1] ?? "";
+      const uuid =
+        /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i.exec(odkaz)?.[1] ?? "";
       return {
         uuid,
         jednaciCislo: str("jednaciCislo"),
@@ -70,7 +77,7 @@ export function parseJusticeListing(json: unknown): { totalPages: number; items:
         klicovaSlova: arr("klicovaSlova"),
         zminenaUstanoveni: arr("zminenaUstanoveni"),
       };
-    }),
+    }).filter((item) => item.uuid),
   };
 }
 
@@ -184,7 +191,7 @@ async function walkJusticeDecisions(
   // day-by-day (each batch flattens per day before appending).
   for (let i = 0; i < days.length && items.length < limit; i += WALK_CONCURRENCY) {
     const batch = days.slice(i, i + WALK_CONCURRENCY);
-    let budget = MAX_PAGES_PER_CALL - pagesFetched;
+    const budget = MAX_PAGES_PER_CALL - pagesFetched;
     if (budget <= 0 || batch.length > budget) truncated = true;
     if (budget <= 0) break;
 

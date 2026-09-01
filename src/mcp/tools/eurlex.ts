@@ -1,21 +1,18 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
+import {
+  FIND_DESCRIPTION,
+  READING_DESCRIPTION,
+  READ_ONLY,
+  continuationHint,
+  isoDate,
+  toolFailure,
+} from "./shared";
 import { getEurlexDocument, getLegislativeHistory, searchEurlex } from "@/src/sources/eurlex";
-import { SourceError, asSourceError, toToolError } from "@/src/sources/shared/errors";
+import { SourceError } from "@/src/sources/shared/errors";
 import { pageOrExcerpt, snippet } from "@/src/sources/shared/text";
 
-const READ_ONLY = {
-  readOnlyHint: true,
-  destructiveHint: false,
-  idempotentHint: true,
-  openWorldHint: true,
-} as const;
-
-const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use ISO format YYYY-MM-DD");
-
-function fail(error: unknown) {
-  return toToolError(error instanceof SourceError ? error : asSourceError("EUR-Lex (Cellar)", error));
-}
+const fail = toolFailure("EUR-Lex (Cellar)");
 
 export function registerEurlex(server: McpServer): void {
   server.registerTool(
@@ -108,17 +105,12 @@ export function registerEurlex(server: McpServer): void {
     {
       title: "EUR-Lex: document text",
       description:
-        "Full text of an EU legal act, judgment or legislative material from the official Cellar dissemination API, by CELEX (e.g. '32016R0679' for GDPR, '52012PC0011' for its proposal — a proposal's text opens with the explanatory memorandum) or ECLI. Prefers the requested language and falls back to English. Long texts come in ~45k-character pages. Token economy: to locate specific passages use 'find' (returns excerpts around matches); fetch further pages only when you genuinely need the whole text. Continue on your own — never ask the user whether to keep reading.",
+        `Full text of an EU legal act, judgment or legislative material from the official Cellar dissemination API, by CELEX (e.g. '32016R0679' for GDPR, '52012PC0011' for its proposal — a proposal's text opens with the explanatory memorandum) or ECLI. Prefers the requested language and falls back to English. ${READING_DESCRIPTION}`,
       inputSchema: z.object({
         celex: z.string().optional().describe("CELEX, e.g. '32016R0679', '62018CJ0311' or '52012PC0011'."),
         ecli: z.string().optional().describe("ECLI, e.g. 'ECLI:EU:C:2020:559'."),
         language: z.string().default("en").describe("Preferred language (cs, en, …)."),
-        find: z
-          .string()
-          .optional()
-          .describe(
-            "Return only excerpts around matches of this term (diacritics-insensitive) instead of pages — the cheap way to locate specific passages in a long text.",
-          ),
+        find: z.string().optional().describe(FIND_DESCRIPTION),
         page: z.number().int().min(1).default(1),
       }),
       outputSchema: z.object({
@@ -155,7 +147,7 @@ export function registerEurlex(server: McpServer): void {
           content: [
             {
               type: "text",
-              text: `${document.url}\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — fetch ONLY what you need, without asking the user: full close reading → call again with page: ${paged.page + 1}; specific passages → call again with find: "term" for targeted excerpts instead of more pages)` : ""}`,
+              text: `${document.url}\n\n${paged.text}${continuationHint(paged)}`,
             },
           ],
           structuredContent: output,

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
+import { READ_ONLY, isoDate, toolFailure } from "./shared";
 import {
   buildStaleUrl,
   getAct,
@@ -8,22 +9,9 @@ import {
   getSection,
   searchActs,
 } from "@/src/sources/esbirka";
-import { SourceError, asSourceError, toToolError } from "@/src/sources/shared/errors";
 import { charPage, snippet } from "@/src/sources/shared/text";
 
 /** MCP tools over the e-Sbírka client. Thin: schema → client call → shaping. */
-
-const READ_ONLY = {
-  readOnlyHint: true,
-  destructiveHint: false,
-  idempotentHint: true,
-  openWorldHint: true,
-} as const;
-
-const isoDate = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, "Use ISO format YYYY-MM-DD")
-  .describe("ISO date (YYYY-MM-DD).");
 
 const actIdentity = {
   year: z.number().int().min(1918).max(2100).describe("Year of the act, e.g. 2012 for 89/2012 Sb."),
@@ -36,9 +24,7 @@ const actIdentity = {
     .describe("Collection code: 'sb' (Sbírka zákonů, default), 'sm' (mezinárodní smlouvy), …"),
 };
 
-function fail(error: unknown) {
-  return toToolError(error instanceof SourceError ? error : asSourceError("e-Sbírka", error));
-}
+const fail = toolFailure("e-Sbírka");
 
 export function registerEsbirka(server: McpServer): void {
   server.registerTool(
@@ -54,8 +40,8 @@ export function registerEsbirka(server: McpServer): void {
           .default("all_words")
           .describe("How the query terms combine."),
         exclude_words: z.string().optional().describe("Words that must NOT occur."),
-        date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Subject date from (ISO)."),
-        date_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Subject date to (ISO)."),
+        date_from: isoDate.optional().describe("Subject date from (ISO)."),
+        date_to: isoDate.optional().describe("Subject date to (ISO)."),
         limit: z.number().int().min(1).max(25).default(10).describe("Results per page."),
         offset: z.number().int().min(0).default(0).describe("Result offset for pagination."),
       }),

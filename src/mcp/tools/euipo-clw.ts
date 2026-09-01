@@ -1,19 +1,10 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
+import { FIND_DESCRIPTION, READ_ONLY, continuationHint, toolFailure } from "./shared";
 import { getEuipoClwDocument, searchEuipoClw } from "@/src/sources/euipo-clw";
-import { SourceError, asSourceError, toToolError } from "@/src/sources/shared/errors";
 import { pageOrExcerpt, snippet } from "@/src/sources/shared/text";
 
-const READ_ONLY = {
-  readOnlyHint: true,
-  destructiveHint: false,
-  idempotentHint: true,
-  openWorldHint: true,
-} as const;
-
-function fail(error: unknown) {
-  return toToolError(error instanceof SourceError ? error : asSourceError("EUIPO eSearchCLW", error));
-}
+const fail = toolFailure("EUIPO eSearchCLW");
 
 export function registerEuipoClw(server: McpServer): void {
   server.registerTool(
@@ -98,12 +89,7 @@ export function registerEuipoClw(server: McpServer): void {
         "Download one EUIPO decision PDF (cookie handshake replayed server-side) and return its extracted text, paginated by characters. Word-format documents cannot be extracted — the tool returns their link instead.",
       inputSchema: z.object({
         pdf_url: z.string().url().describe("The pdfUrl from a euipo_clw_search hit."),
-        find: z
-          .string()
-          .optional()
-          .describe(
-            "Return only excerpts around matches of this term (diacritics-insensitive) instead of pages — the cheap way to locate specific passages in a long text.",
-          ),
+        find: z.string().optional().describe(FIND_DESCRIPTION),
         page: z.number().int().min(1).default(1),
       }),
       outputSchema: z.object({
@@ -134,7 +120,7 @@ export function registerEuipoClw(server: McpServer): void {
           content: [
             {
               type: "text",
-              text: `${document.pdfUrl} (${document.pages} PDF pages)\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — fetch ONLY what you need, without asking the user: full close reading → call again with page: ${paged.page + 1}; specific passages → call again with find: "term" for targeted excerpts instead of more pages)` : ""}`,
+              text: `${document.pdfUrl} (${document.pages} PDF pages)\n\n${paged.text}${continuationHint(paged)}`,
             },
           ],
           structuredContent: output,

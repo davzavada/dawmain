@@ -56,7 +56,7 @@ export interface DatabaseStatus {
  * The databases shown on the page, each tied to the SOURCE constant its
  * client reports under and to the probe canary that can stand in for it.
  */
-const DATABASES: Array<{ label: string; href: string; source: string; canaryId: string }> = [
+export const DATABASES: Array<{ label: string; href: string; source: string; canaryId: string }> = [
   {
     label: "Nejvyšší soud",
     href: "https://rozhodnuti.nsoud.cz",

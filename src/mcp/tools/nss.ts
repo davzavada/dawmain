@@ -1,22 +1,19 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
+import {
+  FIND_DESCRIPTION,
+  READING_DESCRIPTION,
+  READ_ONLY,
+  continuationHint,
+  isoDate,
+  readTopSchema,
+  toolFailure,
+} from "./shared";
 import { getNssDecision, searchNss } from "@/src/sources/nss";
-import { SourceError, asSourceError, toToolError } from "@/src/sources/shared/errors";
 import { dedupeBy, maxTotal, pageOrExcerpt, uniqueQueries } from "@/src/sources/shared/text";
 import { buildPreviews, renderPreviews } from "./previews";
 
-const READ_ONLY = {
-  readOnlyHint: true,
-  destructiveHint: false,
-  idempotentHint: true,
-  openWorldHint: true,
-} as const;
-
-const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use ISO format YYYY-MM-DD");
-
-function fail(error: unknown) {
-  return toToolError(error instanceof SourceError ? error : asSourceError("Nejvyšší správní soud", error));
-}
+const fail = toolFailure("Nejvyšší správní soud");
 
 export function registerNss(server: McpServer): void {
   server.registerTool(
@@ -86,13 +83,7 @@ export function registerNss(server: McpServer): void {
             "Narrow the applies_* act to one provision: '§ 17 odst. 2 písm. a', 'čl. 8 odst. 2', or compact '17(2)(a)'. Requires one applies_* filter.",
           ),
         page: z.number().int().min(1).default(1),
-        read_top: z
-          .number()
-          .int()
-          .min(0)
-          .max(3)
-          .default(0)
-          .describe("Fetch the N best hits' texts in parallel and return excerpts around the query."),
+        read_top: readTopSchema,
       }),
       outputSchema: z.object({
         total: z.number().nullable(),
@@ -162,7 +153,7 @@ export function registerNss(server: McpServer): void {
         };
         const previews = await buildPreviews(
           result.hits.slice(0, read_top).map((hit) => ({ id: hit.id, caseNumber: hit.caseNumber ?? "?" })),
-          (id) => getNssDecision(id).then((d) => d.text),
+          ({ id }) => getNssDecision(id).then((d) => d.text),
           variants,
         );
         const seen = page === 1 ? result.hits.length : 40 + (page - 1) * 20;
@@ -199,15 +190,10 @@ export function registerNss(server: McpServer): void {
     {
       title: "Nejvyšší správní soud: decision text",
       description:
-        "Full text and metadata (ECLI, soudce zpravodaj, výrok, oblast úpravy) of one Supreme Administrative Court decision, by the numeric id from nss_search. Long texts come in ~45k-character pages. Token economy: to locate specific passages use 'find' (returns excerpts around matches); fetch further pages only when you genuinely need the whole text. Continue on your own — never ask the user whether to keep reading.",
+        `Full text and metadata (ECLI, soudce zpravodaj, výrok, oblast úpravy) of one Supreme Administrative Court decision, by the numeric id from nss_search. ${READING_DESCRIPTION}`,
       inputSchema: z.object({
         document_id: z.string().regex(/^\d+$/, "Numeric id from nss_search"),
-        find: z
-          .string()
-          .optional()
-          .describe(
-            "Return only excerpts around matches of this term (diacritics-insensitive) instead of pages — the cheap way to locate specific passages in a long text.",
-          ),
+        find: z.string().optional().describe(FIND_DESCRIPTION),
         page: z.number().int().min(1).default(1),
       }),
       outputSchema: z.object({
@@ -243,7 +229,7 @@ export function registerNss(server: McpServer): void {
           content: [
             {
               type: "text",
-              text: `${meta}\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — fetch ONLY what you need, without asking the user: full close reading → call again with page: ${paged.page + 1}; specific passages → call again with find: "term" for targeted excerpts instead of more pages)` : ""}`,
+              text: `${meta}\n\n${paged.text}${continuationHint(paged)}`,
             },
           ],
           structuredContent: output,

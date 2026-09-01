@@ -1,19 +1,10 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
+import { FIND_DESCRIPTION, READ_ONLY, continuationHint, toolFailure } from "./shared";
 import { fetchGuidelinesSection, fetchGuidelinesToc } from "@/src/sources/euipo-guidelines";
-import { SourceError, asSourceError, toToolError } from "@/src/sources/shared/errors";
 import { pageOrExcerpt } from "@/src/sources/shared/text";
 
-const READ_ONLY = {
-  readOnlyHint: true,
-  destructiveHint: false,
-  idempotentHint: true,
-  openWorldHint: true,
-} as const;
-
-function fail(error: unknown) {
-  return toToolError(error instanceof SourceError ? error : asSourceError("EUIPO Guidelines", error));
-}
+const fail = toolFailure("EUIPO Guidelines");
 
 export function registerEuipoGuidelines(server: McpServer): void {
   server.registerTool(
@@ -90,12 +81,7 @@ export function registerEuipoGuidelines(server: McpServer): void {
           .optional()
           .describe("Override the edition (default: current edition of 'register')."),
         register: z.enum(["trademark", "design"]).default("trademark"),
-        find: z
-          .string()
-          .optional()
-          .describe(
-            "Return only excerpts around matches of this term (diacritics-insensitive) instead of pages — the cheap way to locate specific passages in a long text.",
-          ),
+        find: z.string().optional().describe(FIND_DESCRIPTION),
         page: z.number().int().min(1).default(1),
       }),
       outputSchema: z.object({
@@ -129,7 +115,7 @@ export function registerEuipoGuidelines(server: McpServer): void {
           content: [
             {
               type: "text",
-              text: `${section.url}\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — fetch ONLY what you need, without asking the user: full close reading → call again with page: ${paged.page + 1}; specific passages → call again with find: "term" for targeted excerpts instead of more pages)` : ""}`,
+              text: `${section.url}\n\n${paged.text}${continuationHint(paged)}`,
             },
           ],
           structuredContent: output,

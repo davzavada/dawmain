@@ -28,7 +28,7 @@ const ESB = "https://slovník.gov.cz/datový/sbírka/pojem/";
 /** Fragment-page scan cap for the section fallback (each page is one request). */
 const SECTION_SCAN_MAX_PAGES = 15;
 /** Act metadata and version history are near-static — cache 10 min. */
-const metadataCache = new TtlCache<unknown>(10 * 60 * 1000);
+const metadataCache = new TtlCache<unknown>(DOCUMENT_TTL_MS);
 const searchCache = new TtlCache<EsbirkaSearchPage>(SEARCH_TTL_MS);
 /** Fragment pages back both §-scans and whole-act paging — page N of a long
  * act should not re-download pages the previous call already fetched. */
@@ -74,8 +74,11 @@ async function esbirkaFetch(request: EsbirkaRequest): Promise<unknown> {
         redirect: attempt.headers["esel-api-access-key"] ? "manual" : "follow",
       });
 
-      // 401/403 on the keyed channel = bad key → try the keyless gateway.
-      if ((response.status === 401 || response.status === 403) && !isLast) {
+      // Any refusal by a channel that is not the last one hands the request to
+      // the next channel: a bad key (401/403), a redirect we refuse to follow
+      // while carrying the key (3xx under redirect:"manual"), a gateway hiccup.
+      // Only 404 is terminal — "no such document" is the same answer on both.
+      if (!response.ok && response.status !== 404 && !isLast) {
         lastError = new Error(`HTTP ${response.status} from ${attempt.base}`);
         continue;
       }
@@ -109,7 +112,15 @@ async function esbirkaFetch(request: EsbirkaRequest): Promise<unknown> {
       }
       return json;
     } catch (error) {
-      if (error instanceof SourceError && error.kind !== "UPSTREAM_UNREACHABLE") throw error;
+      // Terminal verdicts stand whichever channel produced them; an outage or
+      // an unreachable host is exactly what the other channel is there for.
+      // (fetchUpstream turns 429/5xx into UPSTREAM_ERROR before we see the
+      // response, so that kind has to fall through here, not above.)
+      const retriable =
+        !(error instanceof SourceError) ||
+        error.kind === "UPSTREAM_UNREACHABLE" ||
+        error.kind === "UPSTREAM_ERROR";
+      if (!retriable) throw error;
       lastError = error;
       if (isLast) throw error;
     }

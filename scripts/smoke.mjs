@@ -205,14 +205,14 @@ async function checkLive(client) {
 
 /**
  * OAuth discovery (RFC 9728). Passes in both states: 404 = OAuth not
- * configured (AUTHKIT_DOMAIN unset), 200 = metadata must name the /api/mcp
+ * configured (the Clerk keys unset), 200 = metadata must name the /api/mcp
  * resource and at least one authorization server.
  */
 async function checkOAuthMetadata() {
   const origin = new URL(url).origin;
   const response = await fetch(`${origin}/.well-known/oauth-protected-resource`);
   if (response.status === 404) {
-    ok("oauth discovery", "not configured (AUTHKIT_DOMAIN unset)");
+    ok("oauth discovery", "not configured (Clerk keys unset)");
     return;
   }
   if (!response.ok) {

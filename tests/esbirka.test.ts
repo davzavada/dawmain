@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildStaleUrl,
   normalizeSectionLabel,
@@ -123,5 +123,69 @@ describe("parseFragments", () => {
     expect(result.totalPages).toBe(3);
     expect(result.fragments[0].text).toBe("Text ustanovení § 7.");
     expect(result.fragments[0].zkracenaCitace).toContain("§ 7");
+  });
+});
+
+/**
+ * e-Sbírka runs two channels: the registered API (keyed) and the SPA's keyless
+ * gateway, which serves the same paths. The point of the second is that a
+ * refusal by the first does not end the request — so every way the keyed host
+ * can refuse has to reach the gateway, not just a bad key.
+ */
+describe("keyed → keyless channel fallback", () => {
+  const ACT = JSON.stringify({ nazev: "Občanský zákoník", staleUrl: "/sb/2012/89" });
+  const KEYED = "api.e-sbirka.gov.cz";
+  const KEYLESS = "sbr-cache";
+
+  beforeEach(() => {
+    process.env.ESBIRKA_API_KEY = "test-key";
+    vi.resetModules();
+  });
+  afterEach(() => {
+    delete process.env.ESBIRKA_API_KEY;
+    vi.unstubAllGlobals();
+  });
+
+  /** Stub the keyed host with `keyedResponse`; the gateway always answers. */
+  async function getActWith(keyedResponse: () => Response): Promise<string[]> {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", async (url: string) => {
+      calls.push(String(url));
+      return String(url).includes(KEYED) ? keyedResponse() : new Response(ACT, { status: 200 });
+    });
+    const { getAct } = await import("@/src/sources/esbirka");
+    const act = await getAct("/sb/2012/89");
+    expect(act.nazev).toBe("Občanský zákoník");
+    return calls;
+  }
+
+  it("falls back when the key is rejected (401)", async () => {
+    const calls = await getActWith(() => new Response("no", { status: 401 }));
+    expect(calls.some((url) => url.includes(KEYLESS))).toBe(true);
+  });
+
+  it("falls back when the keyed host is down (500)", async () => {
+    const calls = await getActWith(() => new Response("boom", { status: 500 }));
+    expect(calls.some((url) => url.includes(KEYLESS))).toBe(true);
+  });
+
+  it("falls back on a redirect the keyed channel must not follow", async () => {
+    // redirect:"manual" is deliberate — following it would forward the API key
+    // cross-origin. The 3xx that comes back still has to reach the gateway.
+    const calls = await getActWith(
+      () => new Response(null, { status: 302, headers: { location: "https://elsewhere.test/" } }),
+    );
+    expect(calls.some((url) => url.includes(KEYLESS))).toBe(true);
+  });
+
+  it("does NOT retry a 404 on the gateway — the document simply does not exist", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", async (url: string) => {
+      calls.push(String(url));
+      return new Response("missing", { status: 404 });
+    });
+    const { getAct } = await import("@/src/sources/esbirka");
+    await expect(getAct("/sb/2012/99999")).rejects.toMatchObject({ kind: "NOT_FOUND" });
+    expect(calls.filter((url) => url.includes(KEYLESS))).toHaveLength(0);
   });
 });
