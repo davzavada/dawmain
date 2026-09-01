@@ -5,7 +5,7 @@ import { getNalusDecision, searchNalus } from "@/src/sources/nalus";
 import { getNssDecision, searchNss } from "@/src/sources/nss";
 import { getCuriaDocument, searchCuria } from "@/src/sources/curia";
 import { SourceError } from "@/src/sources/shared/errors";
-import { dedupeBy, maxTotal, narrowestWindow, uniqueQueries } from "@/src/sources/shared/text";
+import { dedupeBy, maxTotal, uniqueQueries } from "@/src/sources/shared/text";
 import { buildPreviews, withDeadline } from "./previews";
 import { READ_ONLY, isoDate } from "./shared";
 
@@ -18,7 +18,8 @@ import { READ_ONLY, isoDate } from "./shared";
  * court must not sink the others. Runners RETURN their results (no shared
  * mutable state), so a late completion after a timeout cannot race a second,
  * contradictory status into the response. rozhodnuti.justice.cz is absent by
- * design: it has no server-side search (see justice_list_decisions).
+ * design: its index is first-instance civil, not the top courts' case law
+ * (see justice_search).
  */
 
 const SOURCES = ["nss", "ns", "nalus", "curia"] as const;
@@ -186,15 +187,8 @@ export function registerCzCaselaw(server: McpServer): void {
               searchNs({ query: v, dateFrom: date_from, dateTo: date_to }, 0, per_source_limit),
             ),
           );
-          // NS narrows to a 12-month, then 90-day window when it refuses the
-          // open search. Silence here would present a 90-day slice as the
-          // whole archive — the one thing a rešerše must never be told wrong.
-          const windowed = narrowestWindow(results.map((r) => r.appliedWindowFrom));
           return {
             total: maxTotal(results.map((r) => r.matched ?? r.total)),
-            ...(windowed
-              ? { note: `only decisions decided since ${windowed} — NS refused the open search` }
-              : {}),
             hits: dedupeBy(
               results.flatMap((r) => r.hits),
               (hit) => hit.unid,

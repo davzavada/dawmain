@@ -121,16 +121,14 @@ const EXPECTED_TOOLS = [
   "nss_search",
   "nss_get_decision",
   "cz_caselaw_search",
-  "justice_list_decisions",
+  "justice_search",
   "justice_get_decision",
   "curia_search",
   "curia_get_document",
   "eurlex_search",
   "eurlex_get_document",
   "eurlex_legislative_history",
-  // Deliberately unregistered (see src/mcp/tools/index.ts): the EUIPO tools
-  // (their legal notices opt out of automated access) and the ÚPV tools (the
-  // portal drops datacenter connections).
+  // EUIPO and ÚPV are deliberately not covered — see src/mcp/tools/index.ts.
 ];
 
 async function checkTools(client) {

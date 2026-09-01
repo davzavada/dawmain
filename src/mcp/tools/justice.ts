@@ -8,73 +8,171 @@ import {
   isoDate,
   toolFailure,
 } from "./shared";
-import { getJusticeDecision, listJusticeDecisions } from "@/src/sources/justice";
+import {
+  JUSTICE_COURT_CODES,
+  JUSTICE_DOC_TYPES,
+  getJusticeDecision,
+  searchJustice,
+} from "@/src/sources/justice";
 import { pageOrExcerpt, snippet } from "@/src/sources/shared/text";
 
 const fail = toolFailure("rozhodnuti.justice.cz");
 
+/** Czech names for the decision types, so the schema reads as law, not as enum. */
+const TYPE_LABELS: Record<string, string> = {
+  JUDGEMENT: "rozsudek",
+  ORDER_T: "trestní příkaz",
+  RESOLUTION: "usnesení",
+};
+
 export function registerJustice(server: McpServer): void {
   server.registerTool(
-    "justice_list_decisions",
+    "justice_search",
     {
-      title: "Obecné soudy: list decisions by date",
+      title: "Obecné soudy: search decisions",
       description:
-        "List decisions of Czech general courts (okresní, krajské, vrchní) from the Ministry of Justice open-data API. IMPORTANT LIMITATION: this source has NO server-side search — listings go strictly by PUBLICATION date (windows of at most 7 days), and 'court'/'keyword' are client-side filters over that window's metadata only. For full-text case-law research prefer cz_caselaw_search (NSS/NS/ÚS). Data starts 2020-10, mostly first-instance civil decisions; party names are anonymized. Recent days are backfilled — lists near today are not final.",
+        "FULL-TEXT search of Czech general-court decisions (okresní, krajské, vrchní — plus NS/NSS/ÚS copies) in the Ministry of Justice database. Czech queries; match: all_words (default), any_word, phrase. Also filters by spisová značka, court (court_codes), decision type, decision date, publication date, and — the citator these courts otherwise lack — applies_act '89/2012' + applies_section '§ 2201' finds decisions that APPLIED that provision, with no keywords at all. Hits carry a uuid for justice_get_decision, the výrok, and 'affects': what the decision did to the lower court's ruling (CHANGE/CONFIRM/CANCEL…). Data starts 2020-10, mostly first-instance civil decisions; party names are anonymized. Full-text over the whole archive is slow — add a date range when you can. For NS/NSS/ÚS case law prefer cz_caselaw_search, whose indexes are richer.",
       inputSchema: z.object({
-        date_from: isoDate.describe("Publication date from (ISO)."),
-        date_to: isoDate.describe("Publication date to (ISO); window of at most 7 days."),
-        court: z.string().optional().describe("Substring of the court name, e.g. 'Okresní soud v Mostě'."),
-        keyword: z
+        query: z.string().optional().describe("Czech full-text query over the decision texts."),
+        match: z
+          .enum(["all_words", "any_word", "phrase"])
+          .default("all_words")
+          .describe("How the query terms combine."),
+        case_number: z
           .string()
           .optional()
-          .describe("Substring matched over jednací číslo, předmět řízení, keywords and cited provisions."),
+          .describe("Spisová značka, e.g. '8 Co 60/2025' — matched field by field."),
+        court_codes: z
+          .array(z.string())
+          .max(20)
+          .optional()
+          .describe(
+            "Court codes (OR). OS… = okresní soud, OSPH01–10 = obvodní soudy pro Prahu, KS… = krajský, MS… = městský, VSOL/VSPH = vrchní, NS/NSS/US. E.g. ['KSBR','MSPH']. An invalid code returns the full list.",
+          ),
+        types: z
+          .array(z.enum(JUSTICE_DOC_TYPES))
+          .optional()
+          .describe("JUDGEMENT = rozsudek, RESOLUTION = usnesení, ORDER_T = trestní příkaz."),
+        date_from: isoDate.optional().describe("Decision date from (ISO) — when the court decided."),
+        date_to: isoDate.optional().describe("Decision date to (ISO)."),
+        published_from: isoDate
+          .optional()
+          .describe("Publication date from (ISO) — for monitoring what is newly published."),
+        published_to: isoDate.optional().describe("Publication date to (ISO)."),
+        applies_act: z
+          .string()
+          .optional()
+          .describe(
+            "Only decisions applying this act — 'číslo/rok', e.g. '89/2012' (o. z.), '99/1963' (o. s. ř.), '40/2009' (tr. zákoník). Works without keywords.",
+          ),
+        applies_section: z
+          .string()
+          .optional()
+          .describe("Narrows applies_act to one §, e.g. '§ 2201' or '2201'. Requires applies_act."),
+        sort: z
+          .enum(["published", "decided"])
+          .default("published")
+          .describe("Newest first by publication date (default) or by decision date."),
         limit: z.number().int().min(1).max(50).default(20),
+        page: z.number().int().min(0).default(0).describe("Result page (0-indexed)."),
       }),
       outputSchema: z.object({
+        total: z.number(),
         count: z.number(),
-        days_walked: z.array(z.string()),
-        pages_fetched: z.number(),
-        truncated: z.boolean(),
+        page: z.number(),
+        total_pages: z.number(),
+        has_more: z.boolean(),
         items: z.array(
           z.object({
             uuid: z.string(),
-            jednaciCislo: z.string().optional(),
-            soud: z.string().optional(),
+            caseNumber: z.string().optional(),
             ecli: z.string().optional(),
-            predmetRizeni: z.string().optional(),
-            datumVydani: z.string().optional(),
-            datumZverejneni: z.string().optional(),
-            klicovaSlova: z.array(z.string()).optional(),
+            court: z.string().optional(),
+            type: z.string().optional(),
+            decidedAt: z.string().optional(),
+            publishedAt: z.string().optional(),
+            judge: z.string().optional(),
+            subject: z.string().optional(),
+            affects: z.array(
+              z.object({
+                caseNumber: z.string().optional(),
+                court: z.string().optional(),
+                date: z.string().optional(),
+                types: z.array(z.string()),
+              }),
+            ),
             url: z.string(),
           }),
         ),
       }),
       annotations: READ_ONLY,
     },
-    async ({ date_from, date_to, court, keyword, limit }) => {
+    async ({
+      query,
+      match,
+      case_number,
+      court_codes,
+      types,
+      date_from,
+      date_to,
+      published_from,
+      published_to,
+      applies_act,
+      applies_section,
+      sort,
+      limit,
+      page,
+    }) => {
       try {
-        const result = await listJusticeDecisions(date_from, date_to, { court, keyword }, limit);
-        const output = {
-          count: result.items.length,
-          days_walked: result.days_walked,
-          pages_fetched: result.pages_fetched,
-          truncated: result.truncated,
-          items: result.items.map(({ autor: _autor, zminenaUstanoveni: _z, ...item }) => ({
-            ...item,
-            url: `https://rozhodnuti.justice.cz/rozhodnuti/?id=${item.uuid}`,
-          })),
-        };
-        const lines = result.items.map(
-          (item, i) =>
-            `${i + 1}. ${item.jednaciCislo ?? "?"} — ${item.soud ?? "?"}${item.predmetRizeni ? ` — ${snippet(item.predmetRizeni, 90)}` : ""} — uuid ${item.uuid}\n   https://rozhodnuti.justice.cz/rozhodnuti/?id=${item.uuid}`,
+        const result = await searchJustice(
+          {
+            query,
+            match,
+            caseNumber: case_number,
+            courtCodes: court_codes,
+            types,
+            decidedFrom: date_from,
+            decidedTo: date_to,
+            publishedFrom: published_from,
+            publishedTo: published_to,
+            appliesAct: applies_act,
+            appliesSection: applies_section,
+            sort,
+          },
+          page,
+          limit,
         );
-        const text = result.items.length
+        const output = {
+          total: result.total,
+          count: result.hits.length,
+          page: result.page,
+          total_pages: result.totalPages,
+          has_more: result.page + 1 < result.totalPages,
+          // The výrok is often longer than a search result should carry; the
+          // full text is one justice_get_decision away.
+          items: result.hits.map(({ verdict: _verdict, ...hit }) => hit),
+        };
+        const lines = result.hits.map((hit, i) => {
+          const affects = hit.affects
+            .map((a) => `${a.types.join("/")} ${a.caseNumber ?? "?"} (${a.court ?? "?"})`)
+            .join("; ");
+          return [
+            `${page * limit + i + 1}. ${hit.caseNumber ?? "?"} — ${hit.court ?? "?"}${hit.type ? ` (${TYPE_LABELS[hit.type] ?? hit.type})` : ""}${hit.decidedAt ? ` ${hit.decidedAt}` : ""}`,
+            hit.subject ? `   ${snippet(hit.subject, 120)}` : null,
+            affects ? `   mění/potvrzuje: ${affects}` : null,
+            hit.verdict ? `   výrok: ${snippet(hit.verdict, 220)}` : null,
+            `   uuid ${hit.uuid}\n   ${hit.url}`,
+          ]
+            .filter(Boolean)
+            .join("\n");
+        });
+        const text = result.hits.length
           ? [
-              `${result.items.length} decisions (window ${date_from}..${date_to}${result.truncated ? "; page budget hit — narrow the window or filters" : ""}):`,
+              `${result.total} decisions (page ${result.page + 1}/${result.totalPages}):`,
               ...lines,
               "Full text: justice_get_decision {uuid}.",
             ].join("\n")
-          : `No decisions matched in ${date_from}..${date_to}. Note this source lists by PUBLICATION date and holds mostly first-instance civil decisions from 2020-10 on.`;
+          : "No decisions matched. This database starts 2020-10 and holds mostly first-instance civil decisions — broaden the query, widen the dates, or try cz_caselaw_search for NS/NSS/ÚS case law.";
         return { content: [{ type: "text", text }], structuredContent: output };
       } catch (error) {
         return fail(error);
@@ -86,10 +184,9 @@ export function registerJustice(server: McpServer): void {
     "justice_get_decision",
     {
       title: "Obecné soudy: decision text",
-      description:
-        `Full anonymized text of one general-court decision by its UUID from justice_list_decisions. ${READING_DESCRIPTION}`,
+      description: `Full anonymized text of one general-court decision by its UUID from justice_search. ${READING_DESCRIPTION}`,
       inputSchema: z.object({
-        uuid: z.string().uuid().describe("Decision UUID from justice_list_decisions."),
+        uuid: z.string().uuid().describe("Decision UUID from justice_search."),
         find: z.string().optional().describe(FIND_DESCRIPTION),
         page: z.number().int().min(1).default(1),
       }),
@@ -121,10 +218,7 @@ export function registerJustice(server: McpServer): void {
         };
         return {
           content: [
-            {
-              type: "text",
-              text: `${decision.url}\n\n${paged.text}${continuationHint(paged)}`,
-            },
+            { type: "text", text: `${decision.url}\n\n${paged.text}${continuationHint(paged)}` },
           ],
           structuredContent: output,
         };

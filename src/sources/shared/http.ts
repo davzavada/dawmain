@@ -114,7 +114,7 @@ function errorLabel(error: unknown): string {
 
 /**
  * Minimal cookie jar for multi-step flows (NALUS viewstate dance, NSS
- * antiforgery handshake, EUIPO PDF download). Lives only for the duration of
+ * antiforgery handshake). Lives only for the duration of
  * one tool invocation unless a source deliberately caches it in module scope.
  */
 export class CookieSession {

@@ -7,10 +7,10 @@ import {
   refineCuriaHits,
 } from "@/src/sources/curia";
 import {
-  enumerateDays,
-  filterJusticeItems,
+  buildJusticeQuery,
+  formatCaseNumber,
   parseJusticeDecision,
-  parseJusticeListing,
+  parseJusticeSearch,
 } from "@/src/sources/justice";
 import { SourceError } from "@/src/sources/shared/errors";
 
@@ -324,101 +324,8 @@ describe("refineCuriaHits", () => {
   });
 });
 
-describe("enumerateDays", () => {
-  it("lists inclusive day windows", () => {
-    expect(enumerateDays("2026-08-01", "2026-08-03")).toEqual([
-      "2026-08-01",
-      "2026-08-02",
-      "2026-08-03",
-    ]);
-  });
-  it("rejects reversed and oversized windows", () => {
-    expect(() => enumerateDays("2026-08-03", "2026-08-01")).toThrowError(SourceError);
-    expect(() => enumerateDays("2026-08-01", "2026-08-20")).toThrowError(SourceError);
-  });
-});
 
-describe("parseJusticeListing", () => {
-  // Synthetic — item fields verbatim from the ministry's OpenAPI + live probes.
-  const payload = {
-    items: [
-      {
-        jednaciCislo: "14 C 263/2020-19",
-        soud: "Okresní soud v Mostě",
-        autor: "JUDr. Jan Novák",
-        ecli: "ECLI:CZ:OSMO:2020:14.C.263.2020.2",
-        predmetRizeni: "o zaplacení 12 000 Kč",
-        datumVydani: "2020-10-15",
-        datumZverejneni: "2020-10-20",
-        klicovaSlova: ["smlouva o úvěru"],
-        zminenaUstanoveni: ["§ 142 z. č. 99/1963 Sb."],
-        odkaz: "https://rozhodnuti.justice.cz/api/finaldoc/1d6380c9-0364-498a-b494-d162a90121cb",
-      },
-    ],
-    totalPages: 4,
-    pageNumber: 0,
-  };
 
-  it("extracts items and the uuid from the odkaz", () => {
-    const listing = parseJusticeListing(payload);
-    expect(listing.totalPages).toBe(4);
-    expect(listing.items[0].uuid).toBe("1d6380c9-0364-498a-b494-d162a90121cb");
-    expect(listing.items[0].soud).toBe("Okresní soud v Mostě");
-  });
-
-  it("finds the uuid even behind a trailing slash or query string", () => {
-    const listing = parseJusticeListing({
-      items: [
-        { odkaz: "https://rozhodnuti.justice.cz/api/finaldoc/1d6380c9-0364-498a-b494-d162a90121cb/?v=2" },
-      ],
-      totalPages: 1,
-    });
-    expect(listing.items[0].uuid).toBe("1d6380c9-0364-498a-b494-d162a90121cb");
-  });
-
-  it("drops rows with no uuid — justice_get_decision has no other handle", () => {
-    const listing = parseJusticeListing({
-      items: [
-        { jednaciCislo: "1 C 1/2020", odkaz: "" },
-        { jednaciCislo: "2 C 2/2020", odkaz: "https://rozhodnuti.justice.cz/api/finaldoc/1d6380c9-0364-498a-b494-d162a90121cb" },
-      ],
-      totalPages: 1,
-    });
-    expect(listing.items.map((item) => item.jednaciCislo)).toEqual(["2 C 2/2020"]);
-  });
-
-  it("throws PARSE_DRIFT without items", () => {
-    expect(() => parseJusticeListing({})).toThrowError(SourceError);
-  });
-});
-
-describe("filterJusticeItems", () => {
-  const items = parseJusticeListing({
-    items: [
-      {
-        jednaciCislo: "14 C 263/2020-19",
-        soud: "Okresní soud v Mostě",
-        predmetRizeni: "o zaplacení",
-        klicovaSlova: ["úvěr"],
-        odkaz: ".../11111111-2222-3333-4444-555555555555",
-      },
-      {
-        jednaciCislo: "5 T 1/2021",
-        soud: "Krajský soud v Brně",
-        predmetRizeni: "podplácení",
-        odkaz: ".../66666666-7777-8888-9999-aaaaaaaaaaaa",
-      },
-    ],
-    totalPages: 1,
-  }).items;
-
-  it("filters by court substring and keyword", () => {
-    expect(filterJusticeItems(items, { court: "mostě" })).toHaveLength(1);
-    expect(filterJusticeItems(items, { keyword: "úvěr" })).toHaveLength(1);
-    expect(filterJusticeItems(items, { keyword: "podplácení" })[0].soud).toContain("Brně");
-    expect(filterJusticeItems(items, {})).toHaveLength(2);
-  });
-});
 
 describe("parseJusticeDecision", () => {
   it("prefers verdictText + justificationText", () => {
@@ -445,5 +352,137 @@ describe("parseJusticeDecision", () => {
 
   it("throws PARSE_DRIFT when no text is present", () => {
     expect(() => parseJusticeDecision({ metadata: {} }, "x")).toThrowError(SourceError);
+  });
+});
+
+/**
+ * Shapes verbatim from live /api/finaldoc responses (captured 2026-09 through
+ * the deployment's own probe). The endpoint is the SPA's, not the documented
+ * open-data one, so the parser is written against what it actually returns.
+ */
+describe("justice.cz search", () => {
+  const live = {
+    items: [
+      {
+        uuid: "0de9a948-38d8-4d00-8010-cf5a2e086f73",
+        metadata: {
+          type: "JUDGEMENT",
+          ecli: "ECLI:CZ:KSOS:2025:8.Co.60.2025.1",
+          publishedAt: "2025-07-23",
+          decisionAt: "2025-06-02",
+          caseNumber: { senate: 8, registry: "Co", index: 60, year: 2025, pageNumber: 174 },
+          solver: {
+            titlesBefore: "JUDr.",
+            firstName: "Šárka",
+            lastName: "Neuwirthová",
+            titlesAfter: "",
+            function: "předsedkyně senátu",
+          },
+          courtCode: "KSOS",
+          caseSubject: "o zaplacení 94.401,99 Kč s příslušenstvím",
+          affectedDocs: [
+            {
+              caseNumber: { senate: 12, registry: "C", index: 2, year: 2024, pageNumber: 144 },
+              affectedDate: "2024-11-08",
+              courtCode: "OSNJ",
+              affectedTypes: ["CHANGE"],
+              url: null,
+            },
+          ],
+        },
+        verdictText: "I. Rozsudek okresního soudu se v napadené části mění tak, že…",
+        searchMatches: null,
+      },
+    ],
+    numberOfItems: 1,
+    pageSize: 1,
+    pageNumber: 0,
+    totalPages: 8,
+    totalElements: 8,
+  };
+
+  it("parses a live hit, including what it did to the lower court's ruling", () => {
+    const page = parseJusticeSearch(live);
+    expect(page.total).toBe(8);
+    expect(page.totalPages).toBe(8);
+    const [hit] = page.hits;
+    expect(hit.caseNumber).toBe("8 Co 60/2025-174");
+    expect(hit.court).toBe("KSOS");
+    expect(hit.decidedAt).toBe("2025-06-02");
+    expect(hit.judge).toBe("JUDr. Šárka Neuwirthová");
+    expect(hit.affects).toEqual([
+      { caseNumber: "12 C 2/2024-144", court: "OSNJ", date: "2024-11-08", types: ["CHANGE"] },
+    ]);
+    expect(hit.url).toContain(hit.uuid);
+  });
+
+  it("drops rows without a uuid — it is the only handle the next tool takes", () => {
+    const page = parseJusticeSearch({ items: [{ metadata: { ecli: "X" } }], totalElements: 1 });
+    expect(page.hits).toHaveLength(0);
+  });
+
+  it("throws PARSE_DRIFT without items", () => {
+    expect(() => parseJusticeSearch({})).toThrowError(SourceError);
+  });
+
+  it("formats a case number, and gives up when the index or year is missing", () => {
+    expect(formatCaseNumber({ senate: 30, registry: "C", index: 87, year: 2023 })).toBe("30 C 87/2023");
+    expect(formatCaseNumber({ registry: "C", index: 87, year: 2023 })).toBe("C 87/2023");
+    expect(formatCaseNumber({ senate: 30, registry: "C" })).toBeUndefined();
+    expect(formatCaseNumber(undefined)).toBeUndefined();
+  });
+
+  it("builds the query the SPA sends", () => {
+    const params = buildJusticeQuery(
+      {
+        query: "nájem bytu",
+        match: "phrase",
+        caseNumber: "8 Co 60/2025",
+        courtCodes: ["ksos"],
+        types: ["JUDGEMENT"],
+        decidedFrom: "2025-01-01",
+        publishedTo: "2026-01-01",
+        appliesAct: "89/2012 Sb.",
+        appliesSection: "§ 2201",
+        sort: "decided",
+      },
+      2,
+      10,
+    );
+    expect(params.get("searchText")).toBe("nájem bytu");
+    expect(params.get("searchMode")).toBe("EXACT");
+    expect(params.get("caseNumberSenate")).toBe("8");
+    expect(params.get("caseNumberRegistry")).toBe("Co");
+    expect(params.get("caseNumberIndex")).toBe("60");
+    expect(params.get("caseNumberYear")).toBe("2025");
+    expect(params.getAll("courtCodes")).toEqual(["KSOS"]);
+    expect(params.getAll("type")).toEqual(["JUDGEMENT"]);
+    expect(params.get("issuedFrom")).toBe("2025-01-01");
+    expect(params.get("publishedTo")).toBe("2026-01-01");
+    expect(params.get("regulationNumber")).toBe("89");
+    expect(params.get("regulationYear")).toBe("2012");
+    expect(params.get("regulationParagraph")).toBe("2201");
+    expect(params.get("sortBy")).toBe("DECISION_AT");
+    expect(params.get("page")).toBe("2");
+    expect(params.get("limit")).toBe("10");
+  });
+
+  it("omits searchMode when there is nothing to search for", () => {
+    const params = buildJusticeQuery({ appliesAct: "99/1963" }, 0, 20);
+    expect(params.has("searchText")).toBe(false);
+    expect(params.has("searchMode")).toBe(false);
+    expect(params.get("sortBy")).toBe("PUBLISHED_AT");
+  });
+
+  it("refuses an unknown court code with the menu, not zero hits", () => {
+    // The API accepts any string here and answers an unknown one with an empty
+    // result — indistinguishable from "no such case law exists".
+    expect(() => buildJusticeQuery({ courtCodes: ["OSXX"] }, 0, 20)).toThrowError(/not a justice\.cz court code/);
+  });
+
+  it("rejects a section with no act, and inputs it cannot map", () => {
+    expect(() => buildJusticeQuery({ appliesSection: "§ 2201" }, 0, 20)).toThrowError(SourceError);
+    expect(() => buildJusticeQuery({ appliesAct: "obcansky zakonik" }, 0, 20)).toThrowError(SourceError);
+    expect(() => buildJusticeQuery({ caseNumber: "nesmysl" }, 0, 20)).toThrowError(SourceError);
   });
 });

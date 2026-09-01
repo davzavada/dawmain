@@ -84,14 +84,14 @@ quoted passages stay in the original.
 | Deeper digging in one court | `ns_search`, `nss_search`, `nalus_search` |
 | Full text of a decision | `ns_get_decision {unid}`, `nss_get_decision {document_id}`, `nalus_get_decision {sz}` |
 | Which act, and its wording | `esbirka_search` → `esbirka_get_act` → `esbirka_get_text` (whole act, or one § via `section: "§ 12"`, any date) |
-| Lower courts (okresní/krajské/vrchní) | `justice_list_decisions` → `justice_get_decision` — lists by PUBLICATION date only, there is no server-side search |
+| Lower courts (okresní/krajské/vrchní) | `justice_search` → `justice_get_decision` — full text, spisová značka, soud, druh, data, and applied provision |
 | CJEU | `curia_search` → `curia_get_document` (`language: "cs"` falls back to English) |
 | EU legislation | `eurlex_search` (titles/CELEX/ECLI only, NOT full text) → `eurlex_get_document` |
 | EU legislative materials (travaux) | `eurlex_legislative_history {celex}` — the act's whole dossier: proposal + explanatory memorandum, impact assessments, EESC/CoR opinions, EP/Council positions; or `eurlex_search` with `types: ["proposal", "opinion", …]` |
 | A source misbehaves | `dawmain_probe_sources` |
 
 Not covered: EUIPO and ÚPV. If the question needs them, say so and point at
-euipo.europa.eu / isdv.upv.gov.cz.
+euipo.europa.eu / isdv.upv.gov.cz — do not answer from memory instead.
 
 ## Query craft — the precision lever
 
@@ -157,10 +157,17 @@ so re-running a search after reading is cheap.
 - **e-Sbírka** — `match: "phrase"` for a term of art, `all_words` for a combination,
   `exclude_words` to shake off a homonym; `esbirka_get_text {date}` for the wording in
   force at the relevant time.
-- **Obecné soudy** — no full-text search exists: `justice_list_decisions` walks
-  publication days (≤ 7 per call) with client-side `court` / `keyword` filters. Use it
-  for lower-court practice or when the top courts are silent, and say in the memo that
-  this source cannot be searched by content.
+- **Obecné soudy** — `justice_search` is a real full-text search (`match`:
+  `all_words` / `any_word` / `phrase`), plus `court_codes`, `types`, decision and
+  publication dates. Its sharpest filter needs no keywords at all:
+  `applies_act: "89/2012"` + `applies_section: "§ 2201"` returns the decisions that
+  APPLIED that provision — the citator these courts otherwise lack. Every hit carries
+  `affects`: what the decision did to the ruling below it (CHANGE / CONFIRM / CANCEL),
+  which is how you tell a confirmed line from a reversed one. Use it for lower-court
+  practice, for how a provision is applied day to day, and when the top courts are
+  silent. Two honest caveats for the memo: the index starts 10/2020 and is mostly
+  first-instance civil, and it is persuasive practice, not binding authority — never
+  let it outrank NS/NSS/ÚS. Unbounded full text is slow; add dates.
 - **EU legislation** — `eurlex_search` matches titles and identifiers only; for the
   text of judgments use `curia_search`.
 - **EU legislative materials** — when the question turns on purpose or history of an
@@ -224,9 +231,8 @@ and anything in square brackets is stripped.
 query is.
 
 A full-text search covers the **whole** database — there is no hidden recency window,
-so a dateless search reaches judgments from the 1990s as readily as last month's. If
-`applied_window_from` comes back set, NS refused the open search and the server fell
-back to a window; say so if it matters to the answer.
+so a dateless search reaches judgments from the 1990s as readily as last month's. The
+query goes upstream exactly as you wrote it; nothing narrows it behind your back.
 
 **When the ceiling bites, narrow — don't page.** `matched` above 900 means the query is
 too wide to address: add a term, a date range, `type` or `category`. Paging to offset

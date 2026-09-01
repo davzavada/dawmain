@@ -14,7 +14,7 @@ Uživatelský popis je v [README](../README.md).
 | `nss_search` / `nss_get_decision` | vyhledavac.nssoud.cz | judikatura NSS i krajských správních soudů: fulltext, sp. zn., aplikovaný předpis a ustanovení (`applies_act`/`applies_treaty`/`applies_eu_regulation`/`applies_eu_directive` + `applies_provision`), soud/senát vč. rozšířeného, rejstřík, oblast úpravy, datum rozhodnutí i zpřístupnění — vše server-side dle zachyceného POSTu formuláře (číselníky se řeší za běhu z `ciselnikTreeData`) |
 | `nalus_search` / `nalus_get_decision` | nalus.usoud.cz | judikatura ÚS: fulltext (vč. zóny disentů a řazení dle významu), citace/ECLI, soudce zpravodaj i disentující, výrok, navrhovatel, napadený akt (druh/číslo/název/ust. — abstraktní přezkum bez klíčových slov), dotčený orgán, jen publikovaná, datum rozhodnutí i zpřístupnění — číselníky verbatim ze zachyceného POSTu formuláře |
 | `cz_caselaw_search` | NSS + NS + ÚS | jeden dotaz paralelně přes tři vrcholné soudy |
-| `justice_list_decisions` / `justice_get_decision` | rozhodnuti.justice.cz | obecné soudy — výpis po dnech zveřejnění (zdroj nemá server-side vyhledávání) |
+| `justice_search` / `justice_get_decision` | rozhodnuti.justice.cz | obecné soudy (okresní/krajské/vrchní): fulltext (`match` všechna slova/jedno ze slov/fráze), spisová značka, kódy soudů, druh rozhodnutí, datum vydání i zveřejnění, aplikovaný předpis a § (`applies_act` + `applies_section`) — vše server-side přes `/api/finaldoc`, backend SPA zachycený z živého požadavku; hit nese i `affects` (co rozhodnutí udělalo s rozhodnutím nižšího soudu: CHANGE/CONFIRM/CANCEL…) |
 | `curia_search` / `curia_get_document` | InfoCuria + Cellar | FULLTEXT judikatury SDEU (C i T) přes vlastní index soudu — hledá napříč všemi jazykovými verzemi; typ dokumentu, stav věci, citovaný předpis a článek (`cites_celex`/`cites_article`), předběžné otázky podle předkládajícího státu (`referred_from`), datumy — vše server-side dle zachyceného payloadu SPA | 
 | `eurlex_search` / `eurlex_get_document` | Cellar SPARQL (Publications Office) | EU legislativa, judikatura i legislativní materiály (návrhy COM, sdělení, zelené/bílé knihy, SWD, impact assessmenty, stanoviska EHSV/VR, postoje EP a Rady) dle názvů, CELEX/ECLI, typů a dat; texty z oficiálního Cellaru |
 | `eurlex_legislative_history` | Cellar SPARQL (Publications Office) | travaux préparatoires aktu z dossieru interinstitucionálního postupu (`cdm:dossier_contains_work` — obsahuje i přijatý akt, takže kotví CELEX aktu i kteréhokoli dokumentu postupu, případně číslo postupu `2012/0011(COD)`); vrací návrh s důvodovou zprávou, impact assessmenty, stanoviska, postoje EP/Rady + číslo postupu, právní základ a stav (přijato/projednáváno/staženo) |
@@ -22,16 +22,17 @@ Uživatelský popis je v [README](../README.md).
 | `dawmain_probe_sources` | — | diagnostika všech upstreamů z nasazené funkce; `include_raw` pro záchyt fixtures, `discover` pro hledání neověřených endpointů |
 
 Známá omezení (přiznaná i v popisech nástrojů): NS adresuje jen prvních 900
-výsledků dotazu (zužuj dotazem, ne stránkováním); justice.cz umí jen výpis po dnech.
+výsledků dotazu (zužuj dotazem, ne stránkováním); justice.cz drží data od
+10/2020, převážně civilní prvoinstanční, a neohraničený fulltext je pomalý.
 Odkazy na rozhodnutí NS nesou `&Highlight=0,<termy>`, takže se dokument otevře
 rovnou na hledaném místě.
-**EUIPO** (eSearchCLW i Guidelines) je záměrně nedostupné: právní doložky EUIPO
-si výslovně vyhrazují zákaz TDM a scrapingu „jakýmikoli prostředky, včetně
-botů" mimo vědecký výzkum, takže nástroje nejsou registrované a probe na EUIPO
-nesahá; klienti zůstávají v `src/sources/` pro případ písemného svolení.
-**ÚPV** (isdv.upv.gov.cz) zahazuje spojení z datacentrových IP (ověřeno živě z regionu fra1 na obou hostech),
-takže nástroje `upv_browse`/`upv_get_decision` nejsou registrované a probe na
-ÚPV nesahá; kód zůstává v `src/`, kdyby se zdroj zpřístupnil.
+**EUIPO** (eSearchCLW i Guidelines) a **ÚPV** (isdv.upv.gov.cz) záměrně
+pokryté nejsou a kód pro ně v repu není: doložky EUIPO si vyhrazují zákaz TDM
+a scrapingu „jakýmikoli prostředky, včetně botů" mimo vědecký výzkum (bez
+ohledu na objem), ÚPV zahazuje spojení z datacentrových IP (ověřeno živě z
+fra1 na obou hostech). Dřív tu klienti leželi nepoužití; byly to nedosažitelné
+řádky stárnoucí proti webům, které nikdo nekontroloval. V historii gitu
+zůstávají, ale kdyby se zdroje otevřely, stejně by se psaly znovu.
 
 ## Architektura
 
@@ -51,9 +52,6 @@ src/sources/shared/         fetchUpstream, CookieSession, chybová taxonomie, ch
 docs/research/*.json        verbatim rešerše endpointů všech zdrojů
 tests/                      unit testy parserů a fetchUpstream proti fixtures
 scripts/smoke.mjs           end-to-end test po drátě (obě generace protokolu)
-scripts/fetch-fixtures.mjs  jednorázový bootstrap fixtures z veřejných GitHub rep
-                            (fixtures jsou commitnuté; lepší zdroj je dnes
-                            dawmain_probe_sources {include_raw: true})
 ```
 
 Zásady: každý nástroj má `annotations` (vše read-only), stránkování
@@ -98,11 +96,11 @@ produkci. Bez `vercel.json`; Next.js si Vercel detekuje sám.
    Redeploy.
 2. Spusť smoke proti nasazení (viz výše), pak `SMOKE_LIVE=1`.
 3. Zavolej `dawmain_probe_sources` — ověří všechny upstreamy z nasazení.
-4. `dawmain_probe_sources {discover: true}` vypíše (a) kandidátní search
-   endpoint SPA justice.cz, (b) skutečná pole formuláře NSS — obojí slouží
-   k doladění `src/sources/nss.ts` a k budoucímu `justice_search`.
-5. Volitelná jednorázovka v prohlížeči (DevTools → Network): zachytit XHR
-   filtrovaného hledání na rozhodnuti.justice.cz — odemkne server-side filtry.
+4. `dawmain_probe_sources {discover: true}` vypíše skutečná pole formuláře
+   NSS — slouží k doladění mapování v `src/sources/nss.ts`.
+5. `dawmain_probe_sources {include_raw: true, sources: ["ns"]}` zachytí syrové
+   tělo odpovědi jako podklad pro fixture (po jednom zdroji — všechny naráz se
+   nevejdou do rozpočtu odpovědi).
 
 ## Připojení klienta
 
@@ -149,19 +147,21 @@ ne hádat.
 - Neměnná data se cachují per warm instance: metadata a historie znění
   e-Sbírky (10 min), NSS handshake (10 min), texty dokumentů (10 min)
   a výsledky hledání (5 min).
-- NS: fulltext hledá v celé databázi; okno (12 měsíců → 90 dnů) se nasadí jen
-  když server odmítne, a odpověď to přizná v `applied_window_from`. Každá
-  varianta dotazu se zužuje samostatně, takže se hlásí nejpozdější okno ze
-  všech (`narrowestWindow`) - jinak by odpověď tvrdila „celý archiv", zatímco
-  dvě ze tří variant viděly 90 dnů. `cz_caselaw_search` totéž hlásí v `note`
-  u stavu NS. Domino odmítá malé `Count` (HTTP 500), takže se vždy žádá aspoň
+- NS: fulltext hledá v celé databázi, dotaz jde nahoru tak, jak ho volající
+  napsal. Dřív tu byla záchrana, která odmítnutý bezdatumový dotaz tiše
+  zopakovala v okně 12 měsíců a pak 90 dnů; byl to workaround na HTTP 500,
+  které způsoboval náš vlastní malý `Count` (viz `NS_MIN_COUNT`), a po jeho
+  opravě už jen schovávala archiv, aniž by se kdo ptal. Odmítnutí se dnes
+  hlásí jako odmítnutí. Domino odmítá malé `Count`, takže se vždy žádá aspoň
   20 řádků a ořezává se lokálně.
-- Procházení justice.cz je stropované 20 stránkami na volání, scan § v
-  e-Sbírce 15 stránkami; vše končí hned po naplnění limitu.
+- Scan § v e-Sbírce je stropovaný 15 stránkami a končí hned po naplnění
+  limitu; hledání na justice.cz má 30s timeout (neohraničený fulltext je nad
+  výchozích 15 s).
 - Texty dokumentů se vracejí po stránkách 45 000 znaků (bezpečně pod limity klientů) — typické rozhodnutí
   v jedné odpovědi; delší texty nesou pokyn agentovi pokračovat bez ptaní.
 - Timeouty: výchozí 15 s/request; odchylky: NSS POST 25 s, Cellar retrieval 25 s,
-  Cellar SPARQL 30 s, e-Sbírka SPARQL 20 s. Celá invokace ≤ 60 s.
+  Cellar SPARQL 30 s, justice.cz hledání 30 s, e-Sbírka SPARQL 20 s. Celá
+  invokace ≤ 60 s.
 
 ## Autentizace
 

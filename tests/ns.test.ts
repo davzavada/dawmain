@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import {
   buildNsQuery,
-  isoDaysAgo,
   nsFetchCount,
   parseSpisovaZnacka,
   sanitizeNsFullText,
@@ -12,7 +11,6 @@ import {
   parseNsDecision,
   parseNsSearch,
   usToIso,
-  withDefaultWindow,
 } from "@/src/sources/ns";
 import { SourceError } from "@/src/sources/shared/errors";
 
@@ -122,26 +120,6 @@ describe("withHighlight", () => {
   });
 });
 
-describe("default window", () => {
-  const now = Date.UTC(2026, 7, 25); // 2026-08-25
-
-  it("applies date_from when no dates are given", () => {
-    const { input, appliedWindowFrom } = withDefaultWindow({ query: "x" }, 365, now);
-    expect(appliedWindowFrom).toBe("2025-08-25");
-    expect(input.dateFrom).toBe("2025-08-25");
-  });
-
-  it("never touches explicit dates", () => {
-    const { input, appliedWindowFrom } = withDefaultWindow({ query: "x", dateTo: "2020-01-01" }, 365, now);
-    expect(appliedWindowFrom).toBeNull();
-    expect(input.dateTo).toBe("2020-01-01");
-    expect(input.dateFrom).toBeUndefined();
-  });
-
-  it("isoDaysAgo computes ISO dates", () => {
-    expect(isoDaysAgo(30, now)).toBe("2026-07-26");
-  });
-});
 
 // Synthetic — assembled from the verbatim markup in docs/research/cz-sources.json
 // (a.odk anchor regex, count banners, resultData rows have no tbody).

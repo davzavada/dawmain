@@ -1,7 +1,7 @@
 import { SourceError } from "./shared/errors";
 import { fetchUpstream } from "./shared/http";
 import { htmlToText, loadHtml } from "./shared/html";
-import { SEARCH_OPERATORS, czechToIso } from "./shared/text";
+import { SEARCH_OPERATORS, czechToIso, parseCaseNumber } from "./shared/text";
 import { DOCUMENT_TTL_MS, SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
 
 /**
@@ -54,13 +54,18 @@ export interface SpisovaZnacka {
 
 /**
  * Split "23 Cdo 116/2017" into the four fields Domino indexes separately.
- * Trailing decorations ("- II.", "-1") are ignored: they are not part of the
- * indexed značka. Pure — unit-tested.
+ * Shares the parser with rozhodnuti.justice.cz; only the lowercasing is
+ * ours — [spzn2] is indexed lowercase. Pure — unit-tested.
  */
 export function parseSpisovaZnacka(raw: string): SpisovaZnacka | null {
-  const m = /^\s*(?:(\d{1,3})\s+)?(\p{L}+)\s+(\d+)\s*\/\s*(\d{4})/u.exec(raw);
-  if (!m) return null;
-  return { senate: m[1] ?? null, mark: m[2].toLowerCase(), number: m[3], year: m[4] };
+  const parts = parseCaseNumber(raw);
+  if (!parts) return null;
+  return {
+    senate: parts.senate,
+    mark: parts.registry.toLowerCase(),
+    number: parts.number,
+    year: parts.year,
+  };
 }
 
 /** Balanced-delimiter check for the FT sanitizer. Pure. */
@@ -146,27 +151,6 @@ export function buildNsQuery(input: NsSearchInput): string {
     );
   }
   return clauses.join(" AND ");
-}
-
-/** ISO date `days` back from `now` (default: today). Pure — unit-tested. */
-export function isoDaysAgo(days: number, now = Date.now()): string {
-  return new Date(now - days * 86_400_000).toISOString().slice(0, 10);
-}
-
-/**
- * The Domino box answers HTTP 500 to unbounded queries (capacity, not
- * syntax) — apply a default window when the caller gave no dates. Pure.
- */
-export function withDefaultWindow(
-  input: NsSearchInput,
-  days: number,
-  now = Date.now(),
-): { input: NsSearchInput; appliedWindowFrom: string | null } {
-  if (input.dateFrom || input.dateTo || input.publishedFrom || input.publishedTo) {
-    return { input, appliedWindowFrom: null };
-  }
-  const from = isoDaysAgo(days, now);
-  return { input: { ...input, dateFrom: from }, appliedWindowFrom: from };
 }
 
 export interface NsSearchHit {
@@ -425,7 +409,6 @@ async function runNsSearch(
   input: NsSearchInput,
   start: number,
   count: number,
-  retryOnce = true,
 ): Promise<NsSearchPage> {
   const query = buildNsQuery(input);
   const url =
@@ -448,7 +431,6 @@ async function runNsSearch(
     try {
       return await send();
     } catch (error) {
-      if (!retryOnce) throw error;
       if (!(error instanceof SourceError && error.kind === "UPSTREAM_ERROR")) throw error;
       await new Promise((resolve) => setTimeout(resolve, 1500 + Math.random() * 1000));
       return send();
@@ -464,33 +446,25 @@ async function runNsSearch(
   };
 }
 
-export interface NsSearchResult extends NsSearchPage {
-  /** Set when a default window was applied because no dates were given. */
-  appliedWindowFrom: string | null;
-}
-
-const searchCache = new TtlCache<NsSearchResult>(SEARCH_TTL_MS);
+const searchCache = new TtlCache<NsSearchPage>(SEARCH_TTL_MS);
 const decisionCache = new TtlCache<NsDecision>(DOCUMENT_TTL_MS, 24);
 
+/**
+ * Every search runs exactly as the caller wrote it, across the whole
+ * database. There used to be a rescue here that silently re-ran a refused
+ * dateless query inside a 12-month and then a 90-day window; it was a
+ * workaround for HTTP 500s that turned out to be our own small Count (see
+ * NS_MIN_COUNT), and once that was fixed it only stood to hide the archive
+ * from a rešerše without being asked. A refusal is now reported as one.
+ */
 export async function searchNs(
   input: NsSearchInput,
   start: number,
   count: number,
-): Promise<NsSearchResult> {
-  return searchCache.through(memoKey("ns-search", [input, start, count]), () =>
-    runSearchNsWindowed(input, start, count),
-  );
-}
-
-async function runSearchNsWindowed(
-  input: NsSearchInput,
-  start: number,
-  count: number,
-): Promise<NsSearchResult> {
-  // Explicit dates — and unique keys like a spisová značka — run as given.
-  if (input.dateFrom || input.dateTo || input.publishedFrom || input.publishedTo || input.caseNumber) {
+): Promise<NsSearchPage> {
+  return searchCache.through(memoKey("ns-search", [input, start, count]), async () => {
     try {
-      return { ...(await runNsSearch(input, start, count)), appliedWindowFrom: null };
+      return await runNsSearch(input, start, count);
     } catch (error) {
       if (error instanceof SourceError && error.kind === "UPSTREAM_ERROR") {
         // Measured: a full-text term combined with a [datum_predani_na_web]
@@ -506,33 +480,7 @@ async function runSearchNsWindowed(
       }
       throw error;
     }
-  }
-
-  // No dates: search the whole database. The 12-month default this used to
-  // apply was a workaround for 500s that turned out to be our own Count (see
-  // NS_MIN_COUNT) — and it silently hid everything older from every dateless
-  // search, which for case-law research is the wrong failure. Verified after
-  // the fix: "dobré mravy" with no upper bound reports 1224 matches. The
-  // windows survive as a rescue, announced through appliedWindowFrom.
-  try {
-    return { ...(await runNsSearch(input, start, count, false)), appliedWindowFrom: null };
-  } catch (error) {
-    if (!(error instanceof SourceError && error.kind === "UPSTREAM_ERROR")) throw error;
-  }
-  const yearly = withDefaultWindow(input, 365);
-  try {
-    return {
-      ...(await runNsSearch(yearly.input, start, count, false)),
-      appliedWindowFrom: yearly.appliedWindowFrom,
-    };
-  } catch (error) {
-    if (!(error instanceof SourceError && error.kind === "UPSTREAM_ERROR")) throw error;
-    const quarterly = withDefaultWindow(input, 90);
-    return {
-      ...(await runNsSearch(quarterly.input, start, count)),
-      appliedWindowFrom: quarterly.appliedWindowFrom,
-    };
-  }
+  });
 }
 
 export async function getNsDecision(unid: string): Promise<NsDecision> {

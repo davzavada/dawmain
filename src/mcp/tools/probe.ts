@@ -3,6 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { ESBIRKA_CACHE_BASE, getEsbirkaApiBase, getEsbirkaApiKey } from "../config";
 import { USER_AGENT } from "@/src/sources/shared/http";
 import { READ_ONLY } from "./shared";
+import { DOC_PAGE_CHARS } from "@/src/sources/shared/text";
 
 /**
  * Diagnostics for the upstream databases the tools query. This is the only integration
@@ -14,6 +15,9 @@ import { READ_ONLY } from "./shared";
  */
 
 const RAW_CAP = 20_000;
+/** Total raw text one response may carry. A tool result far past this is
+ * rejected whole by MCP clients (the same cap DOC_PAGE_CHARS is sized to). */
+const RAW_TEXT_BUDGET = DOC_PAGE_CHARS;
 const PROBE_TIMEOUT_MS = 12_000;
 
 export interface Canary {
@@ -434,11 +438,45 @@ export function registerProbe(server: McpServer): void {
       );
       const summary = `${probes.filter((p) => p.ok).length}/${probes.length} sources healthy`;
 
+      // The bodies have to ride in the TEXT, not only in structuredContent:
+      // this tool declares no outputSchema, so clients are free to drop the
+      // structured half — and did, which left include_raw silently doing
+      // nothing at all for its one stated purpose, capturing fixtures.
+      //
+      // Budgeted, because all nine canaries at RAW_CAP each is ~180 kB and a
+      // response that size is rejected whole: that would trade one silent
+      // failure for another. Whatever does not fit is named, not dropped
+      // quietly, and `sources` fetches the rest.
+      const rawBlocks: string[] = [];
+      const skipped: string[] = [];
+      let budget = RAW_TEXT_BUDGET;
+      for (const p of probes) {
+        if (p.raw === undefined) continue;
+        const block = `--- RAW ${p.id} (${p.url}) ---\n${UNTRUSTED_OPEN}\n${p.raw}\n${UNTRUSTED_CLOSE}`;
+        if (block.length > budget) {
+          skipped.push(p.id);
+          continue;
+        }
+        rawBlocks.push(block);
+        budget -= block.length;
+      }
+      if (skipped.length) {
+        rawBlocks.push(
+          `(raw bodies omitted for ${skipped.join(", ")} — over the ${Math.round(RAW_TEXT_BUDGET / 1000)}k-character response budget. Re-run with sources: ["${skipped[0]}"] to capture one at a time.)`,
+        );
+      }
+
       return {
         content: [
           {
             type: "text",
-            text: [summary, "", ...lines, discoveries ? "\nDiscoveries:\n" + JSON.stringify(discoveries, null, 2) : ""].join("\n"),
+            text: [
+              summary,
+              "",
+              ...lines,
+              ...(rawBlocks.length ? ["", ...rawBlocks] : []),
+              discoveries ? "\nDiscoveries:\n" + JSON.stringify(discoveries, null, 2) : "",
+            ].join("\n"),
           },
         ],
         structuredContent: { summary, probes, ...(discoveries ? { discoveries } : {}) },

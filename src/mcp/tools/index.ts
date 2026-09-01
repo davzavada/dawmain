@@ -14,20 +14,15 @@ import { registerJustice } from "./justice";
  * Every tool the server exposes. To add one: create `./<name>.ts` exporting a
  * `register<Name>(server)` function and append it here.
  *
- * NOT registered: ./euipo-clw.ts and ./euipo-guidelines.ts — EUIPO's legal
- * notices expressly reserve and opt out of "text or data mining, web scraping
- * or similar reproductions … by any means, including bots, scrapers or other
- * automated processes" for anything other than scientific research, and forbid
- * extracting substantial parts of its databases. That reservation is
- * volume-agnostic, so even a handful of interactive queries a day sits outside
- * it. The clients stay in the tree, dormant, in case EUIPO ever grants written
- * authorisation or publishes case law through its API Portal.
- *
- * NOT registered: ./upv.ts — isdv.upv.gov.cz (and the legacy isdv.upv.cz)
- * drops TCP connections from datacenter IPs, verified live from the fra1
- * deployment. Its probe canaries were removed as dead noise; re-add
- * registerUpv here only after verifying by hand that the host accepts
- * connections from the deployment again.
+ * Two sources are deliberately NOT covered, and no code for them is kept:
+ * EUIPO (eSearchCLW, Guidelines), whose legal notices reserve and opt out of
+ * "text or data mining, web scraping or similar reproductions … by any means,
+ * including bots" outside scientific research — volume-agnostic, so even a few
+ * interactive queries a day sit outside it; and ÚPV (isdv.upv.gov.cz), which
+ * drops TCP connections from datacenter IPs, verified live from fra1. Clients
+ * for both used to sit here dormant; they were unreachable code aging against
+ * sites nobody was checking, so they went. Git history has them if either
+ * source ever opens up, but by then they would want rewriting anyway.
  */
 const registrars: Array<(server: McpServer) => void> = [
   registerPing,

@@ -206,20 +206,6 @@ describe("looksLikeHtml", () => {
   });
 });
 
-describe("narrowestWindow", () => {
-  it("reports the LATEST window, not the first variant's", async () => {
-    const { narrowestWindow } = await import("@/src/sources/shared/text");
-    // Variant 1 searched the whole archive, variants 2-3 were cut back. Saying
-    // "no window" here would present a 90-day slice as the whole database.
-    expect(narrowestWindow([null, "2025-09-01", "2026-06-01"])).toBe("2026-06-01");
-  });
-  it("is null only when no variant was windowed", async () => {
-    const { narrowestWindow } = await import("@/src/sources/shared/text");
-    expect(narrowestWindow([null, null])).toBeNull();
-    expect(narrowestWindow([])).toBeNull();
-  });
-});
-
 describe("parallel-search helpers", () => {
   const decision =
     "Úvod rozhodnutí. ".repeat(20) +

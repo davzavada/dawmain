@@ -10,13 +10,7 @@ import {
   toolFailure,
 } from "./shared";
 import { getNsDecision, nsBodyMissing, searchNs, withHighlight } from "@/src/sources/ns";
-import {
-  dedupeBy,
-  maxTotal,
-  narrowestWindow,
-  pageOrExcerpt,
-  uniqueQueries,
-} from "@/src/sources/shared/text";
+import { dedupeBy, maxTotal, pageOrExcerpt, uniqueQueries } from "@/src/sources/shared/text";
 import { buildPreviews, renderPreviews } from "./previews";
 
 const fail = toolFailure("Nejvyšší soud");
@@ -27,7 +21,7 @@ export function registerNs(server: McpServer): void {
     {
       title: "Nejvyšší soud: search decisions",
       description:
-        "FULL-TEXT search of Czech Supreme Court decisions (civil & criminal law: dovolání, sjednocující stanoviska), with the fields the NS search form exposes: spisová značka (exact), kategorie rozhodnutí A–E, typ rozhodnutí (rozsudek/usnesení/stanovisko), soud, decision date and publication date. The database also carries decisions of LOWER courts — they are in it because they were published in the Sbírka soudních rozhodnutí a stanovisek, so they carry comparable weight; keep them unless the user asked for NS only. Czech queries; 'query' accepts Domino full-text operators — AND / OR / NOT, \"exact phrase\", (grouping), wildcards (nájem*), proximity (NEAR, SENTENCE, PARAGRAPH) — so one precise expression beats several vague searches; 'queries' searches up to 3 variants IN PARALLEL and merges deduplicated results. case_number matches the značka itself, NOT decisions citing it — to find those, pass the značka as 'query'. A full-text search covers the WHOLE database by default (the server narrows to a 12-month, then 90-day window only if NS refuses, and says so in applied_window_from). Any query addresses at most its first 900 documents — 'matched' reports the true count, so narrow with dates, type or category to get inside the window rather than paging. Results carry a UNID for ns_get_decision, and their URLs open the decision with the query terms highlighted. read_top: N also returns excerpt previews of the N best hits.",
+        "FULL-TEXT search of Czech Supreme Court decisions (civil & criminal law: dovolání, sjednocující stanoviska), with the fields the NS search form exposes: spisová značka (exact), kategorie rozhodnutí A–E, typ rozhodnutí (rozsudek/usnesení/stanovisko), soud, decision date and publication date. The database also carries decisions of LOWER courts — they are in it because they were published in the Sbírka soudních rozhodnutí a stanovisek, so they carry comparable weight; keep them unless the user asked for NS only. Czech queries; 'query' accepts Domino full-text operators — AND / OR / NOT, \"exact phrase\", (grouping), wildcards (nájem*), proximity (NEAR, SENTENCE, PARAGRAPH) — so one precise expression beats several vague searches; 'queries' searches up to 3 variants IN PARALLEL and merges deduplicated results. case_number matches the značka itself, NOT decisions citing it — to find those, pass the značka as 'query'. A full-text search covers the WHOLE database. Any query addresses at most its first 900 documents — 'matched' reports the true count, so narrow with dates, type or category to get inside the window rather than paging. Results carry a UNID for ns_get_decision, and their URLs open the decision with the query terms highlighted. read_top: N also returns excerpt previews of the N best hits.",
       inputSchema: z.object({
         query: z.string().optional().describe("Czech full-text query over decision bodies."),
         queries: z
@@ -76,10 +70,6 @@ export function registerNs(server: McpServer): void {
         truncated: z.boolean(),
         count: z.number(),
         offset: z.number(),
-        applied_window_from: z
-          .string()
-          .nullable()
-          .describe("When set, results were limited to this start date because no dates were given."),
         items: z.array(
           z.object({ unid: z.string(), caseNumbers: z.array(z.string()), url: z.string() }),
         ),
@@ -138,10 +128,6 @@ export function registerNs(server: McpServer): void {
           total: maxTotal(results.map((r) => r.total)),
           matched: maxTotal(results.map((r) => r.matched)),
           truncated: results.some((r) => r.truncated),
-          // Each variant falls back on its own, so the window must be reported
-          // across ALL of them: naming only the first variant's would say
-          // "whole archive" while two of three were quietly cut to 90 days.
-          appliedWindowFrom: narrowestWindow(results.map((r) => r.appliedWindowFrom)),
           empty: results.every((r) => r.empty),
           hits: dedupeBy(
             results.flatMap((r) => r.hits),
@@ -161,20 +147,16 @@ export function registerNs(server: McpServer): void {
           truncated: page.truncated,
           count: page.hits.length,
           offset,
-          applied_window_from: page.appliedWindowFrom,
           items: page.hits,
           previews,
         };
         const lines = page.hits.map(
           (hit, i) => `${offset + i + 1}. ${hit.caseNumbers.join("; ")} — unid ${hit.unid}\n   ${hit.url}`,
         );
-        const windowNote = page.appliedWindowFrom
-          ? ` Results limited to decisions decided since ${page.appliedWindowFrom} (the NS server rejects unbounded queries) — pass date_from/date_to for another period.`
-          : "";
         const text = page.empty
-          ? `No NS decisions matched.${windowNote} Broaden the query or the date range.`
+          ? "No NS decisions matched. Broaden the query or the date range."
           : [
-              `${page.total ?? "?"} decisions${page.truncated ? ` (window-capped; ${page.matched} match in total — narrow by date to see the rest)` : ""}:${windowNote}`,
+              `${page.total ?? "?"} decisions${page.truncated ? ` (window-capped; ${page.matched} match in total — narrow by date to see the rest)` : ""}:`,
               ...lines,
               ...renderPreviews(previews, "ns_get_decision"),
             ].join("\n");

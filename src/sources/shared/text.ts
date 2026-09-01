@@ -158,15 +158,27 @@ export function maxTotal(totals: Array<number | null>): number | null {
   return known.length ? Math.max(...known) : null;
 }
 
+
+export interface CaseNumberParts {
+  /** Senát — absent in marks that carry none (Cpjn, Tpjn…). */
+  senate: string | null;
+  /** Rejstříková značka, verbatim: "Co", "Cdo", "Afs". */
+  registry: string;
+  number: string;
+  year: string;
+}
+
 /**
- * The narrowing to report when variants were windowed independently: the
- * LATEST start date among them, because that is the one that hid the most.
- * Null only when no variant was windowed — reporting one variant's null as
- * the answer would claim the whole archive was searched when it was not.
+ * Split "8 Co 60/2025" into the four parts both NS (Domino [spzn1]–[spzn4])
+ * and rozhodnuti.justice.cz (caseNumberSenate/Registry/Index/Year) index
+ * separately. Trailing decorations ("-174", "- II.") are ignored: they are
+ * the page number or a docket suffix, not part of the indexed značka.
+ * Pure — unit-tested.
  */
-export function narrowestWindow(windows: Array<string | null>): string | null {
-  const applied = windows.filter((from): from is string => from !== null).sort();
-  return applied.at(-1) ?? null;
+export function parseCaseNumber(raw: string): CaseNumberParts | null {
+  const m = /^\s*(?:(\d{1,3})\s+)?(\p{L}+)\s+(\d+)\s*\/\s*(\d{4})/u.exec(raw);
+  if (!m) return null;
+  return { senate: m[1] ?? null, registry: m[2], number: m[3], year: m[4] };
 }
 
 /** First occurrence wins; order preserved. */
