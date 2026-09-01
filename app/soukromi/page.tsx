@@ -111,9 +111,7 @@ export default function Soukromi() {
         <p>
           Oba si k plnění své role přibírají vlastní dodavatele (infrastruktura datových center,
           služba pro odesílání ověřovacích e-mailů), které váže stejná povinnost mlčenlivosti a
-          stejná pravidla. Předání do Spojených států se opírá o rozhodnutí Evropské komise o
-          odpovídající ochraně pro EU-US Data Privacy Framework; obě společnosti jsou v tomto rámci
-          zapsány.
+          stejná pravidla.
         </p>
         <p>
           Poskytovatel přihlášení účtem jiné služby (např. Google) je samostatný správce - ověří
@@ -127,42 +125,91 @@ export default function Soukromi() {
         </p>
       </Section>
 
-      <Section heading="7. Cookies">
+      <Section heading="7. Předávání do třetích zemí">
+        <p>
+          Vaše rešerše Evropskou unii neopouští. Server běží v evropském regionu (Frankfurt) a
+          databáze, do kterých se dotazuje, jsou české a unijní.
+        </p>
+        <p>
+          Mimo Evropskou unii jde jediná věc - údaje o vašem účtu, které Clerk vede ve Spojených
+          státech, a přístup k platformě Vercel, spravované rovněž odtamtud. Obojí se opírá o
+          rozhodnutí Evropské komise o odpovídající ochraně pro EU-US Data Privacy Framework; obě
+          společnosti jsou v tomto rámci zapsány.
+        </p>
+      </Section>
+
+      <Section heading="8. Cookies">
         <p>
           Tyto stránky nenastavují žádné cookies. Cookies nutné k udržení přihlášení nastavuje na
           své vlastní adrese Clerk.
         </p>
       </Section>
 
-      <Section heading="8. Zabezpečení údajů">
+      <Section heading="9. Zabezpečení a umístění dat">
         <p>
-          Komunikace probíhá výhradně přes šifrované spojení (HTTPS) a server odmítá neověřené
-          požadavky. Kromě mě mají k údajům přístup jen poskytovatelé uvedení výše a jejich
-          dodavatelé, a to v rozsahu nutném k tomu, aby služba běžela.
+          Server běží v evropském regionu (Frankfurt). Komunikace probíhá výhradně přes šifrované
+          spojení (HTTPS) a server odmítá neověřené požadavky.
+        </p>
+        <p>
+          Nejvíc ale chrání to, co tu vůbec není. Vlastní databázi nevedu, takže neexistuje
+          úložiště, ze kterého by šlo vaše dotazy zpětně vytáhnout. Co projde dočasnou pamětí, po
+          minutách mizí a s vaším účtem to spojené není.
+        </p>
+        <p>
+          Kromě mě mají k údajům přístup jen poskytovatelé uvedení výše a jejich dodavatelé, a to v
+          rozsahu nutném k tomu, aby služba běžela.
         </p>
       </Section>
 
-      <Section heading="9. Pověřenec pro ochranu osobních údajů">
+      <Section heading="10. Pověřenec pro ochranu osobních údajů">
         <p>
           Vzhledem k povaze a rozsahu zpracování nemám povinnost jmenovat pověřence a nejmenoval
           jsem jej. Ve všech věcech ochrany osobních údajů se obracejte přímo na <Mail />.
         </p>
       </Section>
 
-      <Section heading="10. Vaše práva">
-        <p>Máte právo:</p>
+      <Section heading="11. Vaše práva">
+        <p>V souvislosti se svými údaji můžete uplatnit tato práva:</p>
         <ul style={list}>
-          <li>na přístup ke svým osobním údajům a na jejich kopii,</li>
-          <li>na opravu nepřesných údajů,</li>
-          <li>na výmaz údajů (právo být zapomenut),</li>
-          <li>na omezení zpracování,</li>
-          <li>na přenositelnost údajů,</li>
-          <li>vznést námitku proti zpracování založenému na oprávněném zájmu,</li>
           <li>
-            podat stížnost u Úřadu pro ochranu osobních údajů, Pplk. Sochora 27, 170 00 Praha 7,{" "}
-            <a href="https://uoou.gov.cz">uoou.gov.cz</a>.
+            <strong>Právo na přístup.</strong> Můžete se mě zeptat, zda o vás nějaké údaje
+            zpracovávám, a chtít jejich kopii spolu s informací, k čemu je používám, jak dlouho je
+            budu mít a komu se dostanou.
+          </li>
+          <li>
+            <strong>Právo na opravu.</strong> Vedu-li o vás nepřesný údaj, opravím ho; je-li
+            neúplný, doplním ho.
+          </li>
+          <li>
+            <strong>Právo na výmaz.</strong> Můžete chtít, abych vaše údaje smazal - typicky když
+            už je k původnímu účelu nepotřebuji nebo když jste úspěšně vznesli námitku. Účet a vše,
+            co k němu patří, smažu na požádání bez zbytečného odkladu.
+          </li>
+          <li>
+            <strong>Právo na omezení zpracování.</strong> Namítáte-li, že je údaj nepřesný nebo že
+            zpracování nemá oporu, můžete chtít, abych s ním po dobu, než se to vyjasní, nedělal
+            nic dalšího a jen ho uchoval.
+          </li>
+          <li>
+            <strong>Právo na přenositelnost údajů.</strong> Údaje, které o vás zpracovávám
+            automatizovaně pro plnění smlouvy, vám vydám ve strojově čitelném formátu, případně je
+            na vaši žádost pošlu přímo jinému správci, je-li to technicky proveditelné.
+          </li>
+          <li>
+            <strong>Právo vznést námitku.</strong> Proti zpracování, které stojí na oprávněném
+            zájmu - údaje o používání služby, provozní záznamy a vaše zprávy - můžete kdykoli
+            vznést námitku.
+          </li>
+          <li>
+            <strong>Právo podat stížnost.</strong> Se stížností na to, jak s vašimi údaji
+            nakládám, se můžete obrátit na Úřad pro ochranu osobních údajů, Pplk. Sochora 27, 170
+            00 Praha 7, <a href="https://uoou.gov.cz">uoou.gov.cz</a>.
           </li>
         </ul>
+        <p>
+          Právo odvolat souhlas tu nenajdete proto, že žádný souhlas nemám a k ničemu ho
+          nepotřebuji.
+        </p>
         <p>
           Pro uplatnění svých práv mě kontaktujte na <Mail />. Vyřídím je zdarma a bez zbytečného
           odkladu, nejpozději do měsíce od doručení žádosti. Je-li žádost složitá, mohu lhůtu
@@ -174,7 +221,7 @@ export default function Soukromi() {
         </p>
       </Section>
 
-      <Section heading="11. Změny těchto zásad">
+      <Section heading="12. Změny těchto zásad">
         <p>
           Zásady mohu upravit, změní-li se fungování služby nebo právní úprava. Aktuální znění je
           vždy na této stránce a o podstatné změně vás budu informovat e-mailem.
