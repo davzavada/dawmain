@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CookieJar,
   findLoginForm,
+  formRequest,
+  isLoginHost,
   libraryProxies,
   openAsReader,
   proxyLoginUrl,
@@ -56,6 +58,13 @@ describe("CookieJar", () => {
     expect(jar.header(new URL("https://www.taylorfrancis.com/books/1"))).toBe("");
     expect(jar.size).toBe(3);
   });
+
+  it("ignores a Domain attribute the responder does not belong to", () => {
+    const jar = new CookieJar();
+    jar.absorb(new Response(null, { headers: [["set-cookie", "planted=1; Domain=oclc.org"], ["set-cookie", "tld=1; Domain=org"]] }), new URL("https://publisher.test/x"));
+    expect(jar.header(new URL("https://peacepalace.idm.oclc.org/login"))).toBe("");
+    expect(jar.header(new URL("https://publisher.test/y"))).toBe("planted=1; tld=1");
+  });
 });
 
 describe("findLoginForm", () => {
@@ -69,7 +78,7 @@ describe("findLoginForm", () => {
     expect(form!.fields._eventId).toBe("submit");
     expect(form!.fields.execution).toMatch(/…$/);
     expect(form!.fields).not.toHaveProperty("client_name");
-    expect(form!.samlAutoPost).toBe(false);
+    expect(form!.autoPost).toBe(false);
   });
   it("recognises a SimpleSAMLphp login form and an IdP auto-post form", () => {
     const ssp = findLoginForm(
@@ -82,7 +91,7 @@ describe("findLoginForm", () => {
       `<html><body onload="document.forms[0].submit()"><form method="post" action="https://shib.oclc.org/Shibboleth.sso/SAML2/POST"><input type="hidden" name="SAMLResponse" value="PHNhbWw+"/><input type="hidden" name="RelayState" value="ss:mem:1"/><noscript><input type="submit" value="Submit"/></noscript></form></body></html>`,
       "https://peacepalacelibrary.nl/saml/saml2/idp/SSOService.php",
     );
-    expect(saml!.samlAutoPost).toBe(true);
+    expect(saml!.autoPost).toBe(true);
     expect(saml!.fields).toEqual({ SAMLResponse: "PHNhbWw+", RelayState: "ss:mem:1" });
     expect(saml!.passwordField).toBeNull();
     expect(findLoginForm("<html><body><p>The work</p></body></html>", "https://x.test/")).toBeNull();
@@ -101,26 +110,26 @@ function casChain(acceptPassword = "correct") {
     const headers = init.headers as Record<string, string>;
     requests.push({ url, method: init.method ?? "GET", body: typeof init.body === "string" ? init.body : undefined, cookie: headers.cookie });
     const u = new URL(url);
-    if (u.hostname === "ezproxy.test" && u.searchParams.has("ticket")) {
-      return new Response(null, { status: 302, headers: { location: "https://www-publisher-com.ezproxy.test/book/1", "set-cookie": "ezproxy=session1; Domain=.ezproxy.test; Path=/" } });
+    if (u.hostname === "ezproxy.is.cuni.cz" && u.searchParams.has("ticket")) {
+      return new Response(null, { status: 302, headers: { location: "https://www-publisher-com.ezproxy.is.cuni.cz/book/1", "set-cookie": "ezproxy=session1; Domain=.ezproxy.is.cuni.cz; Path=/" } });
     }
-    if (u.hostname === "ezproxy.test" && u.pathname === "/login") {
+    if (u.hostname === "ezproxy.is.cuni.cz" && u.pathname === "/login") {
       if (headers.cookie?.includes("ezproxy=session1")) {
-        return new Response(null, { status: 302, headers: { location: "https://www-publisher-com.ezproxy.test/book/1" } });
+        return new Response(null, { status: 302, headers: { location: "https://www-publisher-com.ezproxy.is.cuni.cz/book/1" } });
       }
-      return new Response(null, { status: 302, headers: { location: "https://cas.test/cas/login?service=https%3A%2F%2Fezproxy.test%2Flogin%3Furl%3D" + encodeURIComponent(u.searchParams.get("url") ?? "") } });
+      return new Response(null, { status: 302, headers: { location: "https://cas.cuni.cz/cas/login?service=https%3A%2F%2Fezproxy.is.cuni.cz%2Flogin%3Furl%3D" + encodeURIComponent(u.searchParams.get("url") ?? "") } });
     }
-    if (u.hostname === "cas.test" && init.method !== "POST") {
-      return new Response(CAS_HTML.replace('action="login"', 'action="https://cas.test/cas/login?service=x"'), { status: 200, headers: { "content-type": "text/html;charset=utf-8", "set-cookie": "JSESSIONID=cas42; Path=/cas; HttpOnly" } });
+    if (u.hostname === "cas.cuni.cz" && init.method !== "POST") {
+      return new Response(CAS_HTML.replace('action="login"', 'action="https://cas.cuni.cz/cas/login?service=x"'), { status: 200, headers: { "content-type": "text/html;charset=utf-8", "set-cookie": "JSESSIONID=cas42; Path=/cas; HttpOnly" } });
     }
-    if (u.hostname === "cas.test" && init.method === "POST") {
+    if (u.hostname === "cas.cuni.cz" && init.method === "POST") {
       const params = new URLSearchParams(typeof init.body === "string" ? init.body : "");
       if (params.get("password") !== acceptPassword) {
         return new Response(CAS_HTML, { status: 401, headers: { "content-type": "text/html" } });
       }
-      return new Response(null, { status: 302, headers: { location: "https://ezproxy.test/login?url=https%3A%2F%2Fpublisher.test%2Fbook%2F1&ticket=ST-1" } });
+      return new Response(null, { status: 302, headers: { location: "https://ezproxy.is.cuni.cz/login?url=https%3A%2F%2Fpublisher.test%2Fbook%2F1&ticket=ST-1" } });
     }
-    if (u.hostname === "www-publisher-com.ezproxy.test") {
+    if (u.hostname === "www-publisher-com.ezproxy.is.cuni.cz") {
       return new Response(`<html><body><article>${"<p>The licensed chapter text about genocide, dolus specialis and the Rome Statute.</p>".repeat(60)}</article></body></html>`, {
         status: 200,
         headers: { "content-type": "text/html; charset=utf-8" },
@@ -136,24 +145,25 @@ describe("walk", () => {
 
   it("signs in through a CAS chain, posting the hidden flow fields with the credentials, and lands on the work", async () => {
     const requests = casChain();
-    const result = await walk("https://ezproxy.test/login?url=https%3A%2F%2Fpublisher.test%2Fbook%2F1", {
+    const result = await walk("https://ezproxy.is.cuni.cz/login?url=https%3A%2F%2Fpublisher.test%2Fbook%2F1", {
       credential: { username: "reader", password: "correct" },
+      loginHosts: libraryProxies().cuni.loginHosts,
     });
     expect(result.loginRequired).toBe(false);
     expect(result.submittedLogin).toBe(true);
-    expect(result.finalUrl).toBe("https://www-publisher-com.ezproxy.test/book/1");
+    expect(result.finalUrl).toBe("https://www-publisher-com.ezproxy.is.cuni.cz/book/1");
     expect(result.status).toBe(200);
     expect(new TextDecoder().decode(result.body)).toContain("dolus specialis");
     const post = requests.find((r) => r.method === "POST")!;
     const params = new URLSearchParams(post.body);
-    expect(post.url).toBe("https://cas.test/cas/login?service=x");
+    expect(post.url).toBe("https://cas.cuni.cz/cas/login?service=x");
     expect(params.get("username")).toBe("reader");
     expect(params.get("password")).toBe("correct");
     expect(params.get("_eventId")).toBe("submit");
     expect(params.get("execution")).toMatch(/…$/);
     expect(post.cookie).toContain("JSESSIONID=cas42");
     // The publisher never sees the CAS cookie; the proxy session travels to the proxied host.
-    const publisher = requests.find((r) => r.url.startsWith("https://www-publisher-com.ezproxy.test"))!;
+    const publisher = requests.find((r) => r.url.startsWith("https://www-publisher-com.ezproxy.is.cuni.cz"))!;
     expect(publisher.cookie).toBe("ezproxy=session1");
     // proxy → CAS form → CAS POST → proxy with ticket → the proxied publisher page
     expect(result.hops).toHaveLength(5);
@@ -161,16 +171,65 @@ describe("walk", () => {
 
   it("stops at the login form without a credential and says so", async () => {
     casChain();
-    const result = await walk("https://ezproxy.test/login?url=https%3A%2F%2Fpublisher.test%2Fbook%2F1");
+    const result = await walk("https://ezproxy.is.cuni.cz/login?url=https%3A%2F%2Fpublisher.test%2Fbook%2F1", { loginHosts: libraryProxies().cuni.loginHosts });
     expect(result.loginRequired).toBe(true);
-    expect(result.finalUrl).toMatch(/^https:\/\/cas\.test\/cas\/login/);
+    expect(result.finalUrl).toMatch(/^https:\/\/cas\.cuni\.cz\/cas\/login/);
   });
 
   it("reports a refused password instead of looping", async () => {
     casChain("other");
     await expect(
-      walk("https://ezproxy.test/login?url=https%3A%2F%2Fpublisher.test%2Fbook%2F1", { credential: { username: "reader", password: "wrong" } }),
+      walk("https://ezproxy.is.cuni.cz/login?url=https%3A%2F%2Fpublisher.test%2Fbook%2F1", {
+        credential: { username: "reader", password: "wrong" },
+        loginHosts: libraryProxies().cuni.loginHosts,
+      }),
     ).rejects.toMatchObject({ kind: "SESSION_EXPIRED" });
+  });
+
+  it("never posts the credential to a host that is not the library's sign-in", async () => {
+    const requests: Array<{ url: string; method: string }> = [];
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+      requests.push({ url, method: init.method ?? "GET" });
+      // A publisher page with a sign-in widget in its header — and the work below it.
+      return new Response(
+        `<html><body><form method="post" action="https://evil.test/steal"><input name="username"><input type="password" name="password"></form><article>${"<p>The chapter text.</p>".repeat(200)}</article></body></html>`,
+        { status: 200, headers: { "content-type": "text/html" } },
+      );
+    });
+    const result = await walk("https://publisher.test/chapter/1", { credential: { username: "reader", password: "secret" }, loginHosts: libraryProxies().cuni.loginHosts });
+    expect(requests).toEqual([{ url: "https://publisher.test/chapter/1", method: "GET" }]);
+    expect(result.loginRequired).toBe(false);
+    expect(result.submittedLogin).toBe(false);
+    expect(new TextDecoder().decode(result.body)).toContain("The chapter text.");
+    expect(isLoginHost("cas.cuni.cz", libraryProxies().cuni.loginHosts)).toBe(true);
+    expect(isLoginHost("cuni.cz.evil.test", libraryProxies().cuni.loginHosts)).toBe(false);
+    expect(isLoginHost("shib.oclc.org", libraryProxies().peacepalace.loginHosts)).toBe(true);
+  });
+
+  it("auto-posts a hidden-only continue page with its submit button and honours GET forms", async () => {
+    const requests: Array<{ url: string; method: string; body?: string }> = [];
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+      requests.push({ url, method: init.method ?? "GET", body: typeof init.body === "string" ? init.body : undefined });
+      const u = new URL(url);
+      if (u.hostname === "idp.cuni.cz" && init.method !== "POST") {
+        return new Response(`<form method="post" action="/idp/profile/SAML2/Redirect/SSO?execution=e1s2"><input type="hidden" name="csrf_token" value="t1"><button type="submit" name="_eventId_proceed" id="_eventId_proceed">Continue</button></form>`, { status: 200, headers: { "content-type": "text/html" } });
+      }
+      if (u.hostname === "idp.cuni.cz" && init.method === "POST") {
+        return new Response(null, { status: 302, headers: { location: "https://search.test/find?q=1" } });
+      }
+      if (u.hostname === "search.test" && u.pathname === "/find") {
+        return new Response(`<form method="get" action="/results"><input type="hidden" name="scope" value="all"><input type="hidden" name="q" value="genocide"></form>`, { status: 200, headers: { "content-type": "text/html" } });
+      }
+      if (u.hostname === "search.test" && u.pathname === "/results") {
+        return new Response(`<html><body>${"<p>Results page text.</p>".repeat(300)}</body></html>`, { status: 200, headers: { "content-type": "text/html" } });
+      }
+      return new Response("not found", { status: 404 });
+    });
+    const result = await walk("https://idp.cuni.cz/idp/profile/SAML2/Redirect/SSO?execution=e1s2");
+    expect(requests[1]).toEqual({ url: "https://idp.cuni.cz/idp/profile/SAML2/Redirect/SSO?execution=e1s2", method: "POST", body: "csrf_token=t1&_eventId_proceed=" });
+    expect(requests[3]).toEqual({ url: "https://search.test/results?scope=all&q=genocide", method: "GET", body: undefined });
+    expect(result.finalUrl).toBe("https://search.test/results?scope=all&q=genocide");
+    expect(formRequest({ action: "https://x.test/a?k=1", method: "GET", fields: {}, usernameField: null, passwordField: null, autoPost: false }, { b: "2 3" })).toEqual({ url: "https://x.test/a?k=1&b=2+3", method: "GET" });
   });
 
   it("auto-posts an IdP's SAMLResponse form on the way back to the service provider", async () => {
@@ -194,7 +253,7 @@ describe("walk", () => {
       }
       return new Response("not found", { status: 404 });
     });
-    const result = await walk("https://idp.test/saml/idp/SSOService.php?SAMLRequest=x", { credential: { username: "u", password: "p" } });
+    const result = await walk("https://idp.test/saml/idp/SSOService.php?SAMLRequest=x", { credential: { username: "u", password: "p" }, loginHosts: [/^idp\.test$/] });
     expect(result.contentType).toBe("application/pdf");
     expect(result.finalUrl).toBe("https://proxy.test/connect?session=abc");
     expect(requests.map((r) => `${r.method} ${new URL(r.url).hostname}`)).toEqual(["GET idp.test", "POST idp.test", "POST sp.test", "GET proxy.test"]);
@@ -210,11 +269,10 @@ describe("openAsReader", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("signs in once per reader and reuses the proxy session for the next work", async () => {
-    process.env.CUNI_PROXY_BASE = "https://ezproxy.test";
     const requests = casChain();
     const credential = { username: "reader", password: "correct" };
     const first = await openAsReader("cuni", "https://publisher.test/book/1", credential, "user_1");
-    expect(first.proxy.proxyBase).toBe("https://ezproxy.test");
+    expect(first.proxy.proxyBase).toBe("https://ezproxy.is.cuni.cz");
     expect(first.submittedLogin).toBe(true);
     const posts = requests.filter((r) => r.method === "POST").length;
     const second = await openAsReader("cuni", "https://publisher.test/book/1", credential, "user_1");
@@ -223,13 +281,25 @@ describe("openAsReader", () => {
     // Another reader gets their own session, hence their own sign-in.
     await openAsReader("cuni", "https://publisher.test/book/1", credential, "user_2");
     expect(requests.filter((r) => r.method === "POST").length).toBe(posts + 1);
-    delete process.env.CUNI_PROXY_BASE;
   });
 
-  it("surfaces a chain the walker cannot pass", async () => {
-    process.env.CUNI_PROXY_BASE = "https://ezproxy.test";
-    vi.stubGlobal("fetch", async () => new Response(`<form><input type="password" name="pw"></form>`, { status: 200, headers: { "content-type": "text/html" } }));
-    await expect(openAsReader("cuni", "https://publisher.test/book/2", { username: "u", password: "p" }, "user_3")).rejects.toBeInstanceOf(SourceError);
-    delete process.env.CUNI_PROXY_BASE;
+  it("remembers a refused login and does not replay it, until the password changes", async () => {
+    const requests = casChain("correct");
+    const wrong = { username: "reader", password: "wrong" };
+    await expect(openAsReader("cuni", "https://publisher.test/book/1", wrong, "user_4")).rejects.toMatchObject({ kind: "SESSION_EXPIRED" });
+    const posts = requests.filter((r) => r.method === "POST").length;
+    expect(posts).toBe(1);
+    await expect(openAsReader("cuni", "https://publisher.test/book/1", wrong, "user_4")).rejects.toThrow(/not retried for 30 minutes/);
+    expect(requests.filter((r) => r.method === "POST").length).toBe(posts);
+    // A corrected password is tried at once.
+    const ok = await openAsReader("cuni", "https://publisher.test/book/1", { username: "reader", password: "correct" }, "user_4");
+    expect(ok.submittedLogin).toBe(true);
+  });
+
+  it("returns a sign-in page on the proxy's own host as loginRequired, not as the work", async () => {
+    vi.stubGlobal("fetch", async () => new Response(`<form method="post"><input name="username"><input type="password" name="pw"></form>`, { status: 200, headers: { "content-type": "text/html" } }));
+    // The proxy host is a login host; without any credential the walk says so.
+    const result = await walk("https://ezproxy.is.cuni.cz/login?url=x", { loginHosts: libraryProxies().cuni.loginHosts });
+    expect(result.loginRequired).toBe(true);
   });
 });

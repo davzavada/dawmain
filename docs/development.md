@@ -43,11 +43,17 @@ licencovaných zkusí přihlášení čtenáře, pokud si ho uživatel uložil n
 metadata Clerku; čte je jen nástroj pro volajícího identifikovaného OAuth
 tokenem — sdílený kód nikoho neidentifikuje). Průchod přihlášením
 (`src/sources/library-login.ts`) nemá napevno žádný řetěz: chová se jako
-prohlížeč s cookie jarem — sleduje přesměrování, vyplní první formulář
-s heslem (CAS UK: `username`, `password`, skryté `execution` a `_eventId`,
-zachyceno; SimpleSAMLphp Peace Palace: `username`, `password`, `AuthState`),
-odešle auto-post formulář se `SAMLResponse` a zastaví se na první stránce,
-která není ani jedno. Proxy Peace Palace (`peacepalace.idm.oclc.org`) je
+prohlížeč s cookie jarem po doménách — sleduje přesměrování, vyplní
+formulář s heslem (CAS UK: `username`, `password`, skryté `execution`
+a `_eventId`, zachyceno; SimpleSAMLphp Peace Palace: `username`, `password`,
+`AuthState`), odešle formuláře složené jen ze skrytých polí (`SAMLResponse`,
+„pokračovat" stránky Shibbolethu vč. jména tlačítka) a zastaví se na první
+stránce, která není ani jedno. Heslo jde výhradně formuláři na
+přihlašovacích hostech dané knihovny (`*.cuni.cz`; `*.peacepalacelibrary.nl`
+a `*.oclc.org`) — políčko heslo na stránce vydavatele není přihlášení
+knihovny a stránka se vrátí jako obsah; odmítnuté přihlášení se 30 minut
+neopakuje, aby prošlé heslo nezablokovalo účet; cookie s cizím `Domain`
+se ignoruje; tělo odpovědi se čte se stropem 12 MB i bez content-length. Proxy Peace Palace (`peacepalace.idm.oclc.org`) je
 z HARu, EZproxy UK (`ezproxy.is.cuni.cz`, `CUNI_PROXY_BASE`) z paměti;
 řetěz, který nesedí, se hlásí s důvodem, viz
 `docs/research/doctrine-sources.json`. Unpaywall chce na každém dotazu

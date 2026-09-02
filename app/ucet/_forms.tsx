@@ -40,7 +40,7 @@ export function LibraryLoginForm({
   library: string;
   label: string;
   hint: string;
-  stored: { username: string; updatedAt: string } | null;
+  stored: { username: string; updatedAt: string; usable: boolean } | null;
 }) {
   const [saved, save, saving] = useActionState(saveLibraryLogin, idle);
   const [removed, remove, removing] = useActionState(deleteLibraryLogin, idle);
@@ -55,8 +55,10 @@ export function LibraryLoginForm({
         {stored ? (
           <>
             Uloženo pro <strong>{stored.username}</strong>
-            {stored.updatedAt ? ` (${new Date(stored.updatedAt).toLocaleDateString("cs-CZ")})` : ""}. Heslo se nezobrazuje; nové uložení ho
-            přepíše.
+            {stored.updatedAt ? ` (${new Date(stored.updatedAt).toLocaleDateString("cs-CZ")})` : ""}.{" "}
+            {stored.usable
+              ? "Heslo se nezobrazuje; nové uložení ho přepíše."
+              : "Uložené heslo už server nedokáže přečíst (změnil se jeho klíč) - zadejte ho prosím znovu."}
           </>
         ) : (
           "Zatím nic uloženo."

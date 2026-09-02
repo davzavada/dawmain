@@ -250,7 +250,6 @@ describe("doctrine_get_document (stubbed upstreams)", () => {
   });
 
   it("opens a licensed work through the caller's library login when the open copies refuse", async () => {
-    process.env.CUNI_PROXY_BASE = "https://ezproxy.test";
     const requests: string[] = [];
     vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
       requests.push(`${init.method ?? "GET"} ${url}`);
@@ -259,23 +258,23 @@ describe("doctrine_get_document (stubbed upstreams)", () => {
       if (u.hostname === "api.unpaywall.org") return new Response(readFileSync(fixture("unpaywall/closed.json"), "utf8"), { status: 200 });
       if (u.hostname === "doi.org") return new Response(null, { status: 302, headers: { location: "https://brill.test/display/title/1" } });
       if (u.hostname === "brill.test") return new Response("<html><body>Sign in · Institutional access · Purchase</body></html>", { status: 200, headers: { "content-type": "text/html" } });
-      if (u.hostname === "ezproxy.test" && u.searchParams.has("ticket")) {
-        return new Response(null, { status: 302, headers: { location: "https://brill-test.ezproxy.test/display/title/1", "set-cookie": "ezproxy=s1; Domain=.ezproxy.test" } });
+      if (u.hostname === "ezproxy.is.cuni.cz" && u.searchParams.has("ticket")) {
+        return new Response(null, { status: 302, headers: { location: "https://brill-test.ezproxy.is.cuni.cz/display/title/1", "set-cookie": "ezproxy=s1; Domain=.ezproxy.is.cuni.cz" } });
       }
-      if (u.hostname === "ezproxy.test") {
+      if (u.hostname === "ezproxy.is.cuni.cz") {
         return headers.cookie?.includes("ezproxy=s1")
-          ? new Response(null, { status: 302, headers: { location: "https://brill-test.ezproxy.test/display/title/1" } })
-          : new Response(null, { status: 302, headers: { location: "https://cas.test/cas/login?service=x" } });
+          ? new Response(null, { status: 302, headers: { location: "https://brill-test.ezproxy.is.cuni.cz/display/title/1" } })
+          : new Response(null, { status: 302, headers: { location: "https://cas.cuni.cz/cas/login?service=x" } });
       }
-      if (u.hostname === "cas.test" && init.method !== "POST") {
+      if (u.hostname === "cas.cuni.cz" && init.method !== "POST") {
         return new Response(`<form method="post" action="/cas/login?service=x"><input name="username"><input type="password" name="password"><input type="hidden" name="execution" value="e1"><input type="hidden" name="_eventId" value="submit"></form>`, { status: 200, headers: { "content-type": "text/html" } });
       }
-      if (u.hostname === "cas.test") {
+      if (u.hostname === "cas.cuni.cz") {
         return new URLSearchParams(String(init.body)).get("password") === "correct"
-          ? new Response(null, { status: 302, headers: { location: "https://ezproxy.test/login?url=x&ticket=ST-1" } })
+          ? new Response(null, { status: 302, headers: { location: "https://ezproxy.is.cuni.cz/login?url=x&ticket=ST-1" } })
           : new Response("<form><input type='password' name='password'></form>", { status: 401, headers: { "content-type": "text/html" } });
       }
-      if (u.hostname === "brill-test.ezproxy.test") {
+      if (u.hostname === "brill-test.ezproxy.is.cuni.cz") {
         return new Response(`<html><body><article>${"<p>Chapter 3. The mental element of genocide: dolus specialis in the case law of the ad hoc tribunals.</p>".repeat(50)}</article></body></html>`, { status: 200, headers: { "content-type": "text/html" } });
       }
       return new Response("not found", { status: 404 });
@@ -292,14 +291,13 @@ describe("doctrine_get_document (stubbed upstreams)", () => {
     ]);
     expect(out.text).toContain("dolus specialis");
     expect(result.content[0].text).toContain("read through your UKAŽ (Univerzita Karlova) login");
-    expect(requests.some((r) => r.startsWith("POST https://cas.test"))).toBe(true);
+    expect(requests.some((r) => r.startsWith("POST https://cas.cuni.cz"))).toBe(true);
 
     // A caller without a stored login gets the honest hint instead.
     const anonymous = await (handler as unknown as (args: Record<string, unknown>, extra: unknown) => ReturnType<Handler>)({ doi: "10.1163/9789004724822", record_only: false, page: 1 }, { authInfo: { extra: { userId: "user_without" } } });
     const anon = anonymous.structuredContent as { access: { status: string; reader_logins: string[] } };
     expect(anon.access).toMatchObject({ status: "unavailable", reader_logins: [] });
     expect(anonymous.content[0].text).toContain("store your library login on /ucet");
-    delete process.env.CUNI_PROXY_BASE;
   });
 
   it("record_only skips every download", async () => {

@@ -1,6 +1,5 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
 import { clerkClient } from "@clerk/nextjs/server";
-import { SEARCH_TTL_MS, TtlCache, memoKey } from "@/src/sources/shared/cache";
 
 /**
  * Readers' library logins — the one piece of state this server keeps about
@@ -54,7 +53,7 @@ export interface StoredCredential {
   updatedAt: string;
 }
 
-const MIN_SECRET_CHARS = 16;
+const MIN_SECRET_CHARS = 32;
 
 /** Whether the deployment can seal anything at all. */
 export function credentialsConfigured(): boolean {
@@ -66,8 +65,9 @@ function key(): Buffer {
   if (secret.length < MIN_SECRET_CHARS) {
     throw new Error(`CREDENTIALS_SECRET is not set (needs at least ${MIN_SECRET_CHARS} characters) — reader logins cannot be stored or read.`);
   }
-  // A fixed derivation of a high-entropy secret; the secret IS the key material.
-  return createHash("sha256").update(secret, "utf8").digest();
+  // HKDF over a high-entropy secret (the secret IS the key material); the
+  // label keeps this key distinct from any other use of the same secret.
+  return Buffer.from(hkdfSync("sha256", secret, "dawmain", "reader-credentials-v1", 32));
 }
 
 /** AES-256-GCM; a fresh IV per call, tag appended. Pure given the env. */
@@ -115,13 +115,31 @@ async function fetchLibraries(userId: string): Promise<Libraries> {
   return librariesOf(user.privateMetadata);
 }
 
+export interface CredentialSummary {
+  username: string;
+  updatedAt: string;
+  /** False when the entry cannot be opened under the current secret (it
+   * was rotated) — the reader must enter the login again. */
+  usable: boolean;
+}
+
 /** What /ucet shows: never the secret. */
-export async function readerCredentialSummary(userId: string): Promise<Record<LibraryId, { username: string; updatedAt: string } | null>> {
+export async function readerCredentialSummary(userId: string): Promise<Record<LibraryId, CredentialSummary | null>> {
   const stored = await fetchLibraries(userId);
-  const out = {} as Record<LibraryId, { username: string; updatedAt: string } | null>;
+  const out = {} as Record<LibraryId, CredentialSummary | null>;
   for (const id of LIBRARY_IDS) {
     const entry = stored[id];
-    out[id] = entry ? { username: entry.username, updatedAt: entry.updatedAt } : null;
+    if (!entry) {
+      out[id] = null;
+      continue;
+    }
+    let usable = true;
+    try {
+      openSecret(entry.sealed);
+    } catch {
+      usable = false;
+    }
+    out[id] = { username: entry.username, updatedAt: entry.updatedAt, usable };
   }
   return out;
 }
@@ -135,27 +153,21 @@ export async function saveReaderCredential(userId: string, library: LibraryId, c
   const client = await clerkClient();
   // Deep-merged by Clerk: other libraries' entries survive.
   await client.users.updateUserMetadata(userId, { privateMetadata: { [METADATA_KEY]: { [library]: stored } } });
-  credentialCache.delete(memoKey("reader-credentials", userId));
 }
 
 export async function deleteReaderCredential(userId: string, library: LibraryId): Promise<void> {
   const client = await clerkClient();
   // null removes the key under Clerk's deep merge.
   await client.users.updateUserMetadata(userId, { privateMetadata: { [METADATA_KEY]: { [library]: null } } });
-  credentialCache.delete(memoKey("reader-credentials", userId));
 }
 
-const credentialCache = new TtlCache<Partial<Record<LibraryId, ReaderCredential>>>(SEARCH_TTL_MS, 100);
-
 /**
- * The caller's usable logins, unsealed — for the tool, per invocation,
- * cached briefly so a research session does not hit Clerk on every read.
+ * The caller's usable logins, unsealed — for the tool, read fresh on every
+ * call: the page that deletes a login runs on another instance, so any
+ * cache here would keep using a login the reader just removed.
  * Undecryptable entries (secret rotated) are skipped, not fatal.
  */
 export async function loadReaderCredentials(userId: string): Promise<Partial<Record<LibraryId, ReaderCredential>>> {
-  const cacheKey = memoKey("reader-credentials", userId);
-  const cached = credentialCache.get(cacheKey);
-  if (cached) return cached;
   if (!credentialsConfigured()) return {};
   const stored = await fetchLibraries(userId);
   const out: Partial<Record<LibraryId, ReaderCredential>> = {};
@@ -168,6 +180,5 @@ export async function loadReaderCredentials(userId: string): Promise<Partial<Rec
       // Sealed under another secret — unusable, and not the tool's business to say more.
     }
   }
-  credentialCache.set(cacheKey, out);
   return out;
 }
