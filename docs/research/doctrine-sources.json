@@ -88,7 +88,8 @@
       ],
       "unverified": [
         "Live behaviour of doi.org and publisher hosts from the deployment (no egress from the development sandbox); the extraction path is pinned by a generated two-page PDF and synthetic HTML.",
-        "Primo VE full-display endpoint GET /primaws/rest/pub/pnxs/{L|PC}/{recordid}?vid=…&lang=cs&search_scope=MyInst_and_CI (from memory; the capture never opened a record) — a miss is reported, and the search result already carries the record's main fields."
+        "Primo VE full-display endpoint GET /primaws/rest/pub/pnxs/{L|PC}/{recordid}?vid=…&lang=cs&search_scope=MyInst_and_CI (from memory; the capture never opened a record) — a miss is reported, and the search result already carries the record's main fields.",
+        "Residual risk, accepted: the public-address guard resolves the host once and fetch() resolves it again — a DNS-rebinding host (TTL 0, two answers) could pass the check and then hand the connection to a private address. Pinning the socket to the checked address needs a custom undici dispatcher (a new dependency); the deployment's function network has no sensitive peers, so the guard is kept as is and this is recorded rather than papered over."
       ],
       "needs_from_user": [
         "Nothing for the open-access path beyond a deploy + dawmain_probe_sources (canary 'unpaywall'). For licensed works: the reader-login captures listed above, and the decision whether readers' library passwords may be stored at all."
