@@ -187,7 +187,7 @@ export function mapPrimoDoc(doc: Rec, full = false): BibHit {
     for (const raw of delivery.link) {
       const link = obj(raw);
       // Display-only link types (the cover image) are not a way to the
-      // work — the same rule accessLinkUrl applies to WorldCat's MARC 856.
+      // work.
       const type = typeof link.linkType === "string" ? link.linkType : "";
       // Both spellings occur live: the purl URI on CDI records, a bare
       // "thumbnail" on catalogue records.

@@ -100,12 +100,6 @@ export const DATABASES: Array<{ label: string; href: string; source: string; can
     canaryId: "cellar-sparql",
   },
   {
-    label: "Peace Palace Library (WorldCat)",
-    href: "https://peacepalace.on.worldcat.org",
-    source: "Peace Palace Library (WorldCat)",
-    canaryId: "worldcat",
-  },
-  {
     label: "UKAŽ (Univerzita Karlova)",
     href: "https://cuni.primo.exlibrisgroup.com/discovery/search?vid=420CKIS_INST:UKAZ",
     source: "UKAŽ (Univerzita Karlova, Primo)",

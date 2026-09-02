@@ -106,40 +106,6 @@ export async function fetchUpstream(
   return response;
 }
 
-/**
- * Read a body while counting: the content-length guard above cannot see a
- * chunked response, so a reader that follows arbitrary links needs the cap
- * on the bytes themselves. Throws once `maxBytes` is exceeded.
- */
-export async function readBodyCapped(source: string, response: Response, maxBytes = DEFAULT_MAX_BYTES): Promise<Uint8Array> {
-  if (!response.body) return new Uint8Array(await response.arrayBuffer());
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > maxBytes) {
-      await reader.cancel().catch(() => undefined);
-      throw new SourceError(
-        source,
-        "UPSTREAM_ERROR",
-        `${source}: the response exceeded the ${Math.round(maxBytes / 1024 / 1024)} MB limit.`,
-        "Narrow the request - this server does not download whole datasets.",
-      );
-    }
-    chunks.push(value);
-  }
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return out;
-}
-
 /** Short, log-safe label for what went wrong - an error name, not its text. */
 function errorLabel(error: unknown): string {
   if (error instanceof Error) return error.name === "TimeoutError" ? "timeout" : error.name;

@@ -18,8 +18,8 @@ Uživatelský popis je v [README](../README.md).
 | `curia_search` / `curia_get_document` | InfoCuria + Cellar | FULLTEXT judikatury SDEU (C i T) přes vlastní index soudu — hledá napříč všemi jazykovými verzemi; typ dokumentu, stav věci, citovaný předpis a článek (`cites_celex`/`cites_article`), předběžné otázky podle předkládajícího státu (`referred_from`), datumy — vše server-side dle zachyceného payloadu SPA | 
 | `eurlex_search` / `eurlex_get_document` | Cellar SPARQL (Publications Office) | EU legislativa, judikatura i legislativní materiály (návrhy COM, sdělení, zelené/bílé knihy, SWD, impact assessmenty, stanoviska EHSV/VR, postoje EP a Rady) dle názvů, CELEX/ECLI, typů a dat; texty z oficiálního Cellaru |
 | `eurlex_legislative_history` | Cellar SPARQL (Publications Office) | travaux préparatoires aktu z dossieru interinstitucionálního postupu (`cdm:dossier_contains_work` — obsahuje i přijatý akt, takže kotví CELEX aktu i kteréhokoli dokumentu postupu, případně číslo postupu `2012/0011(COD)`); vrací návrh s důvodovou zprávou, impact assessmenty, stanoviska, postoje EP/Rady + číslo postupu, právní základ a stav (přijato/projednáváno/staženo) |
-| `doctrine_search` | peacepalace.on.worldcat.org + cuni.primo.exlibrisgroup.com | doktrína: knihy, kapitoly a články ze dvou knihovních katalogů naráz — Peace Palace Library (WorldCat Discovery: WorldCat.org + licencované právnické kolekce) a UKAŽ Univerzity Karlovy (Primo VE: katalog UK + Central Discovery Index); `query`/`queries`, `title`, `author`, `subject`, `language`, `year_from`/`year_to`; katalogy stránkují po 10, `per_source_limit` (≤ 20; nad 10 záznamy stručně, bez abstraktů) stáhne víc stránek v paralelní dávce a `page` kráčí dál — vrací bibliografické záznamy s odkazem na záznam, abstraktem/obsahem a přístupovými odkazy, žádné plné texty; oba klienti postavené na zachycených požadavcích SPA (HAR 2026-09) |
-| `doctrine_get_document` | katalogy výše + api.unpaywall.org + doi.org + vydavatelé/repozitáře + knihovní proxy (peacepalace.idm.oclc.org, EZproxy UK) | záznam v plném znění (celý abstrakt, obsah, hesla, přístupové odkazy — WorldCat přes `no:<OCLC>`, Primo přes full-display endpoint) a text díla, kde existuje open-access kopie: kandidáti v pořadí zadaný `url` → OA umístění z Unpaywall (PDF před landing page) → DOI → odkazy záznamu (proxované až poslední); PDF přes `unpdf`, HTML na text, přihlašovací/nákupní stránka se hlásí jako nedostupnost; každý pokus vrací s důvodem; má-li volající na `/ucet` uložené čtenářské přihlášení, zkusí tatáž díla i přes proxy své knihovny jako přihlášený čtenář (licencované tituly; `access.status` = `reader`); `find`/`page` jako u ostatních `*_get_*`; každý skok přesměrování prochází kontrolou veřejné adresy (SSRF) |
+| `doctrine_search` | cuni.primo.exlibrisgroup.com | doktrína: knihy, kapitoly a články z UKAŽ Univerzity Karlovy (Primo VE: katalog UK + Central Discovery Index licencovaných e-zdrojů); `query`/`queries` (≤ 3 varianty), `title`, `author`, `subject`, `language`, `year_from`/`year_to`; katalog stránkuje po 10, `limit` (≤ 20; nad 10 záznamy stručně, bez abstraktů) stáhne víc stránek v paralelní dávce a `page` kráčí dál (`total` = `total_local` + `total_central`) — vrací bibliografické záznamy s odkazem na záznam, abstraktem/obsahem a přístupovými odkazy, žádné plné texty; klient postavený na zachyceném požadavku SPA (HAR 2026-09), ověřený živě z produkce |
+| `doctrine_get_document` | cuni.primo.exlibrisgroup.com | jeden záznam v plném znění přes full-display endpoint Prima (ověřený živě): celý abstrakt, obsah (TOC), hesla, identifikátory a přístupové odkazy — hledání ukazuje jen začátek abstraktu a obsahu; text díla se nestahuje (k němu vede odkaz na záznam, licencované tituly si čtenář otevře sám přes vzdálený přístup UK) |
 | `dawmain_ping` | — | které nasazení odpovědělo |
 | `dawmain_probe_sources` | — | diagnostika všech upstreamů z nasazené funkce; `include_raw` pro záchyt fixtures, `discover` pro hledání neověřených endpointů |
 
@@ -28,43 +28,27 @@ výsledků dotazu (zužuj dotazem, ne stránkováním); justice.cz drží data o
 10/2020, převážně civilní prvoinstanční, a neohraničený fulltext je pomalý.
 Odkazy na rozhodnutí NS nesou `&Highlight=0,<termy>`, takže se dokument otevře
 rovnou na hledaném místě.
-Doktrína, živě z produkce (fra1, 2026-09-02): **Peace Palace / WorldCat
-Discovery odpovídá Cloudflare 403** („Sorry, you have been blocked") za
-50 ms, tedy WAF blokuje adresu nasazení ještě před kódem OCLC — podpis SPA
-(`Oclc-Apik`/`Oclc-Apin` na každém volání jiné, plus relační `api-token`, vše
-v bundlu, který HAR neobsahuje) by odtud stejně nepomohl. Semafor knihovnu
-ukazuje červeně s HTTP 403, `doctrine_search` odmítnutí hlásí u každého
-volání. Cesty dál: oficiální WorldCat Search API s WSKey vydaným přes
-knihovnu, nebo klient vyřadit jako u ÚPV. **UKAŽ/Primo odpovídá bez tokenu**
-(hledání i full-display záznamu, verbatim fixtures v `tests/fixtures/primo/`);
-guest-token fallback zůstává pro případ, že by ho Primo začalo chtít.
-**Unpaywall** z fra1 třikrát neodpověděl do 12 s a o osm minut později
-odpověděl 200 za 322 ms — výpadek, ne blokace; nástroj na něj čeká nejvýš
-6 s a DOI i odkazy záznamu zkouší tak jako tak. Oba katalogy jsou knihovní, ne
-open access: `doctrine_get_document` přečte jen díla s open-access kopií
-(Unpaywall zná OA umístění k DOI; DOI a odkazy záznamu se zkusí také), u
-licencovaných zkusí přihlášení čtenáře, pokud si ho uživatel uložil na
-`/ucet` (heslo zapečetěné AES-256-GCM klíčem `CREDENTIALS_SECRET` v private
-metadata Clerku; čte je jen nástroj pro volajícího identifikovaného OAuth
-tokenem — sdílený kód nikoho neidentifikuje). Průchod přihlášením
-(`src/sources/library-login.ts`) nemá napevno žádný řetěz: chová se jako
-prohlížeč s cookie jarem po doménách — sleduje přesměrování, vyplní
-formulář s heslem (CAS UK: `username`, `password`, skryté `execution`
-a `_eventId`, zachyceno; SimpleSAMLphp Peace Palace: `username`, `password`,
-`AuthState`), odešle formuláře složené jen ze skrytých polí (`SAMLResponse`,
-„pokračovat" stránky Shibbolethu vč. jména tlačítka) a zastaví se na první
-stránce, která není ani jedno. Heslo jde výhradně formuláři na
-přihlašovacích hostech dané knihovny (`*.cuni.cz`; `*.peacepalacelibrary.nl`
-a `*.oclc.org`) — políčko heslo na stránce vydavatele není přihlášení
-knihovny a stránka se vrátí jako obsah; odmítnuté přihlášení se 30 minut
-neopakuje, aby prošlé heslo nezablokovalo účet; cookie s cizím `Domain`
-se ignoruje; tělo odpovědi se čte se stropem 12 MB i bez content-length. Proxy Peace Palace (`peacepalace.idm.oclc.org`) je
-z HARu, EZproxy UK (`ezproxy.is.cuni.cz`, `CUNI_PROXY_BASE`) z paměti;
-řetěz, který nesedí, se hlásí s důvodem, viz
-`docs/research/doctrine-sources.json`. Unpaywall chce na každém dotazu
-kontaktní e-mail (`UNPAYWALL_EMAIL`, výchozí kontakt z právních stránek).
-Full-display endpoint Prima pro záznam je z paměti, ne z HARu — hlásí se,
-když neodpoví; hledání záznam nese i bez něj.
+Doktrína, živě z produkce (fra1, 2026-09-02): **UKAŽ/Primo odpovídá bez
+tokenu** (hledání i full-display záznamu, verbatim fixtures v
+`tests/fixtures/primo/`); guest-token fallback zůstává pro případ, že by ho
+Primo začalo chtít. **Peace Palace Library (WorldCat Discovery) byla druhým
+zdrojem do prvního živého běhu**: Cloudflare odpověděl 403 („Sorry, you have
+been blocked") za 50 ms, tedy WAF blokuje adresu nasazení ještě před kódem
+OCLC — podpis SPA (`Oclc-Apik`/`Oclc-Apin` na každém volání jiné) by odtud
+stejně nepomohl; klient byl vyřazen jako u ÚPV (žádný spící kód; co se o
+katalogu zjistilo, zůstává v `docs/research/doctrine-sources.json`, cesta
+zpět by vedla přes oficiální WorldCat Search API s WSKey knihovny).
+**Plné texty se nečtou.** První verze uměla stáhnout open-access kopii
+(Unpaywall, DOI, `unpdf`) a licencované tituly otevřít přes EZproxy UK s
+uloženým přihlášením čtenáře (CAS, stránka `/ucet`, hesla zapečetěná v
+private metadata Clerku); na přání zadavatele byla celá vrstva odstraněna —
+k orientaci v literatuře stačí celý abstrakt a obsah záznamu, které
+`doctrine_get_document` vrací (full-display endpoint Prima, ověřený živě,
+`tests/fixtures/primo/record-local-book.json`), a text díla si čtenář otevře
+sám přes odkaz na záznam (u licencovaných přes vzdálený přístup UK v
+prohlížeči). Co se o Unpaywallu, o přihlašovacím řetězu CAS a o proxy
+`ezproxy.is.cuni.cz` (host potvrzený HARem zadavatele) zjistilo, zůstává v
+`docs/research/doctrine-sources.json`; v kódu nezůstal žádný spící zbytek.
 **EUIPO** (eSearchCLW i Guidelines) a **ÚPV** (isdv.upv.gov.cz) záměrně
 pokryté nejsou a kód pro ně v repu není: doložky EUIPO si vyhrazují zákaz TDM
 a scrapingu „jakýmikoli prostředky, včetně botů" mimo vědecký výzkum (bez
@@ -140,17 +124,6 @@ produkci. Bez `vercel.json`; Next.js si Vercel detekuje sám.
 5. `dawmain_probe_sources {include_raw: true, sources: ["ns"]}` zachytí syrové
    tělo odpovědi jako podklad pro fixture (po jednom zdroji — všechny naráz se
    nevejdou do rozpočtu odpovědi).
-
-### Účet čtenáře (`/ucet`)
-
-Stránka pod Clerk přihlášením (`proxy.ts` matcher `/ucet(.*)`), kde si
-uživatel uloží přihlašovací jméno a heslo ke knihovnám (Peace Palace, UK).
-Server actions v `app/ucet/actions.ts` berou id uživatele ze session,
-nikdy z formuláře; `src/mcp/credentials.ts` heslo zapečetí (AES-256-GCM,
-klíč odvozený z `CREDENTIALS_SECRET`) a uloží do private metadata Clerku
-pod `libraries.<knihovna>`; smazání nastaví klíč na `null`. Bez
-`CREDENTIALS_SECRET` stránka nic neukládá a nástroj čte jen open access.
-Rotace klíče znehodnotí uložená hesla — uživatelé je zadají znovu.
 
 ## Připojení klienta
 

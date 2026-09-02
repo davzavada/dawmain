@@ -1,6 +1,6 @@
 ---
 name: dawmain-reserse
-description: Conduct Czech and EU legal research through the Dawmain MCP connector (live queries into e-Sbírka, NS, NSS, Ústavní soud, obecné soudy, SDEU and EUR-Lex, plus the literature in the Peace Palace Library and UKAŽ catalogues) and deliver a research memo — question, answer, argument — citing every authority in the running text with sp. zn./ECLI, date and link. Use this whenever the user asks what the law, the courts or the doctrine say, in phrasings like "právní rešerše", "rešerše k", "co na to judikatura", "najdi judikaturu k § X", "jak to soudy vykládají", "je na to nějaký rozsudek", "platí ještě", "co říká zákon o", "najdi mi rozhodnutí", "co na to doktrína", "najdi literaturu k", "je k tomu komentář nebo článek", or describes a legal problem and expects an answer grounded in statute, case law and literature. Requires the Dawmain connector; if its tools are absent, say so instead of guessing.
+description: Conduct Czech and EU legal research through the Dawmain MCP connector (live queries into e-Sbírka, NS, NSS, Ústavní soud, obecné soudy, SDEU and EUR-Lex, plus the literature in the UKAŽ catalogue of Univerzita Karlova) and deliver a research memo — question, answer, argument — citing every authority in the running text with sp. zn./ECLI, date and link. Use this whenever the user asks what the law, the courts or the doctrine say, in phrasings like "právní rešerše", "rešerše k", "co na to judikatura", "najdi judikaturu k § X", "jak to soudy vykládají", "je na to nějaký rozsudek", "platí ještě", "co říká zákon o", "najdi mi rozhodnutí", "co na to doktrína", "najdi literaturu k", "je k tomu komentář nebo článek", or describes a legal problem and expects an answer grounded in statute, case law and literature. Requires the Dawmain connector; if its tools are absent, say so instead of guessing.
 ---
 
 # Rešerše přes Dawmain
@@ -88,11 +88,12 @@ quoted passages stay in the original.
 | CJEU | `curia_search` → `curia_get_document` (`language: "cs"` falls back to English) |
 | EU legislation | `eurlex_search` (titles/CELEX/ECLI only, NOT full text) → `eurlex_get_document` |
 | EU legislative materials (travaux) | `eurlex_legislative_history {celex}` — the act's whole dossier: proposal + explanatory memorandum, impact assessments, EESC/CoR opinions, EP/Council positions; or `eurlex_search` with `types: ["proposal", "opinion", …]` |
-| Literature — monographs, commentaries, articles (doctrine) | `doctrine_search` — Peace Palace Library (WorldCat) + UKAŽ (Univerzita Karlova, Primo) in parallel → `doctrine_get_document {source, id}` for the record in full and, where an open-access copy exists, the text of the work |
+| Literature — monographs, commentaries, articles (doctrine) | `doctrine_search` — UKAŽ (Univerzita Karlova, Primo: the UK catalogue + the Central Discovery Index) → `doctrine_get_document {id}` for the record in full: the whole abstract and table of contents |
 | A source misbehaves | `dawmain_probe_sources` |
 
-Not covered: EUIPO and ÚPV. If the question needs them, say so and point at
-euipo.europa.eu / isdv.upv.gov.cz — do not answer from memory instead.
+Not covered: EUIPO, ÚPV and the Peace Palace Library. If the question needs them,
+say so and point at euipo.europa.eu / isdv.upv.gov.cz / peacepalace.on.worldcat.org —
+do not answer from memory instead.
 
 ## Query craft — the precision lever
 
@@ -415,16 +416,15 @@ normal, not a bug.
 
 ## Doktrína (literatura): pole
 
-`doctrine_search` searches two library catalogues in parallel — the Peace Palace
-Library in The Hague (WorldCat Discovery: WorldCat.org plus the library's licensed law
-collections — Nomos, Brill, Kluwer, OUP Law, Cambridge journals, Springer, Elgar) and
-UKAŽ of Univerzita Karlova (Primo: the UK catalogue plus the Central Discovery Index).
-It returns **bibliographic records**: author, title, year, publisher, form, ISBN/DOI,
-subject headings, a taste of the abstract and contents, and the link to the record.
-`doctrine_get_document {source: "peacepalace", id: "1525268154"}` then opens one
-work: the record in full (whole abstract, table of contents, subjects, access links)
-and — where an open-access copy exists — the text itself, with `find` and `page` like
-any other `*_get_*` tool.
+`doctrine_search` searches UKAŽ, the discovery service of Univerzita Karlova (Primo):
+the UK catalogue — Czech monographs and commentaries — plus the Central Discovery
+Index of the e-resources the university licenses, where the international journals
+and the Brill, Kluwer, Oxford and Springer literature live. It returns
+**bibliographic records**: author, title, year, publisher, form, ISBN/DOI, subject
+headings, a taste of the abstract and contents, and the link to the record.
+`doctrine_get_document {id: "alma990020025980106986"}` (the `id` of a hit) then returns
+that one record whole: the full abstract, the table of contents, subject headings,
+identifiers and access links. It does not fetch the text of the work.
 
 | Chci | Parametr |
 |---|---|
@@ -434,19 +434,17 @@ any other `*_get_*` tool.
 | předmětové heslo | `subject: "International criminal law"` |
 | jen česky / anglicky / německy | `language: "cze"` / `"eng"` / `"ger"` |
 | období vydání | `year_from: 2015`, `year_to: 2026` |
-| jen jednu knihovnu | `sources: ["cuni"]` / `["peacepalace"]` |
-| jen s dostupným plným textem (Peace Palace) | `full_text_only: true` |
-| víc záznamů najednou (stručně, bez abstraktů) / další stránka | `per_source_limit: 20`, then `page: 2` |
+| víc záznamů najednou (stručně, bez abstraktů) / další stránka | `limit: 20`, then `page: 2` |
 
-**Pick the language per catalogue.** UKAŽ holds the Czech doctrine — Czech terms of art
-(`"promlčení náhrady škody"`), and the commentaries surface under their series names
-(Velké komentáře, Beckovy komentáře). The Peace Palace is the international-law
-library — English (or French, German) terms; its licensed collections are where the
-Brill, Nomos and Kluwer literature lives. `queries` with one term per language runs
-both in one call.
+**Pick the language per part of the catalogue.** The UK catalogue holds the Czech
+doctrine — Czech terms of art (`"promlčení náhrady škody"`), and the commentaries
+surface under their series names (Velké komentáře, Beckovy komentáře). The Central
+Discovery Index answers to English (or French, German) terms. `queries` with one term
+per language runs both in one call; `total_local` and `total_central` in the result
+say which part answered.
 
-**Thousands of hits is the normal case, and paging is not the fix.** These are
-catalogues, so a common word matches everything ever catalogued under it. Read
+**Thousands of hits is the normal case, and paging is not the fix.** This is a
+catalogue, so a common word matches everything ever catalogued under it. Read
 `total` as a signal about the query: add the term of art, `title` or `subject`,
 narrow the years, set `language`. Walk `page: 2, 3…` only when the question is
 genuinely a bibliography ("co všechno vyšlo k…"), and say in the memo how far you
@@ -455,26 +453,18 @@ went (`has_more` tells you whether the list continued).
 **Author + subject without keywords works** — a field-only search is a valid call;
 language and years alone are not.
 
-**Open the work before you lean on it.** `doctrine_get_document` looks for a readable
-copy in order — the open-access location Unpaywall knows for the DOI (PDF first), the
-DOI's own page, the record's access links — and reads the first one that is really the
-work: PDF or HTML, paged, `find: "term"` for the passages. `access.status` tells you
-what happened: `open` means you are reading an open-access text; `reader` means the
-tool signed in with the user's own library login (stored on the Dawmain site under
-Účet, `/ucet`) and read the licensed copy through the library's proxy; `unavailable`
-means every copy sat behind a login or purchase wall (each attempt is listed with its
-reason) — say so, and when `reader_logins` is empty pass on what the ACCESS line of
-the result itself says: for a caller signed in with their own account, storing a
-Peace Palace or UK login on `/ucet` unlocks licensed titles; a shared access code
-identifies nobody, so for it licensed titles stay closed whatever is stored there. Do not treat `unavailable` as absence: the record still carries the whole
-abstract and the table of contents, which is how you tell whether a monograph or
-commentary is on point at all — `record_only: true` fetches just that, cheaply.
+**Read the abstract and the contents before you lean on a work.** The search shows only
+the first lines of each; `doctrine_get_document {id}` returns them whole, and the table
+of contents of a monograph or commentary is how you tell whether it is on point at all
+— which chapter, which paragraph of the commentary. Do it for the two or three works
+you mean to cite, in one turn.
 
-**Cite the record, and say what you read.** A catalogue hit proves the work exists,
-not what it says: cite it as literature (author, title, year, publisher, record link),
-never as an authority for a proposition you have not read. What you read through
-`doctrine_get_document` you may quote and cite by page; what you know only from the
-abstract or the contents you present as the record's abstract, not as the work.
+**Cite the record, and say what you did not read.** A catalogue hit proves the work
+exists, not what it says: cite it as literature (author, title, year, publisher, record
+link), never as an authority for a proposition you have not read. What you know from
+the abstract or the contents you present as the record's abstract, not as the work;
+when the argument needs the text itself, say so and point the user to the record link
+(licensed titles open for them through the university's remote access in a browser).
 
 ## Screening and reading
 
@@ -543,7 +533,7 @@ Most wasted time is a round that adds nothing. Stop when:
    and needs no keywords. Add `doctrine_search` to the same turn when the question
    asks for the literature (komentář, monografie, článek), when the case law is thin
    and doctrine is where the argument lives, or when the topic is international law
-   — the Peace Palace catalogue is the standard bibliography there.
+   — the Central Discovery Index carries the international journals and series too.
 3. **Read the statute you cite.** `esbirka_get_text` with `section` — never paraphrase a
    provision you have not read. Historical matters: pass the reference `date`.
 4. **Read the decisions that decide it.** Full text of the two or three that matter,

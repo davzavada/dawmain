@@ -39,27 +39,13 @@ export default function Soukromi() {
           </li>
           <li>
             <strong>provozní záznamy hostingu</strong> - IP adresa, čas, typ požadavku, chybová
-            hlášení,
-          </li>
-          <li>
-            <strong>přihlašovací údaje ke knihovnám</strong> - jen pokud si je sami uložíte na
-            stránce Účet: přihlašovací jméno a heslo k Peace Palace Library nebo k Univerzitě
-            Karlově, kterými server otevírá licencovanou literaturu vaším jménem.
+            hlášení.
           </li>
         </ul>
         <p>
           Účty vede poskytovatel přihlášení Clerk; drží e-mailovou adresu a identifikátor účtu.
           Přihlásíte-li se přes účet jiné služby (např. Google), předá do Clerku zpravidla totéž.
-          Žádné další údaje z vašeho účtu nezpracovávám. Heslo k Dawmainu u sebe neuchovávám -
-          vede ho Clerk.
-        </p>
-        <p>
-          Přihlašovací údaje ke knihovnám jsou jediný údaj nad rámec účtu, který server drží, a
-          drží ho jen tehdy, když si ho na stránce Účet sami uložíte. Heslo se před uložením
-          zašifruje klíčem, který má jen tento server; uložené je u poskytovatele účtů Clerk vedle
-          vašeho účtu, kde je vidět jen přihlašovací jméno a zašifrovaný blok. Použije se
-          výhradně k přihlášení do zvolené knihovny ve chvíli, kdy vy sami čtete licencovaný text,
-          a nikdy se nezobrazí. Smazat ho můžete kdykoli tamtéž; smazáním účtu zmizí s ním.
+          Žádné další údaje z vašeho účtu nezpracovávám a hesla u sebe neuchovávám.
         </p>
         <p>
           Vaši konverzaci s AI asistentem server nevidí - nedostává ji. Dostane jen strojové
@@ -74,10 +60,6 @@ export default function Soukromi() {
           <li>umožnění přihlášení a přístupu ke službě,</li>
           <li>udržení přihlašovací relace,</li>
           <li>vyřízení rešerše; krátká mezipaměť šetří zdroje, ze kterých se čerpá,</li>
-          <li>
-            otevření licencované literatury vaším jménem v knihovně, ke které jste si uložili
-            přihlášení,
-          </li>
           <li>přehled o tom, jak se služba používá, a její další zlepšování,</li>
           <li>provoz a bezpečnost služby a prevence jejího zneužití.</li>
         </ul>
@@ -87,8 +69,7 @@ export default function Soukromi() {
         <p>
           Účet, přihlašovací relaci a vyřízení rešerše včetně krátké dočasné paměti zpracovávám pro
           plnění smlouvy (čl. 6 odst. 1 písm. b) GDPR). Skutečnost, že je služba bezúplatná, na tom
-          nic nemění. Totéž platí pro přihlašovací údaje ke knihovnám: ukládáte je proto, aby vám
-          služba otevřela licencovanou literaturu, a kdykoli je můžete smazat.
+          nic nemění.
         </p>
         <p>
           Údaje o používání služby, provozní záznamy hostingu a zprávy, které mi napíšete,
@@ -100,10 +81,6 @@ export default function Soukromi() {
       <Section heading="5. Doba uchování">
         <ul style={list}>
           <li>údaje o účtu - dokud účet trvá,</li>
-          <li>
-            přihlašovací údaje ke knihovnám - dokud je sami nesmažete nebo dokud trvá účet;
-            přihlašovací relace v knihovně nejdéle 30 minut v dočasné paměti serveru,
-          </li>
           <li>přihlašovací relace - do svého vypršení,</li>
           <li>dočasná paměť - vyhledávání nejdéle 5 minut, texty rozhodnutí a předpisů nejdéle 10 minut,</li>
           <li>údaje o používání služby - nejdéle 12 měsíců,</li>
@@ -123,9 +100,8 @@ export default function Soukromi() {
         </p>
         <ul style={list}>
           <li>
-            <strong>Clerk, Inc.</strong> - přihlašování a správa účtů, a vedle účtu i vámi uložené
-            přihlašovací údaje ke knihovnám (heslo v zašifrované podobě, kterou Clerk sám
-            nepřečte); společnost sídlí v USA a účty vede tam,
+            <strong>Clerk, Inc.</strong> - přihlašování a správa účtů; společnost sídlí v USA a
+            účty vede tam,
           </li>
           <li>
             <strong>Vercel, Inc.</strong> - hosting serveru; server běží v evropském regionu
@@ -144,34 +120,22 @@ export default function Soukromi() {
         </p>
         <p>
           Do veřejných databází (e-Sbírka, Nejvyšší soud, Nejvyšší správní soud, Ústavní soud,
-          rozhodnuti.justice.cz, InfoCuria, EUR-Lex) a knihovních katalogů (Peace Palace Library
-          na WorldCat Discovery, UKAŽ Univerzity Karlovy na Primo) putuje pouze samotný dotaz,
-          nikoli to, kdo jste. Při čtení open-access literatury odchází identifikátor díla (DOI
-          nebo adresa) do služby Unpaywall a k vydavateli či repozitáři, kde kopie leží; ani tam
-          neodchází nic o vás. Uložíte-li si přihlášení ke knihovně, přihlásí se server při čtení
-          licencovaného textu vaším jménem do přihlašovacího systému této knihovny (Peace Palace
-          Library, resp. CAS Univerzity Karlovy) - ta pak vidí totéž, co když se přihlásíte sami
-          v prohlížeči. Údaje dále předám jen tehdy, uloží-li mi to zákon.
+          rozhodnuti.justice.cz, InfoCuria, EUR-Lex) a knihovního katalogu UKAŽ Univerzity
+          Karlovy (Primo) putuje pouze samotný dotaz, nikoli to, kdo jste. Údaje dále předám jen
+          tehdy, uloží-li mi to zákon.
         </p>
       </Section>
 
       <Section heading="7. Předávání do třetích zemí">
         <p>
-          Server běží v evropském regionu (Frankfurt) a české a unijní databáze, do kterých se
-          dotazuje (e-Sbírka, soudy, rozhodnuti.justice.cz, InfoCuria, EUR-Lex, UKAŽ na Primu),
-          Evropskou unii neopouštějí. Hledáte-li literaturu, jde dotaz i mimo ni: katalog Peace
-          Palace Library běží na WorldCat Discovery americké OCLC, index otevřených kopií Unpaywall
-          vede americká OurResearch a kopii díla server stahuje přímo od vydavatele nebo z
-          repozitáře, který může být kdekoli na světě. Odchází samotný dotaz, případně identifikátor
-          díla (DOI nebo adresa), nikoli to, kdo jste.
+          Vaše rešerše Evropskou unii neopouští. Server běží v evropském regionu (Frankfurt) a
+          databáze, do kterých se dotazuje, jsou české a unijní.
         </p>
         <p>
-          Údaje o vašem účtu - a uložíte-li si je, i přihlašovací údaje ke knihovnám - vede Clerk ve
-          Spojených státech; platformu Vercel spravuje americká společnost odtamtud. Obojí se opírá o
+          Mimo Evropskou unii jde jediná věc - údaje o vašem účtu, které Clerk vede ve Spojených
+          státech, a přístup k platformě Vercel, spravované rovněž odtamtud. Obojí se opírá o
           rozhodnutí Evropské komise o odpovídající ochraně pro EU-US Data Privacy Framework; obě
-          společnosti jsou v tomto rámci zapsány. Uložené přihlášení k Peace Palace Library odchází
-          při čtení do přihlašovacího systému této knihovny v Nizozemsku, přihlášení k Univerzitě
-          Karlově do jejího systému v Česku.
+          společnosti jsou v tomto rámci zapsány.
         </p>
       </Section>
 
@@ -190,10 +154,7 @@ export default function Soukromi() {
         <p>
           Nejvíc ale chrání to, co tu vůbec není. Vlastní databázi nevedu, takže neexistuje
           úložiště, ze kterého by šlo vaše dotazy zpětně vytáhnout. Co projde dočasnou pamětí, po
-          minutách mizí a s vaším účtem to spojené není. Jedinou výjimkou jsou přihlašovací údaje
-          ke knihovnám, které si sami uložíte: heslo je zašifrované (AES-256-GCM) klíčem, který
-          existuje jen v nastavení serveru, takže úložiště samo o sobě heslo nevydá a server sám
-          o sobě žádné nedrží.
+          minutách mizí a s vaším účtem to spojené není.
         </p>
         <p>
           Kromě mě mají k údajům přístup jen poskytovatelé uvedení výše a jejich dodavatelé, a to v

@@ -1,14 +1,13 @@
 /**
- * One bibliographic hit, whichever library catalogue it came from. The
- * doctrine search fans out to two discovery systems that describe the same
- * kind of thing — a book, a chapter, a journal article — so they share one
- * shape; each source client maps its own record format onto it, and the tool
- * renders it once.
+ * One bibliographic hit — a book, a chapter, a journal article — in the shape
+ * the doctrine tools render. The source client maps its record format onto
+ * it; the shape is catalogue-neutral so a further library can be added
+ * without touching the tool.
  */
 export interface BibHit {
-  /** "peacepalace" | "cuni" — which catalogue produced the record. */
-  source: "peacepalace" | "cuni";
-  /** OCLC number (Peace Palace) or Primo record id (UKAŽ). */
+  /** Which catalogue produced the record. Only UKAŽ today. */
+  source: "cuni";
+  /** Primo record id (`alma…` for the UK catalogue, `cdi_…` for the CDI). */
   id: string;
   title: string;
   authors: string[];
@@ -36,10 +35,11 @@ export interface BibHit {
 }
 
 /**
- * Dedupe key across query variants of ONE source: the record id when the
- * catalogue gave one, else DOI, else title + year + first author. Two catalogues are never
- * deduped against each other — the same book held by both is two verifiable
- * records, and the reader may want either library's copy. Pure.
+ * Dedupe key across query variants of one source: the record id when the
+ * catalogue gave one, else DOI, else title + year + first author. The key
+ * is prefixed by the source, so two catalogues would never be deduped
+ * against each other — the same book held by both is two verifiable
+ * records. Pure.
  */
 export function bibKey(hit: BibHit): string {
   if (hit.id) return `${hit.source}:${hit.id}`;
@@ -67,9 +67,9 @@ export interface PageWindow {
 }
 
 /**
- * Which catalogue pages a tool page maps onto. Both catalogues serve fixed
- * pages of `pageSize`; a caller asking for 30 hits per source, page 2, wants
- * hits 30–59 — catalogue pages 4, 5 and 6. Pure — unit-tested.
+ * Which catalogue pages a tool page maps onto. The catalogue serves fixed
+ * pages of `pageSize`; a caller asking for 30 hits, page 2, wants hits
+ * 30–59 — catalogue pages 4, 5 and 6. Pure — unit-tested.
  */
 export function pageWindow(page: number, limit: number, pageSize: number): PageWindow {
   const start = (Math.max(1, page) - 1) * limit;

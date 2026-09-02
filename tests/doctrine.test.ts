@@ -1,14 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
-import {
-  PEACE_PALACE_DATABASES,
-  accessLinkUrl,
-  buildWorldcatQuery,
-  buildWorldcatUrl,
-  mapWorldcatRecord,
-  parseWorldcatSearch,
-} from "@/src/sources/worldcat";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   PRIMO_VID,
   buildPrimoQuery,
@@ -21,136 +13,10 @@ import {
 } from "@/src/sources/primo";
 import { bibKey, formatAuthors, pageWindow, sliceWindow, type BibHit } from "@/src/sources/shared/bib";
 import { SourceError } from "@/src/sources/shared/errors";
+import { registerDoctrine } from "@/src/mcp/tools/doctrine";
 
 const fixture = (name: string) =>
   JSON.parse(readFileSync(path.join(path.dirname(__dirname), "tests", "fixtures", name), "utf8")) as unknown;
-
-// ---------- Peace Palace Library / WorldCat Discovery ----------
-
-describe("buildWorldcatQuery", () => {
-  it("composes the advanced form's index syntax, criteria ANDed", () => {
-    expect(buildWorldcatQuery({ query: "genocide", title: "Rome Statute", author: "Schabas" })).toBe(
-      "kw:(genocide) AND ti:(Rome Statute) AND au:(Schabas)",
-    );
-    expect(buildWorldcatQuery({ subject: "International agencies", language: "ENG" })).toBe(
-      "su:(International agencies) AND la:eng",
-    );
-  });
-  it("keeps phrase quotes but never lets a value unbalance the grouping", () => {
-    expect(buildWorldcatQuery({ query: '"safe harbour" (data)' })).toBe('kw:("safe harbour" data)');
-  });
-  it("is empty without a criterion", () => {
-    expect(buildWorldcatQuery({ language: "eng" })).toBe("la:eng");
-    expect(buildWorldcatQuery({})).toBe("");
-  });
-});
-
-describe("buildWorldcatUrl", () => {
-  it("mirrors the captured parameter set, page absent on page 1", () => {
-    const url = new URL(buildWorldcatUrl({ query: "genocide" }, 1));
-    expect(url.origin + url.pathname).toBe("https://peacepalace.on.worldcat.org/api/search");
-    expect(url.searchParams.get("queryString")).toBe("kw:(genocide)");
-    expect(url.searchParams.get("databaseList")).toBe(PEACE_PALACE_DATABASES);
-    expect(url.searchParams.get("sortKey")).toBe("BEST_MATCH");
-    expect(url.searchParams.get("clusterResults")).toBe("true");
-    expect(url.searchParams.get("groupVariantRecords")).toBe("false");
-    expect(url.searchParams.get("bookReviews")).toBe("off");
-    expect(url.searchParams.get("idDetect")).toBe("true");
-    expect(url.searchParams.get("citeDetect")).toBe("true");
-    expect(url.searchParams.has("page")).toBe(false);
-    expect(url.searchParams.has("year")).toBe(false);
-    expect(url.searchParams.has("content")).toBe(false);
-  });
-  it("adds the year facet, the full-text facet and the page number", () => {
-    const url = new URL(buildWorldcatUrl({ query: "x", yearFrom: 2021, yearTo: 2025, fullTextOnly: true }, 2));
-    expect(url.searchParams.get("year")).toBe("2021..2025");
-    expect(url.searchParams.get("content")).toBe("fullText");
-    expect(url.searchParams.get("page")).toBe("2");
-  });
-  it("opens a one-sided year range at a sensible bound", () => {
-    expect(new URL(buildWorldcatUrl({ query: "x", yearFrom: 2020 }, 1)).searchParams.get("year")).toMatch(/^2020\.\.\d{4}$/);
-    expect(new URL(buildWorldcatUrl({ query: "x", yearTo: 1999 }, 1)).searchParams.get("year")).toBe("1800..1999");
-  });
-});
-
-describe("parseWorldcatSearch (verbatim capture)", () => {
-  const page1 = parseWorldcatSearch(fixture("worldcat/search-page-1.json"));
-  const page2 = parseWorldcatSearch(fixture("worldcat/search-page-2.json"));
-
-  it("reads the total and every record", () => {
-    expect(page1.total).toBe(12279);
-    expect(page1.hits).toHaveLength(3);
-    expect(page1.partial).toBe(false);
-    expect(page2.total).toBe(12279);
-    expect(page2.hits[0].title).toBe("Analytical heat transfer");
-  });
-
-  it("maps a book record field by field", () => {
-    const hit = page1.hits[0];
-    expect(hit.source).toBe("peacepalace");
-    expect(hit.id).toBe("1525268154");
-    expect(hit.title).toBe("International Institutional Law : Seventh Revised Edition");
-    expect(hit.authors).toEqual(["Henry G Schermers", "Niels M Blokker"]);
-    expect(hit.year).toBe("2025");
-    expect(hit.publisher).toBe("Leiden ; Boston : Brill | Nijhoff, 2025.");
-    expect(hit.type).toBe("eBook");
-    expect(hit.language).toBe("eng");
-    expect(hit.isbn).toEqual(["9789004724822", "9004724826"]);
-    expect(hit.doi).toEqual(["10.1163/9789004724822"]);
-    expect(hit.subjects).toContain("International agencies");
-    expect(hit.abstract).toMatch(/^This seventh, revised edition/);
-    expect(hit.abstract!.length).toBeLessThanOrEqual(401);
-    expect(hit.contents).toMatch(/^Preface xxv/);
-    expect(hit.open_access).toBe(false);
-    expect(hit.url).toBe("https://peacepalace.on.worldcat.org/oclc/1525268154");
-  });
-
-  it("collects access links and the LCSH display form of subjects", () => {
-    const hit = page1.hits[1];
-    expect(hit.id).toBe("1507695297");
-    expect(hit.links).toContain("https://public.ebookcentral.proquest.com/choice/PublicFullRecord.aspx?p=31946553");
-    expect(hit.subjects).toContain("Constitutional law—United States");
-  });
-
-  it("keeps only real access links — cover images and excerpts are not the work", () => {
-    // Page 2's Taylor & Francis record carries the book link AND its jacket image.
-    const tandf = page2.hits.find((hit) => hit.id === "1553844722");
-    expect(tandf?.links).toEqual(["https://www.taylorfrancis.com/books/9781003705338"]);
-    expect(accessLinkUrl({ url: "https://x.test/a", relationship: "0" })).toBe("https://x.test/a");
-    expect(accessLinkUrl({ url: "https://x.test/b", relationship: "1" })).toBe("https://x.test/b");
-    expect(accessLinkUrl({ url: "https://x.test/c", relationship: "2", label: "cloudLibrary" })).toBeUndefined();
-    expect(accessLinkUrl({ url: "https://samples.overdrive.com/?crid=1", relationship: " ", label: "Excerpt" })).toBeUndefined();
-    expect(accessLinkUrl({ url: "https://images.yourcloudlibrary.com/delivery/img?type=DOCUMENTIMAGE&documentID=a", relationship: "0" })).toBeUndefined();
-    expect(accessLinkUrl({ url: "https://x.test/jacket.jpg", relationship: "0" })).toBeUndefined();
-    expect(accessLinkUrl({ url: "https://x.test/d", relationship: "0", label: "Front cover" })).toBeUndefined();
-  });
-
-  it("falls back to the SPA's own opac link when a record has no OCLC number", () => {
-    const hit = mapWorldcatRecord({
-      titleObject: { data: "Nameless" },
-      opacLink: "http://peacepalace.on.worldcat.org/search?queryString=ib%3A123",
-    });
-    expect(hit.id).toBe("");
-    expect(hit.url).toBe("http://peacepalace.on.worldcat.org/search?queryString=ib%3A123");
-    expect(hit.authors).toEqual([]);
-    expect(hit.abstract).toBeUndefined();
-  });
-
-  it("carries the backend's own report that it rewrote the query", () => {
-    expect(page1.rewritten).toBe(false);
-    expect(page1.originalQuery).toBe("kw:(keword) AND ti:(title) OR au:(author)   ( (yr:2021..2025) )");
-    expect(page1.resultsType).toBe("NORMAL");
-    const rewritten = parseWorldcatSearch({ numberOfRecords: 9, records: [], queryOptimization: { searchTermDropped: true, originalQuery: "kw:(x)" } });
-    expect(rewritten.rewritten).toBe(true);
-    expect(rewritten.originalQuery).toBe("kw:(x)");
-  });
-
-  it("throws PARSE_DRIFT when the envelope is gone", () => {
-    expect(() => parseWorldcatSearch({ records: [] })).toThrowError(SourceError);
-    expect(() => parseWorldcatSearch({ numberOfRecords: 1 })).toThrow(/numberOfRecords\/records/);
-    expect(() => parseWorldcatSearch("<html>")).toThrowError(SourceError);
-  });
-});
 
 // ---------- UKAŽ / Primo VE ----------
 
@@ -213,66 +79,11 @@ describe("parsePrimoSearch", () => {
     expect(page).toEqual({ total: 0, totalLocal: 0, totalCentral: 0, hits: [] });
   });
 
-  // Synthetic — the capture holds no records (the recorded query matched
-  // nothing); layout per Primo's documented PNX sections.
-  const doc = {
-    context: "PC",
-    adaptor: "Primo Central",
-    "@id": "https://cuni.primo.exlibrisgroup.com/primaws/rest/pub/pnxs/PC/cdi_proquest_journals_123",
-    pnx: {
-      control: { recordid: ["cdi_proquest_journals_123"], sourceid: ["proquest"] },
-      display: {
-        type: ["article"],
-        title: ["Genocide and the Rome Statute$$QGenocide and the Rome Statute"],
-        creator: ["Schabas, William A.$$QSchabas, William A."],
-        contributor: ["Novák, Jan"],
-        creationdate: ["[2019]"],
-        publisher: ["Oxford : OUP"],
-        language: ["eng"],
-        ispartof: ["Journal of International Criminal Justice, 2019, Vol.17 (2), p.1-20"],
-        subject: ["Genocide ; International criminal law"],
-        description: ["A study of the crime of genocide under Article 6."],
-      },
-      addata: { doi: ["10.1093/jicj/mqz001"], issn: ["1478-1387"], jtitle: ["Journal of International Criminal Justice"] },
-      links: { linktorsrc: ["$$Uhttps://www.proquest.com/docview/123$$DView record in ProQuest"] },
-    },
-    delivery: {
-      link: [
-        { linkType: "http://purl.org/pnx/linkType/thumbnail", linkURL: "https://img.example/x.jpg" },
-        { linkType: "http://purl.org/pnx/linkType/linktorsrc", linkURL: "https://x.test/svc" },
-      ],
-      availability: ["fulltext"],
-    },
-  };
-
-  it("maps a synthetic Central Discovery Index article", () => {
-    const page = parsePrimoSearch({ info: { total: 1, totalResultsLocal: 0, totalResultsPC: 1 }, docs: [doc] });
-    expect(page.total).toBe(1);
-    expect(page.totalCentral).toBe(1);
-    const hit = page.hits[0];
-    expect(hit.source).toBe("cuni");
-    expect(hit.id).toBe("cdi_proquest_journals_123");
-    expect(hit.title).toBe("Genocide and the Rome Statute");
-    expect(hit.authors).toEqual(["Schabas, William A.", "Novák, Jan"]);
-    expect(hit.year).toBe("2019");
-    expect(hit.type).toBe("article");
-    expect(hit.language).toBe("eng");
-    expect(hit.container).toBe("Journal of International Criminal Justice, 2019, Vol.17 (2), p.1-20");
-    expect(hit.subjects).toEqual(["Genocide", "International criminal law"]);
-    expect(hit.doi).toEqual(["10.1093/jicj/mqz001"]);
-    expect(hit.issn).toEqual(["1478-1387"]);
-    expect(hit.abstract).toBe("A study of the crime of genocide under Article 6.");
-    // The cover image is display-only; the service link is an access link.
-    expect(hit.links).toEqual(["https://www.proquest.com/docview/123", "https://x.test/svc"]);
-    expect(hit.url).toBe(
-      "https://cuni.primo.exlibrisgroup.com/discovery/fulldisplay?docid=cdi_proquest_journals_123&vid=420CKIS_INST%3AUKAZ&lang=cs&context=PC",
-    );
-  });
-
   it("maps a verbatim Central Discovery Index article from the deployment's own answer", () => {
     const page = parsePrimoSearch(fixture("primo/search-cdi-article.json"));
     expect(page).toMatchObject({ total: 10789, totalLocal: 443, totalCentral: 10346 });
     const hit = page.hits[0];
+    expect(hit.source).toBe("cuni");
     expect(hit.id).toBe("cdi_crossref_primary_10_18485_iipe_mp_2025_76_1194_1");
     expect(hit.title).toBe("Kako je Lemkinovo tumačenje genocida postalo instrument politike?");
     expect(hit.authors).toEqual(["Ćujić, Miodrag"]);
@@ -286,7 +97,9 @@ describe("parsePrimoSearch", () => {
     expect(hit.abstract).toMatch(/^The aim of the paper/);
     // The only delivery link is a cover thumbnail with a relative URL; the pnx links are templates — no access link.
     expect(hit.links).toBeUndefined();
-    expect(hit.url).toBe("https://cuni.primo.exlibrisgroup.com/discovery/fulldisplay?docid=cdi_crossref_primary_10_18485_iipe_mp_2025_76_1194_1&vid=420CKIS_INST%3AUKAZ&lang=cs&context=PC");
+    expect(hit.url).toBe(
+      "https://cuni.primo.exlibrisgroup.com/discovery/fulldisplay?docid=cdi_crossref_primary_10_18485_iipe_mp_2025_76_1194_1&vid=420CKIS_INST%3AUKAZ&lang=cs&context=PC",
+    );
   });
 
   it("maps a verbatim catalogue book with its table of contents and subjects", () => {
@@ -316,6 +129,25 @@ describe("parsePrimoSearch", () => {
     expect(hit.isbn).toEqual(["978-80-1"]);
     expect(hit.doi).toEqual(["10.5/x"]);
     expect(hit.issn).toEqual(["1234-5678"]);
+  });
+
+  it("keeps real delivery links and drops display-only ones", () => {
+    const hit = mapPrimoDoc({
+      context: "PC",
+      pnx: {
+        control: { recordid: ["cdi_x"] },
+        display: { title: ["T"] },
+        links: { linktorsrc: ["$$Uhttps://www.proquest.com/docview/123$$DView record in ProQuest"] },
+      },
+      delivery: {
+        link: [
+          { linkType: "http://purl.org/pnx/linkType/thumbnail", linkURL: "https://img.example/x.jpg" },
+          { linkType: "thumbnail", linkURL: "https://cache.obalkyknih.cz/api/cover?x" },
+          { linkType: "http://purl.org/pnx/linkType/linktorsrc", linkURL: "https://x.test/svc" },
+        ],
+      },
+    });
+    expect(hit.links).toEqual(["https://www.proquest.com/docview/123", "https://x.test/svc"]);
   });
 
   it("builds the container from OpenURL data when ispartof is absent", () => {
@@ -370,12 +202,11 @@ describe("pageWindow / sliceWindow", () => {
 
 describe("bibKey / formatAuthors", () => {
   const base: BibHit = { source: "cuni", id: "", title: "A Title", authors: [], url: null };
-  it("prefers the record id, then DOI, then title + year — per source", () => {
+  it("prefers the record id, then DOI, then title + year + first author", () => {
     expect(bibKey({ ...base, id: "x1" })).toBe("cuni:x1");
     expect(bibKey({ ...base, doi: ["10.1/ABC"] })).toBe("cuni:doi:10.1/abc");
     expect(bibKey({ ...base, year: "2020" })).toBe("cuni:a title|2020|");
     expect(bibKey({ ...base, year: "2020", authors: ["Novák"] })).toBe("cuni:a title|2020|novák");
-    expect(bibKey({ ...base, source: "peacepalace", id: "x1" })).not.toBe(bibKey({ ...base, id: "x1" }));
   });
   it("shortens long author lists", () => {
     expect(formatAuthors([])).toBe("");
@@ -384,10 +215,7 @@ describe("bibKey / formatAuthors", () => {
   });
 });
 
-// ---------- the tool end to end, upstream stubbed with the fixtures ----------
-
-import { afterEach, vi } from "vitest";
-import { registerDoctrine } from "@/src/mcp/tools/doctrine";
+// ---------- the search tool end to end, upstream stubbed with the live records ----------
 
 type Handler = (args: Record<string, unknown>) => Promise<{
   content: Array<{ type: string; text: string }>;
@@ -406,165 +234,192 @@ function doctrineHandler(): Handler {
   return handler;
 }
 
-const worldcatPage = (n: number) =>
-  readFileSync(path.join(path.dirname(__dirname), "tests", "fixtures", "worldcat", `search-page-${n}.json`), "utf8");
-const primoEmpty = readFileSync(path.join(path.dirname(__dirname), "tests", "fixtures", "primo", "search-empty.json"), "utf8");
+const bookDoc = (fixture("primo/search-local-book.json") as { docs: Array<Record<string, unknown>> }).docs[0];
+const articleDoc = (fixture("primo/search-cdi-article.json") as { docs: Array<Record<string, unknown>> }).docs[0];
 
-describe("doctrine_search (stubbed upstreams)", () => {
+/**
+ * A catalogue answering `total` records: page `offset` holds `count` docs,
+ * cloned from the two live records with ids that say where they sit, so a
+ * test can read the paging back off the ids.
+ */
+function primoPage(offset: number, count: number, total = 10789, tag = ""): string {
+  const docs = Array.from({ length: count }, (_, i) => {
+    const n = offset + i;
+    const base = JSON.parse(JSON.stringify(n % 2 === 0 ? bookDoc : articleDoc)) as { pnx: { control: Record<string, unknown> } };
+    base.pnx.control.recordid = [`${n % 2 === 0 ? "alma" : "cdi_"}${tag}${n}`];
+    return base;
+  });
+  return JSON.stringify({ info: { totalResultsLocal: 443, totalResultsPC: total - 443, total, first: offset + 1, last: offset + count }, docs });
+}
+
+describe("doctrine_search (stubbed catalogue)", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  /** Serve the captured pages: WorldCat page 1/2 by its `page` parameter,
-   * Primo the verbatim zero-hit envelope; anything else is a 404. */
-  function stubCatalogues(primoStatus = 200) {
+  /** Serve `perPage` docs per catalogue page (10 = a full page), up to `pages` pages. */
+  function stubCatalogue(perPage = 10, pages = 5, status = 200) {
     const urls: string[] = [];
     vi.stubGlobal("fetch", async (url: string) => {
       urls.push(url);
       const u = new URL(url);
-      if (u.hostname === "peacepalace.on.worldcat.org") {
-        const page = Number(u.searchParams.get("page") ?? "1");
-        return page <= 2
-          ? new Response(worldcatPage(page), { status: 200, headers: { "content-type": "application/json" } })
-          : new Response('{"numberOfRecords":12279,"records":[]}', { status: 200 });
-      }
-      if (u.hostname === "cuni.primo.exlibrisgroup.com") {
-        return new Response(primoStatus === 200 ? primoEmpty : "nope", { status: primoStatus });
-      }
-      return new Response("not found", { status: 404 });
+      const offset = Number(u.searchParams.get("offset") ?? "0");
+      const q = u.searchParams.get("q") ?? "";
+      if (status !== 200) return new Response("nope", { status });
+      const page = offset / 10;
+      return new Response(page < pages ? primoPage(offset, perPage, 10789, q.includes("varianta B") ? "b" : "") : primoPage(offset, 0), { status: 200 });
     });
     return urls;
   }
 
-  it("fetches one catalogue page per source and renders both blocks", async () => {
-    const urls = stubCatalogues();
-    const result = await doctrineHandler()({ query: "institutional law A", per_source_limit: 10, page: 1, full_text_only: false });
+  it("fetches one catalogue page and renders the records with the catalogue split", async () => {
+    const urls = stubCatalogue();
+    const result = await doctrineHandler()({ query: "genocida A", limit: 10, page: 1 });
     expect(result.isError).toBeUndefined();
-    const out = result.structuredContent as { statuses: Array<Record<string, unknown>>; items: BibHit[] };
-    expect(out.statuses).toEqual([
-      { source: "peacepalace", ok: true, total: 12279, has_more: true },
-      { source: "cuni", ok: true, total: 0, has_more: false, note: "0 in the UK catalogue, 0 in the Central Discovery Index" },
-    ]);
-    expect(out.items.map((h) => h.source)).toEqual(["peacepalace", "peacepalace", "peacepalace"]);
-    expect(urls.filter((u) => u.includes("worldcat"))).toHaveLength(1);
-    expect(urls.filter((u) => u.includes("primo"))).toHaveLength(1);
+    const out = result.structuredContent as { total: number; total_local: number; total_central: number; has_more: boolean; items: BibHit[] };
+    expect(out).toMatchObject({ total: 10789, total_local: 443, total_central: 10346, has_more: true });
+    expect(out.items).toHaveLength(10);
+    expect(out.items.map((h) => h.id)).toEqual(["alma0", "cdi_1", "alma2", "cdi_3", "alma4", "cdi_5", "alma6", "cdi_7", "alma8", "cdi_9"]);
+    expect(urls).toHaveLength(1);
+    expect(new URL(urls[0]).searchParams.get("offset")).toBe("0");
     const text = result.content[0].text;
-    expect(text).toContain("✓ Peace Palace Library (WorldCat): 12279 records; showing 1–3 (more: page 2)");
-    expect(text).toContain("1. Henry G Schermers, Niels M Blokker (2025). International Institutional Law : Seventh Revised Edition. Leiden ; Boston : Brill | Nijhoff, 2025. [eBook, eng] ISBN 9789004724822 · DOI 10.1163/9789004724822");
-    expect(text).toContain("https://peacepalace.on.worldcat.org/oclc/1525268154");
-    expect(text).toContain("✓ UKAŽ (Univerzita Karlova): 0 records");
-    expect(text).toContain("no records on this page");
+    expect(text).toContain("✓ UKAŽ (Univerzita Karlova): 10789 records — 443 in the UK catalogue, 10346 in the Central Discovery Index; showing 1–10 (more: page 2)");
+    expect(text).toContain("1. Chuguryan, Vahram, 1974-, Univerzita Mateja Bela. Fakulta politických vied a medzinárodných vzťahov (2015). 100 rokov ticha : Arménska genocída. Banská Bystrica : Belianum [book, slo] ISBN 978-80-557-0874-4");
+    expect(text).toContain("   Contents: 01/01 - Obsah");
+    expect(text).toContain("the whole abstract and contents of a hit: doctrine_get_document {id}");
   });
 
-  it("pulls several catalogue pages for a bigger limit and numbers hits across them", async () => {
-    const urls = stubCatalogues();
-    const result = await doctrineHandler()({ query: "institutional law B", per_source_limit: 13, page: 1, full_text_only: false });
+  it("pulls two catalogue pages for a bigger limit, brief records above ten", async () => {
+    const urls = stubCatalogue();
+    const result = await doctrineHandler()({ query: "genocida B", limit: 13, page: 1 });
     const out = result.structuredContent as { items: BibHit[] };
-    // Two catalogue pages (10 + 10 would cover 13), each fixture holds 3 records.
-    expect(urls.filter((u) => u.includes("worldcat")).map((u) => new URL(u).searchParams.get("page"))).toEqual([null, "2"]);
-    expect(out.items.map((h) => h.title)).toEqual([
-      "International Institutional Law : Seventh Revised Edition",
-      "A companion to the United States Constitution and its amendments : America's continuing revolution",
-      "Family law in America",
-      "Analytical heat transfer",
-      "The art of staying neutral : the Netherlands in the First World War, 1914-1918",
-      "The occupation of justice : Supreme Court of Israel and the Occupied Territories",
-    ]);
-    expect(result.content[0].text).toContain("6. ");
-    // Above FULL_DETAIL_LIMIT per source the records come brief — in the text
-    // and in the structured items alike — so the page stays inside the budget.
-    expect(result.content[0].text).toContain("Brief records (per_source_limit above 10)");
+    expect(urls.map((u) => new URL(u).searchParams.get("offset"))).toEqual(["0", "10"]);
+    expect(out.items).toHaveLength(13);
+    expect(out.items[12].id).toBe("alma12");
+    // Above FULL_DETAIL_LIMIT the records come brief — in the text and in the structured items alike.
+    expect(result.content[0].text).toContain("Brief records (limit above 10)");
     expect(result.content[0].text).not.toContain("Abstract:");
     expect(out.items.every((hit) => hit.abstract === undefined && hit.contents === undefined)).toBe(true);
-    expect(out.items[0].isbn).toEqual(["9789004724822", "9004724826"]);
-  });
-
-  it("gives every keyword variant its share of the page, round-robin, and says when WorldCat rewrote a query", async () => {
-    const urls: string[] = [];
-    vi.stubGlobal("fetch", async (url: string) => {
-      urls.push(url);
-      const u = new URL(url);
-      if (u.hostname === "peacepalace.on.worldcat.org") {
-        const q = u.searchParams.get("queryString") ?? "";
-        if (q.includes("varianta B")) {
-          const body = JSON.parse(worldcatPage(2)) as { queryOptimization: Record<string, unknown> };
-          body.queryOptimization = { ...body.queryOptimization, searchTermDropped: true, originalQuery: "kw:(varianta)" };
-          return new Response(JSON.stringify(body), { status: 200 });
-        }
-        return new Response(worldcatPage(1), { status: 200 });
-      }
-      return new Response(primoEmpty, { status: 200 });
-    });
-    const result = await doctrineHandler()({ queries: ["varianta A", "varianta B"], per_source_limit: 4, page: 1, sources: ["peacepalace"], full_text_only: false });
-    const out = result.structuredContent as { items: BibHit[]; statuses: Array<{ note?: string }> };
-    // share = 2 per variant: A1, B1, A2, B2 — the second variant reaches the reader.
-    expect(out.items.map((h) => h.title)).toEqual([
-      "International Institutional Law : Seventh Revised Edition",
-      "Analytical heat transfer",
-      "A companion to the United States Constitution and its amendments : America's continuing revolution",
-      "The art of staying neutral : the Netherlands in the First World War, 1914-1918",
-    ]);
-    expect(urls.filter((x) => x.includes("worldcat"))).toHaveLength(2);
-    expect(out.statuses[0].note).toContain("did not run the query as given");
-    expect(result.content[0].text).toContain("kw:(varianta)");
-  });
-
-  it("does not advertise a next page when the catalogue returned nothing for this one", async () => {
-    vi.stubGlobal("fetch", async (url: string) =>
-      new URL(url).hostname.includes("worldcat")
-        ? new Response('{"numberOfRecords":12279,"records":[],"partialResult":false}', { status: 200 })
-        : new Response(primoEmpty, { status: 200 }),
-    );
-    const result = await doctrineHandler()({ query: "empty page F", per_source_limit: 10, page: 900, full_text_only: false });
-    const out = result.structuredContent as { statuses: Array<{ source: string; has_more: boolean; total: number }> };
-    expect(out.statuses[0]).toMatchObject({ source: "peacepalace", total: 12279, has_more: false });
-    expect(result.content[0].text).not.toContain("more: page 901");
-  });
-
-  it("refuses whitespace-only field criteria before touching the network", async () => {
-    const urls = stubCatalogues();
-    const result = await doctrineHandler()({ title: "   ", author: " ", per_source_limit: 10, page: 1, full_text_only: false });
-    expect(result.isError).toBe(true);
-    expect(urls).toHaveLength(0);
-  });
-
-  it("keeps abstract and contents on a full-detail page", async () => {
-    stubCatalogues();
-    const result = await doctrineHandler()({ query: "institutional law E", per_source_limit: 10, page: 1, full_text_only: false });
-    const out = result.structuredContent as { items: BibHit[] };
-    expect(out.items[0].abstract).toMatch(/^This seventh, revised edition/);
-    expect(out.items[0].contents).toMatch(/^Preface xxv/);
-    expect(result.content[0].text).toContain("   Abstract: This seventh");
-    expect(result.content[0].text).not.toContain("Brief records");
+    expect(out.items[0].isbn).toEqual(["978-80-557-0874-4"]);
   });
 
   it("walks to a later page by asking the catalogue for the covering pages", async () => {
-    const urls = stubCatalogues();
-    const result = await doctrineHandler()({ query: "institutional law C", per_source_limit: 10, page: 2, sources: ["peacepalace"], full_text_only: false });
-    expect(urls.filter((u) => u.includes("worldcat")).map((u) => new URL(u).searchParams.get("page"))).toEqual(["2"]);
-    expect(urls.filter((u) => u.includes("primo"))).toHaveLength(0);
-    const out = result.structuredContent as { items: BibHit[]; statuses: Array<{ has_more: boolean }> };
-    expect(out.items[0].title).toBe("Analytical heat transfer");
-    expect(result.content[0].text).toContain("showing 11–13 (more: page 3)");
-    expect(out.statuses[0].has_more).toBe(true);
+    const urls = stubCatalogue();
+    const result = await doctrineHandler()({ query: "genocida C", limit: 10, page: 3 });
+    expect(urls.map((u) => new URL(u).searchParams.get("offset"))).toEqual(["20"]);
+    const out = result.structuredContent as { items: BibHit[]; has_more: boolean };
+    expect(out.items[0].id).toBe("alma20");
+    expect(result.content[0].text).toContain("showing 21–30 (more: page 4)");
+    expect(out.has_more).toBe(true);
   });
 
-  it("reports one catalogue's failure without sinking the other", async () => {
-    stubCatalogues(500);
-    const result = await doctrineHandler()({ query: "institutional law D", per_source_limit: 10, page: 1, full_text_only: false });
-    const out = result.structuredContent as { statuses: Array<Record<string, unknown>>; items: BibHit[] };
-    expect(out.statuses[0]).toMatchObject({ source: "peacepalace", ok: true, total: 12279 });
-    expect(out.statuses[1]).toMatchObject({ source: "cuni", ok: false, total: null, has_more: false });
-    expect(String(out.statuses[1].error)).toMatch(/HTTP 500/);
-    expect(out.items).toHaveLength(3);
-    expect(result.content[0].text).toContain("✗ UKAŽ (Univerzita Karlova): ");
+  it("gives every keyword variant its share of the page, round-robin", async () => {
+    const urls = stubCatalogue();
+    const result = await doctrineHandler()({ queries: ["varianta A", "varianta B"], limit: 4, page: 1 });
+    const out = result.structuredContent as { items: BibHit[] };
+    // share = 2 per variant: A1, B1, A2, B2 — the second variant reaches the reader.
+    expect(out.items.map((h) => h.id)).toEqual(["alma0", "almab0", "cdi_1", "cdi_b1"]);
+    expect(urls).toHaveLength(2);
+  });
+
+  it("does not advertise a next page when the catalogue returned nothing for this one", async () => {
+    stubCatalogue(10, 2);
+    const result = await doctrineHandler()({ query: "genocida D", limit: 10, page: 900 });
+    const out = result.structuredContent as { total: number; has_more: boolean; items: BibHit[] };
+    expect(out).toMatchObject({ total: 10789, has_more: false });
+    expect(out.items).toHaveLength(0);
+    expect(result.content[0].text).toContain("no records on this page");
+    expect(result.content[0].text).not.toContain("more: page 901");
+  });
+
+  it("reports the catalogue's failure as a tool error", async () => {
+    stubCatalogue(10, 5, 500);
+    const result = await doctrineHandler()({ query: "genocida E", limit: 10, page: 1 });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/HTTP 500/);
   });
 
   it("refuses a call without any search criterion, before touching the network", async () => {
-    const urls = stubCatalogues();
-    const result = await doctrineHandler()({ language: "cze", year_from: 2020, per_source_limit: 10, page: 1, full_text_only: false });
+    const urls = stubCatalogue();
+    const result = await doctrineHandler()({ language: "cze", year_from: 2020, limit: 10, page: 1 });
     expect(result.isError).toBe(true);
-    expect(urls).toHaveLength(0);
-    const swapped = await doctrineHandler()({ query: "x y", year_from: 2025, year_to: 2020, per_source_limit: 10, page: 1, full_text_only: false });
+    const blank = await doctrineHandler()({ title: "   ", author: " ", limit: 10, page: 1 });
+    expect(blank.isError).toBe(true);
+    const swapped = await doctrineHandler()({ query: "x y", year_from: 2025, year_to: 2020, limit: 10, page: 1 });
     expect(swapped.isError).toBe(true);
     expect(urls).toHaveLength(0);
+  });
+});
+
+// ---------- the record tool: the abstract and contents stay readable, whole ----------
+
+function documentHandler(): Handler {
+  let handler: Handler | undefined;
+  registerDoctrine({
+    registerTool(name: string, _config: unknown, callback: Handler) {
+      if (name === "doctrine_get_document") handler = callback;
+    },
+  } as never);
+  if (!handler) throw new Error("doctrine_get_document did not register");
+  return handler;
+}
+
+describe("doctrine_get_document (stubbed full-display endpoint)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("returns the live catalogue record whole — the entire table of contents, not the search snippet", async () => {
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", async (url: string) => {
+      urls.push(url);
+      return new Response(JSON.stringify(fixture("primo/record-local-book.json")), { status: 200 });
+    });
+    const result = await documentHandler()({ id: "alma990020025980106986" });
+    expect(result.isError).toBeUndefined();
+    expect(urls).toEqual([
+      "https://cuni.primo.exlibrisgroup.com/primaws/rest/pub/pnxs/L/alma990020025980106986?vid=420CKIS_INST%3AUKAZ&lang=cs&search_scope=MyInst_and_CI",
+    ]);
+    const out = result.structuredContent as { record: BibHit };
+    expect(out.record.id).toBe("alma990020025980106986");
+    expect(out.record.title).toBe("100 rokov ticha : Arménska genocída");
+    // The search cuts the contents to a snippet; the record carries them to the last line.
+    const snippet = mapPrimoDoc(fixture("primo/record-local-book.json") as Record<string, unknown>, false).contents ?? "";
+    expect(snippet).toMatch(/…$/);
+    expect(out.record.contents!.length).toBeGreaterThan(snippet.length);
+    expect(out.record.contents).toMatch(/Postoj Slovenskej republiky$/);
+    expect(out.record.subjects).toContain("arménská genocida (1915-1923)");
+    const text = result.content[0].text;
+    expect(text).toContain("RECORD [UKAŽ (Univerzita Karlova)]: Chuguryan, Vahram, 1974-");
+    expect(text).toContain("Subjects: 20. století; Arméni;");
+    expect(text).toContain("Abstract: (none in the record)");
+    expect(text).toContain("Contents: 01/01 - Obsah (FF)");
+    expect(text).toContain("Postoj Slovenskej republiky");
+    expect(text).toContain("Record: https://cuni.primo.exlibrisgroup.com/discovery/fulldisplay?docid=alma990020025980106986");
+    expect(text).toContain("This is the catalogue record, not the work");
+  });
+
+  it("returns the whole abstract of a Central Discovery Index article", async () => {
+    vi.stubGlobal("fetch", async () => new Response(JSON.stringify(articleDoc), { status: 200 }));
+    const result = await documentHandler()({ id: "cdi_crossref_primary_10_18485_iipe_mp_2025_76_1194_1" });
+    expect(result.isError).toBeUndefined();
+    const out = result.structuredContent as { record: BibHit };
+    const full = mapPrimoDoc(articleDoc, true).abstract ?? "";
+    expect(full.length).toBeGreaterThan(0);
+    expect(out.record.abstract).toBe(full);
+    expect(out.record.abstract).not.toMatch(/…$/);
+    expect(out.record.doi).toEqual(["10.18485/iipe_mp.2025.76.1194.1"]);
+    expect(result.content[0].text).toContain(`Abstract: ${full}`);
+  });
+
+  it("reports a missing record as an error and refuses a malformed id before the network", async () => {
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", async (url: string) => {
+      urls.push(url);
+      return new Response("not found", { status: 404 });
+    });
+    const missing = await documentHandler()({ id: "alma000000000000000000" });
+    expect(missing.isError).toBe(true);
+    expect(missing.content[0].text).toMatch(/no record/);
+    expect(urls).toHaveLength(1);
+    const malformed = await documentHandler()({ id: "!!" });
+    expect(malformed.isError).toBe(true);
+    expect(urls).toHaveLength(1);
   });
 });

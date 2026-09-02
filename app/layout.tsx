@@ -43,7 +43,6 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           }}
         >
           <a href="/">Hlavní stránka</a> ·{" "}
-          <a href="/ucet">Účet</a> ·{" "}
           <a href="/podminky">Podmínky užití</a> ·{" "}
           <a href="/soukromi">Zásady ochrany osobních údajů</a>
         </footer>
