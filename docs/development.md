@@ -28,14 +28,18 @@ výsledků dotazu (zužuj dotazem, ne stránkováním); justice.cz drží data o
 10/2020, převážně civilní prvoinstanční, a neohraničený fulltext je pomalý.
 Odkazy na rozhodnutí NS nesou `&Highlight=0,<termy>`, takže se dokument otevře
 rovnou na hledaném místě.
-Doktrína: WorldCat Discovery podepisuje **každý** požadavek SPA (hlavičky
-`Oclc-Apik`/`Oclc-Apin`, na každém volání jiné, plus relační `api-token`) —
-algoritmus žije v bundlu SPA, který zachycený HAR neobsahuje, takže server
-posílá nepodepsané volání a odmítnutí (401/403) hlásí jako odmítnutí; kanárek
-`worldcat` to ukáže hned po nasazení. Primo VE: HAR byl exportovaný bez
-`Authorization`, není tedy jisté, jestli `pnxs` vyžaduje guest JWT SPA;
-klient nejdřív volá bez něj a na 401/403 zkusí guest-token endpoint (z
-paměti, ne z HARu) a hlásí, když neuspěje. Oba katalogy jsou knihovní, ne
+Doktrína, živě z produkce (fra1, 2026-09-02): **Peace Palace / WorldCat
+Discovery odpovídá Cloudflare 403** („Sorry, you have been blocked") za
+50 ms, tedy WAF blokuje adresu nasazení ještě před kódem OCLC — podpis SPA
+(`Oclc-Apik`/`Oclc-Apin` na každém volání jiné, plus relační `api-token`, vše
+v bundlu, který HAR neobsahuje) by odtud stejně nepomohl. Semafor knihovnu
+ukazuje červeně s HTTP 403, `doctrine_search` odmítnutí hlásí u každého
+volání. Cesty dál: oficiální WorldCat Search API s WSKey vydaným přes
+knihovnu, nebo klient vyřadit jako u ÚPV. **UKAŽ/Primo odpovídá bez tokenu**
+(hledání i full-display záznamu, verbatim fixtures v `tests/fixtures/primo/`);
+guest-token fallback zůstává pro případ, že by ho Primo začalo chtít.
+**Unpaywall z fra1 neodpověděl do 12 s** (třikrát); nástroj na něj čeká
+nejvýš 6 s a DOI i odkazy záznamu zkouší tak jako tak. Oba katalogy jsou knihovní, ne
 open access: `doctrine_get_document` přečte jen díla s open-access kopií
 (Unpaywall zná OA umístění k DOI; DOI a odkazy záznamu se zkusí také), u
 licencovaných zkusí přihlášení čtenáře, pokud si ho uživatel uložil na

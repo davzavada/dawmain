@@ -537,7 +537,10 @@ export function registerDoctrine(server: McpServer): void {
         let oaError: string | undefined;
         if (workDoi && !record_only) {
           try {
-            oa = await withDeadline(resolveOpenAccess(workDoi), 10_000);
+            // Live from fra1 (2026-09-02) Unpaywall did not answer within 12 s
+            // at all; the DOI and the record's links are tried regardless, so
+            // the wait for it is kept short.
+            oa = await withDeadline(resolveOpenAccess(workDoi), 6_000);
           } catch (error) {
             oaError = error instanceof Error ? error.message : String(error);
           }

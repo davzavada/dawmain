@@ -1,0 +1,163 @@
+{"beaconO22":"41",
+  "info" : {
+    "totalResultsLocal" : 443,
+    "totalResultsPC" : 10346,
+    "total" : 10789,
+    "first" : 1,
+    "last" : 1
+  },
+  "highlights" : {
+    "snippet" : [ "genocida", "GENOCIDA", "genocide" ],
+    "title" : [ "genocida", "GENOCIDA", "genocidas", "Genocida", "genocída", "genocīda" ],
+    "termsUnion" : [ "genocida", "GENOCIDA", "genocide", "GENOCÍDA", "genocidas", "Genocida", "genocída", "genocīda" ],
+    "subject" : [ "genocida" ],
+    "description" : [ "genocida" ],
+    "toc" : [ "GENOCÍDA" ],
+    "addtitle" : [ "genocida", "Genocida", "genocída" ]
+  },
+  "docs" : [ {
+    "pnx" : {
+      "links" : {
+        "openurl" : [ "$$Topenurl_article" ],
+        "thumbnail" : [ "$$Uapi/image/getissuecoverimage?id=picture_2025_90810.png" ],
+        "openurlfulltext" : [ "$$Topenurlfull_article" ]
+      },
+      "search" : {
+        "orcidid" : [ "https://orcid.org/0009-0002-7087-5745" ],
+        "creatorcontrib" : [ "Ćujić, Miodrag" ],
+        "issn" : [ "0543-3657", "2787-0618" ],
+        "fulltext" : [ "true" ],
+        "addtitle" : [ "International Politics" ],
+        "general" : [ "Institute of International Politics and Economics", "Институт за међународну политику и привреду" ],
+        "rsrctype" : [ "article" ],
+        "startdate" : [ "2025" ],
+        "enddate" : [ "2025" ],
+        "recordtype" : [ "article" ],
+        "sourceid" : [ "REL" ],
+        "recordid" : [ "eNotkF1OwzAQhC0EElXpERC5QILXTrzOE4KKP1GJl75bjrNFbn4cxSkSh-BWHIwU-jIrzWhWo4-xG-AZ6FwXt94PZLohE1wUGaoMoMwzOGMLgRpTrkCfswUvcplKVeAlW8W455xL0Ki4XrCHN9uEZE_JhrrG9-EzJNOhsz_f1M_mB_XB-domQ4iTbUPi-ziNh476abZaP_mG7q7Yxc62kVanu2Tbp8ft-iXdvD-_ru83qUMOR6nAOhSlzRV3hasJSUqdo1CldqISygKqCsGp2lmlnVa7qnYutyhQ1XLJ8P-tG0OMI-3MMPrOjl8GuPmDYU4wzBGGQWWOMAzMzetTkyi0Zh8OYz8PnROUXKP8BZgFYA0" ],
+        "scope" : [ "AE2", "BIXPP", "REL", "AAYXX", "CITATION" ],
+        "creator" : [ "Ćujić, Miodrag" ],
+        "title" : [ "Kako je Lemkinovo tumačenje genocida postalo instrument politike?", "Međunarodna politika" ],
+        "creationdate" : [ "2025" ],
+        "description" : [ "The aim of the paper is to review the shortcomings of the content of the Convention on the Prevention and punishing the crime of genocide in relation to the interpretation of its creator Rafael Lemkin, in order to identify potential agents and factors political influence on the prosecution of the crime of genocide. In the introductory part points to the omitted Lemkin methods of genocide prescribed in Conventions and the application of certain legal institutes with pronounced political narrative, which have been confirmed in the work of international criminal courts (ICTR and ICTY) and certain non-governmental organizations, with a tendency to find solutions in limiting political influence on the implementation of the Convention. In proving the connection between politics and genocide, that is, the execution degree arguments misuse of the concept of genocide for political purposes, such as relevant indicators will be used: content of the Convention, certain legal institutes derived from cases of international criminal courts, positions and opinions of the judges of the International Court of Justice on genocide, but also of individuals non-governmental organizations in proving the crime of genocide. Systematizing given parameters into one whole, a conclusion about the elements would be derived genocide, on the basis of which the existing one could possibly be upgraded the definition of genocide in accordance with Lemkin's principle questions, inter for whom the primary issue is the politicization of genocide." ]
+      },
+      "delivery" : {
+        "fulltext" : [ "fulltext" ],
+        "delcategory" : [ "Remote Search Resource" ]
+      },
+      "display" : {
+        "language" : [ "srp" ],
+        "lds50" : [ "peer_reviewed" ],
+        "publisher" : [ "Institute of International Politics and Economics" ],
+        "type" : [ "article" ],
+        "source" : [ "Central and Eastern European Online Library - CEEOL Journals" ],
+        "creator" : [ "Ćujić, Miodrag" ],
+        "title" : [ "Kako je Lemkinovo tumačenje genocida postalo instrument politike?" ],
+        "ispartof" : [ "Međunarodna politika, 2025, Vol.76 (1194), p.185-202" ],
+        "identifier" : [ "ISSN: 0543-3657", "EISSN: 2787-0618", "DOI: 10.18485/iipe_mp.2025.76.1194.1" ],
+        "oa" : [ "free_for_read" ],
+        "description" : [ "The aim of the paper is to review the shortcomings of the content of the Convention on the Prevention and punishing the crime of genocide in relation to the interpretation of its creator Rafael Lemkin, in order to identify potential agents and factors political influence on the prosecution of the crime of genocide. In the introductory part points to the omitted Lemkin methods of genocide prescribed in Conventions and the application of certain legal institutes with pronounced political narrative, which have been confirmed in the work of international criminal courts (ICTR and ICTY) and certain non-governmental organizations, with a tendency to find solutions in limiting political influence on the implementation of the Convention. In proving the connection between politics and genocide, that is, the execution degree arguments misuse of the concept of genocide for political purposes, such as relevant indicators will be used: content of the Convention, certain legal institutes derived from cases of international criminal courts, positions and opinions of the judges of the International Court of Justice on genocide, but also of individuals non-governmental organizations in proving the crime of genocide. Systematizing given parameters into one whole, a conclusion about the elements would be derived genocide, on the basis of which the existing one could possibly be upgraded the definition of genocide in accordance with Lemkin's principle questions, inter for whom the primary issue is the politicization of genocide." ],
+        "keyword" : [ "Peace and Conflict Studies ;  Political Philosophy" ]
+      },
+      "addata" : {
+        "au" : [ "Ćujić, Miodrag" ],
+        "atitle" : [ "Kako je Lemkinovo tumačenje genocida postalo instrument politike?" ],
+        "date" : [ "2025" ],
+        "risdate" : [ "2025" ],
+        "volume" : [ "76" ],
+        "issue" : [ "1194" ],
+        "spage" : [ "185" ],
+        "epage" : [ "202" ],
+        "pages" : [ "185-202" ],
+        "eissn" : [ "2787-0618" ],
+        "ristype" : [ "JOUR" ],
+        "pub" : [ "Institute of International Politics and Economics" ],
+        "doi" : [ "10.18485/iipe_mp.2025.76.1194.1" ],
+        "tpages" : [ "18" ],
+        "orcidid" : [ "https://orcid.org/0009-0002-7087-5745" ],
+        "issn" : [ "0543-3657" ],
+        "addtitle" : [ "International Politics" ],
+        "abstract" : [ "The aim of the paper is to review the shortcomings of the content of the Convention on the Prevention and punishing the crime of genocide in relation to the interpretation of its creator Rafael Lemkin, in order to identify potential agents and factors political influence on the prosecution of the crime of genocide. In the introductory part points to the omitted Lemkin methods of genocide prescribed in Conventions and the application of certain legal institutes with pronounced political narrative, which have been confirmed in the work of international criminal courts (ICTR and ICTY) and certain non-governmental organizations, with a tendency to find solutions in limiting political influence on the implementation of the Convention. In proving the connection between politics and genocide, that is, the execution degree arguments misuse of the concept of genocide for political purposes, such as relevant indicators will be used: content of the Convention, certain legal institutes derived from cases of international criminal courts, positions and opinions of the judges of the International Court of Justice on genocide, but also of individuals non-governmental organizations in proving the crime of genocide. Systematizing given parameters into one whole, a conclusion about the elements would be derived genocide, on the basis of which the existing one could possibly be upgraded the definition of genocide in accordance with Lemkin's principle questions, inter for whom the primary issue is the politicization of genocide." ],
+        "oa" : [ "free_for_read" ],
+        "jtitle" : [ "Međunarodna politika" ],
+        "genre" : [ "article" ],
+        "format" : [ "journal" ]
+      },
+      "facets" : {
+        "language" : [ "srp" ],
+        "creatorcontrib" : [ "Ćujić, Miodrag" ],
+        "rsrctype" : [ "articles" ],
+        "creationdate" : [ "2025" ],
+        "collection" : [ "Central and Eastern European Online Library (C.E.E.O.L.) (DFG Nationallizenzen)", "CEEOL: Open Access", "Central and Eastern European Online Library - CEEOL Journals", "CrossRef" ],
+        "toplevel" : [ "peer_reviewed", "online_resources" ],
+        "frbrgroupid" : [ "cdi_FETCH-LOGICAL-c701-c70b1ac729a460c5cde7e338472698c2b26a176b71c6dca68c86fbdcc4a7276d3" ],
+        "frbrtype" : [ "5" ],
+        "jtitle" : [ "Međunarodna politika" ],
+        "prefilter" : [ "articles" ]
+      },
+      "sort" : {
+        "author" : [ "Ćujić, Miodrag" ],
+        "title" : [ "Kako je Lemkinovo tumačenje genocida postalo instrument politike?" ],
+        "creationdate" : [ "2025" ]
+      },
+      "control" : {
+        "sourceformat" : [ "XML" ],
+        "sourcesystem" : [ "Other" ],
+        "ceeolid" : [ "1373087" ],
+        "sourcerecordid" : [ "1373087" ],
+        "originalsourceid" : [ "FETCH-LOGICAL-c701-c70b1ac729a460c5cde7e338472698c2b26a176b71c6dca68c86fbdcc4a7276d3" ],
+        "sourcetype" : [ "Index Database" ],
+        "iscdi" : [ "true" ],
+        "recordtype" : [ "article" ],
+        "sourceid" : [ "ceeol_cross" ],
+        "recordid" : [ "cdi_crossref_primary_10_18485_iipe_mp_2025_76_1194_1" ],
+        "addsrcrecordid" : [ "eNotkF1OwzAQhC0EElXpERC5QILXTrzOE4KKP1GJl75bjrNFbn4cxSkSh-BWHIwU-jIrzWhWo4-xG-AZ6FwXt94PZLohE1wUGaoMoMwzOGMLgRpTrkCfswUvcplKVeAlW8W455xL0Ki4XrCHN9uEZE_JhrrG9-EzJNOhsz_f1M_mB_XB-domQ4iTbUPi-ziNh476abZaP_mG7q7Yxc62kVanu2Tbp8ft-iXdvD-_ru83qUMOR6nAOhSlzRV3hasJSUqdo1CldqISygKqCsGp2lmlnVa7qnYutyhQ1XLJ8P-tG0OMI-3MMPrOjl8GuPmDYU4wzBGGQWWOMAzMzetTkyi0Zh8OYz8PnROUXKP8BZgFYA0" ],
+        "score" : [ "0.036877766" ]
+      }
+    },
+    "delivery" : {
+      "link" : [ {
+        "@id" : "_:0",
+        "linkType" : "http://purl.org/pnx/linkType/thumbnail",
+        "linkURL" : "api/image/getissuecoverimage?id=picture_2025_90810.png",
+        "displayLabel" : "thumbnail"
+      } ],
+      "deliveryCategory" : [ "Remote Search Resource" ],
+      "availability" : [ "fulltext" ],
+      "displayLocation" : false,
+      "additionalLocations" : false,
+      "physicalItemTextCodes" : "",
+      "feDisplayOtherLocations" : false,
+      "displayedAvailability" : "true",
+      "holding" : [ ],
+      "almaOpenurl" : "https://eu04.alma.exlibrisgroup.com/view/uresolver/420CKIS_INST/openurl?ctx_enc=info:ofi/enc:UTF-8&ctx_id=10_1&ctx_tim=2026-09-02 11:55:54&ctx_ver=Z39.88-2004&url_ctx_fmt=info:ofi/fmt:kev:mtx:ctx&url_ver=Z39.88-2004&rfr_id=info:sid/primo.exlibrisgroup.com-ceeol_cross&rft_val_fmt=info:ofi/fmt:kev:mtx:journal&rft.genre=article&rft.atitle=Kako+je+Lemkinovo+tuma%C4%8Denje+genocida+postalo+instrument+politike%3F&rft.jtitle=Me%C4%91unarodna+politika&rft.au=%C4%86uji%C4%87%2C+Miodrag&rft.date=2025&rft.volume=76&rft.issue=1194&rft.spage=185&rft.epage=202&rft.pages=185-202&rft.issn=0543-3657&rft.eissn=2787-0618&rft_id=info:doi/10.18485%2Fiipe_mp.2025.76.1194.1&rft.pub=Institute+of+International+Politics+and+Economics&rft_dat=<ceeol_cross>1373087</ceeol_cross>&svc_dat=viewit&rft_ceeol_id=1373087"
+    },
+    "context" : "PC",
+    "adaptor" : "Primo Central",
+    "extras" : {
+      "citationTrails" : {
+        "citing" : [ ],
+        "citedby" : [ ]
+      },
+      "timesCited" : { }
+    },
+    "@id" : "https://eu04.alma.exlibrisgroup.com/primaws/rest/pub/pnxs/PC/cdi_crossref_primary_10_18485_iipe_mp_2025_76_1194_1"
+  } ],
+  "timelog" : {
+    "PC_SEARCH_CALL_TIME" : "3158",
+    "PC_BUILD_JSON_AND_HIGLIGHTS" : "57",
+    "PC_SEARCH_TIME_TOTAL" : "3215",
+    "BUILD_RESULTS_RETRIVE_FROM_DB" : "78",
+    "CALL_SOLR_GET_IDS_LIST" : "81",
+    "RETRIVE_FROM_DB_COURSE_INFO" : "2",
+    "RETRIVE_FROM_DB_RECORDS" : "52",
+    "RETRIVE_FROM_DB_RELATIONS" : "3",
+    "PRIMA_LOCAL_INFO_FACETS_BUILD_DOCS_HIGHLIGHTS" : "208",
+    "PRIMA_LOCAL_SEARCH_TOTAL" : "422",
+    "BUILD_BLEND_AND_CACHE_RESULTS" : 0,
+    "BUILD_COMBINED_RESULTS_MAP" : 0,
+    "COMBINED_SEARCH_TIME" : 30,
+    "PROCESS_COMBINED_RESULTS" : 0,
+    "FEATURED_SEARCH_TIME" : 1
+  }
+}

@@ -269,6 +269,55 @@ describe("parsePrimoSearch", () => {
     );
   });
 
+  it("maps a verbatim Central Discovery Index article from the deployment's own answer", () => {
+    const page = parsePrimoSearch(fixture("primo/search-cdi-article.json"));
+    expect(page).toMatchObject({ total: 10789, totalLocal: 443, totalCentral: 10346 });
+    const hit = page.hits[0];
+    expect(hit.id).toBe("cdi_crossref_primary_10_18485_iipe_mp_2025_76_1194_1");
+    expect(hit.title).toBe("Kako je Lemkinovo tumačenje genocida postalo instrument politike?");
+    expect(hit.authors).toEqual(["Ćujić, Miodrag"]);
+    expect(hit.year).toBe("2025");
+    expect(hit.type).toBe("article");
+    expect(hit.language).toBe("srp");
+    expect(hit.container).toBe("Međunarodna politika, 2025, Vol.76 (1194), p.185-202");
+    expect(hit.doi).toEqual(["10.18485/iipe_mp.2025.76.1194.1"]);
+    expect(hit.issn).toEqual(["0543-3657"]);
+    expect(hit.open_access).toBe(true);
+    expect(hit.abstract).toMatch(/^The aim of the paper/);
+    // The only delivery link is a cover thumbnail with a relative URL; the pnx links are templates — no access link.
+    expect(hit.links).toBeUndefined();
+    expect(hit.url).toBe("https://cuni.primo.exlibrisgroup.com/discovery/fulldisplay?docid=cdi_crossref_primary_10_18485_iipe_mp_2025_76_1194_1&vid=420CKIS_INST%3AUKAZ&lang=cs&context=PC");
+  });
+
+  it("maps a verbatim catalogue book with its table of contents and subjects", () => {
+    const page = parsePrimoSearch(fixture("primo/search-local-book.json"));
+    const hit = page.hits[0];
+    expect(hit.id).toBe("alma990020025980106986");
+    expect(hit.title).toBe("100 rokov ticha : Arménska genocída");
+    expect(hit.authors).toEqual(["Chuguryan, Vahram, 1974-", "Univerzita Mateja Bela. Fakulta politických vied a medzinárodných vzťahov"]);
+    expect(hit.year).toBe("2015");
+    expect(hit.publisher).toBe("Banská Bystrica : Belianum");
+    expect(hit.type).toBe("book");
+    expect(hit.language).toBe("slo");
+    expect(hit.isbn).toEqual(["978-80-557-0874-4"]);
+    expect(hit.subjects).toEqual(["20. století", "Arméni", "arménská otázka", "arménská genocida (1915-1923)", "masakry", "etnické vztahy"]);
+    expect(hit.contents).toMatch(/^01\/01 - Obsah \(FF\) STRUČNÝ HISTORICKÝ VÝVOJ REGIÓNU/);
+    expect(hit.contents!.length).toBeLessThanOrEqual(251);
+    expect(hit.url).toContain("context=L");
+    // The record view keeps the whole table of contents.
+    const full = mapPrimoDoc(fixture("primo/record-local-book.json") as Record<string, unknown>, true);
+    expect(full.id).toBe("alma990020025980106986");
+    expect(full.contents).toMatch(/Postoj Slovenskej republiky$/);
+    expect(full.links).toBeUndefined();
+  });
+
+  it("reads identifiers off display.identifier when addata has none", () => {
+    const hit = mapPrimoDoc({ pnx: { control: { recordid: ["alma1"] }, display: { title: ["T"], identifier: ["$$CISBN$$V978-80-1", "DOI: 10.5/x", "ISSN: 1234-5678"] } } });
+    expect(hit.isbn).toEqual(["978-80-1"]);
+    expect(hit.doi).toEqual(["10.5/x"]);
+    expect(hit.issn).toEqual(["1234-5678"]);
+  });
+
   it("builds the container from OpenURL data when ispartof is absent", () => {
     const hit = mapPrimoDoc({
       context: "L",

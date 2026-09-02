@@ -13,17 +13,17 @@ import type { BibHit } from "./shared/bib";
  * captured from a live browser session (HAR, 2026-09): GET
  * /primaws/rest/pub/pnxs with the advanced-search query in Primo's own
  * `field,operator,value,BOOL;` syntax, `offset`/`limit` paging and the
- * language / date-range pre-filters appended as further clauses. The zero-hit
- * response of that capture pins the envelope (tests/fixtures/primo/
- * search-empty.json); the per-record PNX layout is Primo's documented one and
- * is parsed leniently — every field optional. See
- * docs/research/doctrine-sources.json.
+ * language / date-range pre-filters appended as further clauses. Verified
+ * live from the deployment (2026-09-02): the endpoint answers WITHOUT any
+ * token, and the verbatim responses pin the envelope and the record layout
+ * (tests/fixtures/primo/search-cdi-article.json — a Central Discovery Index
+ * article; search-local-book.json — a catalogue book with contents and
+ * subjects; record-local-book.json — the full-display endpoint's answer).
+ * Every field is still parsed leniently. See docs/research/doctrine-sources.json.
  *
- * Caveat: the capture was exported without Authorization headers, so whether
- * the SPA's guest JWT is required is unknown. The client first calls without
- * one; on 401/403 it asks the guest-token endpoint the SPA uses and retries
- * once — that endpoint is from memory, not from the capture, and a failure
- * there is reported as such.
+ * The guest-token fallback stays for the day Primo starts demanding one:
+ * on 401/403 the client asks the guest-token endpoint the SPA uses (from
+ * memory, not from a capture) and retries once; a refusal is reported.
  */
 
 export const SOURCE = "UKAŽ (Univerzita Karlova, Primo)";
@@ -149,8 +149,9 @@ export function primoLinkUrl(value: string): string | undefined {
  * addata (OpenURL data: doi, isbn, issn, jtitle…), control (recordid). Every
  * field optional. Pure — unit-tested against a synthetic doc.
  */
-/** Abstract cap of the record view — the list shows 300 characters. */
+/** Caps of the record view — the list shows 300 / 250 characters. */
 export const FULL_ABSTRACT_CHARS = 4_000;
+export const FULL_CONTENTS_CHARS = 6_000;
 
 export function mapPrimoDoc(doc: Rec, full = false): BibHit {
   const pnx = obj(doc.pnx);
@@ -188,7 +189,9 @@ export function mapPrimoDoc(doc: Rec, full = false): BibHit {
       // Display-only link types (the cover image) are not a way to the
       // work — the same rule accessLinkUrl applies to WorldCat's MARC 856.
       const type = typeof link.linkType === "string" ? link.linkType : "";
-      if (/\/(thumbnail|cover|coverimage)$/i.test(type)) continue;
+      // Both spellings occur live: the purl URI on CDI records, a bare
+      // "thumbnail" on catalogue records.
+      if (/(^|\/)(thumbnail|cover|coverimage)$/i.test(type)) continue;
       const url = typeof link.linkURL === "string" ? link.linkURL : undefined;
       if (!url || !/^https?:\/\//.test(url) || /\.(jpe?g|png|gif|webp)(\?|$)/i.test(url)) continue;
       if (!links.includes(url)) links.push(url);
@@ -196,6 +199,18 @@ export function mapPrimoDoc(doc: Rec, full = false): BibHit {
     }
   }
 
+  // "$$CISBN$$V978-…" / "DOI: 10.…" / "ISSN: …" — the display identifiers,
+  // for records whose addata lacks the structured field.
+  const identifiers = strings(display.identifier);
+  const identifier = (kind: RegExp): string[] =>
+    identifiers
+      .map((raw) => {
+        const marked = /\$\$C([A-Za-z]+)\$\$V(.+)$/.exec(raw);
+        if (marked) return kind.test(marked[1]) ? marked[2].trim() : undefined;
+        const labelled = /^([A-Za-z]+):\s*(.+)$/.exec(raw);
+        return labelled && kind.test(labelled[1]) ? labelled[2].trim() : undefined;
+      })
+      .filter((value): value is string => Boolean(value));
   const year = first(display.creationdate) ?? first(addata.date);
   const container =
     first(display.ispartof) ??
@@ -217,12 +232,14 @@ export function mapPrimoDoc(doc: Rec, full = false): BibHit {
     publisher: first(display.publisher) ? stripPrimoMarkers(first(display.publisher) as string) : undefined,
     type: first(display.type),
     language: first(display.language),
-    isbn: strings(addata.isbn).slice(0, 4),
-    issn: strings(addata.issn).slice(0, 2),
-    doi: strings(addata.doi).slice(0, 2),
+    isbn: (strings(addata.isbn).length ? strings(addata.isbn) : identifier(/^ISBN$/i)).slice(0, 4),
+    issn: (strings(addata.issn).length ? strings(addata.issn) : identifier(/^E?ISSN$/i)).slice(0, 2),
+    doi: (strings(addata.doi).length ? strings(addata.doi) : identifier(/^DOI$/i)).slice(0, 2),
     container,
     subjects,
     abstract: description ? snippet(description, full ? FULL_ABSTRACT_CHARS : 300) : undefined,
+    // Catalogue books carry their table of contents in display.contents.
+    contents: first(display.contents) ? snippet(first(display.contents) as string, full ? FULL_CONTENTS_CHARS : 250) : undefined,
     open_access: openAccess || undefined,
     // The record's own page in UKAŽ; context (L = catalogue, PC = Central
     // Discovery Index) is part of the full-display route.
@@ -267,9 +284,9 @@ const recordCache = new TtlCache<BibHit>(SEARCH_TTL_MS);
 /**
  * One record in full. The SPA's full-display call — GET
  * /primaws/rest/pub/pnxs/{L|PC}/{recordid}?vid=…&lang=cs&search_scope=… —
- * is from memory of Primo VE, NOT from the capture (which never opened a
- * record). A miss is reported as such; the search endpoint, which is
- * captured, is the fallback the caller can always use.
+ * verified live from the deployment (2026-09-02; response pinned in
+ * tests/fixtures/primo/record-local-book.json, holdings included). A miss
+ * is reported as such; the search results carry the record's main fields.
  */
 export async function getPrimoRecord(id: string): Promise<BibHit> {
   const recordId = id.trim();
