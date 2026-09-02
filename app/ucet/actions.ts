@@ -15,6 +15,9 @@ import { credentialsConfigured, deleteReaderCredential, isLibraryId, saveReaderC
 export interface ActionState {
   ok: boolean;
   message: string;
+  /** Server clock when the action answered — the page shows the newer of
+   * the save and the delete state. */
+  at: number;
 }
 
 async function requireUser(): Promise<string> {
@@ -34,9 +37,9 @@ export async function saveLibraryLogin(_previous: ActionState, formData: FormDat
     const password = String(formData.get("password") ?? "");
     await saveReaderCredential(userId, library, { username, password });
     revalidatePath("/ucet");
-    return { ok: true, message: "Uloženo. Přihlášení se použije při dalším čtení licencované literatury." };
+    return { ok: true, message: "Uloženo. Přihlášení se použije při dalším čtení licencované literatury.", at: Date.now() };
   } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : "Uložení se nepovedlo." };
+    return { ok: false, message: error instanceof Error ? error.message : "Uložení se nepovedlo.", at: Date.now() };
   }
 }
 
@@ -47,8 +50,8 @@ export async function deleteLibraryLogin(_previous: ActionState, formData: FormD
     if (!isLibraryId(library)) throw new Error("Neznámá knihovna.");
     await deleteReaderCredential(userId, library);
     revalidatePath("/ucet");
-    return { ok: true, message: "Smazáno." };
+    return { ok: true, message: "Smazáno.", at: Date.now() };
   } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : "Smazání se nepovedlo." };
+    return { ok: false, message: error instanceof Error ? error.message : "Smazání se nepovedlo.", at: Date.now() };
   }
 }

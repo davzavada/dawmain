@@ -157,14 +157,21 @@ export default function Soukromi() {
 
       <Section heading="7. Předávání do třetích zemí">
         <p>
-          Vaše rešerše Evropskou unii neopouští. Server běží v evropském regionu (Frankfurt) a
-          databáze, do kterých se dotazuje, jsou české a unijní.
+          Server běží v evropském regionu (Frankfurt) a české a unijní databáze, do kterých se
+          dotazuje (e-Sbírka, soudy, rozhodnuti.justice.cz, InfoCuria, EUR-Lex, UKAŽ na Primu),
+          Evropskou unii neopouštějí. Hledáte-li literaturu, jde dotaz i mimo ni: katalog Peace
+          Palace Library běží na WorldCat Discovery americké OCLC, index otevřených kopií Unpaywall
+          vede americká OurResearch a kopii díla server stahuje přímo od vydavatele nebo z
+          repozitáře, který může být kdekoli na světě. Odchází samotný dotaz, případně identifikátor
+          díla (DOI nebo adresa), nikoli to, kdo jste.
         </p>
         <p>
-          Mimo Evropskou unii jde jediná věc - údaje o vašem účtu, které Clerk vede ve Spojených
-          státech, a přístup k platformě Vercel, spravované rovněž odtamtud. Obojí se opírá o
+          Údaje o vašem účtu - a uložíte-li si je, i přihlašovací údaje ke knihovnám - vede Clerk ve
+          Spojených státech; platformu Vercel spravuje americká společnost odtamtud. Obojí se opírá o
           rozhodnutí Evropské komise o odpovídající ochraně pro EU-US Data Privacy Framework; obě
-          společnosti jsou v tomto rámci zapsány.
+          společnosti jsou v tomto rámci zapsány. Uložené přihlášení k Peace Palace Library odchází
+          při čtení do přihlašovacího systému této knihovny v Nizozemsku, přihlášení k Univerzitě
+          Karlově do jejího systému v Česku.
         </p>
       </Section>
 

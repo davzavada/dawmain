@@ -9,7 +9,7 @@ import { deleteLibraryLogin, saveLibraryLogin, type ActionState } from "./action
  * in the server actions.
  */
 
-const idle: ActionState = { ok: true, message: "" };
+const idle: ActionState = { ok: true, message: "", at: 0 };
 
 const input: React.CSSProperties = {
   font: "inherit",
@@ -44,8 +44,10 @@ export function LibraryLoginForm({
 }) {
   const [saved, save, saving] = useActionState(saveLibraryLogin, idle);
   const [removed, remove, removing] = useActionState(deleteLibraryLogin, idle);
-  const message = saved.message || removed.message;
-  const ok = saved.message ? saved.ok : removed.ok;
+  // Two actions, two states: show whichever answered last.
+  const latest = removed.at > saved.at ? removed : saved;
+  const message = latest.message;
+  const ok = latest.ok;
 
   return (
     <section style={{ border: "1px solid #e5e7eb", borderRadius: "0.5rem", padding: "1rem 1.25rem", marginTop: "1.25rem" }}>

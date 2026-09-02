@@ -56,6 +56,7 @@ export interface LibraryProxy {
 }
 
 export function libraryProxies(): Record<LibraryId, LibraryProxy> {
+  const cuniProxyBase = (process.env.CUNI_PROXY_BASE?.trim() || "https://ezproxy.is.cuni.cz").replace(/\/+$/, "");
   return {
     peacepalace: {
       id: "peacepalace",
@@ -65,32 +66,49 @@ export function libraryProxies(): Record<LibraryId, LibraryProxy> {
       proxyBase: "https://peacepalace.idm.oclc.org",
       verified: true,
       note: "OCLC-hosted EZproxy; sign-in via SAML at peacepalacelibrary.nl",
-      // The library's own IdP (the login page the user supplied) and OCLC's
-      // SP/proxy hosts that front it.
-      loginHosts: [/(^|\.)peacepalacelibrary\.nl$/i, /(^|\.)oclc\.org$/i],
+      // Exact sign-in hosts: the proxy itself, OCLC's Shibboleth SP and the
+      // library's IdP (the login page the user supplied). Never a suffix —
+      // EZproxy serves the publisher from a rewritten subdomain of the proxy
+      // (www-taylorfrancis-com.peacepalace.idm.oclc.org), and that page is
+      // the publisher's, sign-in widget included.
+      loginHosts: [/^peacepalace\.idm\.oclc\.org$/i, /^shib\.oclc\.org$/i, /(^|\.)peacepalacelibrary\.nl$/i],
     },
     cuni: {
       id: "cuni",
       label: "Univerzita Karlova",
       // From memory of the university's remote-access service, not from a
       // capture — override with CUNI_PROXY_BASE when it differs.
-      proxyBase: (process.env.CUNI_PROXY_BASE?.trim() || "https://ezproxy.is.cuni.cz").replace(/\/+$/, ""),
+      proxyBase: cuniProxyBase,
       verified: false,
       note: "EZproxy of the university (host unverified); sign-in via Shibboleth → CAS",
-      loginHosts: [/(^|\.)cuni\.cz$/i],
+      // The proxy itself, the IdP and CAS — exact hosts, for the same reason.
+      loginHosts: [new RegExp(`^${escapeRegExp(new URL(cuniProxyBase).hostname)}$`, "i"), /^(cas|idp)\.cuni\.cz$/i],
     },
   };
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 export function proxyLoginUrl(proxyBase: string, target: string): string {
   return `${proxyBase}/login?url=${encodeURIComponent(target)}`;
 }
 
-/** Is `host` one of the library's sign-in hosts? Pure. */
-export function isLoginHost(host: string, loginHosts: RegExp[]): boolean {
-  const lower = host.toLowerCase();
+/** Is this URL on one of the library's sign-in hosts? Exact host, default
+ * port: EZproxy's port-proxying mode serves the publisher from the proxy's
+ * own hostname on another port, and that page is the publisher's. Pure. */
+export function isLoginHost(url: URL | string, loginHosts: RegExp[]): boolean {
+  const parsed = typeof url === "string" ? new URL(url) : url;
+  if (parsed.port !== "") return false;
+  const lower = parsed.hostname.toLowerCase();
   return loginHosts.some((pattern) => pattern.test(lower));
 }
+
+/** Field names that mark a form as an SSO hand-off a browser submits on
+ * load (SAML, WS-Federation, Shibboleth's event buttons). A CSRF token on
+ * its own is not one. */
+const HANDOFF_FIELD = /^(SAMLResponse|SAMLRequest|RelayState|wa|wresult|wctx|_eventId(_.+)?)$/i;
 
 /** Proxy hosts whose `login?url=` wrapper is worth unwrapping: OCLC's
  * per-library EZproxy domains and the university's, by exact label — a
@@ -188,8 +206,8 @@ export interface FoundForm {
   fields: Record<string, string>;
   usernameField: string | null;
   passwordField: string | null;
-  /** A form made of hidden fields only — an IdP's SAMLResponse hand-off or
-   * a "continue" page — which a browser would submit on load. */
+  /** A form made of hidden fields only that carries an SSO hand-off field
+   * (SAMLResponse, RelayState, _eventId…) — which a browser submits on load. */
   autoPost: boolean;
 }
 
@@ -255,7 +273,7 @@ export function findLoginForm(html: string, baseUrl: string): FoundForm | null {
     fields,
     usernameField,
     passwordField,
-    autoPost: !withPassword && Boolean(hiddenOnly),
+    autoPost: !withPassword && Boolean(hiddenOnly) && Object.keys(fields).some((name) => HANDOFF_FIELD.test(name)),
   };
 }
 
@@ -349,7 +367,9 @@ export async function walk(startUrl: string, options: WalkOptions = {}): Promise
     const isHtml = contentType.includes("html") || (!contentType.includes("pdf") && looksLikeHtml(new TextDecoder().decode(bytes.slice(0, 4_000))));
     if (isHtml) {
       const form = findLoginForm(new TextDecoder("utf-8").decode(bytes), target.href);
-      if (form?.autoPost && autoPosts < 5) {
+      // Hand-offs are posted only while on the library's sign-in hosts; on
+      // the open path (no login hosts) a hand-off is a wall like any other.
+      if (form?.autoPost && autoPosts < 5 && isLoginHost(target, loginHosts)) {
         autoPosts++;
         const next = formRequest(form, form.fields);
         url = next.url;
@@ -357,7 +377,7 @@ export async function walk(startUrl: string, options: WalkOptions = {}): Promise
         body = next.body;
         continue;
       }
-      if (form?.passwordField && isLoginHost(target.hostname, loginHosts) && isLoginHost(new URL(form.action).hostname, loginHosts)) {
+      if (form?.passwordField && isLoginHost(target, loginHosts) && isLoginHost(form.action, loginHosts)) {
         if (!options.credential) {
           return { finalUrl: target.href, status: response.status, contentType, body: bytes, hops, loginRequired: true, submittedLogin: submitted > 0 };
         }
@@ -402,7 +422,7 @@ const sessions = new TtlCache<CookieJar>(SESSION_TTL_MS, 100);
 const refusals = new TtlCache<string>(REFUSAL_TTL_MS, 200);
 
 function credentialKey(userId: string, library: LibraryId, credential: ReaderCredential): string {
-  const digest = createHash("sha256").update(`${credential.username} ${credential.password}`).digest("hex").slice(0, 16);
+  const digest = createHash("sha256").update(`${credential.username}\u0000${credential.password}`).digest("hex").slice(0, 16);
   return memoKey("reader-refusal", [userId, library, digest]);
 }
 
@@ -444,6 +464,21 @@ export async function openAsReader(
       "SESSION_EXPIRED",
       `${proxy.label}: the proxy still asks for a login after the walk.`,
       "The sign-in chain of this library does not fit the walker — capture the browser's login flow so it can be pinned.",
+    );
+  }
+  // The work is served either on the proxy's rewritten host or, when the
+  // chain leaves the proxy, on the publisher's own; anywhere else the chain
+  // stopped at an interstitial the walker does not know.
+  const landed = new URL(result.finalUrl).hostname.toLowerCase();
+  const proxyHost = new URL(proxy.proxyBase).hostname.toLowerCase();
+  const wanted = new URL(target).hostname.toLowerCase();
+  const under = (host: string, root: string) => host === root || host.endsWith(`.${root}`);
+  if (!under(landed, proxyHost) && !under(landed, wanted)) {
+    throw new SourceError(
+      SOURCE,
+      "NOT_FOUND",
+      `${proxy.label}: the sign-in chain stopped at ${landed}, which is neither ${wanted} nor the proxy — that page is not the work.`,
+      "An interstitial the walker does not know (attribute-release consent, an institution picker, a second login step) ends the chain there — a HAR of the same sign-in in a browser would show what to post.",
     );
   }
   sessions.set(key, jar);

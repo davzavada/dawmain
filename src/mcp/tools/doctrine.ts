@@ -147,6 +147,8 @@ const MAX_READER_COPIES = 2;
 /** A copy to try: openly, or through a signed-in reader's library proxy. */
 interface CopyCandidate extends TextCandidate {
   reader?: ReaderAccess;
+  /** The work is known to be closed — any sign-in/purchase page is a wall. */
+  strict?: boolean;
 }
 
 interface TriedCopy {
@@ -188,8 +190,10 @@ export function readerCandidates(
   for (const link of input.links ?? []) if (!unwrapProxiedLink(link)) push(link);
   const proxies = libraryProxies();
   const out: CopyCandidate[] = [];
-  for (const library of libraries) {
-    for (const url of targets) {
+  // Target-major: with two logins the cap then spends one attempt per
+  // library instead of both on the first library's targets.
+  for (const url of targets) {
+    for (const library of libraries) {
       out.push({
         url,
         reason: `through your ${proxies[library].label} login`,
@@ -216,7 +220,7 @@ async function readFirstCopy(
       return { tried };
     }
     try {
-      const document = await withDeadline(fetchDocumentText(candidate.url, candidate.reader), Math.min(PER_COPY_MS, left));
+      const document = await withDeadline(fetchDocumentText(candidate.url, candidate.reader, candidate.strict), Math.min(PER_COPY_MS, left));
       return { document, tried: [...tried, { url: candidate.url, reason: candidate.reason, outcome: `read (${document.kind})` }] };
     } catch (error) {
       const message = error instanceof SourceError ? error.message : error instanceof Error ? error.message : String(error);
@@ -474,7 +478,12 @@ export function registerDoctrine(server: McpServer): void {
         source: z.enum(SOURCES).optional().describe("Catalogue the id comes from (with id)."),
         id: z.string().min(1).optional().describe("Record id from a doctrine_search hit: OCLC number (peacepalace) or Primo record id (cuni)."),
         doi: z.string().min(7).optional().describe("DOI of the work, e.g. '10.1163/9789004724822' — also without source/id."),
-        url: z.string().url().optional().describe("An https access link (publisher page, repository PDF) to read directly."),
+        url: z
+          .string()
+          .url()
+          .refine((value) => /^https?:\/\//i.test(value), "Pass an http(s) access link.")
+          .optional()
+          .describe("An http(s) access link (publisher page, repository PDF) to read directly."),
         record_only: z.boolean().default(false).describe("Return only the catalogue record in full; do not look for the text."),
         find: z.string().optional().describe(FIND_DESCRIPTION),
         page: z.number().int().min(1).default(1),
@@ -533,7 +542,14 @@ export function registerDoctrine(server: McpServer): void {
             oaError = error instanceof Error ? error.message : String(error);
           }
         }
-        const openCandidates: CopyCandidate[] = record_only ? [] : orderCandidates({ url, doi: workDoi, oa, links: record?.links }).slice(0, MAX_OPEN_COPIES);
+        // Unpaywall saying "closed" makes every open landing page a wall by
+        // definition, however long it is.
+        const strict = Boolean(oa && !oa.isOa);
+        const openCandidates: CopyCandidate[] = record_only
+          ? []
+          : orderCandidates({ url, doi: workDoi, oa, links: record?.links })
+              .slice(0, MAX_OPEN_COPIES)
+              .map((candidate) => ({ ...candidate, strict }));
 
         // 2b. The caller's own library logins, for the licensed copies.
         const userId = callerUserId(extra);
@@ -586,7 +602,7 @@ export function registerDoctrine(server: McpServer): void {
         const accessBlock = record_only
           ? ["(record only — no copy was looked for)"]
           : [
-              `ACCESS: ${document ? `${document.reader ? `read through your ${LABELS[document.reader]} login` : "open"} — the ${document.kind}${document.pages ? ` (${document.pages} pages)` : ""} at ${document.finalUrl}` : candidates.length ? "no readable copy" : "nothing to try — the record carries no DOI or access link"}${oa ? ` · Unpaywall: ${oa.isOa ? `open access (${oa.status ?? "oa"})` : "closed (no open-access copy known)"}` : oaError ? ` · Unpaywall: ${oaError}` : ""}${readerLogins.length ? ` · your library logins: ${readerLogins.map((library) => LABELS[library]).join(", ")}` : ""}`,
+              `ACCESS: ${document ? `${document.reader ? `read through your ${LABELS[document.reader]} login` : "open"} — the ${document.kind}${document.pages ? ` (${document.pages} pages)` : ""} at ${document.finalUrl}` : candidates.length ? "no readable copy" : record ? "nothing to try — the record carries no DOI or access link" : "nothing to try — no DOI or access link to go on"}${oa ? ` · Unpaywall: ${oa.isOa ? `open access (${oa.status ?? "oa"})` : "closed (no open-access copy known)"}` : oaError ? ` · Unpaywall: ${oaError}` : ""}${readerLogins.length ? ` · your library logins: ${readerLogins.map((library) => LABELS[library]).join(", ")}` : ""}`,
               ...tried.map((entry) => `  ${entry.outcome.startsWith("read") ? "✓" : "✗"} ${entry.reason}: ${entry.url} — ${entry.outcome}`),
               ...(!document && candidates.length
                 ? [

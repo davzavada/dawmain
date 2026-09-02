@@ -206,7 +206,8 @@ ne hádat.
   v jedné odpovědi; delší texty nesou pokyn agentovi pokračovat bez ptaní.
 - Timeouty: výchozí 15 s/request; odchylky: NSS POST 25 s, Cellar retrieval 25 s,
   Cellar SPARQL 30 s, justice.cz hledání 30 s, e-Sbírka SPARQL 20 s, katalogy
-  doktríny 20 s, stažení díla 25 s na kopii, nejvýš 3 kopie a 45 s celkem. Celá
+  doktríny 20 s, stažení díla 20 s na kopii, nejvýš 3 otevřené a 2 čtenářské
+  kopie a 45 s celkem od začátku volání; PDF nad 1 500 stran se odmítne. Celá
   invokace ≤ 60 s.
 
 ## Autentizace

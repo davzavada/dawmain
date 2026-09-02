@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  MAX_PDF_PAGES,
+  decodeHtml,
   fetchDocumentText,
   isPublicAddress,
   looksLikeAccessWall,
@@ -9,6 +11,7 @@ import {
   orderCandidates,
   parseUnpaywall,
 } from "@/src/sources/fulltext";
+import { readerCandidates } from "@/src/mcp/tools/doctrine";
 import { SourceError } from "@/src/sources/shared/errors";
 import { registerDoctrine } from "@/src/mcp/tools/doctrine";
 import type { BibHit } from "@/src/sources/shared/bib";
@@ -155,6 +158,55 @@ describe("fetchDocumentText", () => {
     await expect(fetchDocumentText("https://publisher.test/doi/10.1/403")).rejects.toThrow(/login or licence wall/);
   });
 
+  it("in strict mode treats a long landing page with purchase vocabulary as a wall", async () => {
+    const landing = `<html><body>${"<p>Preview of the chapter, with plenty of front matter and references listed below.</p>".repeat(400)}<p>Sign in to access the full text. Purchase this chapter.</p></body></html>`;
+    vi.stubGlobal("fetch", async () => new Response(landing, { status: 200, headers: { "content-type": "text/html" } }));
+    // Lenient (default): a long page passes as the work.
+    const lenient = await fetchDocumentText("https://publisher.test/doi/10.1/long-landing");
+    expect(lenient.kind).toBe("html");
+    // Strict (Unpaywall said closed): the same page is a wall.
+    await expect(fetchDocumentText("https://publisher.test/doi/10.1/long-landing", undefined, true)).rejects.toMatchObject({ kind: "NOT_FOUND" });
+  });
+
+  it("refuses a PDF longer than the per-call budget allows", async () => {
+    const pages = MAX_PDF_PAGES + 1;
+    // A minimal PDF with `pages` empty pages, xref computed by hand.
+    const objs: string[] = ["<< /Type /Catalog /Pages 2 0 R >>"];
+    const kids = Array.from({ length: pages }, (_, i) => `${3 + i} 0 R`).join(" ");
+    objs.push(`<< /Type /Pages /Kids [${kids}] /Count ${pages} >>`);
+    for (let i = 0; i < pages; i++) objs.push("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>");
+    let out = "%PDF-1.4\n";
+    const offsets: number[] = [];
+    objs.forEach((o, i) => {
+      offsets.push(Buffer.byteLength(out));
+      out += `${i + 1} 0 obj\n${o}\nendobj\n`;
+    });
+    const xref = Buffer.byteLength(out);
+    out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offsets.map((o) => `${String(o).padStart(10, "0")} 00000 n \n`).join("")}trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+    vi.stubGlobal("fetch", async () => new Response(Buffer.from(out, "latin1"), { status: 200, headers: { "content-type": "application/pdf" } }));
+    await expect(fetchDocumentText("https://repo.test/huge.pdf")).rejects.toThrow(/too long to read inside one call/);
+  });
+
+  it("decodes an HTML page by its declared charset", () => {
+    // "ž" is 0x9E in windows-1250.
+    const bytes = new Uint8Array([...Buffer.from('<html><head><meta charset="windows-1250"></head><body>', "latin1"), 0x9e, ...Buffer.from("</body></html>", "latin1")]);
+    expect(decodeHtml(bytes, "text/html")).toContain("ž");
+    expect(decodeHtml(bytes, "text/html; charset=windows-1250")).toContain("ž");
+    expect(decodeHtml(Buffer.from("<p>plain</p>"), "text/html; charset=utf-8")).toBe("<p>plain</p>");
+    expect(decodeHtml(Buffer.from("<p>x</p>"), "text/html; charset=no-such-charset")).toBe("<p>x</p>");
+  });
+
+  it("orders reader candidates target-major so two logins both get a turn", () => {
+    const logins = { peacepalace: { username: "a", password: "b" }, cuni: { username: "c", password: "d" } };
+    const candidates = readerCandidates({ doi: "10.1/x", links: ["https://peacepalace.idm.oclc.org/login?url=https://pub.test/1"], source: "cuni" }, logins, "user_z");
+    expect(candidates.map((c) => `${c.reader?.library}:${c.url}`)).toEqual([
+      "cuni:https://pub.test/1",
+      "peacepalace:https://pub.test/1",
+      "cuni:https://doi.org/10.1/x",
+      "peacepalace:https://doi.org/10.1/x",
+    ]);
+  });
+
   it("reduces a real HTML article to text", async () => {
     const paragraphs = Array.from({ length: 40 }, (_, i) => `<p>Paragraph ${i}: the crime of genocide requires a specific intent to destroy a protected group as such, which distinguishes it from crimes against humanity.</p>`).join("");
     vi.stubGlobal("fetch", async () => new Response(`<html><body><article>${paragraphs}</article></body></html>`, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } }));
@@ -298,6 +350,10 @@ describe("doctrine_get_document (stubbed upstreams)", () => {
     const anon = anonymous.structuredContent as { access: { status: string; reader_logins: string[] } };
     expect(anon.access).toMatchObject({ status: "unavailable", reader_logins: [] });
     expect(anonymous.content[0].text).toContain("store your library login on /ucet");
+
+    // A shared-access-code caller (no user) is told licensed titles stay closed for it.
+    const shared = await (handler as unknown as (args: Record<string, unknown>, extra: unknown) => ReturnType<Handler>)({ doi: "10.1163/9789004724822", record_only: false, page: 1 }, { authInfo: { extra: { method: "shared-token" } } });
+    expect(shared.content[0].text).toContain("licensed titles open only for a caller signed in with their own account");
   });
 
   it("record_only skips every download", async () => {

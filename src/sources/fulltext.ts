@@ -165,25 +165,46 @@ export interface ReaderAccess {
   credential: ReaderCredential;
 }
 
-/** Words a login/purchase wall shows instead of the work. Pure. */
-export function looksLikeAccessWall(text: string): boolean {
-  const head = text.slice(0, 4_000).toLowerCase();
+/** Words a login/purchase wall shows instead of the work; `window` = how
+ * far into the text to look (a landing page keeps them near the top; a
+ * strict check reads the whole page). Pure. */
+export function looksLikeAccessWall(text: string, window = 4_000): boolean {
+  const head = text.slice(0, window).toLowerCase();
   return /\b(sign in|log in|login|přihlásit|přihlášení|institutional access|access denied|purchase|buy this|subscribe|get access|add to cart|403 forbidden)\b/.test(head);
 }
 
 const documentCache = new TtlCache<FetchedDocument>(DOCUMENT_TTL_MS, 20);
 
+/** ~8 ms a page measured with unpdf; beyond this a copy would eat the call. */
+export const MAX_PDF_PAGES = 1_500;
+
 /**
  * The text of the work at `rawUrl`: openly, or — with `reader` — through
  * that reader's library proxy, signed in with their login. A reader's copy
- * is cached under the reader, never shared.
+ * is cached under the reader, never shared. `strict` = the caller already
+ * knows the work is not open (Unpaywall says closed), so a page of any
+ * length that speaks of signing in or buying is a wall, not the work.
  */
-export async function fetchDocumentText(rawUrl: string, reader?: ReaderAccess): Promise<FetchedDocument> {
-  const key = memoKey("fulltext-doc", reader ? [rawUrl, reader.userId, reader.library] : rawUrl);
-  return documentCache.through(key, () => downloadDocument(rawUrl, reader));
+export async function fetchDocumentText(rawUrl: string, reader?: ReaderAccess, strict = false): Promise<FetchedDocument> {
+  const key = memoKey("fulltext-doc", [rawUrl, reader?.userId ?? null, reader?.library ?? null, strict]);
+  return documentCache.through(key, () => downloadDocument(rawUrl, reader, strict));
 }
 
-async function downloadDocument(rawUrl: string, reader?: ReaderAccess): Promise<FetchedDocument> {
+/** Decode an HTML body by its declared charset (Content-Type, else the
+ * meta tag); UTF-8 otherwise — Czech pages still declare windows-1250. */
+export function decodeHtml(buffer: Uint8Array, contentType: string): string {
+  const utf8 = new TextDecoder("utf-8").decode(buffer);
+  const declared = /charset=["']?([\w-]+)/i.exec(contentType)?.[1] ?? /<meta[^>]+charset=["']?([\w-]+)/i.exec(utf8.slice(0, 4_000))?.[1];
+  const charset = (declared ?? "utf-8").trim().toLowerCase();
+  if (charset === "utf-8" || charset === "utf8") return utf8;
+  try {
+    return new TextDecoder(charset).decode(buffer);
+  } catch {
+    return utf8;
+  }
+}
+
+async function downloadDocument(rawUrl: string, reader?: ReaderAccess, strict = false): Promise<FetchedDocument> {
   await assertPublicUrl(rawUrl);
   const walked: WalkResult = reader
     ? await openAsReader(reader.library, rawUrl, reader.credential, reader.userId)
@@ -201,7 +222,7 @@ async function downloadDocument(rawUrl: string, reader?: ReaderAccess): Promise<
   if (walked.status < 200 || walked.status >= 300) {
     throw new SourceError(SOURCE, "UPSTREAM_ERROR", `${url.hostname} answered HTTP ${walked.status}.`, "The link may be dead — try another access link of the record, or the DOI.");
   }
-  const extracted = await extractDocument(walked.body, walked.contentType, url.href, wallHint);
+  const extracted = await extractDocument(walked.body, walked.contentType, url.href, wallHint, strict);
   return { url: rawUrl, ...extracted, ...(reader ? { reader: reader.library } : {}) };
 }
 
@@ -211,19 +232,26 @@ async function extractDocument(
   contentType: string,
   finalUrl: string,
   wallHint: string,
+  strict = false,
 ): Promise<Omit<FetchedDocument, "url">> {
   const hostname = new URL(finalUrl).hostname;
   const isPdf = contentType.includes("application/pdf") || (buffer.length >= 4 && String.fromCharCode(...buffer.slice(0, 4)) === "%PDF");
   if (isPdf) {
-    const { extractText } = await import("unpdf");
-    const { totalPages, text } = await extractText(buffer, { mergePages: true });
+    const { extractText, getDocumentProxy } = await import("unpdf");
+    // Open first, extract second: the page count is known in milliseconds,
+    // the text of a 6 000-page scan would take the whole call.
+    const pdf = await getDocumentProxy(buffer);
+    if (pdf.numPages > MAX_PDF_PAGES) {
+      throw new SourceError(SOURCE, "UPSTREAM_ERROR", `The PDF has ${pdf.numPages} pages — too long to read inside one call.`, `Open it directly: ${finalUrl}`);
+    }
+    const { totalPages, text } = await extractText(pdf, { mergePages: true });
     const merged = (Array.isArray(text) ? text.join("\n") : text).replace(/[ \t]+\n/g, "\n").trim();
     if (!merged) {
       throw new SourceError(SOURCE, "NOT_FOUND", "The PDF contains no extractable text (probably a scan).", `Open it directly: ${finalUrl}`);
     }
     return { finalUrl, kind: "pdf", text: merged, pages: totalPages };
   }
-  const body = new TextDecoder("utf-8").decode(buffer);
+  const body = decodeHtml(buffer, contentType);
   if (!contentType.includes("html") && !looksLikeHtml(body)) {
     throw new SourceError(
       SOURCE,
@@ -233,7 +261,10 @@ async function extractDocument(
     );
   }
   const text = htmlToText(body);
-  if (text.length < MIN_HTML_TEXT_CHARS || (text.length < 20_000 && looksLikeAccessWall(text))) {
+  // A long page is normally the work; when the caller already knows the
+  // work is closed, sign-in/purchase vocabulary anywhere on it means a wall.
+  const wall = strict ? looksLikeAccessWall(text, text.length) : text.length < 20_000 && looksLikeAccessWall(text);
+  if (text.length < MIN_HTML_TEXT_CHARS || wall) {
     throw new SourceError(SOURCE, "NOT_FOUND", `${hostname} served a landing or login page (${text.length} characters of text), not the work.`, wallHint);
   }
   return { finalUrl, kind: "html", text };
@@ -267,7 +298,7 @@ export function orderCandidates(input: {
     seen.add(url);
     out.push({ url, reason });
   };
-  push(input.url, "the link you passed");
+  push(input.url?.replace(/^http:\/\//i, "https://"), "the link you passed");
   if (input.oa?.isOa) {
     push(input.oa.best?.pdfUrl, `open-access PDF (Unpaywall, ${input.oa.status ?? "oa"}${input.oa.best?.license ? `, ${input.oa.best.license}` : ""})`);
     push(input.oa.best?.landingUrl ?? input.oa.best?.url, "open-access copy (Unpaywall)");

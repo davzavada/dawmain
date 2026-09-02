@@ -201,12 +201,36 @@ describe("walk", () => {
     expect(result.loginRequired).toBe(false);
     expect(result.submittedLogin).toBe(false);
     expect(new TextDecoder().decode(result.body)).toContain("The chapter text.");
-    expect(isLoginHost("cas.cuni.cz", libraryProxies().cuni.loginHosts)).toBe(true);
-    expect(isLoginHost("cuni.cz.evil.test", libraryProxies().cuni.loginHosts)).toBe(false);
-    expect(isLoginHost("shib.oclc.org", libraryProxies().peacepalace.loginHosts)).toBe(true);
+    expect(isLoginHost("https://cas.cuni.cz/cas/login", libraryProxies().cuni.loginHosts)).toBe(true);
+    expect(isLoginHost("https://idp.cuni.cz/idp/x", libraryProxies().cuni.loginHosts)).toBe(true);
+    expect(isLoginHost("https://ezproxy.is.cuni.cz/login", libraryProxies().cuni.loginHosts)).toBe(true);
+    // EZproxy's rewritten publisher host and its port mode are the publisher, not the library.
+    expect(isLoginHost("https://www-publisher-com.ezproxy.is.cuni.cz/book/1", libraryProxies().cuni.loginHosts)).toBe(false);
+    expect(isLoginHost("https://ezproxy.is.cuni.cz:2048/book/1", libraryProxies().cuni.loginHosts)).toBe(false);
+    expect(isLoginHost("https://cuni.cz.evil.test/", libraryProxies().cuni.loginHosts)).toBe(false);
+    expect(isLoginHost("https://shib.oclc.org/Shibboleth.sso/Login", libraryProxies().peacepalace.loginHosts)).toBe(true);
+    expect(isLoginHost("https://www-taylorfrancis-com.peacepalace.idm.oclc.org/x", libraryProxies().peacepalace.loginHosts)).toBe(false);
   });
 
-  it("auto-posts a hidden-only continue page with its submit button and honours GET forms", async () => {
+  it("does not hand the password to a publisher served through the proxy's rewritten host", async () => {
+    const requests: Array<{ url: string; method: string }> = [];
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+      requests.push({ url, method: init.method ?? "GET" });
+      const u = new URL(url);
+      if (u.hostname === "ezproxy.is.cuni.cz") return new Response(null, { status: 302, headers: { location: "https://www-publisher-com.ezproxy.is.cuni.cz/doi/10.1000/x" } });
+      // An Atypon-style page: the publisher's own sign-in form in the markup, paywalled abstract below.
+      return new Response(`<html><body><form method="post" action="/action/doLogin"><input name="login"><input type="password" name="password"></form><p>Abstract. Sign in to read. Purchase this article.</p></body></html>`, { status: 200, headers: { "content-type": "text/html" } });
+    });
+    const result = await walk("https://ezproxy.is.cuni.cz/login?url=https%3A%2F%2Fpublisher.test%2Fdoi%2F10.1000%2Fx", {
+      credential: { username: "reader", password: "secret" },
+      loginHosts: libraryProxies().cuni.loginHosts,
+    });
+    expect(requests.map((r) => r.method)).toEqual(["GET", "GET"]);
+    expect(result.submittedLogin).toBe(false);
+    expect(result.loginRequired).toBe(false);
+  });
+
+  it("auto-posts a hidden-only hand-off on a sign-in host with its submit button, and only there", async () => {
     const requests: Array<{ url: string; method: string; body?: string }> = [];
     vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
       requests.push({ url, method: init.method ?? "GET", body: typeof init.body === "string" ? init.body : undefined });
@@ -215,20 +239,26 @@ describe("walk", () => {
         return new Response(`<form method="post" action="/idp/profile/SAML2/Redirect/SSO?execution=e1s2"><input type="hidden" name="csrf_token" value="t1"><button type="submit" name="_eventId_proceed" id="_eventId_proceed">Continue</button></form>`, { status: 200, headers: { "content-type": "text/html" } });
       }
       if (u.hostname === "idp.cuni.cz" && init.method === "POST") {
-        return new Response(null, { status: 302, headers: { location: "https://search.test/find?q=1" } });
+        return new Response(null, { status: 302, headers: { location: "https://publisher.test/landing" } });
       }
-      if (u.hostname === "search.test" && u.pathname === "/find") {
-        return new Response(`<form method="get" action="/results"><input type="hidden" name="scope" value="all"><input type="hidden" name="q" value="genocide"></form>`, { status: 200, headers: { "content-type": "text/html" } });
-      }
-      if (u.hostname === "search.test" && u.pathname === "/results") {
-        return new Response(`<html><body>${"<p>Results page text.</p>".repeat(300)}</body></html>`, { status: 200, headers: { "content-type": "text/html" } });
+      if (u.hostname === "publisher.test") {
+        // A hidden-only form WITHOUT a hand-off field, on a host that is not a sign-in host: content, not a hand-off.
+        return new Response(`<html><body><form method="post" action="https://tracker.test/beacon"><input type="hidden" name="csrf" value="x"></form>${"<p>Landing page text.</p>".repeat(300)}</body></html>`, { status: 200, headers: { "content-type": "text/html" } });
       }
       return new Response("not found", { status: 404 });
     });
-    const result = await walk("https://idp.cuni.cz/idp/profile/SAML2/Redirect/SSO?execution=e1s2");
+    const result = await walk("https://idp.cuni.cz/idp/profile/SAML2/Redirect/SSO?execution=e1s2", { loginHosts: libraryProxies().cuni.loginHosts });
     expect(requests[1]).toEqual({ url: "https://idp.cuni.cz/idp/profile/SAML2/Redirect/SSO?execution=e1s2", method: "POST", body: "csrf_token=t1&_eventId_proceed=" });
-    expect(requests[3]).toEqual({ url: "https://search.test/results?scope=all&q=genocide", method: "GET", body: undefined });
-    expect(result.finalUrl).toBe("https://search.test/results?scope=all&q=genocide");
+    expect(requests).toHaveLength(3);
+    expect(result.finalUrl).toBe("https://publisher.test/landing");
+    // The same hand-off page on the open path (no sign-in hosts) is returned as content, never posted.
+    vi.stubGlobal("fetch", async (url: string) => {
+      requests.push({ url, method: "GET" });
+      return new Response(`<form method="post" action="https://sp.test/acs"><input type="hidden" name="SAMLResponse" value="x"></form>`, { status: 200, headers: { "content-type": "text/html" } });
+    });
+    const open = await walk("https://idp.other.test/handoff");
+    expect(open.finalUrl).toBe("https://idp.other.test/handoff");
+    expect(requests.at(-1)?.method).toBe("GET");
     expect(formRequest({ action: "https://x.test/a?k=1", method: "GET", fields: {}, usernameField: null, passwordField: null, autoPost: false }, { b: "2 3" })).toEqual({ url: "https://x.test/a?k=1&b=2+3", method: "GET" });
   });
 
@@ -294,6 +324,16 @@ describe("openAsReader", () => {
     // A corrected password is tried at once.
     const ok = await openAsReader("cuni", "https://publisher.test/book/1", { username: "reader", password: "correct" }, "user_4");
     expect(ok.submittedLogin).toBe(true);
+  });
+
+  it("reports a chain that ends somewhere that is neither the proxy nor the work", async () => {
+    vi.stubGlobal("fetch", async (url: string) => {
+      const u = new URL(url);
+      if (u.hostname === "ezproxy.is.cuni.cz") return new Response(null, { status: 302, headers: { location: "https://consent.test/attribute-release" } });
+      return new Response(`<html><body><form method="post"><select name="choice"><option value="1">Once</option></select></form>${"<p>Attribute release consent text.</p>".repeat(100)}</body></html>`, { status: 200, headers: { "content-type": "text/html" } });
+    });
+    await expect(openAsReader("cuni", "https://publisher.test/book/9", { username: "u", password: "p" }, "user_5")).rejects.toMatchObject({ kind: "NOT_FOUND" });
+    await expect(openAsReader("cuni", "https://publisher.test/book/9", { username: "u", password: "p" }, "user_5")).rejects.toThrow(/stopped at consent\.test/);
   });
 
   it("returns a sign-in page on the proxy's own host as loginRequired, not as the work", async () => {
