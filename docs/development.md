@@ -38,8 +38,9 @@ volání. Cesty dál: oficiální WorldCat Search API s WSKey vydaným přes
 knihovnu, nebo klient vyřadit jako u ÚPV. **UKAŽ/Primo odpovídá bez tokenu**
 (hledání i full-display záznamu, verbatim fixtures v `tests/fixtures/primo/`);
 guest-token fallback zůstává pro případ, že by ho Primo začalo chtít.
-**Unpaywall z fra1 neodpověděl do 12 s** (třikrát); nástroj na něj čeká
-nejvýš 6 s a DOI i odkazy záznamu zkouší tak jako tak. Oba katalogy jsou knihovní, ne
+**Unpaywall** z fra1 třikrát neodpověděl do 12 s a o osm minut později
+odpověděl 200 za 322 ms — výpadek, ne blokace; nástroj na něj čeká nejvýš
+6 s a DOI i odkazy záznamu zkouší tak jako tak. Oba katalogy jsou knihovní, ne
 open access: `doctrine_get_document` přečte jen díla s open-access kopií
 (Unpaywall zná OA umístění k DOI; DOI a odkazy záznamu se zkusí také), u
 licencovaných zkusí přihlášení čtenáře, pokud si ho uživatel uložil na

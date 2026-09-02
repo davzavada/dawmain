@@ -94,7 +94,7 @@
       "needs_from_user": [
         "Nothing for the open-access path beyond a deploy + dawmain_probe_sources (canary 'unpaywall'). For licensed works: the reader-login captures listed above, and the decision whether readers' library passwords may be stored at all."
       ],
-      "live_2026_09_02": "From the production deployment: api.unpaywall.org/v2/<doi>?email=… did not answer within 12 s on three tries (timeout, no HTTP status). Whether Unpaywall throttles AWS eu-central-1 addresses or was down is unknown; the tool waits at most 6 s for it and tries the DOI and the record's links regardless."
+      "live_2026_09_02": "From the production deployment: api.unpaywall.org/v2/<doi>?email=… did not answer within 12 s on three tries around 09:56 UTC (timeout, no HTTP status), then answered HTTP 200 in 322 ms at 10:04 UTC — a transient outage or throttle, not a block. The tool waits at most 6 s for it and tries the DOI and the record's links regardless."
     },
     {
       "source": "Reader login through the libraries' proxies — EZproxy + IdP (SimpleSAMLphp / Shibboleth→CAS)",
