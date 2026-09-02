@@ -407,7 +407,9 @@ export function registerDoctrine(server: McpServer): void {
               source,
               ok: true,
               total: result.total,
-              has_more: result.total !== null && page * per_source_limit < result.total,
+              // What the page actually returned decides too: an empty page must
+              // not advertise a next one on the strength of a count alone.
+              has_more: result.total !== null && result.hits.length > 0 && page * per_source_limit < result.total,
               ...(result.note ? { note: result.note } : {}),
             };
             return { source, status, hits: result.hits };

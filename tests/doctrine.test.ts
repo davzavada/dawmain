@@ -458,6 +458,18 @@ describe("doctrine_search (stubbed upstreams)", () => {
     expect(result.content[0].text).toContain("kw:(varianta)");
   });
 
+  it("does not advertise a next page when the catalogue returned nothing for this one", async () => {
+    vi.stubGlobal("fetch", async (url: string) =>
+      new URL(url).hostname.includes("worldcat")
+        ? new Response('{"numberOfRecords":12279,"records":[],"partialResult":false}', { status: 200 })
+        : new Response(primoEmpty, { status: 200 }),
+    );
+    const result = await doctrineHandler()({ query: "empty page F", per_source_limit: 10, page: 900, full_text_only: false });
+    const out = result.structuredContent as { statuses: Array<{ source: string; has_more: boolean; total: number }> };
+    expect(out.statuses[0]).toMatchObject({ source: "peacepalace", total: 12279, has_more: false });
+    expect(result.content[0].text).not.toContain("more: page 901");
+  });
+
   it("refuses whitespace-only field criteria before touching the network", async () => {
     const urls = stubCatalogues();
     const result = await doctrineHandler()({ title: "   ", author: " ", per_source_limit: 10, page: 1, full_text_only: false });
