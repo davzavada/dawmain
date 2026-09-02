@@ -459,10 +459,12 @@ language and years alone are not.
 copy in order — the open-access location Unpaywall knows for the DOI (PDF first), the
 DOI's own page, the record's access links — and reads the first one that is really the
 work: PDF or HTML, paged, `find: "term"` for the passages. `access.status` tells you
-what happened: `open` means you are reading the text; `unavailable` means every copy
-sat behind a login or purchase wall (each attempt is listed with its reason) — the work
-is licensed and the library's reader login, which the tool does not hold, would be
-needed. Do not treat `unavailable` as absence: the record still carries the whole
+what happened: `open` means you are reading an open-access text; `reader` means the
+tool signed in with the user's own library login (stored on the Dawmain site under
+Účet, `/ucet`) and read the licensed copy through the library's proxy; `unavailable`
+means every copy sat behind a login or purchase wall (each attempt is listed with its
+reason) — say so, and when `reader_logins` is empty tell the user that storing their
+Peace Palace or UK login on `/ucet` unlocks licensed titles. Do not treat `unavailable` as absence: the record still carries the whole
 abstract and the table of contents, which is how you tell whether a monograph or
 commentary is on point at all — `record_only: true` fetches just that, cheaply.
 

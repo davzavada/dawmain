@@ -1,0 +1,107 @@
+<!-- verbatim forms of https://cas.cuni.cz/cas/login (HAR 2026-09-02), inline scripts removed, execution token shortened -->
+<html><body>
+<form method="post" id="fm1" action="login">
+                <div id="login-form-controls">
+                    <h3 class="text-center">
+                        <i class="mdi mdi-security fas fa-shield-alt"></i>
+                        <span>Enter Username & Password</span>
+                    </h3>
+
+                    <section class="cas-field form-group my-3" id="usernameSection">
+                        <label for="username"
+                               class="mdc-text-field mdc-text-field--outlined control-label w-100">
+                            <span class="mdc-notched-outline">
+                                <span class="mdc-notched-outline__leading"></span>
+                                <span class="mdc-notched-outline__notch">
+                                    <span class="mdc-floating-label"><span class="accesskey">U</span>sername:</span>
+                                </span>
+                                <span class="mdc-notched-outline__trailing"></span>
+                            </span>
+                            <input class="mdc-text-field__input form-control" id="username"
+                                   size="25"
+                                   type="text"
+                                   accesskey="u"
+                                   autocapitalize="none"
+                                   spellcheck="false"
+                                   autocomplete="username" required name="username" value=""/></label>
+
+                        <div class="mdc-text-field-helper-line">
+                            <div class="mdc-text-field-helper-text mdc-text-field-helper-text--validation-msg" aria-hidden="true">
+                                <span id="usernameValidationMessage">Username is a required field.</span>
+                            </div>
+                        </div>
+
+                        
+                    </section>
+                    <section class="cas-field form-group my-3 mdc-input-group form-group" id="passwordSection">
+                        <div class="mdc-input-group-field mdc-input-group-field-append">
+                            <div class="caps-check">
+                                <label for="password"
+                                       class="mdc-text-field caps-check mdc-text-field--outlined control-label mdc-text-field--with-trailing-icon control-label w-100">
+                                    <span class="mdc-notched-outline">
+                                        <span class="mdc-notched-outline__leading"></span>
+                                        <span class="mdc-notched-outline__notch">
+                                            <span class="mdc-floating-label"><span class="accesskey">P</span>assword:</span>
+                                        </span>
+                                        <span class="mdc-notched-outline__trailing"></span>
+                                    </span>
+                                    <input class="mdc-text-field__input form-control pwd"
+                                           type="password"
+                                           id="password"
+                                           size="25"
+                                           required
+                                           accesskey="p"
+                                           autocomplete="off" name="password" value=""/><button
+                                            class="reveal-password align-self-end mdc-button mdc-button--unelevated mdc-input-group-append mdc-icon-button btn btn-primary"
+                                            tabindex="-1" type="button">
+                                        <i class="mdi mdi-eye reveal-password-icon fas fa-eye"></i>
+                                        <span class="visually-hidden">Toggle Password</span>
+                                    </button>
+                                </label>
+                                <div class="mdc-text-field-helper-line">
+                                    <div
+                                            class="mdc-text-field-helper-text mdc-text-field-helper-text--validation-msg"
+                                            aria-hidden="true">
+                                        <span id="passwordValidationMessage">Password is a required field.</span>
+                                    </div>
+                                </div>
+                                <div class="mdc-text-field-helper-line caps-warn">
+                                    <div
+                                            class="mdc-text-field-helper-text mdc-text-field-helper-text--persistent mdc-text-field-helper-text--validation-msg text-danger">
+                                        <span>CAPSLOCK key is turned on!</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="cas-field form-group my-3">
+                        </section>
+
+
+                    <section class="cas-field">
+
+                        <input type="hidden" name="execution" value="b7609023-f7b8-481b-b2b0-c3599467e5a6_ZXl…"/><input type="hidden" name="_eventId" value="submit"/><input type="hidden" name="geolocation"/></section>
+
+                    <button
+                class="mdc-button mdc-button--raised btn btn-primary btn-primary"
+                name="submitBtn"
+                accesskey="l"
+                type="submit">
+            <span class="mdc-button__label">Login</span>
+        </button>
+
+        </div>
+            </form>
+<form method="post" id="formNIA" action="/cas/login">
+                                <button class="mdc-button mdc-button--raised me-2 btn btn-primary d-block w-100 mdc-button-saml2"
+                                        name="submitButton"
+                                        id="NIA"
+                                        type="submit"
+                                        title="NIA saml2"
+                                        accesskey="s" autoRedirectType="none" redirectUrl="clientredirect?client_name=NIA&amp;service=https%3A%2F%2Fidp.cuni.cz%2Fidp%2FAuthn%2FExternal%3Fconversation%3De1s1%26entityId%3Dhttps%3A%2F%2Fcuni.primo.exlibrisgroup.com%2Fmng%2Flogin">
+                                    <span class="mdc-button__label">e-Identity</span>
+                                </button>
+
+                                <input type="hidden" name="client_name" value="NIA" /><input type="hidden" name="_eventId" value="delegatedAuthenticationRedirect" /><input type="hidden" name="execution" value="b7609023-f7b8-481b-b2b0-c3599467e5a6_ZXl…" /></form>
+</body></html>

@@ -93,6 +93,25 @@
       "needs_from_user": [
         "Nothing for the open-access path beyond a deploy + dawmain_probe_sources (canary 'unpaywall'). For licensed works: the reader-login captures listed above, and the decision whether readers' library passwords may be stored at all."
       ]
+    },
+    {
+      "source": "Reader login through the libraries' proxies — EZproxy + IdP (SimpleSAMLphp / Shibboleth→CAS)",
+      "captured": "Peace Palace: the proxy host peacepalace.idm.oclc.org/login?url=… (in every licensed access link the Discovery SPA builds) and the IdP login-page URL peacepalacelibrary.nl/saml/module.php/core/loginuserpass?AuthState=… (spentityid=https://shib.oclc.org/shibboleth) supplied by the user. UK: the start of the Primo login (idp.cuni.cz SAML2 Redirect → idp.cuni.cz/idp/Authn/External → cas.cuni.cz/cas/login?service=…) and the CAS login page with its two forms (fm1: username, password, hidden execution + _eventId=submit + geolocation; formNIA: e-Identity) — tests/fixtures/cas-login-form.html.",
+      "access": [
+        {
+          "kind": "browser-like-walk",
+          "base_url": "https://peacepalace.idm.oclc.org/login?url=<work> (verified host) · https://ezproxy.is.cuni.cz/login?url=<work> (from memory; CUNI_PROXY_BASE)",
+          "auth": "the reader's own library username/password, stored sealed on /ucet",
+          "detail": "No chain is hard-coded. The walker follows redirects with a per-domain cookie jar, fills the first form that has a password input (all hidden fields included — CAS execution/_eventId, SimpleSAMLphp AuthState), auto-posts a form carrying SAMLResponse, and stops at the first page that is neither (the work, or a wall). A password form seen twice = refused login (SESSION_EXPIRED). Every hop passes the public-address guard. One proxy session (cookie jar) per reader and library, 30 min, on a warm instance."
+        }
+      ],
+      "unverified": [
+        "The whole redirect chain of both libraries (never captured end to end): whether EZproxy hands off to the IdP as expected, whether the IdP's SAMLResponse page is a plain auto-post form (a JavaScript-only page or a second factor would stop the walker), and the UK proxy hostname.",
+        "Whether the libraries' proxies accept a datacenter IP (fra1) at all."
+      ],
+      "needs_from_user": [
+        "After deploy: store a login on /ucet, call doctrine_get_document on a licensed hit and read access.tried — each hop's outcome names what did not fit. If a chain stops, a HAR of the same sign-in in a browser (password POST removed) pins the missing step."
+      ]
     }
   ],
   "decisions": [
@@ -100,6 +119,7 @@
     "Both catalogues serve fixed pages of 10; per_source_limit (≤ 20; above 10 records come brief, without abstract/contents, to stay inside the response budget) is served by fetching the covering catalogue pages in a parallel batch, page walks further (pageWindow/sliceWindow in src/sources/shared/bib.ts).",
     "No sort/format filters: their URL parameters were not captured and a guessed one would silently answer a different question.",
     "No reader-login automation: entry points and redirect chains are not captured, and storing readers' library passwords is a privacy-policy decision for the operator (the policy currently states no passwords are held).",
-    "Reading a work = doctrine_get_document: the record in full first (orientation is possible without any copy), then the first readable copy from an ordered candidate list, every failed copy reported with its reason. Open-access only; licensed content needs the reader login, which is a separate decision."
+    "Reading a work = doctrine_get_document: the record in full first (orientation is possible without any copy), then the first readable copy from an ordered candidate list, every failed copy reported with its reason. Open-access only; licensed content needs the reader login, which is a separate decision.",
+    "Readers' library logins live sealed (AES-256-GCM, CREDENTIALS_SECRET) in Clerk private metadata and are used only for the OAuth-identified caller; the shared access code cannot use them. The privacy policy names the new data category."
   ]
 }

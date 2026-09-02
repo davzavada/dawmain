@@ -19,6 +19,13 @@ vi.mock("node:dns/promises", () => ({
   lookup: async (host: string) => [{ address: host.startsWith("private.") ? "10.0.0.5" : "93.184.216.34", family: 4 }],
 }));
 
+// The credentials store talks to Clerk; here one reader has a UK login.
+vi.mock("@/src/mcp/credentials", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/mcp/credentials")>()),
+  credentialsConfigured: () => true,
+  loadReaderCredentials: async (userId: string) => (userId === "user_with_uk" ? { cuni: { username: "reader", password: "correct" } } : {}),
+}));
+
 const fixture = (name: string) => path.join(path.dirname(__dirname), "tests", "fixtures", name);
 const json = (name: string) => JSON.parse(readFileSync(fixture(name), "utf8")) as unknown;
 const PDF = readFileSync(fixture("pdf/two-pages.pdf"));
@@ -212,8 +219,9 @@ describe("doctrine_get_document (stubbed upstreams)", () => {
     const text = result.content[0].text;
     expect(text).toContain("RECORD [Peace Palace Library (WorldCat)]: Henry G Schermers, Niels M Blokker (2025). International Institutional Law");
     expect(text).toContain("Contents: Preface xxv");
-    expect(text).toContain("ACCESS: no readable open copy · Unpaywall: closed");
-    expect(text).toContain("reader login");
+    expect(text).toContain("ACCESS: no readable copy · Unpaywall: closed");
+    expect(text).toContain("licensed titles open only for a caller signed in");
+    expect(text).toContain("stored library login (/ucet)");
     expect(calls.filter((c) => c.includes("worldcat"))).toHaveLength(1);
   });
 
@@ -241,6 +249,59 @@ describe("doctrine_get_document (stubbed upstreams)", () => {
     expect(excerpt.text).toContain("Schabas");
   });
 
+  it("opens a licensed work through the caller's library login when the open copies refuse", async () => {
+    process.env.CUNI_PROXY_BASE = "https://ezproxy.test";
+    const requests: string[] = [];
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+      requests.push(`${init.method ?? "GET"} ${url}`);
+      const u = new URL(url);
+      const headers = (init.headers ?? {}) as Record<string, string>;
+      if (u.hostname === "api.unpaywall.org") return new Response(readFileSync(fixture("unpaywall/closed.json"), "utf8"), { status: 200 });
+      if (u.hostname === "doi.org") return new Response(null, { status: 302, headers: { location: "https://brill.test/display/title/1" } });
+      if (u.hostname === "brill.test") return new Response("<html><body>Sign in · Institutional access · Purchase</body></html>", { status: 200, headers: { "content-type": "text/html" } });
+      if (u.hostname === "ezproxy.test" && u.searchParams.has("ticket")) {
+        return new Response(null, { status: 302, headers: { location: "https://brill-test.ezproxy.test/display/title/1", "set-cookie": "ezproxy=s1; Domain=.ezproxy.test" } });
+      }
+      if (u.hostname === "ezproxy.test") {
+        return headers.cookie?.includes("ezproxy=s1")
+          ? new Response(null, { status: 302, headers: { location: "https://brill-test.ezproxy.test/display/title/1" } })
+          : new Response(null, { status: 302, headers: { location: "https://cas.test/cas/login?service=x" } });
+      }
+      if (u.hostname === "cas.test" && init.method !== "POST") {
+        return new Response(`<form method="post" action="/cas/login?service=x"><input name="username"><input type="password" name="password"><input type="hidden" name="execution" value="e1"><input type="hidden" name="_eventId" value="submit"></form>`, { status: 200, headers: { "content-type": "text/html" } });
+      }
+      if (u.hostname === "cas.test") {
+        return new URLSearchParams(String(init.body)).get("password") === "correct"
+          ? new Response(null, { status: 302, headers: { location: "https://ezproxy.test/login?url=x&ticket=ST-1" } })
+          : new Response("<form><input type='password' name='password'></form>", { status: 401, headers: { "content-type": "text/html" } });
+      }
+      if (u.hostname === "brill-test.ezproxy.test") {
+        return new Response(`<html><body><article>${"<p>Chapter 3. The mental element of genocide: dolus specialis in the case law of the ad hoc tribunals.</p>".repeat(50)}</article></body></html>`, { status: 200, headers: { "content-type": "text/html" } });
+      }
+      return new Response("not found", { status: 404 });
+    });
+    const handler = getDocumentHandler();
+    const extra = { authInfo: { extra: { userId: "user_with_uk" } } };
+    const result = await (handler as unknown as (args: Record<string, unknown>, extra: unknown) => ReturnType<Handler>)({ doi: "10.1163/9789004724822", record_only: false, page: 1 }, extra);
+    const out = result.structuredContent as { access: { status: string; reader_logins: string[]; tried: Array<{ url: string; reason: string; outcome: string }> }; via: string; text: string };
+    expect(out.access.reader_logins).toEqual(["cuni"]);
+    expect(out.access.status).toBe("reader");
+    expect(out.access.tried.map((t) => [t.reason, t.outcome])).toEqual([
+      ["the DOI (publisher's page)", expect.stringMatching(/landing or login page/)],
+      ["through your Univerzita Karlova login", "read (html)"],
+    ]);
+    expect(out.text).toContain("dolus specialis");
+    expect(result.content[0].text).toContain("read through your UKAŽ (Univerzita Karlova) login");
+    expect(requests.some((r) => r.startsWith("POST https://cas.test"))).toBe(true);
+
+    // A caller without a stored login gets the honest hint instead.
+    const anonymous = await (handler as unknown as (args: Record<string, unknown>, extra: unknown) => ReturnType<Handler>)({ doi: "10.1163/9789004724822", record_only: false, page: 1 }, { authInfo: { extra: { userId: "user_without" } } });
+    const anon = anonymous.structuredContent as { access: { status: string; reader_logins: string[] } };
+    expect(anon.access).toMatchObject({ status: "unavailable", reader_logins: [] });
+    expect(anonymous.content[0].text).toContain("store your library login on /ucet");
+    delete process.env.CUNI_PROXY_BASE;
+  });
+
   it("record_only skips every download", async () => {
     const calls: string[] = [];
     vi.stubGlobal("fetch", async (url: string) => {
@@ -249,7 +310,7 @@ describe("doctrine_get_document (stubbed upstreams)", () => {
     });
     const result = await getDocumentHandler()({ source: "peacepalace", id: "1525268154", record_only: true, page: 1 });
     const out = result.structuredContent as { access: { status: string; tried: unknown[] } };
-    expect(out.access).toEqual({ status: "not_tried", tried: [] });
+    expect(out.access).toEqual({ status: "not_tried", reader_logins: [], tried: [] });
     expect(calls.every((c) => c.includes("worldcat"))).toBe(true);
     expect(result.content[0].text).toContain("record only");
   });

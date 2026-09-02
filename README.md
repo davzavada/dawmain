@@ -33,8 +33,10 @@ Discovery: WorldCat.org a licencované právnické kolekce knihovny) a
 Univerzity Karlovy (Primo: katalog UK a Central Discovery Index). Vrací
 bibliografické záznamy s odkazem na záznam; kde existuje open-access kopie
 (přes [Unpaywall](https://unpaywall.org) a DOI), umí stáhnout a číst i text
-díla. Licencované tituly zůstávají za přihlášením knihovny, které server
-nemá.
+díla. Licencované tituly otevře přes proxy knihovny jako přihlášený čtenář,
+pokud si uživatel na stránce [Účet](https://dawmain.davidzavada.cz/ucet)
+uloží své čtenářské přihlášení (Peace Palace, UK); jinak vrátí aspoň celý
+záznam — abstrakt a obsah.
 
 ## Endpoint
 

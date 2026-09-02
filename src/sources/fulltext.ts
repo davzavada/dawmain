@@ -1,10 +1,15 @@
-import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
 import { SourceError } from "./shared/errors";
 import { fetchUpstream } from "./shared/http";
 import { htmlToText, looksLikeHtml } from "./shared/html";
 import { DOCUMENT_TTL_MS, SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
+import { assertPublicUrl as assertPublic, isPublicAddress } from "./shared/publicurl";
+import { openAsReader, walk, type WalkResult } from "./library-login";
 import { getUnpaywallEmail } from "../mcp/config";
+import type { LibraryId, ReaderCredential } from "../mcp/credentials";
+
+export { isPublicAddress };
+/** The guard, tagged with this source. */
+export const assertPublicUrl = (raw: string): Promise<URL> => assertPublic(SOURCE, raw);
 
 /**
  * Full texts of the literature — the layer that lets the doctrine tools READ
@@ -28,7 +33,7 @@ import { getUnpaywallEmail } from "../mcp/config";
 export const SOURCE = "plné texty (Unpaywall/DOI)";
 const UNPAYWALL_BASE = "https://api.unpaywall.org/v2";
 const MAX_REDIRECTS = 5;
-const FETCH_TIMEOUT_MS = 25_000;
+const FETCH_TIMEOUT_MS = 20_000;
 /** A text shorter than this from an HTML page is a landing/login page, not a work. */
 const MIN_HTML_TEXT_CHARS = 2_500;
 
@@ -139,60 +144,6 @@ export async function resolveOpenAccess(doi: string): Promise<OaResolution> {
   });
 }
 
-// ---------- public-address guard ----------
-
-/** RFC 1918/4193/3927 and friends — nothing here is a publisher. Pure. */
-export function isPublicAddress(ip: string): boolean {
-  const kind = isIP(ip);
-  if (kind === 4) {
-    const [a, b] = ip.split(".").map(Number);
-    if (a === 0 || a === 10 || a === 127) return false;
-    if (a === 169 && b === 254) return false;
-    if (a === 172 && b >= 16 && b <= 31) return false;
-    if (a === 192 && b === 168) return false;
-    if (a === 100 && b >= 64 && b <= 127) return false;
-    if (a >= 224) return false;
-    return true;
-  }
-  if (kind === 6) {
-    const lower = ip.toLowerCase();
-    if (lower === "::" || lower === "::1") return false;
-    if (lower.startsWith("fc") || lower.startsWith("fd")) return false; // fc00::/7
-    if (lower.startsWith("fe8") || lower.startsWith("fe9") || lower.startsWith("fea") || lower.startsWith("feb")) return false; // fe80::/10
-    const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(lower);
-    if (mapped) return isPublicAddress(mapped[1]);
-    return true;
-  }
-  return false;
-}
-
-/** HTTPS, a real hostname, every resolved address public. Throws otherwise. */
-export async function assertPublicUrl(raw: string): Promise<URL> {
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch {
-    throw new SourceError(SOURCE, "INPUT_INVALID", `"${raw}" is not a valid absolute URL.`, "Pass the access link of a hit, or a DOI.");
-  }
-  if (url.protocol !== "https:") {
-    throw new SourceError(SOURCE, "INPUT_INVALID", `Only https URLs are fetched (got ${url.protocol}).`, "Use the https link of the record.");
-  }
-  const host = url.hostname.toLowerCase();
-  if (isIP(host) || !host.includes(".") || /\.(local|localhost|internal|arpa|home)$/.test(host) || host === "localhost") {
-    throw new SourceError(SOURCE, "INPUT_INVALID", `Host ${host} is not a public site.`, "Only public publisher and repository sites are fetched.");
-  }
-  let addresses: Array<{ address: string }>;
-  try {
-    addresses = await lookup(host, { all: true });
-  } catch {
-    throw new SourceError(SOURCE, "UPSTREAM_UNREACHABLE", `Host ${host} does not resolve.`, "The link may be dead — open the record and try another access link.");
-  }
-  if (!addresses.length || addresses.some((entry) => !isPublicAddress(entry.address))) {
-    throw new SourceError(SOURCE, "INPUT_INVALID", `Host ${host} resolves to a non-public address.`, "Only public publisher and repository sites are fetched.");
-  }
-  return url;
-}
-
 // ---------- document fetch + extraction ----------
 
 export interface FetchedDocument {
@@ -203,6 +154,15 @@ export interface FetchedDocument {
   kind: "pdf" | "html";
   text: string;
   pages?: number;
+  /** Read through a library proxy as a signed-in reader. */
+  reader?: LibraryId;
+}
+
+/** A signed-in reader to open the copy as, through their library's proxy. */
+export interface ReaderAccess {
+  userId: string;
+  library: LibraryId;
+  credential: ReaderCredential;
 }
 
 /** Words a login/purchase wall shows instead of the work. Pure. */
@@ -213,69 +173,70 @@ export function looksLikeAccessWall(text: string): boolean {
 
 const documentCache = new TtlCache<FetchedDocument>(DOCUMENT_TTL_MS, 20);
 
-export async function fetchDocumentText(rawUrl: string): Promise<FetchedDocument> {
-  return documentCache.through(memoKey("fulltext-doc", rawUrl), () => downloadDocument(rawUrl));
+/**
+ * The text of the work at `rawUrl`: openly, or — with `reader` — through
+ * that reader's library proxy, signed in with their login. A reader's copy
+ * is cached under the reader, never shared.
+ */
+export async function fetchDocumentText(rawUrl: string, reader?: ReaderAccess): Promise<FetchedDocument> {
+  const key = memoKey("fulltext-doc", reader ? [rawUrl, reader.userId, reader.library] : rawUrl);
+  return documentCache.through(key, () => downloadDocument(rawUrl, reader));
 }
 
-async function downloadDocument(rawUrl: string): Promise<FetchedDocument> {
-  let url = await assertPublicUrl(rawUrl);
-  let response: Response | undefined;
-  for (let hop = 0; ; hop++) {
-    response = await fetchUpstream(SOURCE, url.href, {
-      headers: { accept: "application/pdf, text/html;q=0.9, */*;q=0.5", "accept-language": "en,cs;q=0.8" },
-      redirect: "manual",
-      timeoutMs: FETCH_TIMEOUT_MS,
-    });
-    const target = response.headers.get("location");
-    if (response.status < 300 || response.status >= 400 || !target) break;
-    if (hop >= MAX_REDIRECTS) {
-      throw new SourceError(SOURCE, "UPSTREAM_ERROR", `Too many redirects from ${rawUrl}.`, "Open the link in a browser instead.");
-    }
-    // Every hop passes the same guard — a redirect is a link like any other.
-    url = await assertPublicUrl(new URL(target, url).href);
+async function downloadDocument(rawUrl: string, reader?: ReaderAccess): Promise<FetchedDocument> {
+  await assertPublicUrl(rawUrl);
+  const walked: WalkResult = reader
+    ? await openAsReader(reader.library, rawUrl, reader.credential, reader.userId)
+    : await walk(rawUrl, { maxHops: MAX_REDIRECTS + 1, timeoutMs: FETCH_TIMEOUT_MS });
+  const url = new URL(walked.finalUrl);
+  const wallHint = reader
+    ? `The ${reader.library === "peacepalace" ? "Peace Palace" : "UK"} proxy signed in but the publisher still did not serve the work — the library may not license this title, or the link is not the full text.`
+    : "This is not an open-access copy. The record's abstract and contents are still there to orient by; the work itself needs the library's reader login — stored on /ucet, it is used automatically.";
+  if (walked.loginRequired) {
+    throw new SourceError(SOURCE, "NOT_FOUND", `${url.hostname} asks for a login before showing the work.`, wallHint);
   }
-  if (response.status === 401 || response.status === 403) {
-    throw new SourceError(
-      SOURCE,
-      "NOT_FOUND",
-      `${url.hostname} refused the document (HTTP ${response.status}) — it sits behind a login or licence wall.`,
-      "This is not an open-access copy. The record's abstract and contents are still there to orient by; the work itself needs the library's reader login, which this server does not hold.",
-    );
+  if (walked.status === 401 || walked.status === 403) {
+    throw new SourceError(SOURCE, "NOT_FOUND", `${url.hostname} refused the document (HTTP ${walked.status}) — it sits behind a login or licence wall.`, wallHint);
   }
-  if (!response.ok) {
-    throw new SourceError(SOURCE, "UPSTREAM_ERROR", `${url.hostname} answered HTTP ${response.status}.`, "The link may be dead — try another access link of the record, or the DOI.");
+  if (walked.status < 200 || walked.status >= 300) {
+    throw new SourceError(SOURCE, "UPSTREAM_ERROR", `${url.hostname} answered HTTP ${walked.status}.`, "The link may be dead — try another access link of the record, or the DOI.");
   }
-  const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
-  const buffer = new Uint8Array(await response.arrayBuffer());
+  const extracted = await extractDocument(walked.body, walked.contentType, url.href, wallHint);
+  return { url: rawUrl, ...extracted, ...(reader ? { reader: reader.library } : {}) };
+}
+
+/** PDF → text via unpdf; HTML → text, unless it is a wall or a stub. */
+async function extractDocument(
+  buffer: Uint8Array,
+  contentType: string,
+  finalUrl: string,
+  wallHint: string,
+): Promise<Omit<FetchedDocument, "url">> {
+  const hostname = new URL(finalUrl).hostname;
   const isPdf = contentType.includes("application/pdf") || (buffer.length >= 4 && String.fromCharCode(...buffer.slice(0, 4)) === "%PDF");
   if (isPdf) {
     const { extractText } = await import("unpdf");
     const { totalPages, text } = await extractText(buffer, { mergePages: true });
     const merged = (Array.isArray(text) ? text.join("\n") : text).replace(/[ \t]+\n/g, "\n").trim();
     if (!merged) {
-      throw new SourceError(SOURCE, "NOT_FOUND", "The PDF contains no extractable text (probably a scan).", `Open it directly: ${url.href}`);
+      throw new SourceError(SOURCE, "NOT_FOUND", "The PDF contains no extractable text (probably a scan).", `Open it directly: ${finalUrl}`);
     }
-    return { url: rawUrl, finalUrl: url.href, kind: "pdf", text: merged, pages: totalPages };
+    return { finalUrl, kind: "pdf", text: merged, pages: totalPages };
   }
   const body = new TextDecoder("utf-8").decode(buffer);
   if (!contentType.includes("html") && !looksLikeHtml(body)) {
     throw new SourceError(
       SOURCE,
       "UPSTREAM_ERROR",
-      `${url.hostname} returned ${contentType || "an unknown format"}, not a PDF or an HTML page.`,
+      `${hostname} returned ${contentType || "an unknown format"}, not a PDF or an HTML page.`,
       "Try another access link of the record.",
     );
   }
   const text = htmlToText(body);
   if (text.length < MIN_HTML_TEXT_CHARS || (text.length < 20_000 && looksLikeAccessWall(text))) {
-    throw new SourceError(
-      SOURCE,
-      "NOT_FOUND",
-      `${url.hostname} served a landing or login page (${text.length} characters of text), not the work.`,
-      "This is not an open-access copy. Orient by the record's abstract and contents; the work itself needs the library's reader login, which this server does not hold.",
-    );
+    throw new SourceError(SOURCE, "NOT_FOUND", `${hostname} served a landing or login page (${text.length} characters of text), not the work.`, wallHint);
   }
-  return { url: rawUrl, finalUrl: url.href, kind: "html", text };
+  return { finalUrl, kind: "html", text };
 }
 
 // ---------- candidate order ----------

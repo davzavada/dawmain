@@ -19,7 +19,7 @@ Uživatelský popis je v [README](../README.md).
 | `eurlex_search` / `eurlex_get_document` | Cellar SPARQL (Publications Office) | EU legislativa, judikatura i legislativní materiály (návrhy COM, sdělení, zelené/bílé knihy, SWD, impact assessmenty, stanoviska EHSV/VR, postoje EP a Rady) dle názvů, CELEX/ECLI, typů a dat; texty z oficiálního Cellaru |
 | `eurlex_legislative_history` | Cellar SPARQL (Publications Office) | travaux préparatoires aktu z dossieru interinstitucionálního postupu (`cdm:dossier_contains_work` — obsahuje i přijatý akt, takže kotví CELEX aktu i kteréhokoli dokumentu postupu, případně číslo postupu `2012/0011(COD)`); vrací návrh s důvodovou zprávou, impact assessmenty, stanoviska, postoje EP/Rady + číslo postupu, právní základ a stav (přijato/projednáváno/staženo) |
 | `doctrine_search` | peacepalace.on.worldcat.org + cuni.primo.exlibrisgroup.com | doktrína: knihy, kapitoly a články ze dvou knihovních katalogů naráz — Peace Palace Library (WorldCat Discovery: WorldCat.org + licencované právnické kolekce) a UKAŽ Univerzity Karlovy (Primo VE: katalog UK + Central Discovery Index); `query`/`queries`, `title`, `author`, `subject`, `language`, `year_from`/`year_to`; katalogy stránkují po 10, `per_source_limit` (≤ 20; nad 10 záznamy stručně, bez abstraktů) stáhne víc stránek v paralelní dávce a `page` kráčí dál — vrací bibliografické záznamy s odkazem na záznam, abstraktem/obsahem a přístupovými odkazy, žádné plné texty; oba klienti postavené na zachycených požadavcích SPA (HAR 2026-09) |
-| `doctrine_get_document` | katalogy výše + api.unpaywall.org + doi.org + vydavatelé/repozitáře | záznam v plném znění (celý abstrakt, obsah, hesla, přístupové odkazy — WorldCat přes `no:<OCLC>`, Primo přes full-display endpoint) a text díla, kde existuje open-access kopie: kandidáti v pořadí zadaný `url` → OA umístění z Unpaywall (PDF před landing page) → DOI → odkazy záznamu (proxované až poslední); PDF přes `unpdf`, HTML na text, přihlašovací/nákupní stránka se hlásí jako nedostupnost; každý pokus vrací s důvodem; `find`/`page` jako u ostatních `*_get_*`; každý skok přesměrování prochází kontrolou veřejné adresy (SSRF) |
+| `doctrine_get_document` | katalogy výše + api.unpaywall.org + doi.org + vydavatelé/repozitáře + knihovní proxy (peacepalace.idm.oclc.org, EZproxy UK) | záznam v plném znění (celý abstrakt, obsah, hesla, přístupové odkazy — WorldCat přes `no:<OCLC>`, Primo přes full-display endpoint) a text díla, kde existuje open-access kopie: kandidáti v pořadí zadaný `url` → OA umístění z Unpaywall (PDF před landing page) → DOI → odkazy záznamu (proxované až poslední); PDF přes `unpdf`, HTML na text, přihlašovací/nákupní stránka se hlásí jako nedostupnost; každý pokus vrací s důvodem; má-li volající na `/ucet` uložené čtenářské přihlášení, zkusí tatáž díla i přes proxy své knihovny jako přihlášený čtenář (licencované tituly; `access.status` = `reader`); `find`/`page` jako u ostatních `*_get_*`; každý skok přesměrování prochází kontrolou veřejné adresy (SSRF) |
 | `dawmain_ping` | — | které nasazení odpovědělo |
 | `dawmain_probe_sources` | — | diagnostika všech upstreamů z nasazené funkce; `include_raw` pro záchyt fixtures, `discover` pro hledání neověřených endpointů |
 
@@ -38,8 +38,18 @@ klient nejdřív volá bez něj a na 401/403 zkusí guest-token endpoint (z
 paměti, ne z HARu) a hlásí, když neuspěje. Oba katalogy jsou knihovní, ne
 open access: `doctrine_get_document` přečte jen díla s open-access kopií
 (Unpaywall zná OA umístění k DOI; DOI a odkazy záznamu se zkusí také), u
-licencovaných hlásí nedostupnost s důvody — přihlášení účtem čtenáře (Peace
-Palace SAML, UK CAS) server zatím neumí, viz
+licencovaných zkusí přihlášení čtenáře, pokud si ho uživatel uložil na
+`/ucet` (heslo zapečetěné AES-256-GCM klíčem `CREDENTIALS_SECRET` v private
+metadata Clerku; čte je jen nástroj pro volajícího identifikovaného OAuth
+tokenem — sdílený kód nikoho neidentifikuje). Průchod přihlášením
+(`src/sources/library-login.ts`) nemá napevno žádný řetěz: chová se jako
+prohlížeč s cookie jarem — sleduje přesměrování, vyplní první formulář
+s heslem (CAS UK: `username`, `password`, skryté `execution` a `_eventId`,
+zachyceno; SimpleSAMLphp Peace Palace: `username`, `password`, `AuthState`),
+odešle auto-post formulář se `SAMLResponse` a zastaví se na první stránce,
+která není ani jedno. Proxy Peace Palace (`peacepalace.idm.oclc.org`) je
+z HARu, EZproxy UK (`ezproxy.is.cuni.cz`, `CUNI_PROXY_BASE`) z paměti;
+řetěz, který nesedí, se hlásí s důvodem, viz
 `docs/research/doctrine-sources.json`. Unpaywall chce na každém dotazu
 kontaktní e-mail (`UNPAYWALL_EMAIL`, výchozí kontakt z právních stránek).
 Full-display endpoint Prima pro záznam je z paměti, ne z HARu — hlásí se,
@@ -119,6 +129,17 @@ produkci. Bez `vercel.json`; Next.js si Vercel detekuje sám.
 5. `dawmain_probe_sources {include_raw: true, sources: ["ns"]}` zachytí syrové
    tělo odpovědi jako podklad pro fixture (po jednom zdroji — všechny naráz se
    nevejdou do rozpočtu odpovědi).
+
+### Účet čtenáře (`/ucet`)
+
+Stránka pod Clerk přihlášením (`proxy.ts` matcher `/ucet(.*)`), kde si
+uživatel uloží přihlašovací jméno a heslo ke knihovnám (Peace Palace, UK).
+Server actions v `app/ucet/actions.ts` berou id uživatele ze session,
+nikdy z formuláře; `src/mcp/credentials.ts` heslo zapečetí (AES-256-GCM,
+klíč odvozený z `CREDENTIALS_SECRET`) a uloží do private metadata Clerku
+pod `libraries.<knihovna>`; smazání nastaví klíč na `null`. Bez
+`CREDENTIALS_SECRET` stránka nic neukládá a nástroj čte jen open access.
+Rotace klíče znehodnotí uložená hesla — uživatelé je zadají znovu.
 
 ## Připojení klienta
 

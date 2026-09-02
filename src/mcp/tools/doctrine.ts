@@ -8,8 +8,11 @@ import {
   resolveOpenAccess,
   type FetchedDocument,
   type OaResolution,
+  type ReaderAccess,
   type TextCandidate,
 } from "@/src/sources/fulltext";
+import { libraryProxies, unwrapProxiedLink } from "@/src/sources/library-login";
+import { credentialsConfigured, loadReaderCredentials, type LibraryId, type ReaderCredential } from "../credentials";
 import { SourceError } from "@/src/sources/shared/errors";
 import { bibKey, formatAuthors, pageWindow, sliceWindow, type BibHit } from "@/src/sources/shared/bib";
 import { dedupeBy, maxTotal, pageOrExcerpt, uniqueQueries } from "@/src/sources/shared/text";
@@ -137,34 +140,90 @@ const bibItemSchema = z.object({
 
 /** Wall-clock the document tool may spend trying copies; the function has 60 s. */
 const READ_BUDGET_MS = 45_000;
-const PER_COPY_MS = 25_000;
-const MAX_COPIES_TRIED = 3;
+const PER_COPY_MS = 20_000;
+const MAX_OPEN_COPIES = 3;
+const MAX_READER_COPIES = 2;
 
-interface TriedCopy extends TextCandidate {
+/** A copy to try: openly, or through a signed-in reader's library proxy. */
+interface CopyCandidate extends TextCandidate {
+  reader?: ReaderAccess;
+}
+
+interface TriedCopy {
+  url: string;
+  reason: string;
   outcome: string;
 }
 
 /**
- * Try the candidate copies in order until one yields text. Every failure is
- * kept with its reason — "licensed" is a finding the reader needs, not noise.
+ * What the MCP layer knows about the caller: the Clerk user behind an OAuth
+ * token, nothing behind the shared access code. Structural on purpose —
+ * the SDK's RequestHandlerExtra carries authInfo.extra as a free object.
  */
-async function readFirstCopy(
-  candidates: TextCandidate[],
-  started: number,
-): Promise<{ document?: FetchedDocument; tried: TriedCopy[]; exhausted: boolean }> {
-  const tried: TriedCopy[] = [];
-  for (const candidate of candidates.slice(0, MAX_COPIES_TRIED)) {
-    const left = READ_BUDGET_MS - (Date.now() - started);
-    if (left < 5_000) return { tried, exhausted: false };
-    try {
-      const document = await withDeadline(fetchDocumentText(candidate.url), Math.min(PER_COPY_MS, left));
-      return { document, tried: [...tried, { ...candidate, outcome: `read (${document.kind})` }], exhausted: false };
-    } catch (error) {
-      const message = error instanceof SourceError ? error.message : error instanceof Error ? error.message : String(error);
-      tried.push({ ...candidate, outcome: message });
+export function callerUserId(extra: unknown): string | undefined {
+  const info = (extra as { authInfo?: { extra?: Record<string, unknown> } } | undefined)?.authInfo?.extra;
+  return typeof info?.userId === "string" && info.userId ? info.userId : undefined;
+}
+
+/**
+ * The reader's own way in, after the open ones: the works behind the
+ * record's library-wrapped links, the DOI page and the publisher links,
+ * each through the proxy of a library the reader has a login for — the
+ * record's own library first. Pure — unit-tested.
+ */
+export function readerCandidates(
+  input: { doi?: string; links?: string[]; source?: LibraryId },
+  logins: Partial<Record<LibraryId, ReaderCredential>>,
+  userId: string,
+): CopyCandidate[] {
+  const libraries = (Object.keys(logins) as LibraryId[]).filter((id) => logins[id]);
+  if (!libraries.length) return [];
+  libraries.sort((a, b) => (a === input.source ? -1 : b === input.source ? 1 : 0));
+  const targets: string[] = [];
+  const push = (url: string | null | undefined) => {
+    if (url && /^https?:\/\//i.test(url) && !targets.includes(url)) targets.push(url);
+  };
+  for (const link of input.links ?? []) push(unwrapProxiedLink(link));
+  if (input.doi) push(`https://doi.org/${input.doi}`);
+  for (const link of input.links ?? []) if (!unwrapProxiedLink(link)) push(link);
+  const proxies = libraryProxies();
+  const out: CopyCandidate[] = [];
+  for (const library of libraries) {
+    for (const url of targets) {
+      out.push({
+        url,
+        reason: `through your ${proxies[library].label} login`,
+        reader: { userId, library, credential: logins[library] as ReaderCredential },
+      });
     }
   }
-  return { tried, exhausted: tried.length >= Math.min(MAX_COPIES_TRIED, candidates.length) };
+  return out;
+}
+
+/**
+ * Try the copies in order until one yields text. Every failure is kept
+ * with its reason — "licensed" is a finding the reader needs, not noise.
+ */
+async function readFirstCopy(
+  candidates: CopyCandidate[],
+  started: number,
+): Promise<{ document?: FetchedDocument; tried: TriedCopy[] }> {
+  const tried: TriedCopy[] = [];
+  for (const candidate of candidates) {
+    const left = READ_BUDGET_MS - (Date.now() - started);
+    if (left < 5_000) {
+      tried.push({ url: candidate.url, reason: candidate.reason, outcome: "not tried — out of time for this call" });
+      return { tried };
+    }
+    try {
+      const document = await withDeadline(fetchDocumentText(candidate.url, candidate.reader), Math.min(PER_COPY_MS, left));
+      return { document, tried: [...tried, { url: candidate.url, reason: candidate.reason, outcome: `read (${document.kind})` }] };
+    } catch (error) {
+      const message = error instanceof SourceError ? error.message : error instanceof Error ? error.message : String(error);
+      tried.push({ url: candidate.url, reason: candidate.reason, outcome: message });
+    }
+  }
+  return { tried };
 }
 
 const failDocument = toolFailure("doctrine");
@@ -392,7 +451,7 @@ export function registerDoctrine(server: McpServer): void {
     {
       title: "Doctrine: the record in full, and the work's text where it is open",
       description:
-        `READ a work from doctrine_search: the catalogue record in full (whole abstract, table of contents, subject headings, access links) and — where an open-access copy exists — the text of the work itself, paged like every other *_get_* tool. Identify the work by source + id from a hit, by doi, or by an access url. The open copy is looked for in this order: the url you pass, the open-access location Unpaywall knows for the DOI (PDF before landing page), the DOI's own page, the record's access links; the first readable one wins and every failed attempt is reported with its reason. Licensed works (most of the Peace Palace collections, the Central Discovery Index) come back as 'unavailable': the record still orients you — abstract, contents, subjects — but the text needs the library's reader login, which this server does not hold. record_only: true skips the download and returns just the record. ${READING_DESCRIPTION}`,
+        `READ a work from doctrine_search: the catalogue record in full (whole abstract, table of contents, subject headings, access links) and — where a copy can be opened — the text of the work itself, paged like every other *_get_* tool. Identify the work by source + id from a hit, by doi, or by an access url. Copies are tried in this order: the url you pass, the open-access location Unpaywall knows for the DOI (PDF before landing page), the DOI's own page, the record's access links; then, when the caller has stored a library login on /ucet, the same works through that library's proxy as a signed-in reader (licensed titles). The first readable copy wins and every failed attempt is reported with its reason. 'unavailable' means no copy could be opened: the record still orients you — abstract, contents, subjects — and the text needs a reader login the caller has not stored (or the library does not license the title). record_only: true skips the download and returns just the record. ${READING_DESCRIPTION}`,
       inputSchema: z.object({
         source: z.enum(SOURCES).optional().describe("Catalogue the id comes from (with id)."),
         id: z.string().min(1).optional().describe("Record id from a doctrine_search hit: OCLC number (peacepalace) or Primo record id (cuni)."),
@@ -406,8 +465,9 @@ export function registerDoctrine(server: McpServer): void {
         record: bibItemSchema.optional(),
         record_error: z.string().optional(),
         access: z.object({
-          status: z.enum(["open", "unavailable", "not_tried"]),
+          status: z.enum(["open", "reader", "unavailable", "not_tried"]).describe("open = an open-access copy was read; reader = read through the caller's library login; unavailable = every copy refused."),
           oa_status: z.string().optional().describe("Unpaywall's verdict for the DOI: gold/hybrid/bronze/green/closed."),
+          reader_logins: z.array(z.enum(SOURCES)).describe("Libraries the caller has a stored login for (used automatically)."),
           tried: z.array(z.object({ url: z.string(), reason: z.string(), outcome: z.string() })),
         }),
         text_url: z.string().optional(),
@@ -421,7 +481,7 @@ export function registerDoctrine(server: McpServer): void {
       }),
       annotations: READ_ONLY,
     },
-    async ({ source, id, doi, url, record_only, find, page }) => {
+    async ({ source, id, doi, url, record_only, find, page }, extra) => {
       try {
         if ((source && !id) || (id && !source)) {
           throw new SourceError("doctrine", "INPUT_INVALID", "source and id go together.", "Pass both, as they appear on a doctrine_search hit.");
@@ -455,16 +515,31 @@ export function registerDoctrine(server: McpServer): void {
             oaError = error instanceof Error ? error.message : String(error);
           }
         }
-        const candidates = record_only ? [] : orderCandidates({ url, doi: workDoi, oa, links: record?.links });
+        const openCandidates: CopyCandidate[] = record_only ? [] : orderCandidates({ url, doi: workDoi, oa, links: record?.links }).slice(0, MAX_OPEN_COPIES);
+
+        // 2b. The caller's own library logins, for the licensed copies.
+        const userId = callerUserId(extra);
+        let logins: Partial<Record<LibraryId, ReaderCredential>> = {};
+        if (userId && !record_only && credentialsConfigured()) {
+          try {
+            logins = await withDeadline(loadReaderCredentials(userId), 8_000);
+          } catch {
+            // Clerk unreachable: the open copies are still worth trying.
+          }
+        }
+        const readerLogins = (Object.keys(logins) as LibraryId[]).filter((library) => logins[library]);
+        const viaReader = userId && !record_only ? readerCandidates({ doi: workDoi, links: record?.links, source: record?.source ?? source }, logins, userId).slice(0, MAX_READER_COPIES) : [];
+        const candidates = [...openCandidates, ...viaReader.filter((candidate) => !openCandidates.some((open) => open.url === candidate.url && !candidate.reader))];
 
         // 3. Read the first copy that is really the work.
         const { document, tried } = candidates.length ? await readFirstCopy(candidates, started) : { document: undefined, tried: [] as TriedCopy[] };
         const paged = document ? pageOrExcerpt(document.text, page, find) : undefined;
 
         const access = {
-          status: document ? ("open" as const) : record_only || !candidates.length ? ("not_tried" as const) : ("unavailable" as const),
+          status: document ? (document.reader ? ("reader" as const) : ("open" as const)) : record_only || !candidates.length ? ("not_tried" as const) : ("unavailable" as const),
           ...(oa?.status ? { oa_status: oa.status } : {}),
-          tried: tried.map(({ url: triedUrl, reason, outcome }) => ({ url: triedUrl, reason, outcome })),
+          reader_logins: readerLogins,
+          tried,
         };
         const output = {
           record,
@@ -493,11 +568,15 @@ export function registerDoctrine(server: McpServer): void {
         const accessBlock = record_only
           ? ["(record only — no copy was looked for)"]
           : [
-              `ACCESS: ${document ? `open — read the ${document.kind}${document.pages ? ` (${document.pages} pages)` : ""} at ${document.finalUrl}` : candidates.length ? "no readable open copy" : "nothing to try — the record carries no DOI or access link"}${oa ? ` · Unpaywall: ${oa.isOa ? `open access (${oa.status ?? "oa"})` : "closed (no open-access copy known)"}` : oaError ? ` · Unpaywall: ${oaError}` : ""}`,
+              `ACCESS: ${document ? `${document.reader ? `read through your ${LABELS[document.reader]} login` : "open"} — the ${document.kind}${document.pages ? ` (${document.pages} pages)` : ""} at ${document.finalUrl}` : candidates.length ? "no readable copy" : "nothing to try — the record carries no DOI or access link"}${oa ? ` · Unpaywall: ${oa.isOa ? `open access (${oa.status ?? "oa"})` : "closed (no open-access copy known)"}` : oaError ? ` · Unpaywall: ${oaError}` : ""}${readerLogins.length ? ` · your library logins: ${readerLogins.map((library) => LABELS[library]).join(", ")}` : ""}`,
               ...tried.map((entry) => `  ${entry.outcome.startsWith("read") ? "✓" : "✗"} ${entry.reason}: ${entry.url} — ${entry.outcome}`),
               ...(!document && candidates.length
                 ? [
-                    "This is a licensed work as far as the open web goes: orient by the abstract and contents above and cite the record; the text needs the library's reader login (Peace Palace / UK), which this server does not hold yet.",
+                    readerLogins.length
+                      ? "No copy opened, even through your library login: the library may not license this title, or the sign-in chain did not fit (the reasons above say which). Orient by the abstract and contents and cite the record."
+                      : userId
+                        ? "This is a licensed work as far as the open web goes: orient by the abstract and contents above and cite the record. To read licensed titles, store your library login on /ucet of the Dawmain site — it is then used automatically."
+                        : "This is a licensed work as far as the open web goes: orient by the abstract and contents above and cite the record; licensed titles open only for a caller signed in with their own account and a stored library login (/ucet).",
                   ]
                 : []),
             ];
