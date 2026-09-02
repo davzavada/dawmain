@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
-import { ESBIRKA_CACHE_BASE, getEsbirkaApiBase, getEsbirkaApiKey } from "../config";
+import { ESBIRKA_CACHE_BASE, getEsbirkaApiBase, getEsbirkaApiKey, getUnpaywallEmail } from "../config";
 import { USER_AGENT } from "@/src/sources/shared/http";
 import { buildWorldcatUrl } from "@/src/sources/worldcat";
 import { PRIMO_PAGE_SIZE, buildPrimoUrl } from "@/src/sources/primo";
@@ -211,6 +211,16 @@ export function canaries(): Canary[] {
       }),
       marker: /"totalResultsLocal"/,
     },
+    {
+      id: "unpaywall",
+      source: "plné texty (Unpaywall/DOI)",
+      note: "open-access lookup of a known DOI (Schermers/Blokker, closed) — the email parameter is Unpaywall's only key",
+      request: () => ({
+        url: `https://api.unpaywall.org/v2/${encodeURIComponent("10.1163/9789004724822")}?email=${encodeURIComponent(getUnpaywallEmail())}`,
+        init: { headers: { accept: "application/json" } },
+      }),
+      marker: /"is_oa"/,
+    },
   ];
 }
 
@@ -364,6 +374,7 @@ const ALLOWED_FETCH_HOSTS = [
   "publications.europa.eu",
   "peacepalace.on.worldcat.org",
   "cuni.primo.exlibrisgroup.com",
+  "api.unpaywall.org",
 ];
 
 /** Echoed remote bodies are data, never instructions — fence them so a model

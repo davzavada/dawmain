@@ -1,12 +1,20 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
-import { WORLDCAT_PAGE_SIZE, searchWorldcat } from "@/src/sources/worldcat";
-import { PRIMO_PAGE_SIZE, searchPrimo } from "@/src/sources/primo";
+import { WORLDCAT_PAGE_SIZE, getWorldcatRecord, searchWorldcat } from "@/src/sources/worldcat";
+import { PRIMO_PAGE_SIZE, getPrimoRecord, searchPrimo } from "@/src/sources/primo";
+import {
+  fetchDocumentText,
+  orderCandidates,
+  resolveOpenAccess,
+  type FetchedDocument,
+  type OaResolution,
+  type TextCandidate,
+} from "@/src/sources/fulltext";
 import { SourceError } from "@/src/sources/shared/errors";
 import { bibKey, formatAuthors, pageWindow, sliceWindow, type BibHit } from "@/src/sources/shared/bib";
-import { dedupeBy, maxTotal, uniqueQueries } from "@/src/sources/shared/text";
+import { dedupeBy, maxTotal, pageOrExcerpt, uniqueQueries } from "@/src/sources/shared/text";
 import { withDeadline } from "./previews";
-import { READ_ONLY } from "./shared";
+import { FIND_DESCRIPTION, READING_DESCRIPTION, READ_ONLY, continuationHint, toolFailure } from "./shared";
 
 /**
  * Doctrine — the literature: books, chapters and journal articles, searched
@@ -80,8 +88,9 @@ export function briefHit(hit: BibHit): BibHit {
   return rest;
 }
 
-/** Citation-style line for one hit; the structured record carries the rest. */
-function renderHit(hit: BibHit, index: number): string {
+/** Citation-style line for one hit; the structured record carries the rest.
+ * `index` numbers a list entry; the record view passes none. */
+function renderHit(hit: BibHit, index?: number): string {
   const head = [
     formatAuthors(hit.authors),
     hit.year ? `(${hit.year})` : "",
@@ -95,7 +104,7 @@ function renderHit(hit: BibHit, index: number): string {
   ].filter(Boolean);
   const tags = [hit.type, hit.language, hit.open_access ? "open access" : ""].filter(Boolean);
   const lines = [
-    `${index}. ${head ? `${head}. ` : ""}${hit.title}.${hit.container ? ` In: ${hit.container}.` : ""}${hit.publisher ? ` ${hit.publisher}` : ""}${tags.length ? ` [${tags.join(", ")}]` : ""}${ids.length ? ` ${ids.join(" · ")}` : ""}`,
+    `${index === undefined ? "" : `${index}. `}${head ? `${head}. ` : ""}${hit.title}.${hit.container ? ` In: ${hit.container}.` : ""}${hit.publisher ? ` ${hit.publisher}` : ""}${tags.length ? ` [${tags.join(", ")}]` : ""}${ids.length ? ` ${ids.join(" · ")}` : ""}`,
   ];
   if (hit.subjects?.length) lines.push(`   Subjects: ${hit.subjects.slice(0, 6).join("; ")}`);
   if (hit.abstract) lines.push(`   Abstract: ${hit.abstract}`);
@@ -104,6 +113,61 @@ function renderHit(hit: BibHit, index: number): string {
   if (hit.links?.length) lines.push(`   access: ${hit.links.join(" | ")}`);
   return lines.join("\n");
 }
+
+const bibItemSchema = z.object({
+  source: z.enum(SOURCES),
+  id: z.string(),
+  title: z.string(),
+  authors: z.array(z.string()),
+  year: z.string().optional(),
+  publisher: z.string().optional(),
+  type: z.string().optional(),
+  language: z.string().optional(),
+  isbn: z.array(z.string()).optional(),
+  issn: z.array(z.string()).optional(),
+  doi: z.array(z.string()).optional(),
+  container: z.string().optional(),
+  subjects: z.array(z.string()).optional(),
+  abstract: z.string().optional(),
+  contents: z.string().optional(),
+  open_access: z.boolean().optional(),
+  url: z.string().nullable(),
+  links: z.array(z.string()).optional(),
+});
+
+/** Wall-clock the document tool may spend trying copies; the function has 60 s. */
+const READ_BUDGET_MS = 45_000;
+const PER_COPY_MS = 25_000;
+const MAX_COPIES_TRIED = 3;
+
+interface TriedCopy extends TextCandidate {
+  outcome: string;
+}
+
+/**
+ * Try the candidate copies in order until one yields text. Every failure is
+ * kept with its reason — "licensed" is a finding the reader needs, not noise.
+ */
+async function readFirstCopy(
+  candidates: TextCandidate[],
+  started: number,
+): Promise<{ document?: FetchedDocument; tried: TriedCopy[]; exhausted: boolean }> {
+  const tried: TriedCopy[] = [];
+  for (const candidate of candidates.slice(0, MAX_COPIES_TRIED)) {
+    const left = READ_BUDGET_MS - (Date.now() - started);
+    if (left < 5_000) return { tried, exhausted: false };
+    try {
+      const document = await withDeadline(fetchDocumentText(candidate.url), Math.min(PER_COPY_MS, left));
+      return { document, tried: [...tried, { ...candidate, outcome: `read (${document.kind})` }], exhausted: false };
+    } catch (error) {
+      const message = error instanceof SourceError ? error.message : error instanceof Error ? error.message : String(error);
+      tried.push({ ...candidate, outcome: message });
+    }
+  }
+  return { tried, exhausted: tried.length >= Math.min(MAX_COPIES_TRIED, candidates.length) };
+}
+
+const failDocument = toolFailure("doctrine");
 
 export function registerDoctrine(server: McpServer): void {
   server.registerTool(
@@ -162,28 +226,7 @@ export function registerDoctrine(server: McpServer): void {
             error: z.string().optional(),
           }),
         ),
-        items: z.array(
-          z.object({
-            source: z.enum(SOURCES),
-            id: z.string(),
-            title: z.string(),
-            authors: z.array(z.string()),
-            year: z.string().optional(),
-            publisher: z.string().optional(),
-            type: z.string().optional(),
-            language: z.string().optional(),
-            isbn: z.array(z.string()).optional(),
-            issn: z.array(z.string()).optional(),
-            doi: z.array(z.string()).optional(),
-            container: z.string().optional(),
-            subjects: z.array(z.string()).optional(),
-            abstract: z.string().optional(),
-            contents: z.string().optional(),
-            open_access: z.boolean().optional(),
-            url: z.string().nullable(),
-            links: z.array(z.string()).optional(),
-          }),
-        ),
+        items: z.array(bibItemSchema),
       }),
       annotations: READ_ONLY,
     },
@@ -341,6 +384,131 @@ export function registerDoctrine(server: McpServer): void {
         content: [{ type: "text", text }],
         structuredContent: { variants, page, per_source_limit, statuses, items },
       };
+    },
+  );
+
+  server.registerTool(
+    "doctrine_get_document",
+    {
+      title: "Doctrine: the record in full, and the work's text where it is open",
+      description:
+        `READ a work from doctrine_search: the catalogue record in full (whole abstract, table of contents, subject headings, access links) and — where an open-access copy exists — the text of the work itself, paged like every other *_get_* tool. Identify the work by source + id from a hit, by doi, or by an access url. The open copy is looked for in this order: the url you pass, the open-access location Unpaywall knows for the DOI (PDF before landing page), the DOI's own page, the record's access links; the first readable one wins and every failed attempt is reported with its reason. Licensed works (most of the Peace Palace collections, the Central Discovery Index) come back as 'unavailable': the record still orients you — abstract, contents, subjects — but the text needs the library's reader login, which this server does not hold. record_only: true skips the download and returns just the record. ${READING_DESCRIPTION}`,
+      inputSchema: z.object({
+        source: z.enum(SOURCES).optional().describe("Catalogue the id comes from (with id)."),
+        id: z.string().min(1).optional().describe("Record id from a doctrine_search hit: OCLC number (peacepalace) or Primo record id (cuni)."),
+        doi: z.string().min(7).optional().describe("DOI of the work, e.g. '10.1163/9789004724822' — also without source/id."),
+        url: z.string().url().optional().describe("An https access link (publisher page, repository PDF) to read directly."),
+        record_only: z.boolean().default(false).describe("Return only the catalogue record in full; do not look for the text."),
+        find: z.string().optional().describe(FIND_DESCRIPTION),
+        page: z.number().int().min(1).default(1),
+      }),
+      outputSchema: z.object({
+        record: bibItemSchema.optional(),
+        record_error: z.string().optional(),
+        access: z.object({
+          status: z.enum(["open", "unavailable", "not_tried"]),
+          oa_status: z.string().optional().describe("Unpaywall's verdict for the DOI: gold/hybrid/bronze/green/closed."),
+          tried: z.array(z.object({ url: z.string(), reason: z.string(), outcome: z.string() })),
+        }),
+        text_url: z.string().optional(),
+        via: z.enum(["pdf", "html"]).optional(),
+        pdf_pages: z.number().optional(),
+        page: z.number(),
+        total_pages: z.number(),
+        has_more: z.boolean(),
+        matches: z.number().optional(),
+        text: z.string(),
+      }),
+      annotations: READ_ONLY,
+    },
+    async ({ source, id, doi, url, record_only, find, page }) => {
+      try {
+        if ((source && !id) || (id && !source)) {
+          throw new SourceError("doctrine", "INPUT_INVALID", "source and id go together.", "Pass both, as they appear on a doctrine_search hit.");
+        }
+        if (!id && !doi && !url) {
+          throw new SourceError("doctrine", "INPUT_INVALID", "Nothing identifies the work.", "Pass source + id from a hit, a doi, or an access url.");
+        }
+        const started = Date.now();
+
+        // 1. The record — the orientation even when no copy can be read.
+        let record: BibHit | undefined;
+        let recordError: string | undefined;
+        if (source && id) {
+          try {
+            record = await withDeadline(source === "peacepalace" ? getWorldcatRecord(id) : getPrimoRecord(id), 20_000);
+          } catch (error) {
+            // Without a DOI or URL to go on, the record failure is the answer.
+            if (!doi && !url) throw error;
+            recordError = error instanceof SourceError ? `${error.message} ${error.hint}` : error instanceof Error ? error.message : String(error);
+          }
+        }
+
+        // 2. Where a readable copy might be.
+        const workDoi = doi ?? record?.doi?.[0];
+        let oa: OaResolution | undefined;
+        let oaError: string | undefined;
+        if (workDoi && !record_only) {
+          try {
+            oa = await withDeadline(resolveOpenAccess(workDoi), 10_000);
+          } catch (error) {
+            oaError = error instanceof Error ? error.message : String(error);
+          }
+        }
+        const candidates = record_only ? [] : orderCandidates({ url, doi: workDoi, oa, links: record?.links });
+
+        // 3. Read the first copy that is really the work.
+        const { document, tried } = candidates.length ? await readFirstCopy(candidates, started) : { document: undefined, tried: [] as TriedCopy[] };
+        const paged = document ? pageOrExcerpt(document.text, page, find) : undefined;
+
+        const access = {
+          status: document ? ("open" as const) : record_only || !candidates.length ? ("not_tried" as const) : ("unavailable" as const),
+          ...(oa?.status ? { oa_status: oa.status } : {}),
+          tried: tried.map(({ url: triedUrl, reason, outcome }) => ({ url: triedUrl, reason, outcome })),
+        };
+        const output = {
+          record,
+          ...(recordError ? { record_error: recordError } : {}),
+          access,
+          ...(document ? { text_url: document.finalUrl, via: document.kind, ...(document.pages ? { pdf_pages: document.pages } : {}) } : {}),
+          page: paged?.page ?? 1,
+          total_pages: paged?.total_pages ?? 1,
+          has_more: paged?.has_more ?? false,
+          ...(paged?.matches !== undefined ? { matches: paged.matches } : {}),
+          text: paged?.text ?? "",
+        };
+
+        const recordBlock = record
+          ? [
+              `RECORD [${LABELS[record.source]}]: ${renderHit({ ...record, abstract: undefined, contents: undefined, subjects: undefined, links: undefined })}`,
+              ...(record.subjects?.length ? [`Subjects: ${record.subjects.join("; ")}`] : []),
+              ...(record.abstract ? [`Abstract: ${record.abstract}`] : []),
+              ...(record.contents ? [`Contents: ${record.contents}`] : []),
+              ...(record.url ? [`Record: ${record.url}`] : []),
+              ...(record.links?.length ? [`Access links: ${record.links.join(" | ")}`] : []),
+            ]
+          : recordError
+            ? [`RECORD: could not be fetched — ${recordError}`]
+            : [];
+        const accessBlock = record_only
+          ? ["(record only — no copy was looked for)"]
+          : [
+              `ACCESS: ${document ? `open — read the ${document.kind}${document.pages ? ` (${document.pages} pages)` : ""} at ${document.finalUrl}` : candidates.length ? "no readable open copy" : "nothing to try — the record carries no DOI or access link"}${oa ? ` · Unpaywall: ${oa.isOa ? `open access (${oa.status ?? "oa"})` : "closed (no open-access copy known)"}` : oaError ? ` · Unpaywall: ${oaError}` : ""}`,
+              ...tried.map((entry) => `  ${entry.outcome.startsWith("read") ? "✓" : "✗"} ${entry.reason}: ${entry.url} — ${entry.outcome}`),
+              ...(!document && candidates.length
+                ? [
+                    "This is a licensed work as far as the open web goes: orient by the abstract and contents above and cite the record; the text needs the library's reader login (Peace Palace / UK), which this server does not hold yet.",
+                  ]
+                : []),
+            ];
+        const textBlock = document && paged ? ["", `--- TEXT (${document.kind}, via ${document.finalUrl}) ---`, paged.text + continuationHint(paged)] : [];
+        return {
+          content: [{ type: "text", text: [...recordBlock, "", ...accessBlock, ...textBlock].join("\n") }],
+          structuredContent: output,
+        };
+      } catch (error) {
+        return failDocument(error);
+      }
     },
   );
 }

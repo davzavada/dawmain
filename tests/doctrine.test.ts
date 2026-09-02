@@ -3,6 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   PEACE_PALACE_DATABASES,
+  accessLinkUrl,
   buildWorldcatQuery,
   buildWorldcatUrl,
   mapWorldcatRecord,
@@ -108,6 +109,19 @@ describe("parseWorldcatSearch (verbatim capture)", () => {
     expect(hit.id).toBe("1507695297");
     expect(hit.links).toContain("https://public.ebookcentral.proquest.com/choice/PublicFullRecord.aspx?p=31946553");
     expect(hit.subjects).toContain("Constitutional law—United States");
+  });
+
+  it("keeps only real access links — cover images and excerpts are not the work", () => {
+    // Page 2's Taylor & Francis record carries the book link AND its jacket image.
+    const tandf = page2.hits.find((hit) => hit.id === "1553844722");
+    expect(tandf?.links).toEqual(["https://www.taylorfrancis.com/books/9781003705338"]);
+    expect(accessLinkUrl({ url: "https://x.test/a", relationship: "0" })).toBe("https://x.test/a");
+    expect(accessLinkUrl({ url: "https://x.test/b", relationship: "1" })).toBe("https://x.test/b");
+    expect(accessLinkUrl({ url: "https://x.test/c", relationship: "2", label: "cloudLibrary" })).toBeUndefined();
+    expect(accessLinkUrl({ url: "https://samples.overdrive.com/?crid=1", relationship: " ", label: "Excerpt" })).toBeUndefined();
+    expect(accessLinkUrl({ url: "https://images.yourcloudlibrary.com/delivery/img?type=DOCUMENTIMAGE&documentID=a", relationship: "0" })).toBeUndefined();
+    expect(accessLinkUrl({ url: "https://x.test/jacket.jpg", relationship: "0" })).toBeUndefined();
+    expect(accessLinkUrl({ url: "https://x.test/d", relationship: "0", label: "Front cover" })).toBeUndefined();
   });
 
   it("falls back to the SPA's own opac link when a record has no OCLC number", () => {
@@ -299,8 +313,8 @@ type Handler = (args: Record<string, unknown>) => Promise<{
 function doctrineHandler(): Handler {
   let handler: Handler | undefined;
   registerDoctrine({
-    registerTool(_name: string, _config: unknown, callback: Handler) {
-      handler = callback;
+    registerTool(name: string, _config: unknown, callback: Handler) {
+      if (name === "doctrine_search") handler = callback;
     },
   } as never);
   if (!handler) throw new Error("doctrine_search did not register");

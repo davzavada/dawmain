@@ -122,7 +122,9 @@ export default function Soukromi() {
           Do veřejných databází (e-Sbírka, Nejvyšší soud, Nejvyšší správní soud, Ústavní soud,
           rozhodnuti.justice.cz, InfoCuria, EUR-Lex) a knihovních katalogů (Peace Palace Library
           na WorldCat Discovery, UKAŽ Univerzity Karlovy na Primo) putuje pouze samotný dotaz,
-          nikoli to, kdo jste. Údaje dále předám jen tehdy, uloží-li mi to zákon.
+          nikoli to, kdo jste. Při čtení open-access literatury odchází identifikátor díla (DOI
+          nebo adresa) do služby Unpaywall a k vydavateli či repozitáři, kde kopie leží; ani tam
+          neodchází nic o vás. Údaje dále předám jen tehdy, uloží-li mi to zákon.
         </p>
       </Section>
 

@@ -31,7 +31,10 @@ Doktrína (knihy, kapitoly, články) přes katalogy dvou knihoven najednou:
 Discovery: WorldCat.org a licencované právnické kolekce knihovny) a
 [UKAŽ](https://cuni.primo.exlibrisgroup.com/discovery/search?vid=420CKIS_INST:UKAZ)
 Univerzity Karlovy (Primo: katalog UK a Central Discovery Index). Vrací
-bibliografické záznamy s odkazem na záznam, ne plné texty.
+bibliografické záznamy s odkazem na záznam; kde existuje open-access kopie
+(přes [Unpaywall](https://unpaywall.org) a DOI), umí stáhnout a číst i text
+díla. Licencované tituly zůstávají za přihlášením knihovny, které server
+nemá.
 
 ## Endpoint
 

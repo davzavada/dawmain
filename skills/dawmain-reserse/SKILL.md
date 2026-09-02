@@ -88,7 +88,7 @@ quoted passages stay in the original.
 | CJEU | `curia_search` → `curia_get_document` (`language: "cs"` falls back to English) |
 | EU legislation | `eurlex_search` (titles/CELEX/ECLI only, NOT full text) → `eurlex_get_document` |
 | EU legislative materials (travaux) | `eurlex_legislative_history {celex}` — the act's whole dossier: proposal + explanatory memorandum, impact assessments, EESC/CoR opinions, EP/Council positions; or `eurlex_search` with `types: ["proposal", "opinion", …]` |
-| Literature — monographs, commentaries, articles (doctrine) | `doctrine_search` — Peace Palace Library (WorldCat) + UKAŽ (Univerzita Karlova, Primo) in parallel; bibliographic records with links, no full text |
+| Literature — monographs, commentaries, articles (doctrine) | `doctrine_search` — Peace Palace Library (WorldCat) + UKAŽ (Univerzita Karlova, Primo) in parallel → `doctrine_get_document {source, id}` for the record in full and, where an open-access copy exists, the text of the work |
 | A source misbehaves | `dawmain_probe_sources` |
 
 Not covered: EUIPO and ÚPV. If the question needs them, say so and point at
@@ -419,9 +419,12 @@ normal, not a bug.
 Library in The Hague (WorldCat Discovery: WorldCat.org plus the library's licensed law
 collections — Nomos, Brill, Kluwer, OUP Law, Cambridge journals, Springer, Elgar) and
 UKAŽ of Univerzita Karlova (Primo: the UK catalogue plus the Central Discovery Index).
-It returns **bibliographic records**, not texts: author, title, year, publisher, form,
-ISBN/DOI, subject headings, abstract and contents where the record carries them, and
-the link to the record. There is nothing to `find` in or page through afterwards.
+It returns **bibliographic records**: author, title, year, publisher, form, ISBN/DOI,
+subject headings, a taste of the abstract and contents, and the link to the record.
+`doctrine_get_document {source: "peacepalace", id: "1525268154"}` then opens one
+work: the record in full (whole abstract, table of contents, subjects, access links)
+and — where an open-access copy exists — the text itself, with `find` and `page` like
+any other `*_get_*` tool.
 
 | Chci | Parametr |
 |---|---|
@@ -452,12 +455,22 @@ went (`has_more` tells you whether the list continued).
 **Author + subject without keywords works** — a field-only search is a valid call;
 language and years alone are not.
 
+**Open the work before you lean on it.** `doctrine_get_document` looks for a readable
+copy in order — the open-access location Unpaywall knows for the DOI (PDF first), the
+DOI's own page, the record's access links — and reads the first one that is really the
+work: PDF or HTML, paged, `find: "term"` for the passages. `access.status` tells you
+what happened: `open` means you are reading the text; `unavailable` means every copy
+sat behind a login or purchase wall (each attempt is listed with its reason) — the work
+is licensed and the library's reader login, which the tool does not hold, would be
+needed. Do not treat `unavailable` as absence: the record still carries the whole
+abstract and the table of contents, which is how you tell whether a monograph or
+commentary is on point at all — `record_only: true` fetches just that, cheaply.
+
 **Cite the record, and say what you read.** A catalogue hit proves the work exists,
 not what it says: cite it as literature (author, title, year, publisher, record link),
-never as an authority for a proposition you have not read. The access links may open
-the publisher's copy — behind the library's login where the work is licensed, which
-the tool cannot pass. Where the abstract or contents decide relevance, quote them as
-the record's abstract, not as the work.
+never as an authority for a proposition you have not read. What you read through
+`doctrine_get_document` you may quote and cite by page; what you know only from the
+abstract or the contents you present as the record's abstract, not as the work.
 
 ## Screening and reading
 
@@ -470,7 +483,10 @@ around every match with a match count. For "does this decision address X at all"
 call answers it — and zero matches is a real, citable finding.
 
 **Close reading → pages.** Documents come in ~45k-character pages; when you need the
-whole reasoning, fetch the remaining pages **without asking the user**.
+whole reasoning, fetch the remaining pages **without asking the user**. The same goes
+for the literature: an open-access monograph read through `doctrine_get_document` is
+paged like a decision — `find` the chapter or the term, then read the pages that decide
+it.
 
 **Never argue from a snippet.** A právní věta is a headline; the holding lives in the
 odůvodnění, together with the facts that limit it.
@@ -545,6 +561,7 @@ uses them.
 
 **Literatura** — only when doctrine was searched: the works worth the reader's time,
 each as author, title, year, publisher and the record link, one line per work, with a
-word on why (commentary on the provision, leading monograph, recent article).
+word on why (commentary on the provision, leading monograph, recent article) and
+whether you read it (open access) or only its record.
 
 **Co chybí** — what you did not find, what is contested, what needs verifying.

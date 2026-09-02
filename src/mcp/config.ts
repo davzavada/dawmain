@@ -62,3 +62,12 @@ export function getEsbirkaApiBase(): string {
 
 /** Keyless gateway of the e-Sbírka SPA — same paths and response shapes. */
 export const ESBIRKA_CACHE_BASE = "https://e-sbirka.gov.cz/sbr-cache";
+
+/**
+ * Contact e-mail Unpaywall asks for on every request (its only "key"). The
+ * operator's public contact by default — the address on the legal pages —
+ * overridable per deployment.
+ */
+export function getUnpaywallEmail(): string {
+  return process.env.UNPAYWALL_EMAIL?.trim() || "davzavada@gmail.com";
+}

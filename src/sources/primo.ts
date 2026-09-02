@@ -149,7 +149,10 @@ export function primoLinkUrl(value: string): string | undefined {
  * addata (OpenURL data: doi, isbn, issn, jtitle…), control (recordid). Every
  * field optional. Pure — unit-tested against a synthetic doc.
  */
-export function mapPrimoDoc(doc: Rec): BibHit {
+/** Abstract cap of the record view — the list shows 300 characters. */
+export const FULL_ABSTRACT_CHARS = 4_000;
+
+export function mapPrimoDoc(doc: Rec, full = false): BibHit {
   const pnx = obj(doc.pnx);
   const display = obj(pnx.display);
   const addata = obj(pnx.addata);
@@ -213,7 +216,7 @@ export function mapPrimoDoc(doc: Rec): BibHit {
     doi: strings(addata.doi).slice(0, 2),
     container,
     subjects,
-    abstract: description ? snippet(description, 300) : undefined,
+    abstract: description ? snippet(description, full ? FULL_ABSTRACT_CHARS : 300) : undefined,
     open_access: openAccess || undefined,
     // The record's own page in UKAŽ; context (L = catalogue, PC = Central
     // Discovery Index) is part of the full-display route.
@@ -245,6 +248,53 @@ export function parsePrimoSearch(json: unknown): PrimoSearchPage {
   };
 }
 
+// ---------- one record ----------
+
+/** Local catalogue ids start with "alma", Central Discovery Index ids with
+ * "cdi_" — the context the full-display route wants. Pure. */
+export function primoContext(id: string): "L" | "PC" {
+  return id.startsWith("cdi_") ? "PC" : "L";
+}
+
+const recordCache = new TtlCache<BibHit>(SEARCH_TTL_MS);
+
+/**
+ * One record in full. The SPA's full-display call — GET
+ * /primaws/rest/pub/pnxs/{L|PC}/{recordid}?vid=…&lang=cs&search_scope=… —
+ * is from memory of Primo VE, NOT from the capture (which never opened a
+ * record). A miss is reported as such; the search endpoint, which is
+ * captured, is the fallback the caller can always use.
+ */
+export async function getPrimoRecord(id: string): Promise<BibHit> {
+  const recordId = id.trim();
+  if (!/^[A-Za-z0-9_.:-]{3,200}$/.test(recordId)) {
+    throw new SourceError(SOURCE, "INPUT_INVALID", `"${id}" is not a Primo record id.`, "Pass the id of a cuni hit from doctrine_search (alma… or cdi_…).");
+  }
+  return recordCache.through(memoKey("primo-record", recordId), async () => {
+    const context = primoContext(recordId);
+    const url = `${BASE}/primaws/rest/pub/pnxs/${context}/${encodeURIComponent(recordId)}?vid=${encodeURIComponent(PRIMO_VID)}&lang=${LANG}&search_scope=MyInst_and_CI`;
+    const response = await fetchPrimo(url);
+    if (response.status === 404) {
+      throw new SourceError(SOURCE, "NOT_FOUND", `Primo has no record ${recordId} in context ${context}.`, "Take the id from a doctrine_search hit; if it came from there, the full-display endpoint (unverified against a capture) may differ — the search results already carry the record's main fields.");
+    }
+    if (!response.ok) {
+      throw new SourceError(SOURCE, "UPSTREAM_ERROR", `Primo answered HTTP ${response.status} for the record.`, "The full-display endpoint is from memory, not from the capture — a HAR of opening one record in UKAŽ would pin it. The search results already carry the record's main fields.");
+    }
+    let json: unknown;
+    try {
+      json = await response.json();
+    } catch {
+      throw new SourceError(SOURCE, "PARSE_DRIFT", "Primo answered the record request with a non-JSON body.", "Run dawmain_probe_sources (canary 'primo') with include_raw.");
+    }
+    const doc = obj(json);
+    if (!obj(doc.pnx).display) {
+      throw new SourceError(SOURCE, "PARSE_DRIFT", "Primo's record response carries no pnx.display.", "The full-display endpoint is from memory — a HAR of opening one record in UKAŽ would pin it.");
+    }
+    const hit = mapPrimoDoc(doc, true);
+    return hit.id ? hit : { ...hit, id: recordId };
+  });
+}
+
 // ---------- guest token (fallback only) ----------
 
 /** Guest JWT the SPA obtains before searching. Cached per warm instance. */
@@ -274,6 +324,20 @@ async function fetchGuestToken(): Promise<string> {
   });
 }
 
+/** One Primo REST call: unsigned first, once more with the guest JWT when
+ * the unsigned call is refused. */
+async function fetchPrimo(url: string): Promise<Response> {
+  const headers: Record<string, string> = {
+    accept: "application/json, text/plain, */*",
+    "accept-language": "cs,en;q=0.8",
+    referer: `${BASE}/discovery/search?vid=${PRIMO_VID}&lang=${LANG}&mode=advanced`,
+  };
+  const response = await fetchUpstream(SOURCE, url, { headers, timeoutMs: 20_000 });
+  if (response.status !== 401 && response.status !== 403) return response;
+  const token = await fetchGuestToken();
+  return fetchUpstream(SOURCE, url, { headers: { ...headers, authorization: `Bearer ${token}` }, timeoutMs: 20_000 });
+}
+
 const searchCache = new TtlCache<PrimoSearchPage>(SEARCH_TTL_MS);
 
 /** One results page: `offset` records in, `limit` records (≤ PRIMO_PAGE_SIZE). */
@@ -290,20 +354,7 @@ async function runSearchPrimo(input: PrimoSearchInput, offset: number, limit: nu
       "Provide query (keywords), title, author or subject.",
     );
   }
-  const url = buildPrimoUrl(input, offset, limit);
-  const headers: Record<string, string> = {
-    accept: "application/json, text/plain, */*",
-    "accept-language": "cs,en;q=0.8",
-    referer: `${BASE}/discovery/search?vid=${PRIMO_VID}&lang=${LANG}&mode=advanced`,
-  };
-  let response = await fetchUpstream(SOURCE, url, { headers, timeoutMs: 20_000 });
-  if (response.status === 401 || response.status === 403) {
-    const token = await fetchGuestToken();
-    response = await fetchUpstream(SOURCE, url, {
-      headers: { ...headers, authorization: `Bearer ${token}` },
-      timeoutMs: 20_000,
-    });
-  }
+  const response = await fetchPrimo(buildPrimoUrl(input, offset, limit));
   if (!response.ok) {
     throw new SourceError(
       SOURCE,

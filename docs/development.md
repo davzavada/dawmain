@@ -19,6 +19,7 @@ Uživatelský popis je v [README](../README.md).
 | `eurlex_search` / `eurlex_get_document` | Cellar SPARQL (Publications Office) | EU legislativa, judikatura i legislativní materiály (návrhy COM, sdělení, zelené/bílé knihy, SWD, impact assessmenty, stanoviska EHSV/VR, postoje EP a Rady) dle názvů, CELEX/ECLI, typů a dat; texty z oficiálního Cellaru |
 | `eurlex_legislative_history` | Cellar SPARQL (Publications Office) | travaux préparatoires aktu z dossieru interinstitucionálního postupu (`cdm:dossier_contains_work` — obsahuje i přijatý akt, takže kotví CELEX aktu i kteréhokoli dokumentu postupu, případně číslo postupu `2012/0011(COD)`); vrací návrh s důvodovou zprávou, impact assessmenty, stanoviska, postoje EP/Rady + číslo postupu, právní základ a stav (přijato/projednáváno/staženo) |
 | `doctrine_search` | peacepalace.on.worldcat.org + cuni.primo.exlibrisgroup.com | doktrína: knihy, kapitoly a články ze dvou knihovních katalogů naráz — Peace Palace Library (WorldCat Discovery: WorldCat.org + licencované právnické kolekce) a UKAŽ Univerzity Karlovy (Primo VE: katalog UK + Central Discovery Index); `query`/`queries`, `title`, `author`, `subject`, `language`, `year_from`/`year_to`; katalogy stránkují po 10, `per_source_limit` (≤ 20; nad 10 záznamy stručně, bez abstraktů) stáhne víc stránek v paralelní dávce a `page` kráčí dál — vrací bibliografické záznamy s odkazem na záznam, abstraktem/obsahem a přístupovými odkazy, žádné plné texty; oba klienti postavené na zachycených požadavcích SPA (HAR 2026-09) |
+| `doctrine_get_document` | katalogy výše + api.unpaywall.org + doi.org + vydavatelé/repozitáře | záznam v plném znění (celý abstrakt, obsah, hesla, přístupové odkazy — WorldCat přes `no:<OCLC>`, Primo přes full-display endpoint) a text díla, kde existuje open-access kopie: kandidáti v pořadí zadaný `url` → OA umístění z Unpaywall (PDF před landing page) → DOI → odkazy záznamu (proxované až poslední); PDF přes `unpdf`, HTML na text, přihlašovací/nákupní stránka se hlásí jako nedostupnost; každý pokus vrací s důvodem; `find`/`page` jako u ostatních `*_get_*`; každý skok přesměrování prochází kontrolou veřejné adresy (SSRF) |
 | `dawmain_ping` | — | které nasazení odpovědělo |
 | `dawmain_probe_sources` | — | diagnostika všech upstreamů z nasazené funkce; `include_raw` pro záchyt fixtures, `discover` pro hledání neověřených endpointů |
 
@@ -35,9 +36,14 @@ posílá nepodepsané volání a odmítnutí (401/403) hlásí jako odmítnutí;
 `Authorization`, není tedy jisté, jestli `pnxs` vyžaduje guest JWT SPA;
 klient nejdřív volá bez něj a na 401/403 zkusí guest-token endpoint (z
 paměti, ne z HARu) a hlásí, když neuspěje. Oba katalogy jsou knihovní, ne
-open access: přístupové odkazy v záznamech mohou vyžadovat přihlášení
-čtenáře — přihlášení účtem čtenáře (Peace Palace SAML, UK CAS) server zatím
-neumí, viz `docs/research/doctrine-sources.json`.
+open access: `doctrine_get_document` přečte jen díla s open-access kopií
+(Unpaywall zná OA umístění k DOI; DOI a odkazy záznamu se zkusí také), u
+licencovaných hlásí nedostupnost s důvody — přihlášení účtem čtenáře (Peace
+Palace SAML, UK CAS) server zatím neumí, viz
+`docs/research/doctrine-sources.json`. Unpaywall chce na každém dotazu
+kontaktní e-mail (`UNPAYWALL_EMAIL`, výchozí kontakt z právních stránek).
+Full-display endpoint Prima pro záznam je z paměti, ne z HARu — hlásí se,
+když neodpoví; hledání záznam nese i bez něj.
 **EUIPO** (eSearchCLW i Guidelines) a **ÚPV** (isdv.upv.gov.cz) záměrně
 pokryté nejsou a kód pro ně v repu není: doložky EUIPO si vyhrazují zákaz TDM
 a scrapingu „jakýmikoli prostředky, včetně botů" mimo vědecký výzkum (bez
@@ -172,7 +178,8 @@ ne hádat.
 - Texty dokumentů se vracejí po stránkách 45 000 znaků (bezpečně pod limity klientů) — typické rozhodnutí
   v jedné odpovědi; delší texty nesou pokyn agentovi pokračovat bez ptaní.
 - Timeouty: výchozí 15 s/request; odchylky: NSS POST 25 s, Cellar retrieval 25 s,
-  Cellar SPARQL 30 s, justice.cz hledání 30 s, e-Sbírka SPARQL 20 s. Celá
+  Cellar SPARQL 30 s, justice.cz hledání 30 s, e-Sbírka SPARQL 20 s, katalogy
+  doktríny 20 s, stažení díla 25 s na kopii, nejvýš 3 kopie a 45 s celkem. Celá
   invokace ≤ 60 s.
 
 ## Autentizace

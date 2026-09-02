@@ -67,12 +67,39 @@
         "A HAR of the same advanced search with a query that DOES match (e.g. 'genocida', 10 hits), exported WITH sensitive data (so the Authorization header and any jwt call are visible; do it logged out, as a guest, so no personal session is in it) — this pins both the auth question and the real record shape and lets the synthetic fixture be replaced by a verbatim one.",
         "If the reader login is wanted: a HAR of the whole login (Primo 'Přihlásit' → idp.cuni.cz → cas.cuni.cz → back to Primo), with the password POST removed or redacted, plus a statement of what the login is expected to change for the search."
       ]
+    },
+    {
+      "source": "Full texts — Unpaywall (api.unpaywall.org) + DOI resolver (doi.org) + publisher/repository copies",
+      "captured": "Unpaywall: 12 verbatim responses inside the WorldCat HAR (the Discovery SPA asks api.unpaywall.org/v2/<doi>?email=worldcatpm@oclc.org for every DOI it lists) — three kept as fixtures (bronze with PDF, gold with landing page only, closed).",
+      "access": [
+        {
+          "kind": "public-api",
+          "base_url": "https://api.unpaywall.org/v2/{doi}?email={contact}",
+          "auth": "none — a contact e-mail per request is the only requirement (UNPAYWALL_EMAIL, default = the operator's public contact)",
+          "detail": "RESPONSE (verbatim fields): doi, doi_url, is_oa, oa_status (gold|hybrid|bronze|green|closed), best_oa_location{url, url_for_pdf, url_for_landing_page, license, version, host_type, repository_institution}, oa_locations[…same…], first_oa_location, genre, title, journal_name, journal_issns, year, published_date, has_repository_copy. 404 for an unknown DOI.",
+          "fixtures": "tests/fixtures/unpaywall/oa-bronze-pdf.json, oa-gold-landing-only.json, closed.json"
+        },
+        {
+          "kind": "document-fetch",
+          "base_url": "https://doi.org/{doi} and whatever Unpaywall or the catalogue record links to",
+          "auth": "none for open-access copies; licensed copies answer with a login/purchase page or 401/403, which the client reports as 'unavailable' (never as the work)",
+          "detail": "GET with Accept: application/pdf, text/html; redirects followed by hand (max 5) and EVERY hop checked: https only, real hostname, all resolved addresses public (no RFC 1918, loopback, link-local, CGNAT, ULA). PDF (Content-Type or %PDF magic) → unpdf extractText mergePages; HTML → htmlToText, rejected as a wall when under 2 500 characters or when a short page speaks of sign-in/purchase/institutional access. 12 MB body cap (fetchUpstream), 25 s per copy, ≤ 3 copies, 45 s total; text cached 10 min per URL."
+        }
+      ],
+      "unverified": [
+        "Live behaviour of doi.org and publisher hosts from the deployment (no egress from the development sandbox); the extraction path is pinned by a generated two-page PDF and synthetic HTML.",
+        "Primo VE full-display endpoint GET /primaws/rest/pub/pnxs/{L|PC}/{recordid}?vid=…&lang=cs&search_scope=MyInst_and_CI (from memory; the capture never opened a record) — a miss is reported, and the search result already carries the record's main fields."
+      ],
+      "needs_from_user": [
+        "Nothing for the open-access path beyond a deploy + dawmain_probe_sources (canary 'unpaywall'). For licensed works: the reader-login captures listed above, and the decision whether readers' library passwords may be stored at all."
+      ]
     }
   ],
   "decisions": [
     "One tool, doctrine_search, fans out to both catalogues (the cz_caselaw_search shape): same criteria, per-source status, per-source totals and has_more, grouped output.",
     "Both catalogues serve fixed pages of 10; per_source_limit (≤ 20; above 10 records come brief, without abstract/contents, to stay inside the response budget) is served by fetching the covering catalogue pages in a parallel batch, page walks further (pageWindow/sliceWindow in src/sources/shared/bib.ts).",
     "No sort/format filters: their URL parameters were not captured and a guessed one would silently answer a different question.",
-    "No reader-login automation: entry points and redirect chains are not captured, and storing readers' library passwords is a privacy-policy decision for the operator (the policy currently states no passwords are held)."
+    "No reader-login automation: entry points and redirect chains are not captured, and storing readers' library passwords is a privacy-policy decision for the operator (the policy currently states no passwords are held).",
+    "Reading a work = doctrine_get_document: the record in full first (orientation is possible without any copy), then the first readable copy from an ordered candidate list, every failed copy reported with its reason. Open-access only; licensed content needs the reader login, which is a separate decision."
   ]
 }

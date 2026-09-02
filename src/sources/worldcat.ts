@@ -45,6 +45,10 @@ export const PEACE_PALACE_DATABASES =
 export const WORLDCAT_PAGE_SIZE = 10;
 
 export interface WorldcatSearchInput {
+  /** A complete expression in the index syntax, used verbatim — how a
+   * record is fetched back by number (`no:1525268154`, the SPA's own
+   * opacLink form). Overrides every other criterion. */
+  rawQuery?: string;
   /** Keywords anywhere (kw:). */
   query?: string;
   title?: string;
@@ -73,6 +77,7 @@ function indexValue(value: string): string {
  * Pure — unit-tested.
  */
 export function buildWorldcatQuery(input: WorldcatSearchInput): string {
+  if (input.rawQuery?.trim()) return input.rawQuery.trim();
   const parts: string[] = [];
   if (input.query?.trim()) parts.push(`kw:(${indexValue(input.query)})`);
   if (input.title?.trim()) parts.push(`ti:(${indexValue(input.title)})`);
@@ -153,12 +158,37 @@ function authorName(entry: unknown): string | undefined {
 }
 
 /**
+ * One `links[]` entry → its URL when it is the resource itself. The array
+ * is MARC 856 in JSON: `relationship` "0" = the resource, "1" = a version
+ * of it, "2" = a related resource (cover images, in the capture), " " =
+ * unknown (the capture's jacket images and OverDrive excerpts). Only the
+ * first two are access links; an image URL is never one. Pure — unit-tested.
+ */
+export function accessLinkUrl(link: Rec): string | undefined {
+  const url = str(link.url);
+  if (!url) return undefined;
+  const relationship = str(link.relationship);
+  if (relationship !== "0" && relationship !== "1") return undefined;
+  if (/\b(image|cover|thumbnail)\b/i.test(str(link.label) ?? "")) return undefined;
+  if (/\.(jpe?g|png|gif|webp)(\?|$)|type=DOCUMENTIMAGE/i.test(url)) return undefined;
+  return url;
+}
+
+/** Snippet caps: the list shows a taste, the record view the whole thing
+ * (bounded — a 40-page TOC still must not eat the response). */
+const LIST_ABSTRACT_CHARS = 300;
+const LIST_CONTENTS_CHARS = 250;
+export const FULL_ABSTRACT_CHARS = 4_000;
+export const FULL_CONTENTS_CHARS = 6_000;
+
+/**
  * One record of the search response → BibHit. Field names verbatim from the
  * capture; every field optional, because a record from a licensed database
  * (an article from Nomos or Kluwer) carries a different subset from a
- * WorldCat.org book. Pure — unit-tested.
+ * WorldCat.org book. `full` keeps abstract and contents whole (bounded) for
+ * the record view. Pure — unit-tested.
  */
-export function mapWorldcatRecord(record: Rec): BibHit {
+export function mapWorldcatRecord(record: Rec, full = false): BibHit {
   const oclcNumber = str(record.oclcNumber) ?? strings(record.editionOclcNumbers)[0];
   const title = data(record.titleObject) ?? str(record.title) ?? "(bez názvu)";
   const authors: string[] = [];
@@ -187,7 +217,7 @@ export function mapWorldcatRecord(record: Rec): BibHit {
   const links: string[] = [];
   if (Array.isArray(record.links)) {
     for (const link of record.links) {
-      const url = str((link as Rec)?.url);
+      const url = accessLinkUrl((link ?? {}) as Rec);
       if (url && !links.includes(url)) links.push(url);
       if (links.length >= 2) break;
     }
@@ -210,8 +240,8 @@ export function mapWorldcatRecord(record: Rec): BibHit {
     issn: strings(record.issns).slice(0, 2),
     doi: doi.slice(0, 2),
     subjects,
-    abstract: summary ? snippet(summary, 300) : undefined,
-    contents: contents ? snippet(contents, 250) : undefined,
+    abstract: summary ? snippet(summary, full ? FULL_ABSTRACT_CHARS : LIST_ABSTRACT_CHARS) : undefined,
+    contents: contents ? snippet(contents, full ? FULL_CONTENTS_CHARS : LIST_CONTENTS_CHARS) : undefined,
     open_access: typeof record.openAccess === "boolean" ? record.openAccess : undefined,
     // The Discovery permalink of the record; the SPA's own opacLink (a search
     // by OCLC number or ISBN) is the fallback when a record carries no number.
@@ -222,7 +252,7 @@ export function mapWorldcatRecord(record: Rec): BibHit {
 
 /** Whole search response → page. PARSE_DRIFT when the two fields every
  * page must carry are gone. Pure — unit-tested. */
-export function parseWorldcatSearch(json: unknown): WorldcatSearchPage {
+export function parseWorldcatSearch(json: unknown, full = false): WorldcatSearchPage {
   const body = (json ?? {}) as Rec;
   if (typeof body.numberOfRecords !== "number" || !Array.isArray(body.records)) {
     throw new SourceError(
@@ -234,7 +264,7 @@ export function parseWorldcatSearch(json: unknown): WorldcatSearchPage {
   }
   return {
     total: body.numberOfRecords,
-    hits: body.records.map((record) => mapWorldcatRecord((record ?? {}) as Rec)),
+    hits: body.records.map((record) => mapWorldcatRecord((record ?? {}) as Rec, full)),
     partial: body.partialResult === true,
   };
 }
@@ -246,7 +276,27 @@ export async function searchWorldcat(input: WorldcatSearchInput, page: number): 
   return searchCache.through(memoKey("worldcat-search", [input, page]), () => runSearchWorldcat(input, page));
 }
 
-async function runSearchWorldcat(input: WorldcatSearchInput, page: number): Promise<WorldcatSearchPage> {
+/**
+ * One record in full, by OCLC number — the SPA's own way back to a record
+ * is a search for `no:<number>` (its opacLink), so the same endpoint and
+ * parser serve, with the abstract and contents kept whole.
+ */
+export async function getWorldcatRecord(oclcNumber: string): Promise<BibHit> {
+  const number = oclcNumber.trim().replace(/^(ocm|ocn|on)?0*/i, "");
+  if (!/^\d{1,12}$/.test(number)) {
+    throw new SourceError(SOURCE, "INPUT_INVALID", `"${oclcNumber}" is not an OCLC number.`, "Pass the id of a peacepalace hit from doctrine_search.");
+  }
+  const page = await searchCache.through(memoKey("worldcat-record", number), () =>
+    runSearchWorldcat({ rawQuery: `no:${number}` }, 1, true),
+  );
+  const hit = page.hits.find((candidate) => candidate.id === number) ?? page.hits[0];
+  if (!hit) {
+    throw new SourceError(SOURCE, "NOT_FOUND", `No record with OCLC number ${number} in the Peace Palace catalogue.`, "Take the id from a doctrine_search hit; the number may belong to another edition.");
+  }
+  return hit;
+}
+
+async function runSearchWorldcat(input: WorldcatSearchInput, page: number, full = false): Promise<WorldcatSearchPage> {
   const queryString = buildWorldcatQuery(input);
   if (!queryString) {
     throw new SourceError(
@@ -292,5 +342,5 @@ async function runSearchWorldcat(input: WorldcatSearchInput, page: number): Prom
       "Run dawmain_probe_sources (canary 'worldcat') with include_raw to see what came back.",
     );
   }
-  return parseWorldcatSearch(json);
+  return parseWorldcatSearch(json, full);
 }
