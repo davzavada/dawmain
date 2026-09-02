@@ -16,6 +16,7 @@ import {
   mapPrimoDoc,
   parsePrimoSearch,
   primoLinkUrl,
+  searchPrimo,
   stripPrimoMarkers,
 } from "@/src/sources/primo";
 import { bibKey, formatAuthors, pageWindow, sliceWindow, type BibHit } from "@/src/sources/shared/bib";
@@ -135,6 +136,15 @@ describe("parseWorldcatSearch (verbatim capture)", () => {
     expect(hit.abstract).toBeUndefined();
   });
 
+  it("carries the backend's own report that it rewrote the query", () => {
+    expect(page1.rewritten).toBe(false);
+    expect(page1.originalQuery).toBe("kw:(keword) AND ti:(title) OR au:(author)   ( (yr:2021..2025) )");
+    expect(page1.resultsType).toBe("NORMAL");
+    const rewritten = parseWorldcatSearch({ numberOfRecords: 9, records: [], queryOptimization: { searchTermDropped: true, originalQuery: "kw:(x)" } });
+    expect(rewritten.rewritten).toBe(true);
+    expect(rewritten.originalQuery).toBe("kw:(x)");
+  });
+
   it("throws PARSE_DRIFT when the envelope is gone", () => {
     expect(() => parseWorldcatSearch({ records: [] })).toThrowError(SourceError);
     expect(() => parseWorldcatSearch({ numberOfRecords: 1 })).toThrow(/numberOfRecords\/records/);
@@ -179,6 +189,24 @@ describe("buildPrimoUrl", () => {
   });
 });
 
+describe("searchPrimo guest token", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("reports a refused guest token as a session problem and forgets the dead token", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+      const headers = (init.headers ?? {}) as Record<string, string>;
+      calls.push(url.includes("/jwt") ? "JWT" : headers.authorization ? "PNXS+bearer" : "PNXS");
+      if (url.includes("/jwt")) return new Response('"eyJhbGciOiJIUzI1NiJ9.eyJndWVzdCI6dHJ1ZX0.c2ln"', { status: 200 });
+      return new Response("unauthorized", { status: 401 });
+    });
+    await expect(searchPrimo({ query: "odmítnuto 1" }, 0, 10)).rejects.toMatchObject({ kind: "SESSION_EXPIRED" });
+    await expect(searchPrimo({ query: "odmítnuto 2" }, 0, 10)).rejects.toMatchObject({ kind: "SESSION_EXPIRED" });
+    // The dead token is evicted, so the second search handshakes again.
+    expect(calls).toEqual(["PNXS", "JWT", "PNXS+bearer", "PNXS", "JWT", "PNXS+bearer"]);
+  });
+});
+
 describe("parsePrimoSearch", () => {
   it("reads the verbatim zero-hit envelope of the capture", () => {
     const page = parsePrimoSearch(fixture("primo/search-empty.json"));
@@ -208,7 +236,13 @@ describe("parsePrimoSearch", () => {
       addata: { doi: ["10.1093/jicj/mqz001"], issn: ["1478-1387"], jtitle: ["Journal of International Criminal Justice"] },
       links: { linktorsrc: ["$$Uhttps://www.proquest.com/docview/123$$DView record in ProQuest"] },
     },
-    delivery: { link: [{ linkType: "http://purl.org/pnx/linkType/thumbnail", linkURL: "https://img.example/x.jpg" }], availability: ["fulltext"] },
+    delivery: {
+      link: [
+        { linkType: "http://purl.org/pnx/linkType/thumbnail", linkURL: "https://img.example/x.jpg" },
+        { linkType: "http://purl.org/pnx/linkType/linktorsrc", linkURL: "https://x.test/svc" },
+      ],
+      availability: ["fulltext"],
+    },
   };
 
   it("maps a synthetic Central Discovery Index article", () => {
@@ -228,7 +262,8 @@ describe("parsePrimoSearch", () => {
     expect(hit.doi).toEqual(["10.1093/jicj/mqz001"]);
     expect(hit.issn).toEqual(["1478-1387"]);
     expect(hit.abstract).toBe("A study of the crime of genocide under Article 6.");
-    expect(hit.links).toEqual(["https://www.proquest.com/docview/123", "https://img.example/x.jpg"]);
+    // The cover image is display-only; the service link is an access link.
+    expect(hit.links).toEqual(["https://www.proquest.com/docview/123", "https://x.test/svc"]);
     expect(hit.url).toBe(
       "https://cuni.primo.exlibrisgroup.com/discovery/fulldisplay?docid=cdi_proquest_journals_123&vid=420CKIS_INST%3AUKAZ&lang=cs&context=PC",
     );
@@ -289,7 +324,8 @@ describe("bibKey / formatAuthors", () => {
   it("prefers the record id, then DOI, then title + year — per source", () => {
     expect(bibKey({ ...base, id: "x1" })).toBe("cuni:x1");
     expect(bibKey({ ...base, doi: ["10.1/ABC"] })).toBe("cuni:doi:10.1/abc");
-    expect(bibKey({ ...base, year: "2020" })).toBe("cuni:a title|2020");
+    expect(bibKey({ ...base, year: "2020" })).toBe("cuni:a title|2020|");
+    expect(bibKey({ ...base, year: "2020", authors: ["Novák"] })).toBe("cuni:a title|2020|novák");
     expect(bibKey({ ...base, source: "peacepalace", id: "x1" })).not.toBe(bibKey({ ...base, id: "x1" }));
   });
   it("shortens long author lists", () => {
@@ -390,6 +426,43 @@ describe("doctrine_search (stubbed upstreams)", () => {
     expect(result.content[0].text).not.toContain("Abstract:");
     expect(out.items.every((hit) => hit.abstract === undefined && hit.contents === undefined)).toBe(true);
     expect(out.items[0].isbn).toEqual(["9789004724822", "9004724826"]);
+  });
+
+  it("gives every keyword variant its share of the page, round-robin, and says when WorldCat rewrote a query", async () => {
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", async (url: string) => {
+      urls.push(url);
+      const u = new URL(url);
+      if (u.hostname === "peacepalace.on.worldcat.org") {
+        const q = u.searchParams.get("queryString") ?? "";
+        if (q.includes("varianta B")) {
+          const body = JSON.parse(worldcatPage(2)) as { queryOptimization: Record<string, unknown> };
+          body.queryOptimization = { ...body.queryOptimization, searchTermDropped: true, originalQuery: "kw:(varianta)" };
+          return new Response(JSON.stringify(body), { status: 200 });
+        }
+        return new Response(worldcatPage(1), { status: 200 });
+      }
+      return new Response(primoEmpty, { status: 200 });
+    });
+    const result = await doctrineHandler()({ queries: ["varianta A", "varianta B"], per_source_limit: 4, page: 1, sources: ["peacepalace"], full_text_only: false });
+    const out = result.structuredContent as { items: BibHit[]; statuses: Array<{ note?: string }> };
+    // share = 2 per variant: A1, B1, A2, B2 — the second variant reaches the reader.
+    expect(out.items.map((h) => h.title)).toEqual([
+      "International Institutional Law : Seventh Revised Edition",
+      "Analytical heat transfer",
+      "A companion to the United States Constitution and its amendments : America's continuing revolution",
+      "The art of staying neutral : the Netherlands in the First World War, 1914-1918",
+    ]);
+    expect(urls.filter((x) => x.includes("worldcat"))).toHaveLength(2);
+    expect(out.statuses[0].note).toContain("did not run the query as given");
+    expect(result.content[0].text).toContain("kw:(varianta)");
+  });
+
+  it("refuses whitespace-only field criteria before touching the network", async () => {
+    const urls = stubCatalogues();
+    const result = await doctrineHandler()({ title: "   ", author: " ", per_source_limit: 10, page: 1, full_text_only: false });
+    expect(result.isError).toBe(true);
+    expect(urls).toHaveLength(0);
   });
 
   it("keeps abstract and contents on a full-detail page", async () => {

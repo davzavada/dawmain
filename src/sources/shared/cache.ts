@@ -51,6 +51,11 @@ export class TtlCache<T> {
     this.store.set(key, { at: Date.now(), value });
   }
 
+  /** Evict one entry — for a cached value that turned out to be dead. */
+  delete(key: string): void {
+    this.store.delete(key);
+  }
+
   async through(key: string, load: () => Promise<T>): Promise<T> {
     const hit = this.get(key);
     if (hit !== undefined) return hit;

@@ -37,7 +37,7 @@ export interface BibHit {
 
 /**
  * Dedupe key across query variants of ONE source: the record id when the
- * catalogue gave one, else DOI, else title + year. Two catalogues are never
+ * catalogue gave one, else DOI, else title + year + first author. Two catalogues are never
  * deduped against each other — the same book held by both is two verifiable
  * records, and the reader may want either library's copy. Pure.
  */
@@ -45,7 +45,7 @@ export function bibKey(hit: BibHit): string {
   if (hit.id) return `${hit.source}:${hit.id}`;
   const doi = hit.doi?.[0]?.toLowerCase();
   if (doi) return `${hit.source}:doi:${doi}`;
-  return `${hit.source}:${hit.title.toLowerCase().replace(/\s+/g, " ").trim()}|${hit.year ?? ""}`;
+  return `${hit.source}:${hit.title.toLowerCase().replace(/\s+/g, " ").trim()}|${hit.year ?? ""}|${hit.authors[0]?.toLowerCase() ?? ""}`;
 }
 
 /** Author list for a citation line: up to `max` names, "et al." beyond. Pure. */

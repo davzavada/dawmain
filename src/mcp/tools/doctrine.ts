@@ -291,7 +291,7 @@ export function registerDoctrine(server: McpServer): void {
     },
     async ({ query, queries, title, author, subject, language, year_from, year_to, full_text_only, sources, per_source_limit, page }) => {
       const variants = uniqueQueries(query, queries);
-      if (!variants.length && !title && !author && !subject) {
+      if (!variants.length && !title?.trim() && !author?.trim() && !subject?.trim()) {
         return {
           content: [
             {
@@ -320,18 +320,35 @@ export function registerDoctrine(server: McpServer): void {
       const active: SourceId[] = sources?.length ? SOURCES.filter((s) => sources.includes(s)) : [...SOURCES];
       // Field-only searches (author + subject, no keywords) run once.
       const keywordVariants: Array<string | undefined> = variants.length ? variants : [undefined];
+      // Every variant owns an equal share of the page and is walked in step
+      // across pages: with one window per variant the first variant would
+      // fill the whole page and the others — fetched at full cost — would
+      // never reach the reader; and a thin variant would make later pages
+      // skip records. Round-robin, then dedupe; a short share stays short
+      // rather than being back-filled, which would reopen those holes.
+      const share = Math.ceil(per_source_limit / keywordVariants.length);
+      const rotate = (perVariant: Array<{ hits: BibHit[] }>): BibHit[] => {
+        const rotated: BibHit[] = [];
+        for (let rank = 0; rank < share; rank++) {
+          for (const variant of perVariant) if (variant.hits[rank]) rotated.push(variant.hits[rank]);
+        }
+        return dedupeBy(rotated, bibKey).slice(0, per_source_limit);
+      };
 
       const runners: Record<SourceId, () => Promise<RunnerResult>> = {
         peacepalace: async () => {
-          const window = pageWindow(page, per_source_limit, WORLDCAT_PAGE_SIZE);
+          const window = pageWindow(page, share, WORLDCAT_PAGE_SIZE);
           const perVariant = await Promise.all(
             keywordVariants.map(async (variant) => {
               const pages = await fetchPages(window.upstreamPages, (p) =>
                 searchWorldcat({ query: variant, ...criteria }, p),
               );
+              const head = pages[0];
               return {
-                total: pages[0]?.total ?? null,
+                total: head?.total ?? null,
                 partial: pages.some((p) => p.partial),
+                rewritten: head?.rewritten ? (head.originalQuery ?? "query rewritten") : undefined,
+                resultsType: head?.resultsType,
                 hits: sliceWindow(
                   pages.flatMap((p) => p.hits),
                   window,
@@ -339,18 +356,20 @@ export function registerDoctrine(server: McpServer): void {
               };
             }),
           );
-          const partial = perVariant.some((v) => v.partial);
+          const notes: string[] = [];
+          if (perVariant.some((v) => v.partial)) notes.push("partial result — one of the library's databases did not answer upstream");
+          const rewritten = perVariant.find((v) => v.rewritten)?.rewritten;
+          if (rewritten) notes.push(`WorldCat did not run the query as given (its own report: ${rewritten}) — the count and the hits belong to the broadened query`);
+          const odd = perVariant.find((v) => v.resultsType && v.resultsType !== "NORMAL")?.resultsType;
+          if (odd) notes.push(`WorldCat answered with result type ${odd}`);
           return {
             total: maxTotal(perVariant.map((v) => v.total)),
-            hits: dedupeBy(
-              perVariant.flatMap((v) => v.hits),
-              bibKey,
-            ).slice(0, per_source_limit),
-            ...(partial ? { note: "partial result — one of the library's databases did not answer upstream" } : {}),
+            hits: rotate(perVariant),
+            ...(notes.length ? { note: notes.join("; ") } : {}),
           };
         },
         cuni: async () => {
-          const window = pageWindow(page, per_source_limit, PRIMO_PAGE_SIZE);
+          const window = pageWindow(page, share, PRIMO_PAGE_SIZE);
           const perVariant = await Promise.all(
             keywordVariants.map(async (variant) => {
               const pages = await fetchPages(window.upstreamPages, (p) =>
@@ -374,10 +393,7 @@ export function registerDoctrine(server: McpServer): void {
           const split = perVariant.find((v) => v.split)?.split;
           return {
             total: maxTotal(perVariant.map((v) => v.total)),
-            hits: dedupeBy(
-              perVariant.flatMap((v) => v.hits),
-              bibKey,
-            ).slice(0, per_source_limit),
+            hits: rotate(perVariant),
             ...(split ? { note: split } : {}),
           };
         },

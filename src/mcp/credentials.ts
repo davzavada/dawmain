@@ -135,14 +135,14 @@ export async function saveReaderCredential(userId: string, library: LibraryId, c
   const client = await clerkClient();
   // Deep-merged by Clerk: other libraries' entries survive.
   await client.users.updateUserMetadata(userId, { privateMetadata: { [METADATA_KEY]: { [library]: stored } } });
-  credentialCache.set(memoKey("reader-credentials", userId), undefined as never);
+  credentialCache.delete(memoKey("reader-credentials", userId));
 }
 
 export async function deleteReaderCredential(userId: string, library: LibraryId): Promise<void> {
   const client = await clerkClient();
   // null removes the key under Clerk's deep merge.
   await client.users.updateUserMetadata(userId, { privateMetadata: { [METADATA_KEY]: { [library]: null } } });
-  credentialCache.set(memoKey("reader-credentials", userId), undefined as never);
+  credentialCache.delete(memoKey("reader-credentials", userId));
 }
 
 const credentialCache = new TtlCache<Partial<Record<LibraryId, ReaderCredential>>>(SEARCH_TTL_MS, 100);

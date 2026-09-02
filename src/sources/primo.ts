@@ -183,9 +183,15 @@ export function mapPrimoDoc(doc: Rec, full = false): BibHit {
   }
   const delivery = obj(doc.delivery);
   if (Array.isArray(delivery.link)) {
-    for (const link of delivery.link) {
-      const url = typeof obj(link).linkURL === "string" ? (obj(link).linkURL as string) : undefined;
-      if (url && /^https?:\/\//.test(url) && !links.includes(url)) links.push(url);
+    for (const raw of delivery.link) {
+      const link = obj(raw);
+      // Display-only link types (the cover image) are not a way to the
+      // work — the same rule accessLinkUrl applies to WorldCat's MARC 856.
+      const type = typeof link.linkType === "string" ? link.linkType : "";
+      if (/\/(thumbnail|cover|coverimage)$/i.test(type)) continue;
+      const url = typeof link.linkURL === "string" ? link.linkURL : undefined;
+      if (!url || !/^https?:\/\//.test(url) || /\.(jpe?g|png|gif|webp)(\?|$)/i.test(url)) continue;
+      if (!links.includes(url)) links.push(url);
       if (links.length >= 2) break;
     }
   }
@@ -300,9 +306,10 @@ export async function getPrimoRecord(id: string): Promise<BibHit> {
 /** Guest JWT the SPA obtains before searching. Cached per warm instance. */
 const GUEST_TOKEN_TTL_MS = 30 * 60 * 1000;
 const guestToken = new TtlCache<string>(GUEST_TOKEN_TTL_MS, 1);
+const GUEST_TOKEN_KEY = "primo-guest-jwt";
 
 async function fetchGuestToken(): Promise<string> {
-  return guestToken.through("primo-guest-jwt", async () => {
+  return guestToken.through(GUEST_TOKEN_KEY, async () => {
     // From memory of the Primo VE SPA, not from the capture (which was
     // exported without Authorization headers): the institution's guest-JWT
     // endpoint. Only ever called after an unsigned search was refused.
@@ -335,7 +342,18 @@ async function fetchPrimo(url: string): Promise<Response> {
   const response = await fetchUpstream(SOURCE, url, { headers, timeoutMs: 20_000 });
   if (response.status !== 401 && response.status !== 403) return response;
   const token = await fetchGuestToken();
-  return fetchUpstream(SOURCE, url, { headers: { ...headers, authorization: `Bearer ${token}` }, timeoutMs: 20_000 });
+  const signed = await fetchUpstream(SOURCE, url, { headers: { ...headers, authorization: `Bearer ${token}` }, timeoutMs: 20_000 });
+  if (signed.status === 401 || signed.status === 403) {
+    // A replayed dead token must not stick for its whole TTL.
+    guestToken.delete(GUEST_TOKEN_KEY);
+    throw new SourceError(
+      SOURCE,
+      "SESSION_EXPIRED",
+      `Primo refused the search even with the guest token (HTTP ${signed.status}).`,
+      "The token flow this client knows (from memory, not from the capture) does not open UKAŽ — a HAR of one search in the browser, exported with the Authorization header, would pin it. Until then search UKAŽ by hand at https://cuni.primo.exlibrisgroup.com/discovery/search?vid=420CKIS_INST:UKAZ.",
+    );
+  }
+  return signed;
 }
 
 const searchCache = new TtlCache<PrimoSearchPage>(SEARCH_TTL_MS);

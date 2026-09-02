@@ -119,6 +119,14 @@ export interface WorldcatSearchPage {
   hits: BibHit[];
   /** The backend flags a page one of its databases failed to answer for. */
   partial: boolean;
+  /** The backend's own report that it did not run the query as given
+   * (a term dropped, the query "optimized") — the count then belongs to a
+   * broader question than the one asked. */
+  rewritten: boolean;
+  /** Its echo of the query it ran, for the note. */
+  originalQuery?: string;
+  /** "NORMAL" on an ordinary answer; anything else is worth saying. */
+  resultsType?: string;
 }
 
 type Rec = Record<string, unknown>;
@@ -262,10 +270,14 @@ export function parseWorldcatSearch(json: unknown, full = false): WorldcatSearch
       "The Discovery backend may have changed shape or refused the unsigned request — run dawmain_probe_sources (canary 'worldcat') with include_raw.",
     );
   }
+  const optimization = (body.queryOptimization ?? {}) as Rec;
   return {
     total: body.numberOfRecords,
     hits: body.records.map((record) => mapWorldcatRecord((record ?? {}) as Rec, full)),
     partial: body.partialResult === true,
+    rewritten: optimization.searchTermDropped === true || optimization.queryOptimized === true,
+    originalQuery: str(optimization.originalQuery),
+    resultsType: str(body.searchResultsType),
   };
 }
 
