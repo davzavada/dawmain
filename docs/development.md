@@ -18,6 +18,7 @@ Uživatelský popis je v [README](../README.md).
 | `curia_search` / `curia_get_document` | InfoCuria + Cellar | FULLTEXT judikatury SDEU (C i T) přes vlastní index soudu — hledá napříč všemi jazykovými verzemi; typ dokumentu, stav věci, citovaný předpis a článek (`cites_celex`/`cites_article`), předběžné otázky podle předkládajícího státu (`referred_from`), datumy — vše server-side dle zachyceného payloadu SPA | 
 | `eurlex_search` / `eurlex_get_document` | Cellar SPARQL (Publications Office) | EU legislativa, judikatura i legislativní materiály (návrhy COM, sdělení, zelené/bílé knihy, SWD, impact assessmenty, stanoviska EHSV/VR, postoje EP a Rady) dle názvů, CELEX/ECLI, typů a dat; texty z oficiálního Cellaru |
 | `eurlex_legislative_history` | Cellar SPARQL (Publications Office) | travaux préparatoires aktu z dossieru interinstitucionálního postupu (`cdm:dossier_contains_work` — obsahuje i přijatý akt, takže kotví CELEX aktu i kteréhokoli dokumentu postupu, případně číslo postupu `2012/0011(COD)`); vrací návrh s důvodovou zprávou, impact assessmenty, stanoviska, postoje EP/Rady + číslo postupu, právní základ a stav (přijato/projednáváno/staženo) |
+| `doctrine_search` | peacepalace.on.worldcat.org + cuni.primo.exlibrisgroup.com | doktrína: knihy, kapitoly a články ze dvou knihovních katalogů naráz — Peace Palace Library (WorldCat Discovery: WorldCat.org + licencované právnické kolekce) a UKAŽ Univerzity Karlovy (Primo VE: katalog UK + Central Discovery Index); `query`/`queries`, `title`, `author`, `subject`, `language`, `year_from`/`year_to`; katalogy stránkují po 10, `per_source_limit` (≤ 20; nad 10 záznamy stručně, bez abstraktů) stáhne víc stránek v paralelní dávce a `page` kráčí dál — vrací bibliografické záznamy s odkazem na záznam, abstraktem/obsahem a přístupovými odkazy, žádné plné texty; oba klienti postavené na zachycených požadavcích SPA (HAR 2026-09) |
 | `dawmain_ping` | — | které nasazení odpovědělo |
 | `dawmain_probe_sources` | — | diagnostika všech upstreamů z nasazené funkce; `include_raw` pro záchyt fixtures, `discover` pro hledání neověřených endpointů |
 
@@ -26,6 +27,17 @@ výsledků dotazu (zužuj dotazem, ne stránkováním); justice.cz drží data o
 10/2020, převážně civilní prvoinstanční, a neohraničený fulltext je pomalý.
 Odkazy na rozhodnutí NS nesou `&Highlight=0,<termy>`, takže se dokument otevře
 rovnou na hledaném místě.
+Doktrína: WorldCat Discovery podepisuje **každý** požadavek SPA (hlavičky
+`Oclc-Apik`/`Oclc-Apin`, na každém volání jiné, plus relační `api-token`) —
+algoritmus žije v bundlu SPA, který zachycený HAR neobsahuje, takže server
+posílá nepodepsané volání a odmítnutí (401/403) hlásí jako odmítnutí; kanárek
+`worldcat` to ukáže hned po nasazení. Primo VE: HAR byl exportovaný bez
+`Authorization`, není tedy jisté, jestli `pnxs` vyžaduje guest JWT SPA;
+klient nejdřív volá bez něj a na 401/403 zkusí guest-token endpoint (z
+paměti, ne z HARu) a hlásí, když neuspěje. Oba katalogy jsou knihovní, ne
+open access: přístupové odkazy v záznamech mohou vyžadovat přihlášení
+čtenáře — přihlášení účtem čtenáře (Peace Palace SAML, UK CAS) server zatím
+neumí, viz `docs/research/doctrine-sources.json`.
 **EUIPO** (eSearchCLW i Guidelines) a **ÚPV** (isdv.upv.gov.cz) záměrně
 pokryté nejsou a kód pro ně v repu není: doložky EUIPO si vyhrazují zákaz TDM
 a scrapingu „jakýmikoli prostředky, včetně botů" mimo vědecký výzkum (bez

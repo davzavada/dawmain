@@ -1,0 +1,78 @@
+{
+  "findings": [
+    {
+      "source": "Peace Palace Library (The Hague) — WorldCat Discovery (peacepalace.on.worldcat.org)",
+      "captured": "HAR of a live browser session, 2026-09-02 (Edge/Chromium, sanitized export: no Cookie/Set-Cookie/Authorization headers), advanced search with two result pages",
+      "access": [
+        {
+          "kind": "json-backend-of-spa",
+          "base_url": "https://peacepalace.on.worldcat.org",
+          "auth": "UNCERTAIN. Every SPA request carries three headers: Oclc-Apik (64 hex chars) and Oclc-Apin (40 decimal digits) — BOTH DIFFERENT ON EVERY REQUEST (42 distinct pairs in 42 requests), i.e. a per-request signature computed in the SPA bundle; and api-token, a JWE (header {\"cty\":\"jwt\",\"enc\":\"A256CBC-HS512\",\"alg\":\"dir\"}) constant across the two /api/search calls, i.e. a session token. Their origin is not in the capture (no page-load entry). The server sends unsigned requests; the probe canary 'worldcat' reports whether they are served. The site sits behind Cloudflare (CF-RAY FRA).",
+          "detail": "SEARCH (verbatim, entries 0 and 42): GET /api/search?queryString=<q>&databaseList=10007,10025,10052,10058,10306,10896,11162,11537,2795,3313,3560,3577,3578,3583,3590,3962,3963,4023,4052,4056,638&sortKey=BEST_MATCH&clusterResults=true&groupVariantRecords=false&bookReviews=off&year=2021..2025&content=fullText&idDetect=true&citeDetect=true[&page=2]. Request headers: Accept: application/json, text/plain, */*; Accept-Language: en; Referer: the /search?… page with the same parameters.\nqueryString is WorldCat's index syntax as the advanced form composes it: kw:(keword) AND ti:(title) OR au:(author) — index labels kw/ti/au/su; the backend's echoed queryOptimization.originalQuery shows the `year` parameter rewritten into `( (yr:2021..2025) )`. la:<marc code> is the documented language index (not in the capture). `content=fullText` = the 'Full Text' content facet (other facet values seen: openAccess, peerReviewed, notFic).\nRESPONSE: {databaseList[], locale, numberOfRecords (12279), parsedQuery[{field,text,boolean,start,end}], partialResult (bool), providerSearchRequest (an internal SRU 'worldcat-plus' URL — the engine is SRU/CQL), queryExpansion{}, queryOptimization{originalQuery,…}, records[10], searchResultsType: NORMAL}. Page size is fixed at 10; page 2 = records 11–20.\nRECORD fields seen (books only — the captured query matched no articles): oclcNumber, titleObject{data}, authors[{firstNameObject{data}, lastNameObject{data}, primary, type, relatorList}], date, publishers[{data}], itemType (book_digital), itemTypeDisplay (eBook), language (eng), isbns[], digitalObjectIdentifiers[], summariesObjectList[{data}], contentsObjects[{note, noteObject{data}}], subjectGroups[{bibSubjects[{data, unifiedData{displayData}, thesaurusType, type}], id, label}], physicalDescription, edition, editionOclcNumbers[], workId, links[{url,label?,accessMethod}], opacLink (a /search?queryString=no:<oclc> or ib:<isbn> deep link), peerReviewed, openAccess, remoteDatabase, databaseId ('' for WorldCat.org), sourceCollection (xwc), genres[], seriesSeparatedFieldsList[], heldByInstitutionName, staffILLRequestUrl, highlightedRecord (a copy for UI highlighting, dropped from the fixtures).\nRecord permalink used: https://peacepalace.on.worldcat.org/oclc/<oclcNumber>.",
+          "fixtures": "tests/fixtures/worldcat/search-page-1.json, search-page-2.json — verbatim envelope, first 3 records of each page, highlightedRecord removed"
+        },
+        {
+          "kind": "facets",
+          "base_url": "https://peacepalace.on.worldcat.org/api/searchFacets",
+          "auth": "same headers as /api/search",
+          "detail": "Same query parameters as /api/search (clusterResults=false). facets.facetGroups keyed by name; values seen: scope (wz:45289 = Peace Palace Library, zs:34227 = Netherlands), format (Book → book_digital; Artchap → artchap_artcl, artchap_digital), content (bio, fic, fullText, notFic, openAccess, peerReviewed), topic (Conspectus codes), year (2021..2025), author, database (Z-wcorg WorldCat.org 9103, Nomos_el 3231, Cup_journals 35, Boom_juri, Bp_bc, Brill_bps_hrhl, Brill_cwto, Brill_hwgdso, Brill_ieclo, Brill_ilwo, Brill_imbo, Brill_rlpic, Brill_uncls, Dh_dhej, Eee_eel, Eee_epil, Eep_eo, Kluwer_kloj, Oup_ouplc, Springerlink), language (Eng, Ger, Spa, Fre…), materialtype. The URL parameters that apply format/language/database facets were NOT captured — hence no format filter in the tool."
+        },
+        {
+          "kind": "auxiliary",
+          "base_url": "https://peacepalace.on.worldcat.org/api/elink, /api/elink/clusterAvailability, /api/localeditions, /api/stats; https://api.unpaywall.org/v2/<doi>",
+          "auth": "same signature headers",
+          "detail": "Per-record access links (elink: ELinksResponse.result[{id, links[{links[{url, provider, collection, title, openAccess}], type: Primary/Secondary}], doiLinks}]), holdings/editions (localeditions[{localEditions[{oclcNum, titleObject, bibAuthors, date, publisherObjectList, heldLocally, numberOfHoldings}]}]) and usage stats. Not used by the tool; the links[] on the search record cover the access-link need."
+        },
+        {
+          "kind": "login",
+          "base_url": "https://peacepalacelibrary.nl/saml/module.php/core/loginuserpass",
+          "auth": "SimpleSAMLphp IdP of the library (AuthState → spentityid=https://shib.oclc.org/shibboleth): OCLC's Shibboleth SP, i.e. WorldCat Discovery sign-in via the library's own IdP with a username and password",
+          "detail": "Only the login-page URL is known (user-supplied). Not captured: the entry point on peacepalace.on.worldcat.org that starts the SAML dance, the redirect chain through shib.oclc.org back to the Discovery session, and which cookies carry the signed-in state. What signing in changes for SEARCH is also unknown — possibly nothing for WorldCat.org records, possibly access to the licensed databases in databaseList."
+        }
+      ],
+      "unverified": [
+        "Whether /api/search serves an unsigned request (no Oclc-Apik/Oclc-Apin/api-token). The canary answers this from the deployment.",
+        "la:<code> as the language index inside queryString (documented WorldCat index label; not in the capture).",
+        "Article records' field names (journal title, volume, pages) — the capture holds books only.",
+        "page=1 explicitly (the SPA omits the parameter on the first page; the client mirrors that)."
+      ],
+      "needs_from_user": [
+        "A HAR that INCLUDES the initial page load of https://peacepalace.on.worldcat.org/search?queryString=… (document request + the JS bundles it loads) — to locate where api-token comes from and how Oclc-Apik/Oclc-Apin are computed; a HAR of an article-heavy search (e.g. a Kluwer journal topic) for the article record shape; a HAR of the sign-in flow from the 'Sign in' link through peacepalacelibrary.nl back to the results page, exported WITH cookies but with the password POST removed or redacted."
+      ]
+    },
+    {
+      "source": "Univerzita Karlova — UKAŽ, Primo VE (cuni.primo.exlibrisgroup.com, vid 420CKIS_INST:UKAZ)",
+      "captured": "HAR of a live browser session, 2026-09-02 (sanitized export), one advanced search that matched nothing; a second HAR of the start of the CAS login (idp.cuni.cz → cas.cuni.cz login form, no credentials posted)",
+      "access": [
+        {
+          "kind": "rest-of-spa",
+          "base_url": "https://cuni.primo.exlibrisgroup.com/primaws/rest/pub",
+          "auth": "UNCERTAIN. The pnxs request in the capture shows no Authorization header, but the sanitized export strips that header, and Primo VE's SPA normally sends a guest JWT. The client calls without one and, on 401/403, asks GET /primaws/rest/pub/institution/420CKIS_INST/jwt?isGuest=true&lang=cs&targetUrl=…&viewId=420CKIS_INST:UKAZ (from memory of the SPA, not from the capture) and retries with Authorization: Bearer <jwt>. No cookies are needed for the captured call.",
+          "detail": "SEARCH (verbatim, entry 0): GET /primaws/rest/pub/pnxs?acTriggered=false&blendFacetsSeparately=false&citationTrailFilterByAvailability=true&disableCache=false&getMore=0&inst=420CKIS_INST&isCDSearch=false&lang=cs&limit=10&mode=advanced&newspapersActive=true&newspapersSearch=false&offset=0&otbRanking=false&pcAvailability=false&q=<q>&qExclude=&qInclude=&rapido=false&refEntryActive=false&rtaLinks=true&scope=MyInst_and_CI&searchInFulltextUserSelection=true&skipDelivery=Y&sort=rank&tab=Everything&vid=420CKIS_INST:UKAZ\nq syntax (verbatim): any,contains,jakekolivpole,AND;title,contains,nazev,OR;title,equals,nazevjepresne,NOT;creator,contains,autorneaobsahuje,AND;sub,contains,predmet,AND;issn,contains,ISSN,AND;lang,exact,cze,AND;dr_s,exact,20250101,AND;dr_e,exact,20260101,AND — one `field,operator,value,BOOL` clause per form row (fields any/title/creator/sub/issn, operators contains/equals/exact, the boolean of each row trailing), then the pre-filters lang / dr_s / dr_e in the same syntax. Paging: offset + limit (10 in the capture). The SPA's own results URL for the same search: /discovery/search?query=any,contains,…,AND&query=title,contains,…&pfilter=lang,exact,cze,AND&pfilter=dr_s,exact,20250101,AND&pfilter=dr_e,exact,20260101,AND&tab=Everything&search_scope=MyInst_and_CI&sortby=rank&vid=420CKIS_INST:UKAZ&lang=cs&mode=advanced&offset=0.\nRESPONSE (zero hits, verbatim): {beaconO22, info{totalResultsLocal, totalResultsPC, total, first, last}, highlights{termsUnion[]}, docs[], timelog{…}}. docs[] entries follow Primo's PNX layout (context L/PC, adaptor, @id, pnx{control{recordid,sourceid}, display{type,title,creator,contributor,creationdate,publisher,language,ispartof,subject,description,identifier}, addata{doi,isbn,issn,jtitle,volume,issue,spage,date,abstract}, links{linktorsrc ($$U<url>$$D<label>)}}, delivery{link[{linkType,linkURL}], availability[]}) — parsed leniently, every field optional, pinned by a SYNTHETIC test doc.\nRecord page used: https://cuni.primo.exlibrisgroup.com/discovery/fulldisplay?docid=<recordid>&vid=420CKIS_INST:UKAZ&lang=cs&context=<L|PC>.\nCompanion calls seen: /primaws/rest/pub/facets (same params → {facets[]}), /primaws/rest/pub/resourceRecommender?lang=cs&query=…&view=…, and the Ex Libris beacon (beacon-eu.hosted.exlibrisgroup.com — the instance runs in the EU region eu04).",
+          "fixtures": "tests/fixtures/primo/search-empty.json — verbatim zero-hit response"
+        },
+        {
+          "kind": "login",
+          "base_url": "https://cas.cuni.cz/cas/login",
+          "auth": "Primo → Shibboleth IdP idp.cuni.cz (SAML2 Redirect SSO, entityId of the SP https://cuni.primo.exlibrisgroup.com/mng/login) → external authn → CAS (cas.cuni.cz). CAS form (captured): POST /cas/login?service=<idp callback> with username, password, execution (a long JWT-like flow token from the page), _eventId=submit; an alternative e-Identity (NIA) button.",
+          "detail": "Captured only up to the CAS login page. Not captured: the CAS ticket redirect back to idp.cuni.cz, the SAMLResponse POST to Primo/Alma (/mng/login), and how the signed-in state reaches the SPA (a user JWT). What signing in changes for SEARCH is unknown — Primo's guest search already covers the UK catalogue and the Central Discovery Index; the login matters for full-text access through the university's proxy, which is not a search concern."
+        }
+      ],
+      "unverified": [
+        "Whether pnxs needs a guest JWT; the exact guest-JWT endpoint.",
+        "dr_e as YYYY1231 for the 'to' year (the capture shows dr_s=20250101, dr_e=20260101 for the user's range; the tool writes an inclusive year end).",
+        "Real docs[] field shapes — the capture matched nothing; the parser is exercised by a synthetic PNX doc only."
+      ],
+      "needs_from_user": [
+        "A HAR of the same advanced search with a query that DOES match (e.g. 'genocida', 10 hits), exported WITH sensitive data (so the Authorization header and any jwt call are visible; do it logged out, as a guest, so no personal session is in it) — this pins both the auth question and the real record shape and lets the synthetic fixture be replaced by a verbatim one.",
+        "If the reader login is wanted: a HAR of the whole login (Primo 'Přihlásit' → idp.cuni.cz → cas.cuni.cz → back to Primo), with the password POST removed or redacted, plus a statement of what the login is expected to change for the search."
+      ]
+    }
+  ],
+  "decisions": [
+    "One tool, doctrine_search, fans out to both catalogues (the cz_caselaw_search shape): same criteria, per-source status, per-source totals and has_more, grouped output.",
+    "Both catalogues serve fixed pages of 10; per_source_limit (≤ 20; above 10 records come brief, without abstract/contents, to stay inside the response budget) is served by fetching the covering catalogue pages in a parallel batch, page walks further (pageWindow/sliceWindow in src/sources/shared/bib.ts).",
+    "No sort/format filters: their URL parameters were not captured and a guessed one would silently answer a different question.",
+    "No reader-login automation: entry points and redirect chains are not captured, and storing readers' library passwords is a privacy-policy decision for the operator (the policy currently states no passwords are held)."
+  ]
+}

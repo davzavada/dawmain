@@ -128,6 +128,7 @@ const EXPECTED_TOOLS = [
   "eurlex_search",
   "eurlex_get_document",
   "eurlex_legislative_history",
+  "doctrine_search",
   // EUIPO and ÚPV are deliberately not covered — see src/mcp/tools/index.ts.
 ];
 

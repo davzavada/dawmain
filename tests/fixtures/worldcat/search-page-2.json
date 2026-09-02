@@ -1,0 +1,1572 @@
+{
+ "databaseList": [
+  "4052",
+  "11162",
+  "4023",
+  "4056",
+  "10052",
+  "3583",
+  "3560",
+  "3590",
+  "11537",
+  "10007",
+  "10306",
+  "3578",
+  "3313",
+  "3577",
+  "2795",
+  "3962",
+  "3963",
+  "638",
+  "10025",
+  "10058",
+  "10896"
+ ],
+ "locale": "en",
+ "numberOfRecords": 12279,
+ "parsedQuery": [
+  {
+   "field": "kw:",
+   "text": "(keword)",
+   "impliedField": false,
+   "start": 0,
+   "end": 20
+  },
+  {
+   "field": "ti:",
+   "text": "(title)",
+   "boolean": "AND",
+   "impliedField": false,
+   "start": 26,
+   "end": 47
+  },
+  {
+   "field": "au:",
+   "text": "(author)",
+   "boolean": "OR",
+   "impliedField": false,
+   "start": 52,
+   "end": 73
+  }
+ ],
+ "partialResult": false,
+ "providerSearchRequest": "http://firefly.prod.oclc.org/firefly-service/rs/sru/worldcat-plus?version=1.1&operation=searchRetrieve&resultSetTTL=300&query=kw%3A%28keword%29+AND+ti%3A%28title%29+OR+au%3A%28author%29+++%28+%28yr%3A2021..2025%29+%29&recordSchema=info%3Asrw%2Fschema%2F1%2FCDFXML&maximumRecords=10&startRecord=11&x-info-5-retainAttributes=1&sortKeys=relevance,,1&x-info-5-translationLocale=en&x-info-5-altsort-newRR=1&x-info-5-holdPrivacyLevel=P,G&x-info-5-queryType=3&x-info-5-scopeTerm=%28kb%3A57439+%7C+%28x0%3Abook+++x4%3Adigital+++wz%3A45289%29%29+OR+pa%3Abrill_ieclo+OR+pa%3Abrill_cwto+OR+pa%3Abrill_imbo+OR+pa%3Abrill_hwgdso+OR+pa%3Abrill_uncls+OR+pa%3Abrill_ilwo+OR+pa%3Abrill_rlpic&x-info-5-scopeQueryType=3&x-info-5-dblist=4052,11162,4023,4056,10052,3583,3560,3590,11537,10007,10306,3578,3313,3577,2795,3962,3963,638,10025,10058,10896&x-info-5-stemTerms=on&x-info-5-holdingsIndications=true&x-info-5-affiliation=57439&x-info-5-rankingGroup=34227&x-info-5-rankingInstitution=45289&x-info-5-askForOwnership=on&x-info-5-preferredLanguage=eng&x-info-5-frbrGrouping=on&x-info-5-differentialGroupRank=false&x-info-5-kbwcArtHoldRegId=57439&x-info-5-customViewParms=OWC_FRBR_WCD_MIN%3ALHRDATAINS%3D%3C45289%3E%3BLSDATAINS%3D%3C45289%3E%3BNOLINKS%3D%3CNOLINKS%3E%3B&x-info-5-altsort-altBibAge=20&x-info-5-altsort-currentweight=100&x-info-5-altsort-altpercentQueryInAuthorScale=40&x-info-5-altsort-altSuperHoldingThreshhold=2000&x-info-5-altsort-altholdingScale=100&x-info-5-altsort-current=15&x-info-5-altsort-altsortdebug=0&x-info-5-altsort-oldweight=1&x-info-5-relevancyType=BEST_MATCH&x-info-5-altsort-altSuperHoldingBonus=50000&x-info-5-altsort-altShortBoost=10&x-info-5-altsort-altpercentAuthorInQueryScale=50&x-info-5-altsort-altpercentTitleInQueryScale=100&x-info-5-altsort-altpercentQueryInTitleScale=110&x-info-5-altsort-recent=25&x-info-5-altsort=1&x-info-5-altsort-altexactTitleScale=90&x-info-5-altsort-altexactAuthorScale=40&x-info-5-altsort-altBibCurrentScale=150&x-info-5-altsort-altBibHoldingBoost=150&x-info-5-altsort-altIgnoreTA=0&x-info-5-altsort-recentweight=10&x-info-5-newspaper=exclude&x-info-5-bookreview=exclude&x-info-5-openAccess=include&x-info-5-serviceName=DiscoveryServices",
+ "queryExpansion": {
+  "enhancedExpansionApiEnabled": true,
+  "enhancedExpansionDisplay": false,
+  "sensitiveTermInfoMessage": "This search expansion contains terms which some users may find sensitive.",
+  "sensitiveTermInfoMessageLanguage": "en",
+  "statusType": "WARNING"
+ },
+ "queryOptimization": {
+  "isIdDetectionEnabled": true,
+  "originalQuery": "kw:(keword) AND ti:(title) OR au:(author)   ( (yr:2021..2025) )",
+  "queryOptimized": false,
+  "searchTermDropped": false
+ },
+ "records": [
+  {
+   "additionalPhysicalFormEntries": [
+    {
+     "displayConstant": "Print version:",
+     "isbns": [
+      "9780367758974"
+     ],
+     "mainEntryHeadings": [
+      "Han, Je-Chin, 1946-"
+     ],
+     "titles": [
+      "Analytical heat transfer"
+     ]
+    }
+   ],
+   "additionalTitle": "Je-Chin Han, Lesley Wright.",
+   "authors": [
+    {
+     "entityUris": [
+      {
+       "type": "oclc",
+       "uri": "https://id.oclc.org/worldcat/entity/E39PBJy4fmKfV3Wdb8P67PrDv3"
+      }
+     ],
+     "firstNameObject": {
+      "data": "Je-Chin"
+     },
+     "flipNameOrder": false,
+     "lastNameObject": {
+      "data": "Han"
+     },
+     "notes": "1946-",
+     "primary": true,
+     "relatorList": {
+      "relators": [
+       {
+        "code": "aut",
+        "term": "Author"
+       }
+      ]
+     },
+     "subFieldsQueryString": " AND au=\"1946\"",
+     "type": "person"
+    },
+    {
+     "firstNameObject": {
+      "data": "Lesley"
+     },
+     "flipNameOrder": false,
+     "lastNameObject": {
+      "data": "Wright"
+     },
+     "primary": false,
+     "relatorList": {
+      "relators": [
+       {
+        "code": "aut",
+        "term": "Author"
+       }
+      ]
+     },
+     "type": "person"
+    }
+   ],
+   "bibliographiesObjectList": [
+    {
+     "data": "Includes bibliographical references and index.",
+     "private": false
+    }
+   ],
+   "bookReview": false,
+   "catLang": "eng",
+   "databaseId": "",
+   "date": "2022",
+   "defaultCoverArtUrl": "//coverart.oclc.org/ImageWebSvc/oclc/+-+3702195686_70.jpg?SearchOrder=+-+IG,OT,OS,AV,FA,GO&DefaultImage=N&client&allowDefault=true",
+   "digitalGraphicRepresentation": "",
+   "digitalObjectIdentifiers": [
+    "10.1201/9781003164487"
+   ],
+   "disableAuthorLinks": false,
+   "displayCopyAndPasteCitations": true,
+   "displayDeepOpacLinks": false,
+   "displayOpacLink": true,
+   "edition": "Second edition.",
+   "editionId": "9adf281da891ccae24e3468a3b7eb80c",
+   "editionOclcNumbers": [
+    "1407117642",
+    "1310467528",
+    "1315536874"
+   ],
+   "editionSingletonEdition": false,
+   "enhancedCollectionName": "WorldCat.org",
+   "enhancedEditionVariantInfo": [
+    {
+     "editionVariantInfo": {
+      "language": "eng",
+      "ocn": "1315536874"
+     },
+     "language": "eng",
+     "languageNameInLocal": "English",
+     "ocn": "1315536874"
+    },
+    {
+     "editionVariantInfo": {
+      "language": "ger",
+      "ocn": "1407117642"
+     },
+     "language": "ger",
+     "languageNameInLocal": "German",
+     "ocn": "1407117642"
+    }
+   ],
+   "entityAuthors": {
+    "authors": [
+     {
+      "authorName": "Je-Chin Han",
+      "entityUri": "https://id.oclc.org/worldcat/entity/E39PBJy4fmKfV3Wdb8P67PrDv3"
+     }
+    ]
+   },
+   "heldByInstitutionName": "Peace Palace Library",
+   "heldByLevel": 1,
+   "holdingAudienceLevel": "P",
+   "iiifImageUrl": "",
+   "isbns": [
+    "9781000597349",
+    "1000597342",
+    "9781003164487",
+    "100316448X",
+    "9781000597295",
+    "1000597296"
+   ],
+   "itemType": "book_digital",
+   "itemTypeDisplay": "eBook",
+   "labelAsUniqueIdentifier": false,
+   "language": "eng",
+   "lcNumber": "2021059842",
+   "links": [
+    {
+     "accessMethod": "4",
+     "relationship": "0",
+     "url": "https://www.vlebooks.com/vleweb/product/openreader?id=none&isbn=9781000597295"
+    }
+   ],
+   "masterCallNumber": "QC320",
+   "mediumCoverArtUrl": "//coverart.oclc.org/ImageWebSvc/oclc/+-+3702195686_140.jpg?SearchOrder=+-+IG,OT,OS,AV,FA,GO&DefaultImage=N&client&allowDefault=true",
+   "musicalPresentationStatement": "",
+   "numberOfEditionIds": 14,
+   "numberOfOtherEditions": 38,
+   "oclcNumber": "1310467528",
+   "opacLink": "http://peacepalace.on.worldcat.org/search?queryString=ib%3A1000597342",
+   "openAccess": false,
+   "openUrlContextObject": "rft_val_fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Abook&ctx_enc=info%3Aofi%2Fenc%3AUTF-8&rft.pub=CRC+Press%2C&ctx_tim=2026-09-02T03%3A17%3A16EDT&rft.dat=1310467528&rft.place=Boca+Raton%2C+FL+%3A&rft_id=info%3Aoclcnum%2F1310467528&rfr_id=info%3Asid%2F.on.worldcat.org%3Axwc&ctx_ver=Z39.88-2004&rft.isbn=9781000597349&rft.btitle=Analytical+heat+transfer&rft.genre=book&rft.aufirst=Je-Chin&rft.pages=1+online+resource&url_ctx_fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Actx&rft.aulast=Han&rfr.id=1310467528&rft.id=1310467528&url_ver=Z39.88-2004&rft.date=2022&ctx_id=1310467528&rft_dat=%7B%22stdrt1%22%3A%22Book%22%2C%22stdrt2%22%3A%22Digital%22%7D",
+   "peerReviewed": false,
+   "physicalDescription": "1 online resource",
+   "publishers": [
+    {
+     "data": "Boca Raton, FL : CRC Press, 2022."
+    }
+   ],
+   "remoteDatabase": false,
+   "source": "",
+   "sourceCollection": "xwc",
+   "staffILLRequestUrl": "https://57439.share.worldcat.org/wms/cmnd/nd/discover/items/1310467528/holdings/ALL?dbid=",
+   "subjectGroups": [
+    {
+     "bibSubjects": [
+      {
+       "data": "Heat Transmission",
+       "local": false,
+       "thesaurusType": "LIBRARY_OF_CONGRESS_SUBJECT_HEADINGS",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Heat Transmission",
+        "displayData": "Heat—Transmission",
+        "private": false
+       }
+      }
+     ],
+     "id": "lcsh",
+     "isPromoted": true,
+     "label": "Library of Congress Subject Headings",
+     "thesaurusType": "LIBRARY_OF_CONGRESS_SUBJECT_HEADINGS"
+    },
+    {
+     "bibSubjects": [
+      {
+       "data": "Heat Transmission",
+       "local": false,
+       "otherSource": "fast",
+       "thesaurusType": "OTHER_SOURCES",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Heat Transmission",
+        "displayData": "Heat—Transmission",
+        "private": false
+       }
+      }
+     ],
+     "id": "fast",
+     "isPromoted": true,
+     "label": "Faceted Application of Subject Terminology",
+     "thesaurusType": "OTHER_SOURCES"
+    },
+    {
+     "bibSubjects": [
+      {
+       "data": "Chaleur Transmission",
+       "local": false,
+       "thesaurusType": "REPERTOIRE_DE_VEDETTES_MATIERE",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Chaleur Transmission",
+        "displayData": "Chaleur—Transmission",
+        "private": false
+       }
+      }
+     ],
+     "id": "rvm",
+     "isPromoted": true,
+     "label": "Répertoire de Vedettes-Matière",
+     "thesaurusType": "REPERTOIRE_DE_VEDETTES_MATIERE"
+    },
+    {
+     "bibSubjects": [
+      {
+       "data": "heat transmission",
+       "local": false,
+       "otherSource": "aat",
+       "thesaurusType": "OTHER_SOURCES",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "heat transmission",
+        "displayData": "heat transmission",
+        "private": false
+       }
+      }
+     ],
+     "id": "aat",
+     "isPromoted": false,
+     "label": "Art & Architecture Thesaurus",
+     "thesaurusType": "OTHER_SOURCES"
+    },
+    {
+     "bibSubjects": [
+      {
+       "data": "SCIENCE / Energy",
+       "local": false,
+       "otherSource": "bisacsh",
+       "thesaurusType": "OTHER_SOURCES",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "SCIENCE / Energy",
+        "displayData": "SCIENCE / Energy",
+        "private": false
+       }
+      },
+      {
+       "data": "SCIENCE / Mechanics / Dynamics / Thermodynamics",
+       "local": false,
+       "otherSource": "bisacsh",
+       "thesaurusType": "OTHER_SOURCES",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "SCIENCE / Mechanics / Dynamics / Thermodynamics",
+        "displayData": "SCIENCE / Mechanics / Dynamics / Thermodynamics",
+        "private": false
+       }
+      },
+      {
+       "data": "TECHNOLOGY / Engineering / Mechanical",
+       "local": false,
+       "otherSource": "bisacsh",
+       "thesaurusType": "OTHER_SOURCES",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "TECHNOLOGY / Engineering / Mechanical",
+        "displayData": "TECHNOLOGY / Engineering / Mechanical",
+        "private": false
+       }
+      }
+     ],
+     "id": "bisacsh",
+     "isPromoted": false,
+     "label": "BISAC Subject Headings",
+     "thesaurusType": "OTHER_SOURCES"
+    }
+   ],
+   "summariesObjectList": [
+    {
+     "data": "\"Analytical Heat Transfer explains how to analyze and solve conduction, convection, and radiation heat transfer problems. It enables students to tackle complex engineering heat transfer problems prevalent in practice. Covering heat transfer in high-speed flows and unsteady highly turbulent flows, the book also discusses enhanced heat transfer in channels, heat transfer in rotating channels, numerical modeling for turbulent flow heat transfer, and thermally developing heat transfer in a circular tube. The second edition features new content on Duhamel's superposition method, Green's function method for transient heat conduction, finite-difference method for steady state and transient heat conduction in cylindrical coordinates, and laminar mixed convection. It includes three new chapters on boiling, condensation, and heat exchanger analysis, in addition to end-of-chapter problems. The book bridges the gap between basic heat transfer undergraduate courses and advanced heat transfer graduate courses for a single semester of intermediate heat transfer; advanced conduction/convection heat transfer; or radiation heat transfer. Features : focuses on analyzing and solving classic heat transfer problems in conduction, convection, and radiation, covers 3-D view factor evaluation, combined radiation with conduction and/or convection, gas radiation optically thin and optically thick limits, and thermally developing heat transfer in a circular tube. Also features updated content and new chapters on mass and heat transfer analogy, laminar-turbulent transitional heat transfer, unsteady highly turbulent flows, enhanced heat transfer in channels, heat transfer in rotating channels, and numerical modeling for turbulent flow heat transfer. Provides step-by-step mathematical formula derivations, analytical solution procedures, and demonstration examples. Includes end-of-chapter problems with an accompanying Solutions Manual for instructors. This book is ideal for undergraduate and graduate students studying basic heat transfer and advanced heat transfer\"-- Provided by publisher.",
+     "private": false
+    }
+   ],
+   "titleObject": {
+    "data": "Analytical heat transfer"
+   },
+   "workCount": 39,
+   "workId": "899194404",
+   "workSingletonIndicator": false,
+   "workSingletonWork": false
+  },
+  {
+   "accessibilityContents": [
+    {
+     "displayConstant": "0",
+     "materialsSpecified": {
+      "data": "EPUB",
+      "private": false
+     },
+     "source": {
+      "data": "onix",
+      "private": false
+     },
+     "textualAssistiveFeature": [
+      {
+       "data": "ARIA roles provided",
+       "private": false
+      }
+     ]
+    },
+    {
+     "displayConstant": "0",
+     "materialsSpecified": {
+      "data": "EPUB",
+      "private": false
+     },
+     "source": {
+      "data": "onix",
+      "private": false
+     },
+     "textualAssistiveFeature": [
+      {
+       "data": "All non-decorative content supports reading without sight",
+       "private": false
+      }
+     ]
+    },
+    {
+     "displayConstant": "0",
+     "materialsSpecified": {
+      "data": "EPUB",
+      "private": false
+     },
+     "source": {
+      "data": "onix",
+      "private": false
+     },
+     "textualAssistiveFeature": [
+      {
+       "data": "Appearance of all textual content can be modified",
+       "private": false
+      }
+     ]
+    },
+    {
+     "displayConstant": "0",
+     "materialsSpecified": {
+      "data": "EPUB",
+      "private": false
+     },
+     "source": {
+      "data": "onix",
+      "private": false
+     },
+     "textualAssistiveFeature": [
+      {
+       "data": "Epub Accessibility Specification 1.1",
+       "private": false
+      }
+     ]
+    },
+    {
+     "displayConstant": "0",
+     "materialsSpecified": {
+      "data": "EPUB",
+      "private": false
+     },
+     "source": {
+      "data": "onix",
+      "private": false
+     },
+     "textualAssistiveFeature": [
+      {
+       "data": "Index navigation",
+       "private": false
+      }
+     ]
+    },
+    {
+     "displayConstant": "0",
+     "materialsSpecified": {
+      "data": "EPUB",
+      "private": false
+     },
+     "source": {
+      "data": "onix",
+      "private": false
+     },
+     "textualAssistiveFeature": [
+      {
+       "data": "Next / Previous structural navigation",
+       "private": false
+      }
+     ]
+    },
+    {
+     "displayConstant": "0",
+     "materialsSpecified": {
+      "data": "EPUB",
+      "private": false
+     },
+     "source": {
+      "data": "onix",
+      "private": false
+     },
+     "textualAssistiveFeature": [
+      {
+       "data": "Print-equivalent page numbering",
+       "private": false
+      }
+     ]
+    },
+    {
+     "displayConstant": "0",
+     "materialsSpecified": {
+      "data": "EPUB",
+      "private": false
+     },
+     "source": {
+      "data": "onix",
+      "private": false
+     },
+     "textualAssistiveFeature": [
+      {
+       "data": "Short alternative textual descriptions",
+       "private": false
+      }
+     ]
+    },
+    {
+     "displayConstant": "0",
+     "materialsSpecified": {
+      "data": "EPUB",
+      "private": false
+     },
+     "source": {
+      "data": "onix",
+      "private": false
+     },
+     "textualAssistiveFeature": [
+      {
+       "data": "Single logical reading order",
+       "private": false
+      }
+     ]
+    },
+    {
+     "displayConstant": "0",
+     "materialsSpecified": {
+      "data": "EPUB",
+      "private": false
+     },
+     "source": {
+      "data": "onix",
+      "private": false
+     },
+     "textualAssistiveFeature": [
+      {
+       "data": "Table of contents navigation",
+       "private": false
+      }
+     ]
+    },
+    {
+     "displayConstant": "0",
+     "materialsSpecified": {
+      "data": "EPUB",
+      "private": false
+     },
+     "source": {
+      "data": "onix",
+      "private": false
+     },
+     "textualAssistiveFeature": [
+      {
+       "data": "Use of color is not sole means of conveying information",
+       "private": false
+      }
+     ]
+    },
+    {
+     "displayConstant": "0",
+     "materialsSpecified": {
+      "data": "PDF",
+      "private": false
+     },
+     "source": {
+      "data": "onix",
+      "private": false
+     },
+     "textualAssistiveFeature": [
+      {
+       "data": "Index navigation",
+       "private": false
+      }
+     ]
+    },
+    {
+     "displayConstant": "0",
+     "materialsSpecified": {
+      "data": "PDF",
+      "private": false
+     },
+     "source": {
+      "data": "onix",
+      "private": false
+     },
+     "textualAssistiveFeature": [
+      {
+       "data": "Print-equivalent page numbering",
+       "private": false
+      }
+     ]
+    },
+    {
+     "displayConstant": "0",
+     "materialsSpecified": {
+      "data": "PDF",
+      "private": false
+     },
+     "source": {
+      "data": "onix",
+      "private": false
+     },
+     "textualAssistiveFeature": [
+      {
+       "data": "Short alternative textual descriptions",
+       "private": false
+      }
+     ]
+    },
+    {
+     "displayConstant": "0",
+     "materialsSpecified": {
+      "data": "PDF",
+      "private": false
+     },
+     "source": {
+      "data": "onix",
+      "private": false
+     },
+     "textualAssistiveFeature": [
+      {
+       "data": "Table of contents navigation",
+       "private": false
+      }
+     ]
+    }
+   ],
+   "accessibilityNotes": [
+    {
+     "displayConstant": "8",
+     "materialsSpecified": {
+      "data": "EPUB",
+      "private": false
+     },
+     "summaryOfAccessibility": {
+      "data": "No known hazards or warnings",
+      "private": false
+     }
+    },
+    {
+     "displayConstant": "8",
+     "materialsSpecified": {
+      "data": "EPUB",
+      "private": false
+     },
+     "summaryOfAccessibility": {
+      "data": "Publisher contact for further accessibility information: ebookqueries@tandf.co.uk",
+      "private": false
+     }
+    },
+    {
+     "displayConstant": "8",
+     "materialsSpecified": {
+      "data": "PDF",
+      "private": false
+     },
+     "summaryOfAccessibility": {
+      "data": "No known hazards or warnings",
+      "private": false
+     }
+    },
+    {
+     "displayConstant": "8",
+     "materialsSpecified": {
+      "data": "PDF",
+      "private": false
+     },
+     "summaryOfAccessibility": {
+      "data": "Publisher contact for further accessibility information: ebookqueries@tandf.co.uk",
+      "private": false
+     }
+    }
+   ],
+   "additionalTitle": "Maartje Abbenhuis.",
+   "allHighlightedFields": [
+    "date",
+    "publisherObjectList"
+   ],
+   "authors": [
+    {
+     "entityUris": [
+      {
+       "type": "oclc",
+       "uri": "https://id.oclc.org/worldcat/entity/E39PBJj8Y6Xchw3PjYbkKjc9Dq"
+      }
+     ],
+     "firstNameObject": {
+      "data": "Maartje"
+     },
+     "flipNameOrder": false,
+     "lastNameObject": {
+      "data": "Abbenhuis"
+     },
+     "primary": true,
+     "relatorList": {
+      "relators": [
+       {
+        "code": "aut",
+        "term": "Author"
+       }
+      ]
+     },
+     "type": "person"
+    }
+   ],
+   "bookReview": false,
+   "briefHighlightedFields": [
+    "date",
+    "publisherObjectList"
+   ],
+   "catLang": "eng",
+   "contentsObjects": [
+    {
+     "note": "Introduction : the war knocked on our door, it did not step inside : the Netherlands and the Great War -- A nation too small to commit great stupidities : the Netherlands and neutrality -- A pack of lions : the Dutch armed forces -- Api Api : the mobilisation July-August 1914 -- Calm amidst the raging waves : defending territorial neutrality -- Fugitives of war : refugees and internees -- Shifting sand and gravel : military and economic neutrality -- Somewhere between war and peace : the states of war and siege -- Ash-grey with neutrality : safeguarding neutrality in the state of siege -- The war for bread and guns : supply and the fate of a small nation -- No more war! : the furore over leave and demobilisation -- This dreary war : expressions of popular frustration -- All hell has broken loose : the year 1918 -- Conclusion : between the devil and the deep blue sea : the paradox of neutrality.",
+     "noteObject": {
+      "data": "Introduction : the war knocked on our door, it did not step inside : the Netherlands and the Great War -- A nation too small to commit great stupidities : the Netherlands and neutrality -- A pack of lions : the Dutch armed forces -- Api Api : the mobilisation July-August 1914 -- Calm amidst the raging waves : defending territorial neutrality -- Fugitives of war : refugees and internees -- Shifting sand and gravel : military and economic neutrality -- Somewhere between war and peace : the states of war and siege -- Ash-grey with neutrality : safeguarding neutrality in the state of siege -- The war for bread and guns : supply and the fate of a small nation -- No more war! : the furore over leave and demobilisation -- This dreary war : expressions of popular frustration -- All hell has broken loose : the year 1918 -- Conclusion : between the devil and the deep blue sea : the paradox of neutrality.",
+      "private": false
+     },
+     "titles": [
+      "Introduction : the war knocked on our door, it did not step inside : the Netherlands and the Great War --",
+      "A nation too small to commit great stupidities : the Netherlands and neutrality --",
+      "A pack of lions : the Dutch armed forces --",
+      "Api Api : the mobilisation July-August 1914 --",
+      "Calm amidst the raging waves : defending territorial neutrality --",
+      "Fugitives of war : refugees and internees --",
+      "Shifting sand and gravel : military and economic neutrality --",
+      "Somewhere between war and peace : the states of war and siege --",
+      "Ash-grey with neutrality : safeguarding neutrality in the state of siege --",
+      "The war for bread and guns : supply and the fate of a small nation --",
+      "No more war! : the furore over leave and demobilisation --",
+      "This dreary war : expressions of popular frustration --",
+      "All hell has broken loose : the year 1918 --",
+      "Conclusion : between the devil and the deep blue sea : the paradox of neutrality."
+     ]
+    }
+   ],
+   "databaseId": "",
+   "date": "2025",
+   "defaultCoverArtUrl": "//coverart.oclc.org/ImageWebSvc/oclc/+-+7729938006_70.jpg?SearchOrder=+-+IG,OT,OS,AV,FA,GO&DefaultImage=N&client&allowDefault=true",
+   "digitalGraphicRepresentation": "",
+   "digitalObjectIdentifiers": [
+    "10.5117/9789053568187"
+   ],
+   "disableAuthorLinks": false,
+   "displayCopyAndPasteCitations": true,
+   "displayDeepOpacLinks": false,
+   "displayOpacLink": true,
+   "edition": "",
+   "editionId": "dd039d5a3e32f276c4f7f3847397145a",
+   "editionOclcNumbers": [
+    "1582145907",
+    "1553844722"
+   ],
+   "editionSingletonEdition": false,
+   "enhancedCollectionName": "WorldCat.org",
+   "enhancedEditionVariantInfo": [
+    {
+     "editionVariantInfo": {
+      "language": "ger",
+      "ocn": "1582145907"
+     },
+     "language": "ger",
+     "languageNameInLocal": "German",
+     "ocn": "1582145907"
+    }
+   ],
+   "entityAuthors": {
+    "authors": [
+     {
+      "authorName": "Maartje Abbenhuis",
+      "entityUri": "https://id.oclc.org/worldcat/entity/E39PBJj8Y6Xchw3PjYbkKjc9Dq"
+     }
+    ]
+   },
+   "heldByInstitutionName": "Peace Palace Library",
+   "heldByLevel": 1,
+   "holdingAudienceLevel": "P",
+   "iiifImageUrl": "",
+   "isbns": [
+    "9781040800799",
+    "1040800793",
+    "9781040795873",
+    "1040795870",
+    "9781003705338",
+    "1003705332"
+   ],
+   "itemType": "book_digital",
+   "itemTypeDisplay": "eBook",
+   "labelAsUniqueIdentifier": false,
+   "language": "eng",
+   "lcNumber": "",
+   "links": [
+    {
+     "accessMethod": "4",
+     "label": "Taylor & Francis",
+     "relationship": "0",
+     "url": "https://www.taylorfrancis.com/books/9781003705338"
+    },
+    {
+     "accessMethod": "4",
+     "label": "Image",
+     "relationship": " ",
+     "url": "http://images.tandf.co.uk/common/jackets/agentjpg/978104080/9781040800799.jpg"
+    }
+   ],
+   "masterCallNumber": "D621.N4",
+   "mediumCoverArtUrl": "//coverart.oclc.org/ImageWebSvc/oclc/+-+7729938006_140.jpg?SearchOrder=+-+IG,OT,OS,AV,FA,GO&DefaultImage=N&client&allowDefault=true",
+   "musicalPresentationStatement": "",
+   "numberOfEditionIds": 8,
+   "numberOfOtherEditions": 30,
+   "oclcNumber": "1553844722",
+   "opacLink": "http://peacepalace.on.worldcat.org/search?queryString=ib%3A1040800793",
+   "openAccess": true,
+   "openUrlContextObject": "rft_val_fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Abook&ctx_enc=info%3Aofi%2Fenc%3AUTF-8&rft.pub=Routledge%2C&ctx_tim=2026-09-02T03%3A17%3A16EDT&rft.dat=1553844722&rft.place=London+%3A&rft_id=info%3Aoclcnum%2F1553844722&rfr_id=info%3Asid%2F.on.worldcat.org%3Axwc&ctx_ver=Z39.88-2004&rft.isbn=9781040800799&rft.btitle=The+art+of+staying+neutral+%3A+the+Netherlands+in+the+First+World+War%2C+1914-1918&rft.genre=book&rft.aufirst=Maartje&rft.pages=1+online+resource&url_ctx_fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Actx&rft.aulast=Abbenhuis&rfr.id=1553844722&rft.id=1553844722&url_ver=Z39.88-2004&rft.date=2025&ctx_id=1553844722&rft_dat=%7B%22stdrt1%22%3A%22Book%22%2C%22stdrt2%22%3A%22Digital%22%7D",
+   "peerReviewed": false,
+   "physicalDescription": "1 online resource",
+   "publishers": [
+    {
+     "data": "London : Routledge, 2025."
+    }
+   ],
+   "remoteDatabase": false,
+   "source": "",
+   "sourceCollection": "xwc",
+   "staffILLRequestUrl": "https://57439.share.worldcat.org/wms/cmnd/nd/discover/items/1553844722/holdings/ALL?dbid=",
+   "subjectGroups": [
+    {
+     "bibSubjects": [
+      {
+       "data": "Neutrality Netherlands History 20th century",
+       "local": false,
+       "thesaurusType": "LIBRARY_OF_CONGRESS_SUBJECT_HEADINGS",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Neutrality Netherlands History 20th century",
+        "displayData": "Neutrality—Netherlands—History—20th century",
+        "private": false
+       }
+      },
+      {
+       "data": "World War, 1914-1918 Netherlands",
+       "local": false,
+       "thesaurusType": "LIBRARY_OF_CONGRESS_SUBJECT_HEADINGS",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "World War, 1914-1918 Netherlands",
+        "displayData": "World War, 1914-1918—Netherlands",
+        "private": false
+       }
+      },
+      {
+       "data": "Netherlands History Wilhelmina, 1898-1948",
+       "local": false,
+       "thesaurusType": "LIBRARY_OF_CONGRESS_SUBJECT_HEADINGS",
+       "type": "GEOGRAPHICAL_TERM",
+       "unifiedData": {
+        "data": "Netherlands History Wilhelmina, 1898-1948",
+        "displayData": "Netherlands—History—Wilhelmina, 1898-1948",
+        "private": false
+       }
+      }
+     ],
+     "id": "lcsh",
+     "isPromoted": true,
+     "label": "Library of Congress Subject Headings",
+     "thesaurusType": "LIBRARY_OF_CONGRESS_SUBJECT_HEADINGS"
+    },
+    {
+     "bibSubjects": [
+      {
+       "data": "Neutrality History",
+       "local": false,
+       "otherSource": "fast",
+       "thesaurusType": "OTHER_SOURCES",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Neutrality History",
+        "displayData": "Neutrality—History",
+        "private": false
+       }
+      },
+      {
+       "data": "Netherlands",
+       "local": false,
+       "otherSource": "fast",
+       "thesaurusType": "OTHER_SOURCES",
+       "type": "GEOGRAPHICAL_TERM",
+       "unifiedData": {
+        "data": "Netherlands",
+        "displayData": "Netherlands",
+        "private": false
+       }
+      },
+      {
+       "data": "1898-1948",
+       "local": false,
+       "otherSource": "fast",
+       "thesaurusType": "OTHER_SOURCES",
+       "type": "CHRONOLOGY_TERM",
+       "unifiedData": {
+        "data": "1898-1948",
+        "displayData": "1898-1948",
+        "private": false
+       }
+      },
+      {
+       "data": "1900-1999",
+       "local": false,
+       "otherSource": "fast",
+       "thesaurusType": "OTHER_SOURCES",
+       "type": "CHRONOLOGY_TERM",
+       "unifiedData": {
+        "data": "1900-1999",
+        "displayData": "1900-1999",
+        "private": false
+       }
+      }
+     ],
+     "id": "fast",
+     "isPromoted": true,
+     "label": "Faceted Application of Subject Terminology",
+     "thesaurusType": "OTHER_SOURCES"
+    },
+    {
+     "bibSubjects": [
+      {
+       "data": "Neutralité Pays-Bas Histoire 20e siècle",
+       "local": false,
+       "thesaurusType": "REPERTOIRE_DE_VEDETTES_MATIERE",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Neutralité Pays-Bas Histoire 20e siècle",
+        "displayData": "Neutralité—Pays-Bas—Histoire—20e siècle",
+        "private": false
+       }
+      },
+      {
+       "data": "Guerre mondiale, 1914-1918 Pays-Bas",
+       "local": false,
+       "thesaurusType": "REPERTOIRE_DE_VEDETTES_MATIERE",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Guerre mondiale, 1914-1918 Pays-Bas",
+        "displayData": "Guerre mondiale, 1914-1918—Pays-Bas",
+        "private": false
+       }
+      },
+      {
+       "data": "Pays-Bas Histoire 1898-1948 (Wilhelmine)",
+       "local": false,
+       "thesaurusType": "REPERTOIRE_DE_VEDETTES_MATIERE",
+       "type": "GEOGRAPHICAL_TERM",
+       "unifiedData": {
+        "data": "Pays-Bas Histoire 1898-1948 (Wilhelmine)",
+        "displayData": "Pays-Bas—Histoire—1898-1948 (Wilhelmine)",
+        "private": false
+       }
+      }
+     ],
+     "id": "rvm",
+     "isPromoted": true,
+     "label": "Répertoire de Vedettes-Matière",
+     "thesaurusType": "REPERTOIRE_DE_VEDETTES_MATIERE"
+    }
+   ],
+   "summariesObjectList": [
+    {
+     "data": "The Art of Staying Neutral offers a fascinating insight into the problems and challenges associated with neutrality in an age of 'total war'. It explains how the Netherlands upheld and protected its non-belligerency during the First World War despite constant interference from its warring neighbours.Staying neutral was an artform that the Dutch managed to master through clever diplomacy, conscientious adherence to international laws, comprehensive mobilisation of its armed forces, regular patrols of its territorial boundaries, careful policing of its citizens, and a decisive measure of good fortune. The Art of Staying Neutral makes important contributions to the study of neutrality and the domestic history of the Netherlands in this seminal world event.",
+     "private": false
+    }
+   ],
+   "titleObject": {
+    "data": "The art of staying neutral : the Netherlands in the First World War, 1914-1918"
+   },
+   "totalHighlights": 2,
+   "workCount": 31,
+   "workId": "794164798",
+   "workSingletonIndicator": false,
+   "workSingletonWork": false
+  },
+  {
+   "additionalPhysicalFormEntries": [
+    {
+     "displayConstant": "Print version:",
+     "isbns": [
+      "9780190696023"
+     ],
+     "mainEntryHeadings": [
+      "Kretzmer, David, 1943-"
+     ],
+     "recordControlOclcNumbers": [
+      "1183400461"
+     ],
+     "titles": [
+      "Occupation of justice."
+     ]
+    }
+   ],
+   "additionalTitle": "David Kretzmer & Yaël Ronen.",
+   "allHighlightedFields": [
+    "date",
+    "publisherObjectList"
+   ],
+   "authors": [
+    {
+     "entityUris": [
+      {
+       "type": "oclc",
+       "uri": "https://id.oclc.org/worldcat/entity/E39PBJfrMhdGhyqVHQTvxtvyh3"
+      }
+     ],
+     "firstNameObject": {
+      "data": "David"
+     },
+     "flipNameOrder": false,
+     "lastNameObject": {
+      "data": "Kretzmer"
+     },
+     "notes": "1943-",
+     "primary": true,
+     "relatorList": {
+      "relators": [
+       {
+        "code": "aut",
+        "term": "Author"
+       }
+      ]
+     },
+     "subFieldsQueryString": " AND au=\"1943\"",
+     "type": "person"
+    },
+    {
+     "entityUris": [
+      {
+       "type": "oclc",
+       "uri": "https://id.oclc.org/worldcat/entity/E39PBJwxQkfyh77kgKqjcwwt8C"
+      }
+     ],
+     "firstNameObject": {
+      "data": "Yaël"
+     },
+     "flipNameOrder": false,
+     "lastNameObject": {
+      "data": "Ronen"
+     },
+     "notes": "1968-",
+     "primary": false,
+     "relatorList": {
+      "relators": [
+       {
+        "code": "aut",
+        "term": "Author"
+       }
+      ]
+     },
+     "subFieldsQueryString": " AND au=\"1968\"",
+     "type": "person"
+    }
+   ],
+   "bibliographiesObjectList": [
+    {
+     "data": "Includes bibliographical references and index.",
+     "private": false
+    }
+   ],
+   "bookReview": false,
+   "briefHighlightedFields": [
+    "date",
+    "publisherObjectList"
+   ],
+   "catLang": "eng",
+   "contentsObjects": [
+    {
+     "note": "Introduction -- Jurisdiction and justiciability -- Local law, military orders and administrative law -- The international law of belligerent occupation -- International human rights law -- Israeli constitutional law -- The Oslo Accords -- Public order and civil life -- Gaza after 2005 -- Civilian settlements -- Israeli settlers -- The separation barrier -- Planning and building in Area C -- Residence and family reunification -- Security measures : basic issues -- Internment -- Interrogation practices -- Punitive house demolitions -- Deportations -- Hostilities -- Conclusions.",
+     "noteObject": {
+      "data": "Introduction -- Jurisdiction and justiciability -- Local law, military orders and administrative law -- The international law of belligerent occupation -- International human rights law -- Israeli constitutional law -- The Oslo Accords -- Public order and civil life -- Gaza after 2005 -- Civilian settlements -- Israeli settlers -- The separation barrier -- Planning and building in Area C -- Residence and family reunification -- Security measures : basic issues -- Internment -- Interrogation practices -- Punitive house demolitions -- Deportations -- Hostilities -- Conclusions.",
+      "private": false
+     }
+    }
+   ],
+   "databaseId": "",
+   "date": "2021",
+   "defaultCoverArtUrl": "//coverart.oclc.org/ImageWebSvc/oclc/+-+4677182876_70.jpg?SearchOrder=+-+IG,OT,OS,AV,FA,GO&DefaultImage=N&client&allowDefault=true",
+   "digitalGraphicRepresentation": "",
+   "disableAuthorLinks": false,
+   "displayCopyAndPasteCitations": true,
+   "displayDeepOpacLinks": false,
+   "displayOpacLink": true,
+   "edition": "Second edition.",
+   "editionId": "4eee9b68226ff7d9c12049f451f27e45",
+   "editionOclcNumbers": [
+    "1480334222",
+    "1237362219",
+    "1316444511",
+    "1475877878",
+    "1257794382"
+   ],
+   "editionSingletonEdition": false,
+   "enhancedCollectionName": "WorldCat.org",
+   "enhancedEditionVariantInfo": [
+    {
+     "editionVariantInfo": {
+      "language": "eng",
+      "ocn": "1316444511"
+     },
+     "language": "eng",
+     "languageNameInLocal": "English",
+     "ocn": "1316444511"
+    },
+    {
+     "editionVariantInfo": {
+      "language": "eng",
+      "ocn": "1475877878"
+     },
+     "language": "eng",
+     "languageNameInLocal": "English",
+     "ocn": "1475877878"
+    },
+    {
+     "editionVariantInfo": {
+      "language": "eng",
+      "ocn": "1480334222"
+     },
+     "language": "eng",
+     "languageNameInLocal": "English",
+     "ocn": "1480334222"
+    },
+    {
+     "editionVariantInfo": {
+      "language": "ger",
+      "ocn": "1257794382"
+     },
+     "language": "ger",
+     "languageNameInLocal": "German",
+     "ocn": "1257794382"
+    }
+   ],
+   "entityAuthors": {
+    "authors": [
+     {
+      "authorName": "David Kretzmer",
+      "entityUri": "https://id.oclc.org/worldcat/entity/E39PBJfrMhdGhyqVHQTvxtvyh3"
+     },
+     {
+      "authorName": "Yaël Ronen",
+      "entityUri": "https://id.oclc.org/worldcat/entity/E39PBJwxQkfyh77kgKqjcwwt8C"
+     }
+    ]
+   },
+   "heldByInstitutionName": "Peace Palace Library",
+   "heldByLevel": 1,
+   "holdingAudienceLevel": "P",
+   "iiifImageUrl": "",
+   "isbns": [
+    "9780190696030",
+    "0190696036",
+    "9780190696054",
+    "0190696052"
+   ],
+   "itemType": "book_digital",
+   "itemTypeDisplay": "eBook",
+   "labelAsUniqueIdentifier": false,
+   "language": "eng",
+   "lcNumber": "",
+   "links": [
+    {
+     "accessMethod": "4",
+     "label": "EBSCOhost",
+     "relationship": "0",
+     "url": "http://search.ebscohost.com/login.aspx?direct=true&scope=site&db=nlebk&db=nlabk&AN=2723249"
+    },
+    {
+     "accessMethod": "4",
+     "relationship": "0",
+     "url": "https://dx.doi.org/10.1093/oso/9780190696023.001.0001"
+    }
+   ],
+   "masterCallNumber": "KMK3466 .K74 2021",
+   "mediumCoverArtUrl": "//coverart.oclc.org/ImageWebSvc/oclc/+-+4677182876_140.jpg?SearchOrder=+-+IG,OT,OS,AV,FA,GO&DefaultImage=N&client&allowDefault=true",
+   "musicalPresentationStatement": "",
+   "numberOfEditionIds": 7,
+   "numberOfOtherEditions": 33,
+   "oclcNumber": "1237362219",
+   "opacLink": "http://peacepalace.on.worldcat.org/search?queryString=ib%3A0190696036",
+   "openAccess": false,
+   "openUrlContextObject": "rft_val_fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Abook&ctx_enc=info%3Aofi%2Fenc%3AUTF-8&rft.pub=Oxford+University+Press%2C&ctx_tim=2026-09-02T03%3A17%3A16EDT&rft.dat=1237362219&rft.place=New+York%2C+NY+%3A&rft_id=info%3Aoclcnum%2F1237362219&rfr_id=info%3Asid%2F.on.worldcat.org%3Axwc&ctx_ver=Z39.88-2004&rft.isbn=9780190696030&rft.btitle=The+occupation+of+justice+%3A+Supreme+Court+of+Israel+and+the+Occupied+Territories&rft.genre=book&rft.aufirst=David&rft.pages=1+online+resource+%28ix%2C+543+pages%29.&url_ctx_fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Actx&rft.aulast=Kretzmer&rfr.id=1237362219&rft.id=1237362219&url_ver=Z39.88-2004&rft.date=2021&ctx_id=1237362219&rft_dat=%7B%22stdrt1%22%3A%22Book%22%2C%22stdrt2%22%3A%22Digital%22%7D",
+   "peerReviewed": false,
+   "physicalDescription": "1 online resource (ix, 543 pages).",
+   "publishers": [
+    {
+     "data": "New York, NY : Oxford University Press, [2021]"
+    }
+   ],
+   "remoteDatabase": false,
+   "seriesSeparatedFieldsList": [
+    {
+     "formatted": "SUNY series in Israeli studies",
+     "name": "SUNY series in Israeli studies"
+    },
+    {
+     "formatted": "SUNY series in Israeli studies.",
+     "name": "SUNY series in Israeli studies."
+    }
+   ],
+   "source": "",
+   "sourceCollection": "xwc",
+   "staffILLRequestUrl": "https://57439.share.worldcat.org/wms/cmnd/nd/discover/items/1237362219/holdings/ALL?dbid=",
+   "subjectGroups": [
+    {
+     "bibSubjects": [
+      {
+       "data": "Israel",
+       "local": true,
+       "otherSource": "pplt",
+       "thesaurusType": "OTHER_SOURCES",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Israel",
+        "displayData": "Israel",
+        "marcField": "v650",
+        "private": false
+       }
+      },
+      {
+       "data": "Supreme court",
+       "local": true,
+       "otherSource": "pplt",
+       "thesaurusType": "OTHER_SOURCES",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Supreme court",
+        "displayData": "Supreme court",
+        "marcField": "v650",
+        "private": false
+       }
+      },
+      {
+       "data": "Occupied territories",
+       "local": true,
+       "otherSource": "pplt",
+       "thesaurusType": "OTHER_SOURCES",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Occupied territories",
+        "displayData": "Occupied territories",
+        "marcField": "v650",
+        "private": false
+       }
+      },
+      {
+       "data": "Occupation",
+       "local": true,
+       "otherSource": "pplt",
+       "thesaurusType": "OTHER_SOURCES",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Occupation",
+        "displayData": "Occupation",
+        "marcField": "v650",
+        "private": false
+       }
+      },
+      {
+       "data": "Judicial review",
+       "local": true,
+       "otherSource": "pplt",
+       "thesaurusType": "OTHER_SOURCES",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Judicial review",
+        "displayData": "Judicial review",
+        "marcField": "v650",
+        "private": false
+       }
+      }
+     ],
+     "id": "pplt",
+     "isPromoted": true,
+     "label": "Peace Palace thesaurus",
+     "thesaurusType": "OTHER_SOURCES"
+    },
+    {
+     "bibSubjects": [
+      {
+       "data": "Israel. Bet ha-mishpaṭ ha-gavoha le-tsedeḳ",
+       "local": false,
+       "thesaurusType": "LIBRARY_OF_CONGRESS_SUBJECT_HEADINGS",
+       "type": "CORPORATE_NAME",
+       "unifiedData": {
+        "data": "Israel. Bet ha-mishpaṭ ha-gavoha le-tsedeḳ",
+        "displayData": "Israel.—Bet ha-mishpaṭ ha-gavoha le-tsedeḳ",
+        "private": false
+       }
+      },
+      {
+       "data": "Courts of last resort Israel",
+       "local": false,
+       "thesaurusType": "LIBRARY_OF_CONGRESS_SUBJECT_HEADINGS",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Courts of last resort Israel",
+        "displayData": "Courts of last resort—Israel",
+        "private": false
+       }
+      },
+      {
+       "data": "Political questions and judicial power Israel",
+       "local": false,
+       "thesaurusType": "LIBRARY_OF_CONGRESS_SUBJECT_HEADINGS",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Political questions and judicial power Israel",
+        "displayData": "Political questions and judicial power—Israel",
+        "private": false
+       }
+      },
+      {
+       "data": "Civil rights Israel",
+       "local": false,
+       "thesaurusType": "LIBRARY_OF_CONGRESS_SUBJECT_HEADINGS",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Civil rights Israel",
+        "displayData": "Civil rights—Israel",
+        "private": false
+       }
+      },
+      {
+       "data": "Jurisdiction Israel",
+       "local": false,
+       "thesaurusType": "LIBRARY_OF_CONGRESS_SUBJECT_HEADINGS",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Jurisdiction Israel",
+        "displayData": "Jurisdiction—Israel",
+        "private": false
+       }
+      },
+      {
+       "data": "Military government West Bank",
+       "local": false,
+       "thesaurusType": "LIBRARY_OF_CONGRESS_SUBJECT_HEADINGS",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Military government West Bank",
+        "displayData": "Military government—West Bank",
+        "private": false
+       }
+      },
+      {
+       "data": "Military government Gaza Strip",
+       "local": false,
+       "thesaurusType": "LIBRARY_OF_CONGRESS_SUBJECT_HEADINGS",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Military government Gaza Strip",
+        "displayData": "Military government—Gaza Strip",
+        "private": false
+       }
+      }
+     ],
+     "id": "lcsh",
+     "isPromoted": true,
+     "label": "Library of Congress Subject Headings",
+     "thesaurusType": "LIBRARY_OF_CONGRESS_SUBJECT_HEADINGS"
+    },
+    {
+     "bibSubjects": [
+      {
+       "data": "Israel. Bet ha-mishpaṭ ha-gavoha le-tsedeḳ",
+       "local": false,
+       "otherSource": "fast",
+       "thesaurusType": "OTHER_SOURCES",
+       "type": "CORPORATE_NAME",
+       "unifiedData": {
+        "data": "Israel. Bet ha-mishpaṭ ha-gavoha le-tsedeḳ",
+        "displayData": "Israel.—Bet ha-mishpaṭ ha-gavoha le-tsedeḳ",
+        "private": false
+       }
+      },
+      {
+       "data": "Civil rights",
+       "local": false,
+       "otherSource": "fast",
+       "thesaurusType": "OTHER_SOURCES",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Civil rights",
+        "displayData": "Civil rights",
+        "private": false
+       }
+      },
+      {
+       "data": "Courts of last resort",
+       "local": false,
+       "otherSource": "fast",
+       "thesaurusType": "OTHER_SOURCES",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Courts of last resort",
+        "displayData": "Courts of last resort",
+        "private": false
+       }
+      },
+      {
+       "data": "Jurisdiction",
+       "local": false,
+       "otherSource": "fast",
+       "thesaurusType": "OTHER_SOURCES",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Jurisdiction",
+        "displayData": "Jurisdiction",
+        "private": false
+       }
+      },
+      {
+       "data": "Military government",
+       "local": false,
+       "otherSource": "fast",
+       "thesaurusType": "OTHER_SOURCES",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Military government",
+        "displayData": "Military government",
+        "private": false
+       }
+      },
+      {
+       "data": "Political questions and judicial power",
+       "local": false,
+       "otherSource": "fast",
+       "thesaurusType": "OTHER_SOURCES",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Political questions and judicial power",
+        "displayData": "Political questions and judicial power",
+        "private": false
+       }
+      },
+      {
+       "data": "Gaza Strip",
+       "local": false,
+       "otherSource": "fast",
+       "thesaurusType": "OTHER_SOURCES",
+       "type": "GEOGRAPHICAL_TERM",
+       "unifiedData": {
+        "data": "Gaza Strip",
+        "displayData": "Gaza Strip",
+        "private": false
+       }
+      },
+      {
+       "data": "Israel",
+       "local": false,
+       "otherSource": "fast",
+       "thesaurusType": "OTHER_SOURCES",
+       "type": "GEOGRAPHICAL_TERM",
+       "unifiedData": {
+        "data": "Israel",
+        "displayData": "Israel",
+        "private": false
+       }
+      },
+      {
+       "data": "West Bank",
+       "local": false,
+       "otherSource": "fast",
+       "thesaurusType": "OTHER_SOURCES",
+       "type": "GEOGRAPHICAL_TERM",
+       "unifiedData": {
+        "data": "West Bank",
+        "displayData": "West Bank",
+        "private": false
+       }
+      }
+     ],
+     "id": "fast",
+     "isPromoted": true,
+     "label": "Faceted Application of Subject Terminology",
+     "thesaurusType": "OTHER_SOURCES"
+    },
+    {
+     "bibSubjects": [
+      {
+       "data": "Politique et pouvoir judiciaire Israël",
+       "local": false,
+       "thesaurusType": "REPERTOIRE_DE_VEDETTES_MATIERE",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Politique et pouvoir judiciaire Israël",
+        "displayData": "Politique et pouvoir judiciaire—Israël",
+        "private": false
+       }
+      },
+      {
+       "data": "Juridiction Israël",
+       "local": false,
+       "thesaurusType": "REPERTOIRE_DE_VEDETTES_MATIERE",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Juridiction Israël",
+        "displayData": "Juridiction—Israël",
+        "private": false
+       }
+      },
+      {
+       "data": "Gouvernement militaire Cisjordanie",
+       "local": false,
+       "thesaurusType": "REPERTOIRE_DE_VEDETTES_MATIERE",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Gouvernement militaire Cisjordanie",
+        "displayData": "Gouvernement militaire—Cisjordanie",
+        "private": false
+       }
+      },
+      {
+       "data": "Gouvernement militaire Gaza, Bande de",
+       "local": false,
+       "thesaurusType": "REPERTOIRE_DE_VEDETTES_MATIERE",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Gouvernement militaire Gaza, Bande de",
+        "displayData": "Gouvernement militaire—Gaza, Bande de",
+        "private": false
+       }
+      }
+     ],
+     "id": "rvm",
+     "isPromoted": true,
+     "label": "Répertoire de Vedettes-Matière",
+     "thesaurusType": "REPERTOIRE_DE_VEDETTES_MATIERE"
+    },
+    {
+     "bibSubjects": [
+      {
+       "data": "International humanitarian law",
+       "local": true,
+       "thesaurusType": "SOURCE_NOT_SPECIFIED",
+       "unifiedData": {
+        "data": "International humanitarian law",
+        "displayData": "International humanitarian law",
+        "marcField": "v695",
+        "private": false
+       }
+      }
+     ],
+     "id": "none",
+     "isPromoted": false,
+     "label": "Source not specified",
+     "thesaurusType": "SOURCE_NOT_SPECIFIED"
+    }
+   ],
+   "summariesObjectList": [
+    {
+     "data": "This volume provides a critical analysis of the manner in which the Israeli Supreme Court has dealt with petitions relating to the actions and policies of the Israeli authorities in the West Bank and Gaza, which were occupied by Israel in 1967. It offers an exhaustive analysis of the Court's decisions on a variety of topics, including civilian settlements, the separation barrier, punitive house demolitions, and conduct of hostilities.",
+     "private": false
+    }
+   ],
+   "titleObject": {
+    "data": "The occupation of justice : Supreme Court of Israel and the Occupied Territories"
+   },
+   "totalHighlights": 2,
+   "workCount": 34,
+   "workId": "795400450",
+   "workSingletonIndicator": false,
+   "workSingletonWork": false
+  }
+ ],
+ "searchResultsType": "NORMAL"
+}

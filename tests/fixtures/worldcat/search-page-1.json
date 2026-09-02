@@ -1,0 +1,914 @@
+{
+ "databaseList": [
+  "4052",
+  "11162",
+  "4023",
+  "4056",
+  "10052",
+  "3583",
+  "3560",
+  "3590",
+  "11537",
+  "10007",
+  "10306",
+  "3578",
+  "3313",
+  "3577",
+  "2795",
+  "3962",
+  "3963",
+  "638",
+  "10025",
+  "10058",
+  "10896"
+ ],
+ "locale": "en",
+ "numberOfRecords": 12279,
+ "parsedQuery": [
+  {
+   "field": "kw:",
+   "text": "(keword)",
+   "impliedField": false,
+   "start": 0,
+   "end": 20
+  },
+  {
+   "field": "ti:",
+   "text": "(title)",
+   "boolean": "AND",
+   "impliedField": false,
+   "start": 26,
+   "end": 47
+  },
+  {
+   "field": "au:",
+   "text": "(author)",
+   "boolean": "OR",
+   "impliedField": false,
+   "start": 52,
+   "end": 73
+  }
+ ],
+ "partialResult": false,
+ "providerSearchRequest": "http://firefly.prod.oclc.org/firefly-service/rs/sru/worldcat-plus?version=1.1&operation=searchRetrieve&resultSetTTL=300&query=kw%3A%28keword%29+AND+ti%3A%28title%29+OR+au%3A%28author%29+++%28+%28yr%3A2021..2025%29+%29&recordSchema=info%3Asrw%2Fschema%2F1%2FCDFXML&maximumRecords=10&startRecord=1&x-info-5-retainAttributes=1&sortKeys=relevance,,1&x-info-5-translationLocale=en&x-info-5-altsort-newRR=1&x-info-5-holdPrivacyLevel=P,G&x-info-5-queryType=3&x-info-5-scopeTerm=%28kb%3A57439+%7C+%28x0%3Abook+++x4%3Adigital+++wz%3A45289%29%29+OR+pa%3Abrill_ieclo+OR+pa%3Abrill_cwto+OR+pa%3Abrill_imbo+OR+pa%3Abrill_hwgdso+OR+pa%3Abrill_uncls+OR+pa%3Abrill_ilwo+OR+pa%3Abrill_rlpic&x-info-5-scopeQueryType=3&x-info-5-dblist=4052,11162,4023,4056,10052,3583,3560,3590,11537,10007,10306,3578,3313,3577,2795,3962,3963,638,10025,10058,10896&x-info-5-stemTerms=on&x-info-5-holdingsIndications=true&x-info-5-affiliation=57439&x-info-5-rankingGroup=34227&x-info-5-rankingInstitution=45289&x-info-5-askForOwnership=on&x-info-5-preferredLanguage=eng&x-info-5-frbrGrouping=on&x-info-5-differentialGroupRank=false&x-info-5-kbwcArtHoldRegId=57439&x-info-5-customViewParms=OWC_FRBR_WCD_MIN%3ALHRDATAINS%3D%3C45289%3E%3BLSDATAINS%3D%3C45289%3E%3BNOLINKS%3D%3CNOLINKS%3E%3B&x-info-5-altsort-altBibAge=20&x-info-5-altsort-currentweight=100&x-info-5-altsort-altpercentQueryInAuthorScale=40&x-info-5-altsort-altSuperHoldingThreshhold=2000&x-info-5-altsort-altholdingScale=100&x-info-5-altsort-current=15&x-info-5-altsort-altsortdebug=0&x-info-5-altsort-oldweight=1&x-info-5-relevancyType=BEST_MATCH&x-info-5-altsort-altSuperHoldingBonus=50000&x-info-5-altsort-altShortBoost=10&x-info-5-altsort-altpercentAuthorInQueryScale=50&x-info-5-altsort-altpercentTitleInQueryScale=100&x-info-5-altsort-altpercentQueryInTitleScale=110&x-info-5-altsort-recent=25&x-info-5-altsort=1&x-info-5-altsort-altexactTitleScale=90&x-info-5-altsort-altexactAuthorScale=40&x-info-5-altsort-altBibCurrentScale=150&x-info-5-altsort-altBibHoldingBoost=150&x-info-5-altsort-altIgnoreTA=0&x-info-5-altsort-recentweight=10&x-info-5-newspaper=exclude&x-info-5-bookreview=exclude&x-info-5-openAccess=include&x-info-5-serviceName=DiscoveryServices",
+ "queryExpansion": {
+  "enhancedExpansionApiEnabled": true,
+  "enhancedExpansionDisplay": false,
+  "sensitiveTermInfoMessage": "This search expansion contains terms which some users may find sensitive.",
+  "sensitiveTermInfoMessageLanguage": "en",
+  "statusType": "WARNING"
+ },
+ "queryOptimization": {
+  "isIdDetectionEnabled": true,
+  "originalQuery": "kw:(keword) AND ti:(title) OR au:(author)   ( (yr:2021..2025) )",
+  "queryOptimized": false,
+  "searchTermDropped": false
+ },
+ "records": [
+  {
+   "additionalPhysicalFormEntries": [
+    {
+     "isbns": [
+      "9789004688216"
+     ]
+    },
+    {
+     "isbns": [
+      "9004688218"
+     ]
+    }
+   ],
+   "additionalTitle": "Henry G. Schermers and Niels M. Blokker.",
+   "allHighlightedFields": [
+    "date",
+    "publisherObjectList",
+    "seriesSeparatedFieldsList"
+   ],
+   "authors": [
+    {
+     "firstNameObject": {
+      "data": "Henry G"
+     },
+     "flipNameOrder": false,
+     "lastNameObject": {
+      "data": "Schermers"
+     },
+     "primary": true,
+     "relatorList": {
+      "relators": [
+       {
+        "code": "aut",
+        "term": "Author"
+       }
+      ]
+     },
+     "type": "person"
+    },
+    {
+     "firstNameObject": {
+      "data": "Niels M"
+     },
+     "flipNameOrder": false,
+     "lastNameObject": {
+      "data": "Blokker"
+     },
+     "primary": false,
+     "relatorList": {
+      "relators": [
+       {
+        "code": "aut",
+        "term": "Author"
+       }
+      ]
+     },
+     "type": "person"
+    }
+   ],
+   "bibliographiesObjectList": [
+    {
+     "data": "Includes bibliographical references and index.",
+     "private": false
+    }
+   ],
+   "bookReview": false,
+   "briefHighlightedFields": [
+    "date",
+    "publisherObjectList"
+   ],
+   "catLang": "eng",
+   "contentsObjects": [
+    {
+     "note": "Preface xxv -- Abbreviations, Terminology, Internet References, Paragraph Numbers xxxi -- Chapter OneIntroduction -- I.International institutional law 1 -- II.Definition 29 -- III.Classification 48 -- IV.Conclusion 65 -- Chapter TwoParticipants -- I.Full members 71 -- II.Associate members 166 -- III.Partial members 169 -- IV.Affiliate members 172 -- V.Observers 173 -- VI.Concluding observations 198 -- Chapter ThreeRules for International Organs -- I.Powers 206 -- II.Composition of organs 237 -- III.Functioning 306 -- IV.Concluding observations 376 -- Chapter FourPolicy-Making and Administrative Organs -- I.Classifying international organs 384 -- II.Policy-making organs 389 -- III.Secretariat 434 -- IV.The European Commission 547 -- V.Concluding observations 551 -- Chapter FiveAdvisory and Supervisory Organs -- I.Parliamentary organs 558 -- II.Judicial organs 597 -- III.Concluding observations 700 -- Chapter SixDecision-Making Process -- I.The concept of a decision 706 -- II.Legal basis 708 -- III.Initiative 710 -- IV.Drafting of the text 725 -- V.Decision-making by consensus 771 -- VI.Voting 787 -- VII.Entry into force of decisions 888 -- VIII.Termination of decisions 897 -- IX.Concluding observations 917 -- Chapter SevenFinancing -- I.Expenditure 928 -- II.Income 965 -- III.Budget 1091 -- IV.Concluding observations 1131 -- Chapter EightLegal Order -- I.Introduction 1139 -- II.Constitution 1145 -- III.Decisions of the organization 1196 -- IV.Other elements of the legal order 1335 -- V.Concluding observations 1340 -- Chapter NineInterpretation and Settlement of Disputes -- I.Means of interpretation 1346 -- II.Authorities charged with interpretation 1351 -- III.Competence to request interpretation 1379 -- IV.Concluding observations 1387 -- Chapter TenSupervision and Sanctions -- I.Definitions 1392 -- II.Supervision of the implementation of rules 1399 -- III.Official recognition of violations 1439 -- IV.Waiver of obligations 1444 -- V.Sanctions 1445 -- VI.Concluding observations 1553 -- Chapter ElevenLegal Status -- I.Status in international law 1562 -- II.Status in national law 1591 -- III.Duration 1617 -- IV.Concluding observations 1681 -- Chapter TwelveExternal Relations -- I.Partners for external relations 1687 -- II.Instruments of external relations 1742 -- III.Concluding observations 1875 -- Concluding Remarks -- I.Introduction 1884 -- II.The relationship between an international organization and its members 1885 -- III.Diversity of the rules of international institutional law 1892 -- IV.Unity of the rules of international institutional law 1896 -- V.Towards more centralized international law? 1900 -- Index 1353.",
+     "noteObject": {
+      "data": "Preface xxv -- Abbreviations, Terminology, Internet References, Paragraph Numbers xxxi -- Chapter OneIntroduction -- I.International institutional law 1 -- II.Definition 29 -- III.Classification 48 -- IV.Conclusion 65 -- Chapter TwoParticipants -- I.Full members 71 -- II.Associate members 166 -- III.Partial members 169 -- IV.Affiliate members 172 -- V.Observers 173 -- VI.Concluding observations 198 -- Chapter ThreeRules for International Organs -- I.Powers 206 -- II.Composition of organs 237 -- III.Functioning 306 -- IV.Concluding observations 376 -- Chapter FourPolicy-Making and Administrative Organs -- I.Classifying international organs 384 -- II.Policy-making organs 389 -- III.Secretariat 434 -- IV.The European Commission 547 -- V.Concluding observations 551 -- Chapter FiveAdvisory and Supervisory Organs -- I.Parliamentary organs 558 -- II.Judicial organs 597 -- III.Concluding observations 700 -- Chapter SixDecision-Making Process -- I.The concept of a decision 706 -- II.Legal basis 708 -- III.Initiative 710 -- IV.Drafting of the text 725 -- V.Decision-making by consensus 771 -- VI.Voting 787 -- VII.Entry into force of decisions 888 -- VIII.Termination of decisions 897 -- IX.Concluding observations 917 -- Chapter SevenFinancing -- I.Expenditure 928 -- II.Income 965 -- III.Budget 1091 -- IV.Concluding observations 1131 -- Chapter EightLegal Order -- I.Introduction 1139 -- II.Constitution 1145 -- III.Decisions of the organization 1196 -- IV.Other elements of the legal order 1335 -- V.Concluding observations 1340 -- Chapter NineInterpretation and Settlement of Disputes -- I.Means of interpretation 1346 -- II.Authorities charged with interpretation 1351 -- III.Competence to request interpretation 1379 -- IV.Concluding observations 1387 -- Chapter TenSupervision and Sanctions -- I.Definitions 1392 -- II.Supervision of the implementation of rules 1399 -- III.Official recognition of violations 1439 -- IV.Waiver of obligations 1444 -- V.Sanctions 1445 -- VI.Concluding observations 1553 -- Chapter ElevenLegal Status -- I.Status in international law 1562 -- II.Status in national law 1591 -- III.Duration 1617 -- IV.Concluding observations 1681 -- Chapter TwelveExternal Relations -- I.Partners for external relations 1687 -- II.Instruments of external relations 1742 -- III.Concluding observations 1875 -- Concluding Remarks -- I.Introduction 1884 -- II.The relationship between an international organization and its members 1885 -- III.Diversity of the rules of international institutional law 1892 -- IV.Unity of the rules of international institutional law 1896 -- V.Towards more centralized international law? 1900 -- Index 1353.",
+      "private": false
+     },
+     "titles": [
+      "Preface xxv -- Abbreviations, Terminology, Internet References, Paragraph Numbers xxxi -- Chapter OneIntroduction -- I.International institutional law 1 -- II.Definition 29 -- III.Classification 48 -- IV.Conclusion 65 -- Chapter TwoParticipants -- I.Full members 71 -- II.Associate members 166 -- III.Partial members 169 -- IV.Affiliate members 172 -- V.Observers 173 -- VI.Concluding observations 198 -- Chapter ThreeRules for International Organs -- I.Powers 206 -- II.Composition of organs 237 -- III.Functioning 306 -- IV.Concluding observations 376 -- Chapter FourPolicy-Making and Administrative Organs -- I.Classifying international organs 384 -- II.Policy-making organs 389 -- III.Secretariat 434 -- IV.The European Commission 547 -- V.Concluding observations 551 -- Chapter FiveAdvisory and Supervisory Organs -- I.Parliamentary organs 558 -- II.Judicial organs 597 -- III.Concluding observations 700 -- Chapter SixDecision-Making Process -- I.The concept of a decision 706 -- II.Legal basis 708 -- III.Initiative 710 -- IV.Drafting of the text 725 -- V.Decision-making by consensus 771 -- VI.Voting 787 -- VII.Entry into force of decisions 888 -- VIII.Termination of decisions 897 -- IX.Concluding observations 917 -- Chapter SevenFinancing -- I.Expenditure 928 -- II.Income 965 -- III.Budget 1091 -- IV.Concluding observations 1131 -- Chapter EightLegal Order -- I.Introduction 1139 -- II.Constitution 1145 -- III.Decisions of the organization 1196 -- IV.Other elements of the legal order 1335 -- V.Concluding observations 1340 -- Chapter NineInterpretation and Settlement of Disputes -- I.Means of interpretation 1346 -- II.Authorities charged with interpretation 1351 -- III.Competence to request interpretation 1379 -- IV.Concluding observations 1387 -- Chapter TenSupervision and Sanctions -- I.Definitions 1392 -- II.Supervision of the implementation of rules 1399 -- III.Official recognition of violations 1439 -- IV.Waiver of obligations 1444 -- V.Sanctions 1445 -- VI.Concluding observations 1553 -- Chapter ElevenLegal Status -- I.Status in international law 1562 -- II.Status in national law 1591 -- III.Duration 1617 -- IV.Concluding observations 1681 -- Chapter TwelveExternal Relations -- I.Partners for external relations 1687 -- II.Instruments of external relations 1742 -- III.Concluding observations 1875 -- Concluding Remarks -- I.Introduction 1884 -- II.The relationship between an international organization and its members 1885 -- III.Diversity of the rules of international institutional law 1892 -- IV.Unity of the rules of international institutional law 1896 -- V.Towards more centralized international law? 1900 -- Index 1353."
+     ]
+    }
+   ],
+   "databaseId": "",
+   "date": "2025",
+   "defaultCoverArtUrl": "//coverart.oclc.org/ImageWebSvc/oclc/+-+9063170706_70.jpg?SearchOrder=+-+IG,OT,OS,AV,FA,GO&DefaultImage=N&client&allowDefault=true",
+   "digitalGraphicRepresentation": "",
+   "digitalObjectIdentifiers": [
+    "10.1163/9789004724822"
+   ],
+   "disableAuthorLinks": false,
+   "displayCopyAndPasteCitations": true,
+   "displayDeepOpacLinks": false,
+   "displayOpacLink": true,
+   "edition": "1st ed.",
+   "editionId": "8d46bce2b7f32d9df296a7145402dbdb",
+   "editionOclcNumbers": [
+    "1525268154"
+   ],
+   "editionSingletonEdition": false,
+   "enhancedCollectionName": "WorldCat.org",
+   "entityAuthors": {},
+   "heldByInstitutionName": "Peace Palace Library",
+   "heldByLevel": 1,
+   "holdingAudienceLevel": "P",
+   "iiifImageUrl": "",
+   "isbns": [
+    "9789004724822",
+    "9004724826"
+   ],
+   "itemType": "book_digital",
+   "itemTypeDisplay": "eBook",
+   "labelAsUniqueIdentifier": false,
+   "language": "eng",
+   "languageNotes": [
+    {
+     "languageNoteText": {
+      "data": "English.",
+      "private": false
+     }
+    }
+   ],
+   "lcNumber": "2024058393",
+   "masterCallNumber": "KZ4850",
+   "mediumCoverArtUrl": "//coverart.oclc.org/ImageWebSvc/oclc/+-+9063170706_140.jpg?SearchOrder=+-+IG,OT,OS,AV,FA,GO&DefaultImage=N&client&allowDefault=true",
+   "musicalPresentationStatement": "",
+   "numberOfEditionIds": 44,
+   "numberOfOtherEditions": 107,
+   "oclcNumber": "1525268154",
+   "opacLink": "http://peacepalace.on.worldcat.org/search?queryString=ib%3A9004724826",
+   "openAccess": false,
+   "openUrlContextObject": "rft_val_fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Abook&ctx_enc=info%3Aofi%2Fenc%3AUTF-8&rft.pub=Brill+%7C+Nijhoff%2C&ctx_tim=2026-09-02T03%3A17%3A00EDT&rft.dat=1525268154&rft.place=Leiden+%3B&rft_id=info%3Aoclcnum%2F1525268154&rfr_id=info%3Asid%2F.on.worldcat.org%3Axwc&ctx_ver=Z39.88-2004&rft.isbn=9789004724822&rft.btitle=International+Institutional+Law+%3A+Seventh+Revised+Edition&rft.genre=book&rft.aufirst=Henry+G.&rft.pages=1+online+resource+%280+pages%29.&url_ctx_fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Actx&rft.aulast=Schermers&rfr.id=1525268154&rft.id=1525268154&url_ver=Z39.88-2004&rft.date=2025&ctx_id=1525268154&rft_dat=%7B%22stdrt1%22%3A%22Book%22%2C%22stdrt2%22%3A%22Digital%22%7D",
+   "peerReviewed": false,
+   "physicalDescription": "1 online resource (0 pages).",
+   "publishers": [
+    {
+     "data": "Leiden ; Boston : Brill | Nijhoff, 2025."
+    }
+   ],
+   "remoteDatabase": false,
+   "seriesSeparatedFieldsList": [
+    {
+     "formatted": "International Law E-Books Online, Collection 2025",
+     "name": "International Law E-Books Online, Collection 2025"
+    },
+    {
+     "formatted": "International Law E-Books Online, Collection 2025.",
+     "name": "International Law E-Books Online, Collection 2025."
+    }
+   ],
+   "source": "",
+   "sourceCollection": "xwc",
+   "staffILLRequestUrl": "https://57439.share.worldcat.org/wms/cmnd/nd/discover/items/1525268154/holdings/ALL?dbid=",
+   "subjectGroups": [
+    {
+     "bibSubjects": [
+      {
+       "data": "International agencies",
+       "local": false,
+       "thesaurusType": "LIBRARY_OF_CONGRESS_SUBJECT_HEADINGS",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "International agencies",
+        "displayData": "International agencies",
+        "private": false
+       }
+      },
+      {
+       "data": "International cooperation",
+       "local": false,
+       "thesaurusType": "LIBRARY_OF_CONGRESS_SUBJECT_HEADINGS",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "International cooperation",
+        "displayData": "International cooperation",
+        "private": false
+       }
+      }
+     ],
+     "id": "lcsh",
+     "isPromoted": true,
+     "label": "Library of Congress Subject Headings",
+     "thesaurusType": "LIBRARY_OF_CONGRESS_SUBJECT_HEADINGS"
+    },
+    {
+     "bibSubjects": [
+      {
+       "data": "International agencies",
+       "local": false,
+       "otherSource": "fast",
+       "thesaurusType": "OTHER_SOURCES",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "International agencies",
+        "displayData": "International agencies",
+        "private": false
+       }
+      },
+      {
+       "data": "International cooperation",
+       "local": false,
+       "otherSource": "fast",
+       "thesaurusType": "OTHER_SOURCES",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "International cooperation",
+        "displayData": "International cooperation",
+        "private": false
+       }
+      }
+     ],
+     "id": "fast",
+     "isPromoted": true,
+     "label": "Faceted Application of Subject Terminology",
+     "thesaurusType": "OTHER_SOURCES"
+    },
+    {
+     "bibSubjects": [
+      {
+       "data": "Organisations internationales",
+       "local": false,
+       "thesaurusType": "REPERTOIRE_DE_VEDETTES_MATIERE",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Organisations internationales",
+        "displayData": "Organisations internationales",
+        "private": false
+       }
+      },
+      {
+       "data": "Coopération internationale",
+       "local": false,
+       "thesaurusType": "REPERTOIRE_DE_VEDETTES_MATIERE",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Coopération internationale",
+        "displayData": "Coopération internationale",
+        "private": false
+       }
+      }
+     ],
+     "id": "rvm",
+     "isPromoted": true,
+     "label": "Répertoire de Vedettes-Matière",
+     "thesaurusType": "REPERTOIRE_DE_VEDETTES_MATIERE"
+    },
+    {
+     "bibSubjects": [
+      {
+       "data": "international organizations",
+       "local": false,
+       "otherSource": "aat",
+       "thesaurusType": "OTHER_SOURCES",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "international organizations",
+        "displayData": "international organizations",
+        "private": false
+       }
+      }
+     ],
+     "id": "aat",
+     "isPromoted": false,
+     "label": "Art & Architecture Thesaurus",
+     "thesaurusType": "OTHER_SOURCES"
+    }
+   ],
+   "summariesObjectList": [
+    {
+     "data": "This seventh, revised edition of International Institutional Law covers the most recent developments in the field. Although public international organizations such as the United Nations, the World Trade Organization, the World Health Organization, the African Union, ASEAN, the European Union, Mercosur, NATO and OPEC have widely divergent objectives, powers, fields of activity and numbers of member states, they also have many institutional characteristics in common. There is unity within diversity. Rather than being a handbook for specific organizations, the book offers a comparative analysis of the institutional law of international organizations. It includes chapters on the rules and practices concerning membership, institutional structure, decision-making, financing, legal order, supervision and sanctions, legal status and external relations. The books theoretical framework and extensive use of examples from practice is designed to appeal to both academics and practitioners.",
+     "private": false
+    }
+   ],
+   "titleObject": {
+    "data": "International Institutional Law : Seventh Revised Edition"
+   },
+   "totalHighlights": 2,
+   "varyingFormOfTitles": [
+    {
+     "display": false,
+     "displayConstant": " ",
+     "orderList": [
+      "titleProper"
+     ],
+     "titleProper": {
+      "data": "Seventh Revised Edition",
+      "private": false
+     }
+    }
+   ],
+   "workCount": 108,
+   "workId": "802034384",
+   "workSingletonIndicator": false,
+   "workSingletonWork": false
+  },
+  {
+   "additionalPhysicalFormEntries": [
+    {
+     "displayConstant": "Print version:",
+     "isbns": [
+      "9798765130544"
+     ],
+     "mainEntryHeadings": [
+      "Vile, John R."
+     ],
+     "titles": [
+      "A Companion to the United States Constitution and Its Amendments"
+     ]
+    },
+    {
+     "displayConstant": "Print version:",
+     "isbns": [
+      "9798765130582"
+     ]
+    }
+   ],
+   "additionalTitle": "John R. Vile.",
+   "allHighlightedFields": [
+    "date",
+    "publisherObjectList"
+   ],
+   "authors": [
+    {
+     "entityUris": [
+      {
+       "type": "oclc",
+       "uri": "https://id.oclc.org/worldcat/entity/E39PCjFDRDjbmqxCgvvRHjwdXq"
+      }
+     ],
+     "firstNameObject": {
+      "data": "John R"
+     },
+     "flipNameOrder": false,
+     "lastNameObject": {
+      "data": "Vile"
+     },
+     "primary": true,
+     "relatorList": {
+      "relators": [
+       {
+        "code": "aut",
+        "term": "Author"
+       }
+      ]
+     },
+     "type": "person"
+    }
+   ],
+   "bibliographiesObjectList": [
+    {
+     "data": "Includes bibliographical references and index.",
+     "private": false
+    }
+   ],
+   "bookReview": false,
+   "briefHighlightedFields": [
+    "date",
+    "publisherObjectList"
+   ],
+   "catLang": "eng",
+   "contentsObjects": [
+    {
+     "note": "The declaration of independence and events that led to it -- The articles of confederation and the writing , ratification, and purposes of the U.S, Constitution -- Article I : The Legislative Branch -- Article II : the Executive Branch -- Article III : The Judicial Branch -- Article IV : The federal system -- Articles V-VII : The Amending provisions and miscellaneous matters -- The Bill of Rights : The First Amendment -- The Bill of Rights : of arms and men-amendments 2-3 -- The Bill of Rights and the rights of the accused and the convicted-Amendments 4-8 -- States-Amendments 9-10, and 11 and 12 -- The Post-Civil war amendments-amendments 13-15 -- The progressive era amendments-amendments 16-19 -- The most recent amendments-amendments 20-27.",
+     "noteObject": {
+      "data": "The declaration of independence and events that led to it -- The articles of confederation and the writing , ratification, and purposes of the U.S, Constitution -- Article I : The Legislative Branch -- Article II : the Executive Branch -- Article III : The Judicial Branch -- Article IV : The federal system -- Articles V-VII : The Amending provisions and miscellaneous matters -- The Bill of Rights : The First Amendment -- The Bill of Rights : of arms and men-amendments 2-3 -- The Bill of Rights and the rights of the accused and the convicted-Amendments 4-8 -- States-Amendments 9-10, and 11 and 12 -- The Post-Civil war amendments-amendments 13-15 -- The progressive era amendments-amendments 16-19 -- The most recent amendments-amendments 20-27.",
+      "private": false
+     }
+    }
+   ],
+   "databaseId": "",
+   "date": "2025",
+   "defaultCoverArtUrl": "//coverart.oclc.org/ImageWebSvc/oclc/+-+2470412506_70.jpg?SearchOrder=+-+IG,OT,OS,AV,FA,GO&DefaultImage=N&client&allowDefault=true",
+   "digitalGraphicRepresentation": "",
+   "disableAuthorLinks": false,
+   "displayCopyAndPasteCitations": true,
+   "displayDeepOpacLinks": false,
+   "displayOpacLink": true,
+   "edition": "Eighth edition.",
+   "editionId": "c2b1670bc733ab1a48e18abfee54db85",
+   "editionOclcNumbers": [
+    "1522005499",
+    "1518877283",
+    "1507695297"
+   ],
+   "editionSingletonEdition": false,
+   "enhancedCollectionName": "WorldCat.org",
+   "enhancedEditionVariantInfo": [
+    {
+     "editionVariantInfo": {
+      "language": "eng",
+      "ocn": "1522005499"
+     },
+     "language": "eng",
+     "languageNameInLocal": "English",
+     "ocn": "1522005499"
+    },
+    {
+     "editionVariantInfo": {
+      "language": "ger",
+      "ocn": "1518877283"
+     },
+     "language": "ger",
+     "languageNameInLocal": "German",
+     "ocn": "1518877283"
+    }
+   ],
+   "entityAuthors": {
+    "authors": [
+     {
+      "authorName": "John R Vile",
+      "entityUri": "https://id.oclc.org/worldcat/entity/E39PCjFDRDjbmqxCgvvRHjwdXq"
+     }
+    ]
+   },
+   "genreObjects": [
+    {
+     "data": "Electronic books.",
+     "local": false
+    }
+   ],
+   "genres": [
+    "Electronic books."
+   ],
+   "globalNotesObjectList": [
+    {
+     "data": "Description based upon print version of record.",
+     "local": false,
+     "private": false
+    }
+   ],
+   "heldByInstitutionName": "Peace Palace Library",
+   "heldByLevel": 1,
+   "holdingAudienceLevel": "P",
+   "iiifImageUrl": "",
+   "isbns": [
+    "9798765130568",
+    "9798765130575",
+    "9798765130551",
+    "9798765130544",
+    "9798765130582"
+   ],
+   "itemType": "book_digital",
+   "itemTypeDisplay": "eBook",
+   "labelAsUniqueIdentifier": false,
+   "language": "eng",
+   "lcNumber": "",
+   "links": [
+    {
+     "accessMethod": "4",
+     "relationship": "0",
+     "url": "https://public.ebookcentral.proquest.com/choice/PublicFullRecord.aspx?p=31946553"
+    },
+    {
+     "accessMethod": "4",
+     "nonPublicNote": "Unlimited Access",
+     "relationship": "0",
+     "url": "https://dx.doi.org/10.5040/9798765130582?locatt=label:secondary_bloomsburyCollections"
+    }
+   ],
+   "masterCallNumber": "KF4550 .V55 2025",
+   "mediumCoverArtUrl": "//coverart.oclc.org/ImageWebSvc/oclc/+-+2470412506_140.jpg?SearchOrder=+-+IG,OT,OS,AV,FA,GO&DefaultImage=N&client&allowDefault=true",
+   "musicalPresentationStatement": "",
+   "numberOfEditionIds": 39,
+   "numberOfOtherEditions": 91,
+   "oclcNumber": "1507695297",
+   "opacLink": "http://peacepalace.on.worldcat.org/search?queryString=no%3A1507695297",
+   "openAccess": false,
+   "openUrlContextObject": "rft_val_fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Abook&ctx_enc=info%3Aofi%2Fenc%3AUTF-8&rft.pub=Bloomsbury+Academic%2C&ctx_tim=2026-09-02T03%3A17%3A00EDT&rft.dat=1507695297&rft.place=New+York+%3A&rft_id=info%3Aoclcnum%2F1507695297&rfr_id=info%3Asid%2F.on.worldcat.org%3Axwc&ctx_ver=Z39.88-2004&rft.isbn=9798765130568&rft.btitle=A+companion+to+the+United+States+Constitution+and+its+amendments+%3A+America%27s+continuing+revolution&rft.genre=book&rft.aufirst=John+R.&rft.pages=1+online+resource+%28417+p.%29&url_ctx_fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Actx&rft.aulast=Vile&rfr.id=1507695297&rft.id=1507695297&url_ver=Z39.88-2004&rft.date=2025&ctx_id=1507695297&rft_dat=%7B%22stdrt1%22%3A%22Book%22%2C%22stdrt2%22%3A%22Digital%22%7D",
+   "peerReviewed": false,
+   "physicalDescription": "1 online resource (417 p.)",
+   "publishers": [
+    {
+     "data": "New York : Bloomsbury Academic, 2025."
+    }
+   ],
+   "remoteDatabase": false,
+   "source": "",
+   "sourceCollection": "xwc",
+   "staffILLRequestUrl": "https://57439.share.worldcat.org/wms/cmnd/nd/discover/items/1507695297/holdings/ALL?dbid=",
+   "subjectGroups": [
+    {
+     "bibSubjects": [
+      {
+       "data": "United States",
+       "local": false,
+       "thesaurusType": "LIBRARY_OF_CONGRESS_SUBJECT_HEADINGS",
+       "type": "CORPORATE_NAME",
+       "unifiedData": {
+        "data": "United States",
+        "displayData": "United States",
+        "private": false
+       }
+      },
+      {
+       "data": "Constitutional law United States",
+       "local": false,
+       "thesaurusType": "LIBRARY_OF_CONGRESS_SUBJECT_HEADINGS",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Constitutional law United States",
+        "displayData": "Constitutional law—United States",
+        "private": false
+       }
+      }
+     ],
+     "id": "lcsh",
+     "isPromoted": true,
+     "label": "Library of Congress Subject Headings",
+     "thesaurusType": "LIBRARY_OF_CONGRESS_SUBJECT_HEADINGS"
+    },
+    {
+     "bibSubjects": [
+      {
+       "data": "Constitution (United States)",
+       "local": false,
+       "otherSource": "fast",
+       "thesaurusType": "OTHER_SOURCES",
+       "type": "UNIFORM_TITLE",
+       "unifiedData": {
+        "data": "Constitution (United States)",
+        "displayData": "Constitution (United States)",
+        "private": false
+       }
+      },
+      {
+       "data": "Constitutional law",
+       "local": false,
+       "otherSource": "fast",
+       "thesaurusType": "OTHER_SOURCES",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Constitutional law",
+        "displayData": "Constitutional law",
+        "private": false
+       }
+      },
+      {
+       "data": "United States",
+       "local": false,
+       "otherSource": "fast",
+       "thesaurusType": "OTHER_SOURCES",
+       "type": "GEOGRAPHICAL_TERM",
+       "unifiedData": {
+        "data": "United States",
+        "displayData": "United States",
+        "private": false
+       }
+      }
+     ],
+     "id": "fast",
+     "isPromoted": true,
+     "label": "Faceted Application of Subject Terminology",
+     "thesaurusType": "OTHER_SOURCES"
+    }
+   ],
+   "summariesObjectList": [
+    {
+     "data": "Charting 250 years of history, this 8th edition companion examines the U.S. Constitution line by line, with special reference to important legal developments such as U.S. Supreme Court decisions.",
+     "private": false
+    },
+    {
+     "data": "\"This constitutional companion book shows students just how revolutionary the Constitution was-and how relevant it remains today. After revisiting the key events leading to the Constitution's ratification, this book explores the Constitution article by article, and amendment by amendment, to help readers better understand how each section of the document shapes the country we live in today. The 8th edition illuminates such issues as Donald Trump's immunity from prosecution for the January 6th riots, Mike Pence's role in certifying Electoral College votes, Ketanji Brown Jackson's appointment to the Supreme Court, and the Dobbs decision, among other recent developments\"-- Provided by publisher.",
+     "private": false
+    }
+   ],
+   "titleObject": {
+    "data": "A companion to the United States Constitution and its amendments : America's continuing revolution"
+   },
+   "totalHighlights": 2,
+   "workCount": 92,
+   "workId": "4925924208",
+   "workSingletonIndicator": false,
+   "workSingletonWork": false
+  },
+  {
+   "additionalPhysicalFormEntries": [
+    {
+     "displayConstant": "Print version:",
+     "isbns": [
+      "9780197554319"
+     ],
+     "mainEntryHeadings": [
+      "Katz, Sanford N., 1933-"
+     ],
+     "recordControlOclcNumbers": [
+      "1178867831"
+     ],
+     "titles": [
+      "Family law in America."
+     ]
+    }
+   ],
+   "additionalTitle": "Sanford N. Katz.",
+   "allHighlightedFields": [
+    "date",
+    "publisherObjectList"
+   ],
+   "authors": [
+    {
+     "entityUris": [
+      {
+       "type": "oclc",
+       "uri": "https://id.oclc.org/worldcat/entity/E39PCjwJhPDQgMcXQd8xh6rMKd"
+      }
+     ],
+     "firstNameObject": {
+      "data": "Sanford N"
+     },
+     "flipNameOrder": false,
+     "lastNameObject": {
+      "data": "Katz"
+     },
+     "notes": "1933-",
+     "primary": true,
+     "relatorList": {
+      "relators": [
+       {
+        "code": "aut",
+        "term": "Author"
+       }
+      ]
+     },
+     "subFieldsQueryString": " AND au=\"1933\"",
+     "type": "person"
+    }
+   ],
+   "bibliographiesObjectList": [
+    {
+     "data": "Includes bibliographical references and index.",
+     "private": false
+    }
+   ],
+   "bookReview": false,
+   "briefHighlightedFields": [
+    "date",
+    "publisherObjectList"
+   ],
+   "catLang": "eng",
+   "contentsObjects": [
+    {
+     "note": "Friendship, marriage-like relationships, and informal marriage -- Marriage -- Divorce -- Child protection -- Adoption.",
+     "noteObject": {
+      "data": "Friendship, marriage-like relationships, and informal marriage -- Marriage -- Divorce -- Child protection -- Adoption.",
+      "private": false
+     }
+    }
+   ],
+   "databaseId": "",
+   "date": "2021",
+   "defaultCoverArtUrl": "//coverart.oclc.org/ImageWebSvc/oclc/+-+5934282876_70.jpg?SearchOrder=+-+IG,OT,OS,AV,FA,GO&DefaultImage=N&client&allowDefault=true",
+   "digitalGraphicRepresentation": "",
+   "disableAuthorLinks": false,
+   "displayCopyAndPasteCitations": true,
+   "displayDeepOpacLinks": false,
+   "displayOpacLink": true,
+   "edition": "Third edition.",
+   "editionId": "189e00ce7acd829772c5696f9db14da8",
+   "editionOclcNumbers": [
+    "1263175246",
+    "1281183480",
+    "1262045844",
+    "1295581283",
+    "1237379840"
+   ],
+   "editionSingletonEdition": false,
+   "enhancedCollectionName": "WorldCat.org",
+   "enhancedEditionVariantInfo": [
+    {
+     "editionVariantInfo": {
+      "language": "eng",
+      "ocn": "1262045844"
+     },
+     "language": "eng",
+     "languageNameInLocal": "English",
+     "ocn": "1262045844"
+    },
+    {
+     "editionVariantInfo": {
+      "language": "eng",
+      "ocn": "1281183480"
+     },
+     "language": "eng",
+     "languageNameInLocal": "English",
+     "ocn": "1281183480"
+    },
+    {
+     "editionVariantInfo": {
+      "language": "eng",
+      "ocn": "1295581283"
+     },
+     "language": "eng",
+     "languageNameInLocal": "English",
+     "ocn": "1295581283"
+    },
+    {
+     "editionVariantInfo": {
+      "language": "ger",
+      "ocn": "1263175246"
+     },
+     "language": "ger",
+     "languageNameInLocal": "German",
+     "ocn": "1263175246"
+    }
+   ],
+   "entityAuthors": {
+    "authors": [
+     {
+      "authorName": "Sanford N Katz",
+      "entityUri": "https://id.oclc.org/worldcat/entity/E39PCjwJhPDQgMcXQd8xh6rMKd"
+     }
+    ]
+   },
+   "heldByInstitutionName": "Peace Palace Library",
+   "heldByLevel": 1,
+   "holdingAudienceLevel": "P",
+   "iiifImageUrl": "",
+   "isbns": [
+    "9780197554326",
+    "0197554326",
+    "9780197554340",
+    "0197554342"
+   ],
+   "itemType": "book_digital",
+   "itemTypeDisplay": "eBook",
+   "labelAsUniqueIdentifier": false,
+   "language": "eng",
+   "lcNumber": "2020032613",
+   "links": [
+    {
+     "accessMethod": "4",
+     "relationship": "0",
+     "url": "http://public.eblib.com/choice/PublicFullRecord.aspx?p=6476736"
+    },
+    {
+     "accessMethod": "4",
+     "relationship": "0",
+     "url": "https://www.vlebooks.com/vleweb/product/openreader?id=none&isbn=9780197554326"
+    },
+    {
+     "accessMethod": "4",
+     "label": "Oxford scholarship online",
+     "relationship": "0",
+     "url": "https://dx.doi.org/10.1093/oso/9780197554319.001.0001"
+    },
+    {
+     "accessMethod": "4",
+     "relationship": "0",
+     "url": "https://www.vlebooks.com/vleweb/product/openreader?id=none&isbn=9780197554333"
+    },
+    {
+     "accessMethod": "4",
+     "label": "Kortext",
+     "relationship": "0",
+     "url": "https://app.kortext.com/borrow/868416"
+    }
+   ],
+   "masterCallNumber": "KF505 .K38 2021",
+   "mediumCoverArtUrl": "//coverart.oclc.org/ImageWebSvc/oclc/+-+5934282876_140.jpg?SearchOrder=+-+IG,OT,OS,AV,FA,GO&DefaultImage=N&client&allowDefault=true",
+   "musicalPresentationStatement": "",
+   "numberOfEditionIds": 21,
+   "numberOfOtherEditions": 83,
+   "oclcNumber": "1237379840",
+   "opacLink": "http://peacepalace.on.worldcat.org/search?queryString=ib%3A0197554326",
+   "openAccess": false,
+   "openUrlContextObject": "rft_val_fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Abook&ctx_enc=info%3Aofi%2Fenc%3AUTF-8&rft.pub=Oxford+University+Press%2C&ctx_tim=2026-09-02T03%3A17%3A00EDT&rft.dat=1237379840&rft.place=New+York%2C+NY+%3A&rft_id=info%3Aoclcnum%2F1237379840&rfr_id=info%3Asid%2F.on.worldcat.org%3Axwc&ctx_ver=Z39.88-2004&rft.isbn=9780197554326&rft.btitle=Family+law+in+America&rft.genre=book&rft.aufirst=Sanford+N.&rft.pages=1+online+resource+%28xiv%2C+319+pages%29.&url_ctx_fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Actx&rft.aulast=Katz&rfr.id=1237379840&rft.id=1237379840&url_ver=Z39.88-2004&rft.date=2021&ctx_id=1237379840&rft_dat=%7B%22stdrt1%22%3A%22Book%22%2C%22stdrt2%22%3A%22Digital%22%7D",
+   "peerReviewed": false,
+   "physicalDescription": "1 online resource (xiv, 319 pages).",
+   "publishers": [
+    {
+     "data": "New York, NY : Oxford University Press, [2021]"
+    }
+   ],
+   "remoteDatabase": false,
+   "source": "",
+   "sourceCollection": "xwc",
+   "staffILLRequestUrl": "https://57439.share.worldcat.org/wms/cmnd/nd/discover/items/1237379840/holdings/ALL?dbid=",
+   "subjectGroups": [
+    {
+     "bibSubjects": [
+      {
+       "data": "Domestic relations United States",
+       "local": false,
+       "thesaurusType": "LIBRARY_OF_CONGRESS_SUBJECT_HEADINGS",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Domestic relations United States",
+        "displayData": "Domestic relations—United States",
+        "private": false
+       }
+      }
+     ],
+     "id": "lcsh",
+     "isPromoted": true,
+     "label": "Library of Congress Subject Headings",
+     "thesaurusType": "LIBRARY_OF_CONGRESS_SUBJECT_HEADINGS"
+    },
+    {
+     "bibSubjects": [
+      {
+       "data": "Domestic relations",
+       "local": false,
+       "otherSource": "fast",
+       "thesaurusType": "OTHER_SOURCES",
+       "type": "TOPIC",
+       "unifiedData": {
+        "data": "Domestic relations",
+        "displayData": "Domestic relations",
+        "private": false
+       }
+      },
+      {
+       "data": "United States",
+       "local": false,
+       "otherSource": "fast",
+       "thesaurusType": "OTHER_SOURCES",
+       "type": "GEOGRAPHICAL_TERM",
+       "unifiedData": {
+        "data": "United States",
+        "displayData": "United States",
+        "private": false
+       }
+      }
+     ],
+     "id": "fast",
+     "isPromoted": true,
+     "label": "Faceted Application of Subject Terminology",
+     "thesaurusType": "OTHER_SOURCES"
+    }
+   ],
+   "summariesObjectList": [
+    {
+     "data": "This book is a highly readable presentation of the laws regulating family relationships in the United States, placing them in their historical and cultural contexts. This third edition captures recent developments, including the transformation of the institution of marriage to encompass same-sex marriage.",
+     "private": false
+    }
+   ],
+   "titleObject": {
+    "data": "Family law in America"
+   },
+   "totalHighlights": 2,
+   "workCount": 84,
+   "workId": "11599872",
+   "workSingletonIndicator": false,
+   "workSingletonWork": false
+  }
+ ],
+ "searchResultsType": "NORMAL"
+}

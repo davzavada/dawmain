@@ -120,8 +120,9 @@ export default function Soukromi() {
         </p>
         <p>
           Do veřejných databází (e-Sbírka, Nejvyšší soud, Nejvyšší správní soud, Ústavní soud,
-          rozhodnuti.justice.cz, InfoCuria, EUR-Lex) putuje pouze samotný dotaz, nikoli to, kdo
-          jste. Údaje dále předám jen tehdy, uloží-li mi to zákon.
+          rozhodnuti.justice.cz, InfoCuria, EUR-Lex) a knihovních katalogů (Peace Palace Library
+          na WorldCat Discovery, UKAŽ Univerzity Karlovy na Primo) putuje pouze samotný dotaz,
+          nikoli to, kdo jste. Údaje dále předám jen tehdy, uloží-li mi to zákon.
         </p>
       </Section>
 

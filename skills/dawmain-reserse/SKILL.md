@@ -1,6 +1,6 @@
 ---
 name: dawmain-reserse
-description: Conduct Czech and EU legal research through the Dawmain MCP connector (live queries into e-Sbírka, NS, NSS, Ústavní soud, obecné soudy, SDEU and EUR-Lex) and deliver a research memo — question, answer, argument — citing every authority in the running text with sp. zn./ECLI, date and link. Use this whenever the user asks what the law or the courts say, in phrasings like "právní rešerše", "rešerše k", "co na to judikatura", "najdi judikaturu k § X", "jak to soudy vykládají", "je na to nějaký rozsudek", "platí ještě", "co říká zákon o", "najdi mi rozhodnutí", or describes a legal problem and expects an answer grounded in statute and case law. Requires the Dawmain connector; if its tools are absent, say so instead of guessing.
+description: Conduct Czech and EU legal research through the Dawmain MCP connector (live queries into e-Sbírka, NS, NSS, Ústavní soud, obecné soudy, SDEU and EUR-Lex, plus the literature in the Peace Palace Library and UKAŽ catalogues) and deliver a research memo — question, answer, argument — citing every authority in the running text with sp. zn./ECLI, date and link. Use this whenever the user asks what the law, the courts or the doctrine say, in phrasings like "právní rešerše", "rešerše k", "co na to judikatura", "najdi judikaturu k § X", "jak to soudy vykládají", "je na to nějaký rozsudek", "platí ještě", "co říká zákon o", "najdi mi rozhodnutí", "co na to doktrína", "najdi literaturu k", "je k tomu komentář nebo článek", or describes a legal problem and expects an answer grounded in statute, case law and literature. Requires the Dawmain connector; if its tools are absent, say so instead of guessing.
 ---
 
 # Rešerše přes Dawmain
@@ -88,6 +88,7 @@ quoted passages stay in the original.
 | CJEU | `curia_search` → `curia_get_document` (`language: "cs"` falls back to English) |
 | EU legislation | `eurlex_search` (titles/CELEX/ECLI only, NOT full text) → `eurlex_get_document` |
 | EU legislative materials (travaux) | `eurlex_legislative_history {celex}` — the act's whole dossier: proposal + explanatory memorandum, impact assessments, EESC/CoR opinions, EP/Council positions; or `eurlex_search` with `types: ["proposal", "opinion", …]` |
+| Literature — monographs, commentaries, articles (doctrine) | `doctrine_search` — Peace Palace Library (WorldCat) + UKAŽ (Univerzita Karlova, Primo) in parallel; bibliographic records with links, no full text |
 | A source misbehaves | `dawmain_probe_sources` |
 
 Not covered: EUIPO and ÚPV. If the question needs them, say so and point at
@@ -161,6 +162,9 @@ so re-running a search after reading is cheap.
   druh rozhodnutí, obě data, a rozhodnutí podle aplikovaného ustanovení.
 - **EU legislation** — `eurlex_search` matches titles and identifiers only; for the
   text of judgments use `curia_search`.
+- **Doktrína** — its own section below: two library catalogues at once, keyword
+  variants in both languages, author/title/subject fields, years, and paging over
+  result lists that run into the thousands.
 - **EU legislative materials** — when the question turns on purpose or history of an
   EU act (proč to tam je, co chtěl normotvůrce), `eurlex_legislative_history {celex}`
   returns the whole procedure dossier from the adopted act's CELEX: the proposal
@@ -409,6 +413,52 @@ the case; a common word as a name will drown.
 opinion and the referring request together, so "1 matching case, 5 documents" is
 normal, not a bug.
 
+## Doktrína (literatura): pole
+
+`doctrine_search` searches two library catalogues in parallel — the Peace Palace
+Library in The Hague (WorldCat Discovery: WorldCat.org plus the library's licensed law
+collections — Nomos, Brill, Kluwer, OUP Law, Cambridge journals, Springer, Elgar) and
+UKAŽ of Univerzita Karlova (Primo: the UK catalogue plus the Central Discovery Index).
+It returns **bibliographic records**, not texts: author, title, year, publisher, form,
+ISBN/DOI, subject headings, abstract and contents where the record carries them, and
+the link to the record. There is nothing to `find` in or page through afterwards.
+
+| Chci | Parametr |
+|---|---|
+| literaturu k tématu | `query` — or `queries: ["genocide intent", "genocida úmysl"]` for both languages at once |
+| jen tohoto autora | `author: "Šturma"` (surname is enough) |
+| slova z názvu | `title: "Rome Statute commentary"` |
+| předmětové heslo | `subject: "International criminal law"` |
+| jen česky / anglicky / německy | `language: "cze"` / `"eng"` / `"ger"` |
+| období vydání | `year_from: 2015`, `year_to: 2026` |
+| jen jednu knihovnu | `sources: ["cuni"]` / `["peacepalace"]` |
+| jen s dostupným plným textem (Peace Palace) | `full_text_only: true` |
+| víc záznamů najednou (stručně, bez abstraktů) / další stránka | `per_source_limit: 20`, then `page: 2` |
+
+**Pick the language per catalogue.** UKAŽ holds the Czech doctrine — Czech terms of art
+(`"promlčení náhrady škody"`), and the commentaries surface under their series names
+(Velké komentáře, Beckovy komentáře). The Peace Palace is the international-law
+library — English (or French, German) terms; its licensed collections are where the
+Brill, Nomos and Kluwer literature lives. `queries` with one term per language runs
+both in one call.
+
+**Thousands of hits is the normal case, and paging is not the fix.** These are
+catalogues, so a common word matches everything ever catalogued under it. Read
+`total` as a signal about the query: add the term of art, `title` or `subject`,
+narrow the years, set `language`. Walk `page: 2, 3…` only when the question is
+genuinely a bibliography ("co všechno vyšlo k…"), and say in the memo how far you
+went (`has_more` tells you whether the list continued).
+
+**Author + subject without keywords works** — a field-only search is a valid call;
+language and years alone are not.
+
+**Cite the record, and say what you read.** A catalogue hit proves the work exists,
+not what it says: cite it as literature (author, title, year, publisher, record link),
+never as an authority for a proposition you have not read. The access links may open
+the publisher's copy — behind the library's login where the work is licensed, which
+the tool cannot pass. Where the abstract or contents decide relevance, quote them as
+the record's abstract, not as the work.
+
 ## Screening and reading
 
 **Screen before you read.** Every hit carries court, date and form. Judge relevance from
@@ -470,7 +520,10 @@ Most wasted time is a round that adds nothing. Stop when:
    `justice_search` to the same turn when the question is about everyday practice
    rather than doctrine ("jak to soudy běžně řeší", "co dostanu za…"), or when you
    already know the provision — `applies_act` + `applies_section` costs nothing extra
-   and needs no keywords.
+   and needs no keywords. Add `doctrine_search` to the same turn when the question
+   asks for the literature (komentář, monografie, článek), when the case law is thin
+   and doctrine is where the argument lives, or when the topic is international law
+   — the Peace Palace catalogue is the standard bibliography there.
 3. **Read the statute you cite.** `esbirka_get_text` with `section` — never paraphrase a
    provision you have not read. Historical matters: pass the reference `date`.
 4. **Read the decisions that decide it.** Full text of the two or three that matter,
@@ -489,5 +542,9 @@ ECLI + date + link, e.g. rozsudek Nejvyššího soudu ze dne 11. 12. 2013, sp. z
 [23 Cdo 3375/2011](url). Verbatim quotations go in a Markdown blockquote, immediately
 followed by the citation. No source list at the end — the links live where the argument
 uses them.
+
+**Literatura** — only when doctrine was searched: the works worth the reader's time,
+each as author, title, year, publisher and the record link, one line per work, with a
+word on why (commentary on the provision, leading monograph, recent article).
 
 **Co chybí** — what you did not find, what is contested, what needs verifying.

@@ -2,6 +2,8 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { ESBIRKA_CACHE_BASE, getEsbirkaApiBase, getEsbirkaApiKey } from "../config";
 import { USER_AGENT } from "@/src/sources/shared/http";
+import { buildWorldcatUrl } from "@/src/sources/worldcat";
+import { PRIMO_PAGE_SIZE, buildPrimoUrl } from "@/src/sources/primo";
 import { READ_ONLY } from "./shared";
 import { DOC_PAGE_CHARS } from "@/src/sources/shared/text";
 
@@ -178,6 +180,37 @@ export function canaries(): Canary[] {
       }),
       marker: /<html|<HTML|xhtml/,
     },
+    {
+      id: "worldcat",
+      source: "Peace Palace Library (WorldCat)",
+      note: "Discovery /api/search unsigned (the SPA signs with Oclc-Apik/Apin + api-token) — a 401/403 here means the search tool cannot reach it",
+      request: () => ({
+        url: buildWorldcatUrl({ query: "genocide" }, 1),
+        init: {
+          headers: {
+            accept: "application/json, text/plain, */*",
+            "accept-language": "en",
+            referer: "https://peacepalace.on.worldcat.org/search?queryString=kw%3A%28genocide%29",
+          },
+        },
+      }),
+      marker: /"numberOfRecords"/,
+    },
+    {
+      id: "primo",
+      source: "UKAŽ (Univerzita Karlova, Primo)",
+      note: "primaws/rest/pub/pnxs without a guest JWT — a 401/403 here means the token flow is needed",
+      request: () => ({
+        url: buildPrimoUrl({ query: "genocida" }, 0, PRIMO_PAGE_SIZE),
+        init: {
+          headers: {
+            accept: "application/json, text/plain, */*",
+            referer: "https://cuni.primo.exlibrisgroup.com/discovery/search?vid=420CKIS_INST:UKAZ&lang=cs&mode=advanced",
+          },
+        },
+      }),
+      marker: /"totalResultsLocal"/,
+    },
   ];
 }
 
@@ -329,6 +362,8 @@ const ALLOWED_FETCH_HOSTS = [
   "infocuria.curia.europa.eu",
   "curia.europa.eu",
   "publications.europa.eu",
+  "peacepalace.on.worldcat.org",
+  "cuni.primo.exlibrisgroup.com",
 ];
 
 /** Echoed remote bodies are data, never instructions — fence them so a model

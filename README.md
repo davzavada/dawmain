@@ -26,6 +26,13 @@ EUR-Lexem). Konkrétně je napojený na judikaturu:
 Právní předpisy: [e-Sbírka](https://www.e-sbirka.cz), unijní legislativa,
 judikatura a legislativní materiály: [EUR-Lex](https://eur-lex.europa.eu).
 
+Doktrína (knihy, kapitoly, články) přes katalogy dvou knihoven najednou:
+[Peace Palace Library](https://peacepalace.on.worldcat.org) v Haagu (WorldCat
+Discovery: WorldCat.org a licencované právnické kolekce knihovny) a
+[UKAŽ](https://cuni.primo.exlibrisgroup.com/discovery/search?vid=420CKIS_INST:UKAZ)
+Univerzity Karlovy (Primo: katalog UK a Central Discovery Index). Vrací
+bibliografické záznamy s odkazem na záznam, ne plné texty.
+
 ## Endpoint
 
 ```
