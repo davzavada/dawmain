@@ -1,11 +1,9 @@
 import { clerkClient } from "@clerk/nextjs/server";
 import { verifyClerkToken } from "@clerk/mcp-tools/next";
-import {
-  fetchClerkAuthorizationServerMetadata,
-  generateClerkProtectedResourceMetadata,
-} from "@clerk/mcp-tools/server";
+import { generateClerkProtectedResourceMetadata } from "@clerk/mcp-tools/server";
 import type { AuthInfo } from "@modelcontextprotocol/server";
 import { getPublicOrigin } from "mcp-handler";
+import { TtlCache } from "../sources/shared/cache";
 import { clerkConfigured, getBearerToken, getClerkPublishableKey, tokenMatches } from "./config";
 
 /**
@@ -152,14 +150,95 @@ export function protectedResourceMetadata(request: Request): Response {
 }
 
 /**
+ * The authorization server a publishable key points at — the Clerk frontend
+ * API host is base64-encoded in the key (`pk_<env>_<base64 of "host$">`),
+ * which is what Clerk's own metadata helper decodes too. Read back from that
+ * helper rather than decoded here, so the two well-known documents can never
+ * disagree about the issuer.
+ */
+export function clerkAuthorizationServer(publishableKey: string): string {
+  const [issuer] = generateClerkProtectedResourceMetadata({
+    publishableKey,
+    resourceUrl: "https://localhost/api/mcp",
+  }).authorization_servers;
+  return issuer;
+}
+
+/** Clerk's metadata changes with a dashboard setting at most — an hour of
+ * per-instance memory covers a whole login round-trip and every retry. */
+const AUTH_SERVER_METADATA_TTL_MS = 60 * 60 * 1000;
+const AUTH_SERVER_FETCH_TIMEOUT_MS = 8_000;
+const authServerMetadataCache = new TtlCache<Record<string, unknown>>(AUTH_SERVER_METADATA_TTL_MS, 4);
+
+/**
+ * One attempt at Clerk's RFC 8414 document: bounded in time, and only a JSON
+ * object with an issuer counts — an outage page (HTML, 5xx) is a failure, not
+ * metadata to forward.
+ */
+async function fetchAuthorizationServerMetadataOnce(issuer: string): Promise<Record<string, unknown>> {
+  const response = await fetch(`${issuer}/.well-known/oauth-authorization-server`, {
+    headers: { accept: "application/json" },
+    signal: AbortSignal.timeout(AUTH_SERVER_FETCH_TIMEOUT_MS),
+  });
+  if (!response.ok) throw new Error(`Clerk answered HTTP ${response.status}`);
+  const metadata: unknown = await response.json();
+  if (!metadata || typeof metadata !== "object" || typeof (metadata as { issuer?: unknown }).issuer !== "string") {
+    throw new Error("Clerk answered without an issuer");
+  }
+  return metadata as Record<string, unknown>;
+}
+
+/**
  * RFC 8414 authorization-server metadata, proxied from Clerk at our origin —
  * a compatibility shim for MCP clients that skip the protected-resource step
  * and look for the authorization server on the resource's own domain.
+ *
+ * MCP clients fetch this in the middle of the login hand-off, so it must
+ * never crash the function: Clerk's helper is a bare `fetch().json()`, and a
+ * single dropped connection or an HTML error page from Clerk turned the whole
+ * login into a Vercel FUNCTION_INVOCATION_FAILED that "worked on the second
+ * try". Here the upstream call is bounded, retried once, cached per warm
+ * instance, and a persistent failure is a 503 with Retry-After — a response
+ * the client can act on.
  */
 export async function authorizationServerMetadata(): Promise<Response> {
   const publishableKey = getClerkPublishableKey();
   if (!publishableKey || !clerkConfigured()) return notConfigured();
-  const metadata = await fetchClerkAuthorizationServerMetadata({ publishableKey });
+  const issuer = clerkAuthorizationServer(publishableKey);
+
+  let metadata = authServerMetadataCache.get(issuer);
+  if (!metadata) {
+    try {
+      metadata = await fetchAuthorizationServerMetadataOnce(issuer);
+    } catch (firstError) {
+      try {
+        metadata = await fetchAuthorizationServerMetadataOnce(issuer);
+      } catch (secondError) {
+        console.warn(
+          `Clerk authorization-server metadata unavailable from ${issuer}:`,
+          firstError,
+          secondError,
+        );
+        return new Response(
+          JSON.stringify({
+            error: "temporarily_unavailable",
+            message: "The authorization server's metadata could not be fetched. Try again in a moment.",
+          }),
+          {
+            status: 503,
+            headers: {
+              "content-type": "application/json",
+              "retry-after": "5",
+              "cache-control": "no-store",
+              ...METADATA_CORS_HEADERS,
+            },
+          },
+        );
+      }
+    }
+    authServerMetadataCache.set(issuer, metadata);
+  }
+
   return new Response(JSON.stringify(metadata), {
     headers: {
       "content-type": "application/json",

@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { clerkConfigured, tokenMatches } from "@/src/mcp/config";
-import { authMode, verifyRequestAuth } from "@/src/mcp/auth";
+import { authMode, authorizationServerMetadata, clerkAuthorizationServer, verifyRequestAuth } from "@/src/mcp/auth";
 
 /**
  * The endpoint's gate (src/mcp/auth.ts): shared token + Clerk OAuth. These
@@ -83,5 +83,80 @@ describe("verifyRequestAuth + authMode", () => {
     expect(authMode()).toBe("oauth+token");
     delete process.env.MCP_BEARER_TOKEN;
     expect(authMode()).toBe("oauth");
+  });
+});
+
+describe("authorizationServerMetadata", () => {
+  // Same shape Clerk issues: the frontend-API host, "$"-terminated, base64 in the key.
+  const host = "guarded-login-42.clerk.accounts.dev";
+  const publishableKey = "pk_test_" + Buffer.from(`${host}$`).toString("base64");
+  const issuer = `https://${host}`;
+  const document = { issuer, authorization_endpoint: `${issuer}/oauth/authorize` };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+    delete process.env.CLERK_SECRET_KEY;
+  });
+
+  function configure(): void {
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = publishableKey;
+    process.env.CLERK_SECRET_KEY = "sk_test_x";
+  }
+
+  it("derives the issuer from the publishable key", () => {
+    expect(clerkAuthorizationServer(publishableKey)).toBe(issuer);
+  });
+
+  it("is 404 while OAuth is unconfigured, without touching the network", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await authorizationServerMetadata();
+    expect(response.status).toBe(404);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("answers 503 instead of crashing when Clerk is unreachable — twice", async () => {
+    configure();
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError("fetch failed"));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await authorizationServerMetadata();
+    expect(response.status).toBe(503);
+    expect(response.headers.get("retry-after")).toBe("5");
+    expect(await response.json()).toMatchObject({ error: "temporarily_unavailable" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0][0]).toBe(`${issuer}/.well-known/oauth-authorization-server`);
+  });
+
+  it("treats an outage page from Clerk as a failure, not as metadata", async () => {
+    configure();
+    const html = () => new Response("<html>502 Bad Gateway</html>", { status: 502, headers: { "content-type": "text/html" } });
+    const fetchMock = vi.fn().mockImplementation(async () => html());
+    vi.stubGlobal("fetch", fetchMock);
+    expect((await authorizationServerMetadata()).status).toBe(503);
+
+    // A 200 that is not JSON (the failure mode that threw inside .json()).
+    fetchMock.mockImplementation(async () => new Response("<html>maintenance</html>", { status: 200 }));
+    expect((await authorizationServerMetadata()).status).toBe(503);
+  });
+
+  it("recovers on the retry and then serves the cached document", async () => {
+    configure();
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("fetch failed"))
+      .mockImplementation(async () => Response.json(document));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = await authorizationServerMetadata();
+    expect(first.status).toBe(200);
+    expect(first.headers.get("access-control-allow-origin")).toBe("*");
+    expect(await first.json()).toEqual(document);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const second = await authorizationServerMetadata();
+    expect(second.status).toBe(200);
+    expect(await second.json()).toEqual(document);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

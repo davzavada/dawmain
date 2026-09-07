@@ -226,6 +226,19 @@ async function checkOAuthMetadata() {
     throw new Error(`oauth-protected-resource resource is not the MCP endpoint: ${JSON.stringify(metadata)}`);
   }
   ok("oauth discovery", `${metadata.resource} → ${metadata.authorization_servers.join(", ")}`);
+
+  // RFC 8414 shim on our own origin — fetched mid-login by clients that look
+  // for the authorization server on the resource's domain; a crash here was
+  // the "500 on first login attempt".
+  const authServer = await fetch(`${origin}/.well-known/oauth-authorization-server`);
+  if (!authServer.ok) {
+    throw new Error(`oauth-authorization-server → HTTP ${authServer.status}`);
+  }
+  const authServerMetadata = await authServer.json();
+  if (typeof authServerMetadata.issuer !== "string" || typeof authServerMetadata.authorization_endpoint !== "string") {
+    throw new Error(`oauth-authorization-server is not RFC 8414 metadata: ${JSON.stringify(authServerMetadata)}`);
+  }
+  ok("oauth authorization server", `${authServerMetadata.issuer} (${authServerMetadata.authorization_endpoint})`);
 }
 
 async function main() {

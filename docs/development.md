@@ -203,7 +203,14 @@ Endpoint přijímá dvě credentials naráz (stačí kterákoli); logika žije v
    Account Portal; server jen ověřuje předložené OAuth tokeny přes Clerk
    (`verifyClerkToken`), k čemuž potřebuje secret key. `proxy.ts` (Clerk
    middleware, jen na `/api` a `/__clerk`) je to, co `auth()` v route
-   zprovozňuje; bez klíčů je no-op.
+   zprovozňuje; bez klíčů je no-op a když Clerk uprostřed požadavku
+   vyhodí výjimku, požadavek propustí k vlastnímu ověření v route (ta bez
+   proxy selhává uzavřeně), místo aby spadla celá funkce. Dokument
+   `/.well-known/oauth-authorization-server` se z Clerku stahuje s
+   timeoutem, jedním opakováním a hodinovou cache per instance; při trvalém
+   výpadku vrací 503 s `Retry-After` — dřív byl holý `fetch().json()`, a jeden
+   spadlý spoj s Clerkem přeložil celé přihlášení na
+   `FUNCTION_INVOCATION_FAILED`, které „napodruhé prošlo".
 2. **Sdílený přístupový kód** (`MCP_BEARER_TOKEN`) — původní schéma,
    ponechané pro existující klienty; token se přijímá z `Authorization`,
    `X-API-Key` i `cf-aig-authorization` (stačí, když sedí kterákoli).
