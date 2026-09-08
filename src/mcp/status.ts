@@ -99,12 +99,6 @@ export const DATABASES: Array<{ label: string; href: string; source: string; can
     source: "EUR-Lex (Cellar)",
     canaryId: "cellar-sparql",
   },
-  {
-    label: "UKAŽ (Univerzita Karlova)",
-    href: "https://cuni.primo.exlibrisgroup.com/discovery/search?vid=420CKIS_INST:UKAZ",
-    source: "UKAŽ (Univerzita Karlova, Primo)",
-    canaryId: "primo",
-  },
 ];
 
 interface CachedCanary {

@@ -1,6 +1,6 @@
 ---
 name: dawmain-reserse
-description: Conduct Czech and EU legal research through the Dawmain MCP connector (live queries into e-Sbírka, NS, NSS, Ústavní soud, obecné soudy, SDEU and EUR-Lex, plus the literature in the UKAŽ catalogue of Univerzita Karlova) and deliver a research memo — question, answer, argument — citing every authority in the running text with sp. zn./ECLI, date and link. Use this whenever the user asks what the law, the courts or the doctrine say, in phrasings like "právní rešerše", "rešerše k", "co na to judikatura", "najdi judikaturu k § X", "jak to soudy vykládají", "je na to nějaký rozsudek", "platí ještě", "co říká zákon o", "najdi mi rozhodnutí", "co na to doktrína", "najdi literaturu k", "je k tomu komentář nebo článek", or describes a legal problem and expects an answer grounded in statute, case law and literature. Requires the Dawmain connector; if its tools are absent, say so instead of guessing.
+description: Conduct Czech and EU legal research through the Dawmain MCP connector (live queries into e-Sbírka, NS, NSS, Ústavní soud, obecné soudy, SDEU and EUR-Lex) and deliver a research memo — question, answer, argument — citing every authority in the running text with sp. zn./ECLI, date and link. Use this whenever the user asks what the law or the courts say, in phrasings like "právní rešerše", "rešerše k", "co na to judikatura", "najdi judikaturu k § X", "jak to soudy vykládají", "je na to nějaký rozsudek", "platí ještě", "co říká zákon o", "najdi mi rozhodnutí", or describes a legal problem and expects an answer grounded in statute and case law. Requires the Dawmain connector; if its tools are absent, say so instead of guessing.
 ---
 
 # Rešerše přes Dawmain
@@ -88,12 +88,10 @@ quoted passages stay in the original.
 | CJEU | `curia_search` → `curia_get_document` (`language: "cs"` falls back to English) |
 | EU legislation | `eurlex_search` (titles/CELEX/ECLI only, NOT full text) → `eurlex_get_document` |
 | EU legislative materials (travaux) | `eurlex_legislative_history {celex}` — the act's whole dossier: proposal + explanatory memorandum, impact assessments, EESC/CoR opinions, EP/Council positions; or `eurlex_search` with `types: ["proposal", "opinion", …]` |
-| Literature — monographs, commentaries, articles (doctrine) | `doctrine_search` — UKAŽ (Univerzita Karlova, Primo: the UK catalogue + the Central Discovery Index) → `doctrine_get_document {id}` for the record in full: the whole abstract and table of contents |
 | A source misbehaves | `dawmain_probe_sources` |
 
-Not covered: EUIPO, ÚPV and the Peace Palace Library. If the question needs them,
-say so and point at euipo.europa.eu / isdv.upv.gov.cz / peacepalace.on.worldcat.org —
-do not answer from memory instead.
+Not covered: EUIPO and ÚPV. If the question needs them, say so and point at
+euipo.europa.eu / isdv.upv.gov.cz — do not answer from memory instead.
 
 ## Query craft — the precision lever
 
@@ -163,9 +161,6 @@ so re-running a search after reading is cheap.
   druh rozhodnutí, obě data, a rozhodnutí podle aplikovaného ustanovení.
 - **EU legislation** — `eurlex_search` matches titles and identifiers only; for the
   text of judgments use `curia_search`.
-- **Doktrína** — its own section below: two library catalogues at once, keyword
-  variants in both languages, author/title/subject fields, years, and paging over
-  result lists that run into the thousands.
 - **EU legislative materials** — when the question turns on purpose or history of an
   EU act (proč to tam je, co chtěl normotvůrce), `eurlex_legislative_history {celex}`
   returns the whole procedure dossier from the adopted act's CELEX: the proposal
@@ -414,58 +409,6 @@ the case; a common word as a name will drown.
 opinion and the referring request together, so "1 matching case, 5 documents" is
 normal, not a bug.
 
-## Doktrína (literatura): pole
-
-`doctrine_search` searches UKAŽ, the discovery service of Univerzita Karlova (Primo):
-the UK catalogue — Czech monographs and commentaries — plus the Central Discovery
-Index of the e-resources the university licenses, where the international journals
-and the Brill, Kluwer, Oxford and Springer literature live. It returns
-**bibliographic records**: author, title, year, publisher, form, ISBN/DOI, subject
-headings, a taste of the abstract and contents, and the link to the record.
-`doctrine_get_document {id: "alma990020025980106986"}` (the `id` of a hit) then returns
-that one record whole: the full abstract, the table of contents, subject headings,
-identifiers and access links. It does not fetch the text of the work.
-
-| Chci | Parametr |
-|---|---|
-| literaturu k tématu | `query` — or `queries: ["genocide intent", "genocida úmysl"]` for both languages at once |
-| jen tohoto autora | `author: "Šturma"` (surname is enough) |
-| slova z názvu | `title: "Rome Statute commentary"` |
-| předmětové heslo | `subject: "International criminal law"` |
-| jen česky / anglicky / německy | `language: "cze"` / `"eng"` / `"ger"` |
-| období vydání | `year_from: 2015`, `year_to: 2026` |
-| víc záznamů najednou (stručně, bez abstraktů) / další stránka | `limit: 20`, then `page: 2` |
-
-**Pick the language per part of the catalogue.** The UK catalogue holds the Czech
-doctrine — Czech terms of art (`"promlčení náhrady škody"`), and the commentaries
-surface under their series names (Velké komentáře, Beckovy komentáře). The Central
-Discovery Index answers to English (or French, German) terms. `queries` with one term
-per language runs both in one call; `total_local` and `total_central` in the result
-say which part answered.
-
-**Thousands of hits is the normal case, and paging is not the fix.** This is a
-catalogue, so a common word matches everything ever catalogued under it. Read
-`total` as a signal about the query: add the term of art, `title` or `subject`,
-narrow the years, set `language`. Walk `page: 2, 3…` only when the question is
-genuinely a bibliography ("co všechno vyšlo k…"), and say in the memo how far you
-went (`has_more` tells you whether the list continued).
-
-**Author + subject without keywords works** — a field-only search is a valid call;
-language and years alone are not.
-
-**Read the abstract and the contents before you lean on a work.** The search shows only
-the first lines of each; `doctrine_get_document {id}` returns them whole, and the table
-of contents of a monograph or commentary is how you tell whether it is on point at all
-— which chapter, which paragraph of the commentary. Do it for the two or three works
-you mean to cite, in one turn.
-
-**Cite the record, and say what you did not read.** A catalogue hit proves the work
-exists, not what it says: cite it as literature (author, title, year, publisher, record
-link), never as an authority for a proposition you have not read. What you know from
-the abstract or the contents you present as the record's abstract, not as the work;
-when the argument needs the text itself, say so and point the user to the record link
-(licensed titles open for them through the university's remote access in a browser).
-
 ## Screening and reading
 
 **Screen before you read.** Every hit carries court, date and form. Judge relevance from
@@ -477,10 +420,7 @@ around every match with a match count. For "does this decision address X at all"
 call answers it — and zero matches is a real, citable finding.
 
 **Close reading → pages.** Documents come in ~45k-character pages; when you need the
-whole reasoning, fetch the remaining pages **without asking the user**. The same goes
-for the literature: an open-access monograph read through `doctrine_get_document` is
-paged like a decision — `find` the chapter or the term, then read the pages that decide
-it.
+whole reasoning, fetch the remaining pages **without asking the user**.
 
 **Never argue from a snippet.** A právní věta is a headline; the holding lives in the
 odůvodnění, together with the facts that limit it.
@@ -530,10 +470,7 @@ Most wasted time is a round that adds nothing. Stop when:
    `justice_search` to the same turn when the question is about everyday practice
    rather than doctrine ("jak to soudy běžně řeší", "co dostanu za…"), or when you
    already know the provision — `applies_act` + `applies_section` costs nothing extra
-   and needs no keywords. Add `doctrine_search` to the same turn when the question
-   asks for the literature (komentář, monografie, článek), when the case law is thin
-   and doctrine is where the argument lives, or when the topic is international law
-   — the Central Discovery Index carries the international journals and series too.
+   and needs no keywords.
 3. **Read the statute you cite.** `esbirka_get_text` with `section` — never paraphrase a
    provision you have not read. Historical matters: pass the reference `date`.
 4. **Read the decisions that decide it.** Full text of the two or three that matter,
@@ -552,10 +489,5 @@ ECLI + date + link, e.g. rozsudek Nejvyššího soudu ze dne 11. 12. 2013, sp. z
 [23 Cdo 3375/2011](url). Verbatim quotations go in a Markdown blockquote, immediately
 followed by the citation. No source list at the end — the links live where the argument
 uses them.
-
-**Literatura** — only when doctrine was searched: the works worth the reader's time,
-each as author, title, year, publisher and the record link, one line per work, with a
-word on why (commentary on the provision, leading monograph, recent article) and
-whether you read it (open access) or only its record.
 
 **Co chybí** — what you did not find, what is contested, what needs verifying.
