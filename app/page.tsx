@@ -108,10 +108,7 @@ export default async function Home() {
       <h2 style={{ fontSize: "1.1rem", marginTop: "2rem" }}>Jak to funguje?</h2>
       <p>
         Server nemá vlastní databázi - funguje jako nachytřený Google: vyhledává živě přímo v
-        oficiálních databázích. Právní předpisy bere přes API e-Sbírky, unijní legislativu i
-        legislativní materiály z Cellaru (strojové rozhraní Úřadu pro publikace EU, které stojí za
-        EUR-Lexem). Konkrétně je
-        napojený na tyto zdroje:
+        oficiálních databázích. Konkrétně je napojený na tyto zdroje:
       </p>
       <Suspense fallback={<SourceListFallback />}>
         <SourceList />

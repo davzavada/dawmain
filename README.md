@@ -12,10 +12,7 @@ Budu rád, pokud nástroj vyzkoušíte :)
 ## Jak to funguje?
 
 Server nemá vlastní databázi - funguje jako nachytřený Google: vyhledává živě
-přímo v oficiálních databázích. Právní předpisy bere přes API e-Sbírky, unijní
-legislativu i legislativní materiály (návrhy, stanoviska, postoje EP a Rady)
-z Cellaru (strojové rozhraní Úřadu pro publikace EU, které stojí za
-EUR-Lexem). Konkrétně je napojený na judikaturu:
+přímo v oficiálních databázích. Konkrétně je napojený na judikaturu:
 
 - Nejvyššího soudu - dostupné [zde](https://rozhodnuti.nsoud.cz)
 - Nejvyššího správního soudu - dostupné [zde](https://vyhledavac.nssoud.cz)
