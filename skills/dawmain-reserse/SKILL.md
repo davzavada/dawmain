@@ -355,6 +355,13 @@ overwhelmingly first-instance civil — absence here is not absence of law. And 
 persuasive practice, not binding authority: never let an okresní rozsudek outrank an NS
 decision, and say plainly when the lower courts are all you found.
 
+**Default: the last 5 years.** A call with no date (`date_from`/`date_to`/`published_*`)
+and no `case_number` searches only decisions issued in the last five years, and the
+response opens with a ⚠ line saying so (`default_date_from` in the structured output).
+Whenever that line appears, say in the memo that obecné soudy were searched from that
+date only. For older practice pass `date_from: "2020-10-01"` (the whole archive) or an
+explicit window — expect it to be slower.
+
 **Keep the full text short — the index is slow, not down.** One distinctive word with
 a date window of months (`query: "sazebník"`, `date_from: "2025-01-01"`) answers in
 about a second; a multi-word sentence (`"určení sazby odměny sazebník nesouhlasící

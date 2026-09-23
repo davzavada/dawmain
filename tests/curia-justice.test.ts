@@ -14,6 +14,7 @@ import {
   searchJustice,
 } from "@/src/sources/justice";
 import { SourceError } from "@/src/sources/shared/errors";
+import { DEFAULT_WINDOW_YEARS, defaultDecidedFrom } from "@/src/mcp/tools/justice";
 
 describe("caseNumberToCelex", () => {
   it("derives CELEX sector-6 numbers", () => {
@@ -506,5 +507,22 @@ describe("justice.cz search timeout", () => {
     expect(error).toBeInstanceOf(SourceError);
     expect((error as SourceError).message).toMatch(/did not answer the search within 45 s/);
     expect((error as SourceError).hint).toMatch(/ONE distinctive word/);
+  });
+});
+
+describe("justice_search default date window", () => {
+  const today = new Date("2026-09-23T10:00:00Z");
+
+  it("applies the last 5 years when no date and no case number is given", () => {
+    expect(defaultDecidedFrom({}, today)).toBe("2021-09-23");
+    expect(DEFAULT_WINDOW_YEARS).toBe(5);
+  });
+
+  it("stays out of the way of any explicit date or a spisová značka lookup", () => {
+    expect(defaultDecidedFrom({ date_from: "2020-10-01" }, today)).toBeUndefined();
+    expect(defaultDecidedFrom({ date_to: "2022-01-01" }, today)).toBeUndefined();
+    expect(defaultDecidedFrom({ published_from: "2026-09-01" }, today)).toBeUndefined();
+    expect(defaultDecidedFrom({ published_to: "2026-09-01" }, today)).toBeUndefined();
+    expect(defaultDecidedFrom({ case_number: "8 Co 60/2025" }, today)).toBeUndefined();
   });
 });
