@@ -1,6 +1,6 @@
 ---
 name: dawmain-reserse
-description: Conduct Czech and EU legal research through the Dawmain MCP connector (live queries into e-Sbírka, NS, NSS, Ústavní soud, obecné soudy, SDEU and EUR-Lex, plus the literature in the UKAŽ catalogue of Univerzita Karlova) and deliver a research memo — question, answer, argument — citing every authority in the running text with sp. zn./ECLI, date and link. Use this whenever the user asks what the law, the courts or the doctrine say, in phrasings like "právní rešerše", "rešerše k", "co na to judikatura", "najdi judikaturu k § X", "jak to soudy vykládají", "je na to nějaký rozsudek", "platí ještě", "co říká zákon o", "najdi mi rozhodnutí", "co na to doktrína", "najdi literaturu k", "je k tomu komentář nebo článek", or describes a legal problem and expects an answer grounded in statute, case law and literature. Requires the Dawmain connector; if its tools are absent, say so instead of guessing.
+description: Conduct Czech and EU legal research through the Dawmain MCP connector (live queries into e-Sbírka, NS, NSS, Ústavní soud, obecné soudy, SDEU and EUR-Lex, plus the literature in the UKAŽ catalogue of Univerzita Karlova) and deliver a research memo — question, answer, argument — citing every authority in the running text (decisions: quotation, bod, sp. zn., link; statutes without links). Use this whenever the user asks what the law, the courts or the doctrine say, in phrasings like "právní rešerše", "rešerše k", "co na to judikatura", "najdi judikaturu k § X", "jak to soudy vykládají", "je na to nějaký rozsudek", "platí ještě", "co říká zákon o", "najdi mi rozhodnutí", "co na to doktrína", "najdi literaturu k", "je k tomu komentář nebo článek", or describes a legal problem and expects an answer grounded in statute, case law and literature. Requires the Dawmain connector; if its tools are absent, say so instead of guessing.
 ---
 
 # Rešerše přes Dawmain
@@ -51,13 +51,31 @@ ECLI, § number or URL you did not read out of a tool response in this session. 
 fabricated case number is worse than an admitted gap, and a link you assembled
 yourself will 404 in front of the reader.
 
-**Link the document, cite the paragraph.** Hits carry a `url` that opens the decision
-itself — record it the moment it appears (going back for links after the memo is
-written is how they get invented). Never cite a search URL or a database homepage: the
-reader must land on the text. Then point at the passage you actually rely on — Czech
-supreme-court decisions number their paragraphs, so cite the bod (…, bod 24); where a
-decision has no numbering, quote the sentence in a blockquote instead. NS links come
-back with the search terms highlighted, so the reader opens at the passage.
+**Every decision gets all four: citace, bod, spisová značka, odkaz.** No exception,
+whether it carries the argument or is mentioned in passing:
+
+1. **Citace** — the passage you rely on, verbatim, in a Markdown blockquote. Copy it
+   from `*_get_decision` output you read in this session; never reconstruct it from a
+   snippet or from memory. Paraphrase alone is not enough.
+2. **Bod** — the numbered paragraph it comes from (…, bod 24). Where the decision has
+   no numbering, say where in it the passage sits (odůvodnění, s. 5) — the quotation
+   is then what lets the reader find it.
+3. **Spisová značka** (or ECLI for SDEU), with the court, the form and the date.
+4. **Odkaz** — the hit's `url`, opening the decision itself. Record it the moment it
+   appears (going back for links after the memo is written is how they get invented).
+   Never a search URL or a database homepage: the reader must land on the text. NS
+   links come back with the search terms highlighted, so the reader opens at the
+   passage.
+
+A decision you could not read in full (so have no quotation from) does not go in as
+authority — at most under **Co chybí**, with its link, as unread.
+
+**Statutes: cite, don't link.** A provision is cited as § 2201 zákona č. 89/2012 Sb.,
+občanský zákoník (or čl. 6 odst. 1 nařízení (EU) 2016/679) — no URL. Quote the wording
+when the argument turns on it; read it with `esbirka_get_text` either way.
+
+**Sources live in the text, never in a list at the end.** Each authority is cited where
+the argument uses it. No "Zdroje", "Použitá judikatura" or bibliography section.
 
 **Say what you did not find.** Thin case law, only lower courts, nothing after a
 statutory change — write that. A memo that admits there is no NS precedent beats one
@@ -171,7 +189,7 @@ so re-running a search after reading is cheap.
   returns the whole procedure dossier from the adopted act's CELEX: the proposal
   (its text opens with the explanatory memorandum — the EU důvodová zpráva),
   impact assessments, EESC/CoR opinions and EP/Council positions. Read them with
-  `eurlex_get_document {celex}`; cite the CELEX + date + link like any authority.
+  `eurlex_get_document {celex}`; cite the document, its CELEX, date and link in the running text (the adopted act itself, like any statute, needs no link).
 
 ## Nejvyšší soud: pole a operátory
 
@@ -556,15 +574,17 @@ Most wasted time is a round that adds nothing. Stop when:
 
 **Odpověď** — the conclusion in a few sentences, up front.
 
-**Argumentace** — the reasoning, each authority cited in the running text: sp. zn. or
-ECLI + date + link, e.g. rozsudek Nejvyššího soudu ze dne 11. 12. 2013, sp. zn.
-[23 Cdo 3375/2011](url). Verbatim quotations go in a Markdown blockquote, immediately
-followed by the citation. No source list at the end — the links live where the argument
-uses them.
+**Argumentace** — the reasoning, each authority cited in the running text where it is
+used. Every decision: the verbatim quotation in a blockquote, immediately followed by
+the citation with bod, spisová značka and link, e.g.
 
-**Literatura** — only when doctrine was searched: the works worth the reader's time,
-each as author, title, year, publisher and the record link, one line per work, with a
-word on why (commentary on the provision, leading monograph, recent article) and
-whether you read it (open access) or only its record.
+> Pronajímatel je oprávněn …
+
+— rozsudek Nejvyššího soudu ze dne 11. 12. 2013, sp. zn. [23 Cdo 3375/2011](url), bod 24.
+
+Statutes by § and number, without a link: § 2201 zákona č. 89/2012 Sb. Literature, when
+doctrine was searched, also in the running text where it supports the point — author,
+title, year, publisher and the record link, and whether you read the work or only its
+record. No source list at the end.
 
 **Co chybí** — what you did not find, what is contested, what needs verifying.
