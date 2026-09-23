@@ -1,0 +1,108 @@
+{"beaconO22":"33",
+  "info" : {
+    "totalResultsLocal" : 443,
+    "totalResultsPC" : 10346,
+    "total" : 10789,
+    "first" : 2,
+    "last" : 2
+  },
+  "highlights" : {
+    "snippet" : [ "genocida", "GENOCIDA", "genocide" ],
+    "title" : [ "genocida", "GENOCIDA", "genocidas", "Genocida", "genocída", "genocīda" ],
+    "termsUnion" : [ "genocida", "GENOCIDA", "genocide", "GENOCÍDA", "genocidas", "Genocida", "genocída", "genocīda" ],
+    "subject" : [ "genocida" ],
+    "description" : [ "genocida" ],
+    "toc" : [ "GENOCÍDA" ],
+    "addtitle" : [ "genocida", "Genocida", "genocída" ]
+  },
+  "docs" : [ {
+    "context" : "L",
+    "adaptor" : "Local Search Engine",
+    "@id" : "https://eu04.alma.exlibrisgroup.com/primaws/rest/pub/pnxs/L/990020025980106986",
+    "pnx" : {
+      "display" : {
+        "source" : [ "Alma" ],
+        "type" : [ "book" ],
+        "language" : [ "slo" ],
+        "title" : [ "100 rokov ticha : Arménska genocída " ],
+        "format" : [ "195 stran : fotografie, faksimile, mapy ; 21 cm" ],
+        "identifier" : [ "$$CISBN$$V978-80-557-0874-4" ],
+        "creationdate" : [ "2015" ],
+        "lds14" : [ "Rejstřík", "Obsahuje bibliografii na straně 176-191 a bibliografické odkazy", "Slovenské a anglické resumé" ],
+        "creator" : [ "Chuguryan, Vahram, 1974-$$QChuguryan, Vahram" ],
+        "publisher" : [ "Banská Bystrica : Belianum" ],
+        "mms" : [ "990020025980106986" ],
+        "contributor" : [ "Univerzita Mateja Bela. Fakulta politických vied a medzinárodných vzťahov$$QUniverzita Mateja Bela. Fakulta politických vied a medzinárodných vzťahov" ],
+        "addtitle" : [ "Arménska genocída", "Sto rokov ticha" ],
+        "edition" : [ "Vydanie prvé" ],
+        "contents" : [ "01/01 - Obsah (FF) STRUČNÝ HISTORICKÝ VÝVOJ REGIÓNU -- Geopolitické vymedzenie Arménska od vzniku po 20. storočie -- Postavenie arménskeho obyvateľstva Západného Arménska v rámci Osmanskej ríše -- Prvá fáza genocídy Arménov za vlády sultána Abdul Hamida II. -- Príchod Mladoturkov k moci -- PRVÁ GENOCÍDA 20. STOROČIA -- Prípravná fáza -- Realizácia genocídy v roku -- Fakty dôkazy a svedectvá -- Politika negacionizmu popieranie genocídy -- NÁBOŽENSTVO V GEOPOLITICKÝCH SÚVISLOSTIACH -- Svätá arménska apoštolská cirkev -- Islam a turecké politické myšlienkové prúdy -- VYMEDZENIE GENOCÍDY V MEDZINÁRODNOM PRÁVE -- Termín genocída -- Zmluva o genocíde -- Otázka ľudských práv -- PRÁVNO-POLITICKÉ ASPEKTY GENOCÍDY DILEMA EURÓPY A ÚSPECHY TURECKEJ DIPLOMACIE -- Právno-politické aspekty genocídy -- Úskalia svetovej politiky a sofistikovanosť tureckej diplomacie -- Pozícia Tureckej republiky v súčasnosti -- SÚČASNÁ POLITIKA EÚ FRANCÚZSKA USA A ĎALŠÍCH ŠTÁTOV VOČI TURECKU V OTÁZKE ARMÉNSKEJ GENOCÍDY -- Postoj Európskej únie -- Postoj viacerých štátov na čele s Francúzskou republikou a otázka trestnoprávnej zodpovednosti za popieranie arménskej genocídy -- Postoj Spojených štátov amerických -- Postoj Slovenskej republiky" ],
+        "genre" : [ "monografie" ],
+        "place" : [ "Banská Bystrica :" ],
+        "version" : [ "1" ],
+        "lds02" : [ "SVKBB ABD001" ],
+        "lds06" : [ "ABD001" ],
+        "subject" : [ "20. století", "Arméni", "arménská otázka", "arménská genocida (1915-1923)", "masakry", "etnické vztahy", "Arménie", "Turecko" ]
+      },
+      "control" : {
+        "sourcerecordid" : [ "990020025980106986" ],
+        "recordid" : [ "alma990020025980106986" ],
+        "sourceid" : "alma",
+        "originalsourceid" : [ "002002598-CKS01" ],
+        "sourcesystem" : [ "ILS" ],
+        "sourceformat" : [ "MARC21" ],
+        "score" : [ 0.035660833100000004 ],
+        "isDedup" : false,
+        "save_score" : [ 0.0018536966 ]
+      },
+      "addata" : {
+        "originatingSystemIDAuthor" : [ "jo2015881156" ],
+        "originatingSystemIDSubject" : [ "ge131143" ],
+        "originatingSystemIDContributor" : [ "kn20021008023" ],
+        "aulast" : [ "Chuguryan" ],
+        "aufirst" : [ "Vahram" ],
+        "auinit" : [ "V" ],
+        "au" : [ "Chuguryan, Vahram" ],
+        "addau" : [ "Univerzita Mateja Bela. Fakulta politických vied a medzinárodných vzťahov" ],
+        "creatorfull" : [ "Chuguryan, Vahram," ],
+        "addtitle" : [ "Arménska genocída", "Sto rokov ticha" ],
+        "date" : [ "2015" ],
+        "isbn" : [ "978-80-557-0874-4" ],
+        "notes" : [ "Obsahuje bibliografii na straně 176-191 a bibliografické odkazy" ],
+        "cop" : [ "Banská Bystrica" ],
+        "pub" : [ "Belianum" ],
+        "oclcid" : [ "(cz-prcu)002002598", "(cz-prcu)002002598cks01-aleph" ],
+        "edition" : [ "Vydanie prvé" ],
+        "format" : [ "book" ],
+        "genre" : [ "book" ],
+        "ristype" : [ "BOOK" ],
+        "btitle" : [ "100 rokov ticha : Arménska genocída" ]
+      },
+      "sort" : {
+        "title" : [ "100 rokov ticha : Arménska genocída /" ],
+        "author" : [ "Chuguryan, Vahram, 1974-" ],
+        "creationdate" : [ "2015" ]
+      },
+      "facets" : {
+        "frbrtype" : [ "6" ],
+        "frbrgroupid" : [ "9038739353273501779" ]
+      }
+    }
+  } ],
+  "timelog" : {
+    "PC_SEARCH_CALL_TIME" : "3158",
+    "PC_BUILD_JSON_AND_HIGLIGHTS" : "57",
+    "PC_SEARCH_TIME_TOTAL" : "3215",
+    "BUILD_RESULTS_RETRIVE_FROM_DB" : "78",
+    "CALL_SOLR_GET_IDS_LIST" : "81",
+    "RETRIVE_FROM_DB_COURSE_INFO" : "2",
+    "RETRIVE_FROM_DB_RECORDS" : "52",
+    "RETRIVE_FROM_DB_RELATIONS" : "3",
+    "PRIMA_LOCAL_INFO_FACETS_BUILD_DOCS_HIGHLIGHTS" : "208",
+    "PRIMA_LOCAL_SEARCH_TOTAL" : "422",
+    "BUILD_BLEND_AND_CACHE_RESULTS" : 0,
+    "BUILD_COMBINED_RESULTS_MAP" : 0,
+    "COMBINED_SEARCH_TIME" : 20,
+    "PROCESS_COMBINED_RESULTS" : 0,
+    "FEATURED_SEARCH_TIME" : 0
+  }
+}

@@ -55,7 +55,7 @@ const AFFECTED_TYPES = ["CHANGE", "COMPLETE", "CONFIRM", "CORRECT", "REPLACE", "
 describe("SKILL.md is pinned to the registered tool surface", () => {
   it("names only tools that exist", () => {
     const named = [
-      ...SKILL.matchAll(/\b((?:dawmain|esbirka|ns|nss|nalus|cz|justice|curia|eurlex)_[a-z_]+)\b/g),
+      ...SKILL.matchAll(/\b((?:dawmain|esbirka|ns|nss|nalus|cz|justice|curia|eurlex|doctrine)_[a-z_]+)\b/g),
     ].map((match) => match[1]);
     expect(named.length).toBeGreaterThan(20);
     expect([...new Set(named)].filter((name) => !(name in tools))).toEqual([]);
