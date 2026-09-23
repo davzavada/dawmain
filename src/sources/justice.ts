@@ -18,8 +18,13 @@ import { DOCUMENT_TTL_MS, SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cach
 
 const SOURCE = "rozhodnuti.justice.cz";
 const BASE = "https://rozhodnuti.justice.cz/api";
-/** Full-text over the whole archive is slow; the default 15 s times out. */
-const SEARCH_TIMEOUT_MS = 30_000;
+/**
+ * Full-text over the whole archive is slow; the default 15 s times out. One
+ * attempt only, and short of the route's 60 s maxDuration: 30 s plus a retry
+ * after a timeout used to run ~61 s, so the platform killed the call and the
+ * client saw a bare "server isn't responding" instead of the hint below.
+ */
+const SEARCH_TIMEOUT_MS = 45_000;
 
 const searchCache = new TtlCache<JusticeSearchPage>(SEARCH_TTL_MS);
 const decisionCache = new TtlCache<JusticeDecision>(DOCUMENT_TTL_MS, 24);
@@ -301,10 +306,24 @@ async function runSearchJustice(
   limit: number,
 ): Promise<JusticeSearchPage> {
   const params = buildJusticeQuery(input, page, limit);
-  const response = await fetchUpstream(SOURCE, `${BASE}/finaldoc?${params}`, {
-    headers: { accept: "application/json" },
-    timeoutMs: SEARCH_TIMEOUT_MS,
-  });
+  let response: Response;
+  try {
+    response = await fetchUpstream(SOURCE, `${BASE}/finaldoc?${params}`, {
+      headers: { accept: "application/json" },
+      timeoutMs: SEARCH_TIMEOUT_MS,
+      retry: false,
+    });
+  } catch (error) {
+    if (error instanceof SourceError && error.kind === "UPSTREAM_UNREACHABLE" && /timeout/i.test(error.message)) {
+      throw new SourceError(
+        SOURCE,
+        "UPSTREAM_UNREACHABLE",
+        `justice.cz did not answer the search within ${SEARCH_TIMEOUT_MS / 1000} s.`,
+        "Its full-text index is slow on multi-word queries and on large result sets, not down. Retry with ONE distinctive word (e.g. 'sazebník' rather than a sentence), a date window of months rather than years, and/or court_codes; for NS/NSS/ÚS case law use cz_caselaw_search.",
+      );
+    }
+    throw error;
+  }
   if (response.status === 400) {
     // Spring names the field it rejected; that beats any guess we could make.
     const detail = (await response.text()).slice(0, 400);

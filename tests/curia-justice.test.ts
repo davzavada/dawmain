@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildCitationsMotif,
   buildCuriaBody,
@@ -11,6 +11,7 @@ import {
   formatCaseNumber,
   parseJusticeDecision,
   parseJusticeSearch,
+  searchJustice,
 } from "@/src/sources/justice";
 import { SourceError } from "@/src/sources/shared/errors";
 
@@ -484,5 +485,26 @@ describe("justice.cz search", () => {
     expect(() => buildJusticeQuery({ appliesSection: "§ 2201" }, 0, 20)).toThrowError(SourceError);
     expect(() => buildJusticeQuery({ appliesAct: "obcansky zakonik" }, 0, 20)).toThrowError(SourceError);
     expect(() => buildJusticeQuery({ caseNumber: "nesmysl" }, 0, 20)).toThrowError(SourceError);
+  });
+});
+
+describe("justice.cz search timeout", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("makes ONE attempt and explains the slow index, inside the 60 s route budget", async () => {
+    // 30 s plus a retry after a timeout ran past maxDuration, so the platform
+    // cut the call off and the client saw only "server isn't responding".
+    let calls = 0;
+    vi.stubGlobal("fetch", async () => {
+      calls += 1;
+      throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    });
+    const error = await searchJustice({ query: "sazby odměny sazebník", match: "all_words" }, 0, 10).catch(
+      (e: unknown) => e,
+    );
+    expect(calls).toBe(1);
+    expect(error).toBeInstanceOf(SourceError);
+    expect((error as SourceError).message).toMatch(/did not answer the search within 45 s/);
+    expect((error as SourceError).hint).toMatch(/ONE distinctive word/);
   });
 });
