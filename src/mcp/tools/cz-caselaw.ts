@@ -6,7 +6,7 @@ import { getNssDecision, searchNss } from "@/src/sources/nss";
 import { getCuriaDocument, searchCuria } from "@/src/sources/curia";
 import { SourceError } from "@/src/sources/shared/errors";
 import { interleave, maxTotal, uniqueQueries } from "@/src/sources/shared/text";
-import { buildPreviews } from "./previews";
+import { buildPreviews, previewBlock } from "./previews";
 import { READ_ONLY, isoDate } from "./shared";
 import { runVariants } from "./variants";
 
@@ -348,9 +348,8 @@ export function registerCzCaselaw(server: McpServer): void {
         const court = foreignCourt(hit);
         return `${i + 1}. [${hit.source.toUpperCase()}] ${hit.caseNumber}${hit.category ? ` [${hit.category}]` : ""}${hit.date ? ` (${hit.date})` : ""}${court ? ` — ${court}` : ""} → ${hit.detail_tool} id/sz: ${hit.id}${hit.url ? `\n   ${hit.url}` : ""}`;
       });
-      const previewBlocks = (previews ?? []).map(
-        (preview) =>
-          `— PREVIEW [${preview.source.toUpperCase()}] ${preview.caseNumber} (${preview.matches ? `${preview.matches}× query terms` : "document head"}):\n${preview.excerpt}\n(excerpt only — full text via ${preview.detail_tool})`,
+      const previewBlocks = (previews ?? []).map((preview) =>
+        previewBlock({ ...preview, caseNumber: `[${preview.source.toUpperCase()}] ${preview.caseNumber}` }, preview.detail_tool),
       );
       return {
         content: [

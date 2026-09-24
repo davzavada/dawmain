@@ -39,8 +39,41 @@ const registrars: Array<(server: McpServer) => void> = [
   registerDoctrine,
 ];
 
+type ToolConfig = Record<string, unknown> & { outputSchema?: unknown };
+type ToolResult = Record<string, unknown> & { structuredContent?: unknown };
+
+/**
+ * Clients get the TEXT of every answer and nothing else. A result carrying
+ * both halves is read differently by different clients: Claude Code hands
+ * the model the structuredContent instead of the text (measured — the ping's
+ * pretty-printed text arrived as compact JSON), so every hint that lives only
+ * in the text (the justice.cz date window, continuation, variant failures)
+ * never reached the model, and the JSON cost 14–160 % more tokens than the
+ * curated text. Stripping here, at the one registration boundary, keeps the
+ * handlers' structured output as their internal, unit-tested contract while
+ * every client reads the same text. outputSchema goes with it: the spec
+ * requires structuredContent wherever one is declared.
+ */
+function textOnly(server: McpServer): McpServer {
+  return {
+    registerTool(name: string, config: ToolConfig, handler: (...args: unknown[]) => Promise<ToolResult>) {
+      const { outputSchema: _structured, ...rest } = config;
+      // A method call on the real server — registerTool relies on `this`.
+      return (server as unknown as { registerTool: (...args: unknown[]) => unknown }).registerTool(
+        name,
+        rest,
+        async (...args: unknown[]) => {
+          const { structuredContent: _dropped, ...result } = await handler(...args);
+          return result;
+        },
+      );
+    },
+  } as unknown as McpServer;
+}
+
 export function registerAllTools(server: McpServer): void {
+  const target = textOnly(server);
   for (const register of registrars) {
-    register(server);
+    register(target);
   }
 }

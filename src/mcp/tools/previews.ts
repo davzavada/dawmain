@@ -60,11 +60,13 @@ export function renderPreviews(
   detailTool: string,
 ): string[] {
   if (!previews?.length) return [];
-  return [
-    "",
-    ...previews.map(
-      (preview) =>
-        `— PREVIEW ${preview.caseNumber} (${preview.matches ? `${preview.matches}× query terms` : "document head"}):\n${preview.excerpt}\n(excerpt only — full text via ${detailTool})`,
-    ),
-  ];
+  return ["", ...previews.map((preview) => previewBlock(preview, detailTool))];
+}
+
+/** One preview; a hit whose text never mentions the terms gets one line, not its head. */
+export function previewBlock(preview: Pick<ToolPreview, "caseNumber" | "matches" | "excerpt">, detailTool: string): string {
+  if (!preview.matches) {
+    return `— NO PREVIEW ${preview.caseNumber}: the query terms do not occur verbatim in its text (the search may have matched another word form) — judge it by its hit line, or read it via ${detailTool}.`;
+  }
+  return `— PREVIEW ${preview.caseNumber} (${preview.matches}× query terms):\n${preview.excerpt}\n(excerpt only — the whole decision via ${detailTool})`;
 }

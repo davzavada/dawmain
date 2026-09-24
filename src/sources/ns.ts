@@ -534,14 +534,12 @@ async function runNsSearch(
   const page = await upstreamCache.through(url, () => fetchNsResults(url));
   // We asked for a full page (or block) even when the caller wanted three rows.
   const hits = relevance ? page.hits.slice(start, start + count) : page.hits.slice(0, count);
-  // Under relevance the banner counts at most SearchMax matches.
+  // Under relevance the banner counts at most SearchMax matches. Hit URLs
+  // stay plain: the highlighted link comes from ns_get_decision with `find`,
+  // opening at the very passage a memo quotes — search-term highlights on
+  // every hit cost ~80 characters apiece and were rarely the cited link.
   const matchedIsMinimum = relevance && page.matched !== null && page.matched >= NS_SEARCH_MAX;
-  if (!input.query) return { ...page, hits, matchedIsMinimum };
-  return {
-    ...page,
-    matchedIsMinimum,
-    hits: hits.map((hit) => ({ ...hit, url: withHighlight(hit.url, [input.query]) })),
-  };
+  return { ...page, hits, matchedIsMinimum };
 }
 
 const searchCache = new TtlCache<NsSearchPage>(SEARCH_TTL_MS);

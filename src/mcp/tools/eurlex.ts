@@ -14,6 +14,18 @@ import { pageOrExcerpt, snippet } from "@/src/sources/shared/text";
 
 const fail = toolFailure("EUR-Lex (Cellar)");
 
+/**
+ * Procedure paperwork rather than material a reader argues from: Council
+ * agenda items and cover notes, voting results, drafts listed anyway in their
+ * final form, the EP's adopted-text and Cellar's act duplicates, OJ notices.
+ * In the GDPR dossier they were 14 of 31 entries. Pure — unit-tested.
+ */
+const PAPERWORK_TYPE = /^(?:ITEM_|NOTE|VOTING_RES$|ACT_DRAFT$|STAT_REASON_DRAFT$|NOTICE$|ADOPT_TEXT$|ACT_LEGIS$)/;
+
+export function isProcedurePaperwork(type: string | undefined): boolean {
+  return Boolean(type && PAPERWORK_TYPE.test(type));
+}
+
 export function registerEurlex(server: McpServer): void {
   server.registerTool(
     "eurlex_search",
@@ -163,7 +175,7 @@ export function registerEurlex(server: McpServer): void {
     {
       title: "EUR-Lex: legislative history of an act",
       description:
-        "All legislative materials (travaux préparatoires) of one EU act in a single call, from the official Cellar dossier of its interinstitutional procedure: the Commission proposal (with explanatory memorandum), impact assessments, EESC/CoR/EDPS opinions, EP positions, Council positions with statements of reasons, and the adopted act — each with CELEX, type, date, title and link, plus the procedure's number, legal basis and adopted/pending/withdrawn state. Anchor by the CELEX of the ADOPTED ACT or of ANY procedure document (e.g. 32016R0679 or 52012PC0011 both yield the GDPR dossier), or by the procedure reference. Read the texts with eurlex_get_document {celex}.",
+        "All legislative materials (travaux préparatoires) of one EU act in a single call, from the official Cellar dossier of its interinstitutional procedure: the Commission proposal (with explanatory memorandum), impact assessments, EESC/CoR/EDPS opinions, EP positions, Council positions with statements of reasons, and the adopted act — each with CELEX, type, date, title and link, plus the procedure's number, legal basis and adopted/pending/withdrawn state. Anchor by the CELEX of the ADOPTED ACT or of ANY procedure document (e.g. 32016R0679 or 52012PC0011 both yield the GDPR dossier), or by the procedure reference. Procedure paperwork (Council agenda items and cover notes, voting results, drafts, duplicates) is counted but not listed unless all: true. Read the texts with eurlex_get_document {celex}.",
       inputSchema: z.object({
         celex: z
           .string()
@@ -177,6 +189,10 @@ export function registerEurlex(server: McpServer): void {
           .string()
           .default("en")
           .describe("Language of the titles (cs, en, …); falls back to English where a version is missing."),
+        all: z
+          .boolean()
+          .default(false)
+          .describe("Also list procedure paperwork (Council agenda items, cover notes, voting results, drafts, duplicates)."),
       }),
       outputSchema: z.object({
         count: z.number().describe("Number of dossiers (procedures) found."),
@@ -192,6 +208,7 @@ export function registerEurlex(server: McpServer): void {
             date_adopted: z.string().optional(),
             title: z.string().optional(),
             url: z.string().optional().describe("EUR-Lex procedure page."),
+            omitted: z.number().describe("Procedure paperwork left out (all: true lists it)."),
             documents: z.array(
               z.object({
                 celex: z.string().optional(),
@@ -206,9 +223,14 @@ export function registerEurlex(server: McpServer): void {
       }),
       annotations: READ_ONLY,
     },
-    async ({ celex, procedure, language }) => {
+    async ({ celex, procedure, language, all }) => {
       try {
-        const { dossiers, truncated } = await getLegislativeHistory({ celex, procedure, language });
+        const history = await getLegislativeHistory({ celex, procedure, language });
+        const truncated = history.truncated;
+        const dossiers = history.dossiers.map((dossier) => {
+          const documents = all ? dossier.documents : dossier.documents.filter((doc) => !isProcedurePaperwork(doc.type));
+          return { ...dossier, omitted: dossier.documents.length - documents.length, documents };
+        });
         const output = { count: dossiers.length, truncated, dossiers };
         if (!dossiers.length) {
           return {
@@ -241,6 +263,9 @@ export function registerEurlex(server: McpServer): void {
             dossier.title ? snippet(dossier.title, 200) : "",
             dossier.url ?? "",
             ...lines,
+            dossier.omitted
+              ? `(+${dossier.omitted} procedure paperwork — Council agenda items, cover notes, votes, drafts — not listed; all: true lists them)`
+              : "",
           ]
             .filter(Boolean)
             .join("\n");

@@ -201,9 +201,11 @@ export function registerNalus(server: McpServer): void {
           ...(failures.length ? { failed_variants: failures } : {}),
           previews,
         };
+        // The citation line carries form, sp. zn., date and the SbNU/Sb.
+        // reference in one — what a memo cites.
         const lines = hits.map(
           (hit, i) =>
-            `${start + i + 1}. ${hit.caseNumber}${hit.form ? ` (${hit.form})` : ""}${hit.date ? ` ${hit.date}` : ""} — sz ${hit.sz ?? "?"}${hit.url ? `\n   ${hit.url}` : ""}`,
+            `${start + i + 1}. ${hit.citation ?? `${hit.caseNumber}${hit.form ? ` (${hit.form})` : ""}${hit.date ? ` ${hit.date}` : ""}`} — sz ${hit.sz ?? "?"}${hit.url ? `\n   ${hit.url}` : ""}`,
         );
         const variantLine = variantTotals
           ? `Variants: ${keyed.map((v, i) => `"${v}" ${variantTotals[i] ?? "✗"}`).join(" · ")} (merged round-robin)`
@@ -284,11 +286,14 @@ export function registerNalus(server: McpServer): void {
           matches: paged.matches,
           text: paged.text,
         };
+        // The právní věta once, with the first page — not again with every
+        // further page or `find` (it runs to thousands of characters).
+        const firstRead = page === 1 && !find?.trim();
         const header = [
           decision.registrySign,
           decision.form,
           decision.popularName ? `Populární název: ${decision.popularName}` : null,
-          decision.legalSentence
+          firstRead && decision.legalSentence
             ? `Právní věta:\n${decision.legalSentence
                 .split("\n")
                 .map((line) => `> ${line}`)

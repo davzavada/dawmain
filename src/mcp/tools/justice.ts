@@ -11,8 +11,10 @@ import {
 import {
   JUSTICE_COURT_CODES,
   JUSTICE_DOC_TYPES,
+  formatCaseNumber,
   getJusticeDecision,
   searchJustice,
+  type JusticeCaseNumber,
 } from "@/src/sources/justice";
 import { pageOrExcerpt, snippet } from "@/src/sources/shared/text";
 
@@ -44,6 +46,48 @@ const TYPE_LABELS: Record<string, string> = {
   ORDER_T: "trestní příkaz",
   RESOLUTION: "usnesení",
 };
+
+/**
+ * The decision's own metadata as text lines — the soud, značka, date, judge,
+ * outcome, the provisions it applied and what it did to the decision below.
+ * Clients read the text only, so none of this may live in structured output
+ * alone. Pure — unit-tested.
+ */
+export function justiceDecisionHeader(metadata: Record<string, unknown>): string[] {
+  const str = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined);
+  const list = (value: unknown) => (Array.isArray(value) ? value : []);
+  const type = str(metadata.type);
+  const caseNumber = formatCaseNumber(metadata.caseNumber as JusticeCaseNumber | undefined);
+  const solver = (metadata.solver ?? {}) as Record<string, unknown>;
+  const judge = [solver.titlesBefore, solver.firstName, solver.lastName, solver.titlesAfter]
+    .map(str)
+    .filter(Boolean)
+    .join(" ");
+  const regulations = list(metadata.regulations)
+    .map((entry) => entry as Record<string, unknown>)
+    .map((entry) => `§ ${entry.paragraphNumber} ${entry.lexNumber}/${entry.lexYear}`)
+    .filter((entry) => !entry.includes("undefined"));
+  const affects = list(metadata.affectedDocs)
+    .map((entry) => entry as Record<string, unknown>)
+    .map((entry) => {
+      const types = list(entry.affectedTypes ?? entry.types).join("/");
+      const mark = formatCaseNumber(entry.caseNumber as JusticeCaseNumber | undefined);
+      return [types, mark, str(entry.courtCode) ? `(${entry.courtCode})` : ""].filter(Boolean).join(" ");
+    })
+    .filter(Boolean);
+  return [
+    [caseNumber ?? "?", str(metadata.courtCode), type ? (TYPE_LABELS[type] ?? type) : undefined, str(metadata.decisionAt)]
+      .filter(Boolean)
+      .join(" — "),
+    str(metadata.ecli) ? `ECLI: ${metadata.ecli}` : null,
+    str(metadata.caseSubject) ? `Předmět: ${metadata.caseSubject}` : null,
+    judge ? `Soudce: ${judge}${str(solver.function) ? ` (${solver.function})` : ""}` : null,
+    list(metadata.caseResultType).length ? `Výsledek: ${list(metadata.caseResultType).join(", ")}` : null,
+    regulations.length ? `Aplikované předpisy: ${regulations.join("; ")}` : null,
+    affects.length ? `Mění/potvrzuje: ${affects.join("; ")}` : null,
+    str(metadata.publishedAt) ? `Zveřejněno: ${metadata.publishedAt}` : null,
+  ].filter((line): line is string => Boolean(line));
+}
 
 export function registerJustice(server: McpServer): void {
   server.registerTool(
@@ -250,7 +294,10 @@ export function registerJustice(server: McpServer): void {
         };
         return {
           content: [
-            { type: "text", text: `${decision.url}\n\n${paged.text}${continuationHint(paged)}` },
+            {
+              type: "text",
+              text: `${[...justiceDecisionHeader(decision.metadata), decision.url].join("\n")}\n\n${paged.text}${continuationHint(paged)}`,
+            },
           ],
           structuredContent: output,
         };

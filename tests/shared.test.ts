@@ -163,6 +163,32 @@ describe("findExcerpts / pageOrExcerpt", () => {
     expect(result.text).toContain("[…]");
   });
 
+  it("opens a window at its paragraph, so the bod number heads the excerpt", async () => {
+    const { findExcerpts } = await import("@/src/sources/shared/text");
+    const text = [
+      "[23] Předchozí odstavec o něčem jiném. " + "Výplň. ".repeat(40),
+      "[24] Nejvyšší správní soud dále uvádí, že " + "odůvodnění ".repeat(20) + "zásahová žaloba je subsidiární.",
+      "[25] Další odstavec.",
+    ].join("\n");
+    const result = findExcerpts(text, "zásahová žaloba");
+    expect(result.text.startsWith("[24] Nejvyšší správní soud")).toBe(true);
+    expect(result.text).not.toContain("[23]");
+    expect(result.text).not.toContain("[25]");
+  });
+
+  it("shows at most eight passages and counts the rest", async () => {
+    const { findExcerpts, pageOrExcerpt } = await import("@/src/sources/shared/text");
+    const text = Array.from({ length: 12 }, (_, i) => `${i + 1}. Odstavec o náhradě škody číslo ${i + 1}.`).join("\n");
+    const result = findExcerpts(text, "náhradě škody");
+    expect(result.matches).toBe(12);
+    expect(result.windows).toBe(12);
+    expect(result.shown).toBe(8);
+    expect(result.truncated).toBe(true);
+    const view = pageOrExcerpt(text, 1, "náhradě škody");
+    expect(view.has_more).toBe(true);
+    expect(view.text).toContain("8 of 12 passages shown");
+  });
+
   it("folds Czech diacritics in the needle", async () => {
     const { findExcerpts } = await import("@/src/sources/shared/text");
     expect(findExcerpts("Nejvyšší soud o vydržení rozhodl.", "VYDRZENI", 20).matches).toBe(1);
@@ -178,6 +204,19 @@ describe("findExcerpts / pageOrExcerpt", () => {
     expect(excerpted.matches).toBe(1);
     expect(excerpted.text).toContain("Stichting Brein");
     expect(excerpted.has_more).toBe(false);
+    // An excerpt never passes for the decision: it says where the whole is.
+    expect(excerpted.text).toContain("(Excerpts only, 1 match — the whole text: page 1; a decision you rely on, read in full.)");
+  });
+
+  it("a single passage longer than the cap counts as truncated", async () => {
+    const { findExcerpts } = await import("@/src/sources/shared/text");
+    const text = "škoda ".repeat(400);
+    const result = findExcerpts(text, "škoda", 500, 300);
+    expect(result.shown).toBe(1);
+    expect(result.windows).toBe(1);
+    expect(result.cut).toBe(true);
+    expect(result.truncated).toBe(true);
+    expect(result.text.length).toBe(301);
   });
 
   it("says so explicitly when find matches nothing", async () => {
@@ -276,16 +315,14 @@ describe("parallel-search helpers", () => {
     expect(maxTotal([null, null])).toBeNull();
   });
 
-  it("previewExcerpt falls through variants and defaults to the head", async () => {
+  it("previewExcerpt falls through variants and stays silent on a miss", async () => {
     const { previewExcerpt } = await import("@/src/sources/shared/text");
     const hit = previewExcerpt(decision, ["neexistuje", "safe harbour"], 40, 500);
     expect(hit.matches).toBe(2);
     expect(hit.excerpt).toContain("safe harbour");
-    const miss = previewExcerpt(decision, ["neexistuje"], 40, 120);
-    expect(miss.matches).toBe(0);
-    expect(miss.excerpt.length).toBeLessThanOrEqual(121);
-    expect(miss.excerpt).toContain("Úvod rozhodnutí");
-    expect(miss.excerpt.endsWith("…")).toBe(true);
+    expect(hit.excerpt.length).toBeLessThanOrEqual(501);
+    // The head of a decision that never mentions the terms tells nothing.
+    expect(previewExcerpt(decision, ["neexistuje"], 40, 120)).toEqual({ matches: 0, excerpt: "" });
   });
 });
 

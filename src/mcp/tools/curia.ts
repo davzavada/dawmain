@@ -183,7 +183,7 @@ export function registerCuria(server: McpServer): void {
         };
         const lines = result.hits.map(
           (hit, i) =>
-            `${page * limit + i + 1}. ${hit.caseNumber ?? "?"} ${hit.caseName ?? hit.parties ?? ""}${hit.docType ? ` [${hit.docType}]` : ""}${hit.date ? ` (${hit.date})` : ""}${hit.ecli ? ` — ${hit.ecli}` : ""}${hit.url ? `\n   ${hit.url}` : ""}`,
+            `${page * limit + i + 1}. ${hit.caseNumber ?? "?"} ${hit.caseName ?? hit.parties ?? ""}${hit.docType ? ` [${hit.docType}]` : ""}${hit.date ? ` (${hit.date})` : ""}${hit.ecli ? ` — ${hit.ecli}` : hit.logicDocId ? ` — logic_doc_id ${hit.logicDocId}` : ""}${hit.url ? `\n   ${hit.url}` : ""}`,
         );
         // total counts matching CASES (affairs); the listed items are the
         // documents (or bare case listings) inside them — say both.

@@ -79,6 +79,8 @@ function renderHit(hit: BibHit, index?: number): string {
   if (hit.contents) lines.push(`   Contents: ${hit.contents}`);
   if (hit.url) lines.push(`   ${hit.url}`);
   if (hit.links?.length) lines.push(`   access: ${hit.links.join(" | ")}`);
+  // A list entry carries the id doctrine_get_document needs.
+  if (index !== undefined) lines.push(`   id ${hit.id}`);
   return lines.join("\n");
 }
 

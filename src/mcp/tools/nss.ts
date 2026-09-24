@@ -175,7 +175,7 @@ export function registerNss(server: McpServer): void {
         };
         const lines = hits.map(
           (hit, i) =>
-            `${start + i + 1}. ${hit.caseNumber ?? "?"}${hit.form ? ` (${hit.form})` : ""}${hit.date ? ` ${hit.date}` : ""} — id ${hit.id}\n   ${hit.url}`,
+            `${start + i + 1}. ${hit.caseNumber ?? "?"}${hit.form ? ` (${hit.form})` : ""}${hit.date ? ` ${hit.date}` : ""}${hit.court && !/^Nejvyššího správního soudu$/i.test(hit.court) ? ` — ${hit.court}` : ""} — id ${hit.id}\n   ${hit.url}`,
         );
         const variantLine = variantTotals
           ? `Variants: ${keyed.map((v, i) => `"${v}" ${variantTotals[i] ?? "✗"}`).join(" · ")} (merged round-robin)`

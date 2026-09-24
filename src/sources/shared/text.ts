@@ -68,8 +68,17 @@ export function czechToIso(czech: string): string | null {
  * diacritics- and case-insensitive (per-char NFD fold keeps offsets 1:1).
  * Lets the model jump to the relevant passages of a long decision instead
  * of paging through all of it — the token-economical read.
+ *
+ * A window reaches back to the start of the paragraph that holds the match
+ * when that start is near, so the paragraph's own number — "24.", "[24]",
+ * the CJEU's bare "24" line — heads the excerpt: the bod a citation needs,
+ * read from the text rather than guessed. At most MAX_EXCERPT_WINDOWS
+ * windows are shown; the rest are counted, and the pages stay one call away.
  */
-const EXCERPT_CONTEXT_CHARS = 1_500;
+const EXCERPT_CONTEXT_CHARS = 500;
+/** How far back a window may grow to reach the start of its paragraph. */
+const PARAGRAPH_REACH_CHARS = 1_200;
+export const MAX_EXCERPT_WINDOWS = 8;
 
 function foldChar(char: string): string {
   // Astral characters (surrogate pairs) occupy TWO UTF-16 units — emit them
@@ -86,8 +95,14 @@ function foldText(text: string): string {
 
 export interface ExcerptResult {
   matches: number;
-  /** Windows joined with a […] separator; capped at one page. */
+  /** Windows joined with a […] separator; capped at `maxWindows` and one page. */
   text: string;
+  /** Windows the matches form (nearby matches share one). */
+  windows: number;
+  /** Windows actually in `text`. */
+  shown: number;
+  /** The one window shown was longer than the cap and was cut short. */
+  cut: boolean;
   truncated: boolean;
 }
 
@@ -96,9 +111,11 @@ export function findExcerpts(
   term: string,
   contextChars = EXCERPT_CONTEXT_CHARS,
   maxTotalChars = DOC_PAGE_CHARS,
+  maxWindows = MAX_EXCERPT_WINDOWS,
+  paragraphReach = PARAGRAPH_REACH_CHARS,
 ): ExcerptResult {
   const needle = foldText(term.trim());
-  if (!needle) return { matches: 0, text: "", truncated: false };
+  if (!needle) return { matches: 0, text: "", windows: 0, shown: 0, cut: false, truncated: false };
   const haystack = foldText(text);
 
   const windows: Array<[number, number]> = [];
@@ -106,30 +123,49 @@ export function findExcerpts(
   let matches = 0;
   while (index !== -1 && matches < 200) {
     matches++;
-    const start = Math.max(0, index - contextChars);
-    const end = Math.min(text.length, index + needle.length + contextChars);
+    const matchEnd = index + needle.length;
+    const paragraphStart = text.lastIndexOf("\n", index - 1) + 1;
+    const start = index - paragraphStart <= paragraphReach ? paragraphStart : Math.max(0, index - contextChars);
+    const paragraphEnd = text.indexOf("\n", matchEnd);
+    const end = Math.min(
+      text.length,
+      paragraphEnd === -1 ? matchEnd + contextChars : Math.min(paragraphEnd, matchEnd + contextChars),
+    );
     const last = windows[windows.length - 1];
-    if (last && start <= last[1]) last[1] = end;
+    if (last && start <= last[1]) last[1] = Math.max(last[1], end);
     else windows.push([start, end]);
-    index = haystack.indexOf(needle, index + needle.length);
+    index = haystack.indexOf(needle, matchEnd);
   }
-  if (!matches) return { matches: 0, text: "", truncated: false };
+  if (!matches) return { matches: 0, text: "", windows: 0, shown: 0, cut: false, truncated: false };
 
   const SEPARATOR = "\n\n[…]\n\n";
   const parts: string[] = [];
   let used = 0;
-  let truncated = false;
+  let cut = false;
   for (const [start, end] of windows) {
-    const piece = `${start > 0 ? "…" : ""}${text.slice(start, end)}${end < text.length ? "…" : ""}`;
+    if (parts.length >= maxWindows) break;
+    // An ellipsis only where the window cuts into running text.
+    const piece = `${start > 0 && text[start - 1] !== "\n" ? "…" : ""}${text.slice(start, end)}${end < text.length && text[end] !== "\n" ? "…" : ""}`;
     const cost = piece.length + (parts.length ? SEPARATOR.length : 0);
     if (used + cost > maxTotalChars) {
-      truncated = true;
+      // Never answer "N matches" with nothing to show for them.
+      if (!parts.length) {
+        parts.push(`${piece.slice(0, maxTotalChars)}…`);
+        cut = true;
+      }
       break;
     }
     parts.push(piece);
     used += cost;
   }
-  return { matches, text: parts.join(SEPARATOR), truncated };
+  return {
+    matches,
+    text: parts.join(SEPARATOR),
+    windows: windows.length,
+    shown: parts.length,
+    cut,
+    truncated: cut || parts.length < windows.length,
+  };
 }
 
 /** Distinct, trimmed query variants — at most `cap` (case-insensitive dedupe). */
@@ -272,19 +308,24 @@ export function excerptTerms(queries: Array<string | undefined>): string[] {
   return out;
 }
 
+/**
+ * A preview is small on purpose — it earns a full read, it does not replace
+ * one — and says nothing when no query term occurs: the head of a decision
+ * that never mentions the terms cost 2 400 characters and told the reader
+ * only what the hit list already did.
+ */
 export function previewExcerpt(
   text: string,
   terms: string[],
-  contextChars = 600,
-  maxChars = 2_400,
+  contextChars = 300,
+  maxChars = 1_200,
 ): SearchPreview {
   for (const term of terms) {
     if (!term?.trim()) continue;
-    const result = findExcerpts(text, term, contextChars, maxChars);
+    const result = findExcerpts(text, term, contextChars, maxChars, 2, contextChars);
     if (result.matches) return { matches: result.matches, excerpt: result.text };
   }
-  const head = text.slice(0, maxChars).trim();
-  return { matches: 0, excerpt: text.length > maxChars ? `${head}…` : head };
+  return { matches: 0, excerpt: "" };
 }
 
 export interface DocumentView extends CharPage {
@@ -297,13 +338,21 @@ export interface DocumentView extends CharPage {
 export function pageOrExcerpt(text: string, page: number, find?: string): DocumentView {
   if (find?.trim()) {
     const result = findExcerpts(text, find);
+    // Every excerpt answer says what it is and where the whole text is:
+    // `find` locates passages, it does not stand in for reading a decision
+    // an argument rests on.
+    const pages = Math.max(1, Math.ceil(text.length / DOC_PAGE_CHARS));
+    const whole = `the whole text: page 1${pages > 1 ? ` of ${pages}` : ""}`;
+    const rest = result.truncated
+      ? `\n\n(${result.shown} of ${result.windows} passages shown${result.cut ? ", cut short" : ""}, ${result.matches} matches in all — narrow the term, or read ${whole}.)`
+      : `\n\n(Excerpts only, ${result.matches} ${result.matches === 1 ? "match" : "matches"} — ${whole}; a decision you rely on, read in full.)`;
     return {
       mode: "excerpt",
       matches: result.matches,
       // A zero-match answer must say so explicitly — an empty string reads
       // as a broken fetch, and Czech terms inflect, so hint at the fix.
       text: result.matches
-        ? result.text
+        ? `${result.text}${rest}`
         : `No occurrences of "${find.trim()}" in this document (${text.length} chars searched; matching is case- and diacritics-insensitive). Inflected languages: retry with a shorter word stem or a synonym — or read the pages.`,
       page: 1,
       total_pages: 1,
