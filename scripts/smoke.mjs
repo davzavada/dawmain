@@ -108,6 +108,18 @@ function ok(label, detail) {
   console.log(`  ✓ ${label}${detail ? ` — ${detail}` : ""}`);
 }
 
+/**
+ * The server answers in text only (src/mcp/tools/index.ts strips the
+ * structured half), so the checks read what a client reads — and fail if a
+ * structured half ever comes back.
+ */
+function textOf(result, label) {
+  if (result.structuredContent !== undefined) {
+    throw new Error(`${label} returned structuredContent — clients must get the text only`);
+  }
+  return result.content?.map((part) => part.text ?? "").join("\n") ?? "";
+}
+
 const EXPECTED_TOOLS = [
   "dawmain_ping",
   "dawmain_probe_sources",
@@ -116,20 +128,20 @@ const EXPECTED_TOOLS = [
   "esbirka_get_text",
   "ns_search",
   "ns_get_decision",
-  "nalus_search",
-  "nalus_get_decision",
+  "us_search",
+  "us_get_decision",
   "nss_search",
   "nss_get_decision",
-  "cz_caselaw_search",
+  "caselaw_search",
   "justice_search",
   "justice_get_decision",
-  "curia_search",
-  "curia_get_document",
+  "sdeu_search",
+  "sdeu_get_document",
   "eurlex_search",
   "eurlex_get_document",
-  "eurlex_legislative_history",
+  "eurlex_get_history",
   "doctrine_search",
-  "doctrine_get_document",
+  "doctrine_get_record",
   // EUIPO and ÚPV are deliberately not covered — see src/mcp/tools/index.ts.
 ];
 
@@ -145,10 +157,12 @@ async function checkTools(client) {
       `tools/list mismatch — missing: [${missing.join(", ")}], unexpected: [${surplus.join(", ")}]`,
     );
   }
-  ok("tools/list", `${names.length} tools, roster matches`);
+  const structured = tools.filter((t) => t.outputSchema).map((t) => t.name);
+  if (structured.length) throw new Error(`tools declare an outputSchema: ${structured.join(", ")}`);
+  ok("tools/list", `${names.length} tools, roster matches, text-only`);
 
   const ping = await client.request("tools/call", { name: "dawmain_ping", arguments: {} });
-  const info = ping.structuredContent ?? {};
+  const info = JSON.parse(textOf(ping, "dawmain_ping"));
   if (info.ok !== true) throw new Error(`dawmain_ping did not report ok: ${JSON.stringify(ping)}`);
   ok("dawmain_ping", `env=${info.environment} region=${info.region ?? "-"} commit=${info.commit ?? "-"}`);
 
@@ -173,26 +187,29 @@ async function checkLive(client) {
     name: "dawmain_probe_sources",
     arguments: {},
   });
-  const probes = probe.structuredContent?.probes ?? [];
-  const healthy = probes.filter((p) => p.ok).length;
-  for (const p of probes) {
-    ok(`probe ${p.id}`, `${p.ok ? "OK" : "FAIL"} http=${p.http_status ?? "ERR"} ${p.latency_ms}ms marker=${p.marker_found}`);
+  const probeLines = textOf(probe, "dawmain_probe_sources")
+    .split("\n")
+    .filter((line) => /^[✓✗] /.test(line));
+  for (const line of probeLines) ok("probe", line.slice(2).replace(/\s+/g, " "));
+  if (!probeLines.some((line) => line.startsWith("✓"))) {
+    throw new Error("no upstream source is reachable from this deployment");
   }
-  if (!healthy) throw new Error("no upstream source is reachable from this deployment");
 
   const act = await client.request("tools/call", {
     name: "esbirka_get_act",
     arguments: { year: 2012, number: 89 },
   });
   if (act.isError) throw new Error(`esbirka_get_act 89/2012 failed: ${act.content?.[0]?.text}`);
-  ok("esbirka_get_act", act.structuredContent?.nazev ?? "(no name)");
+  ok("esbirka_get_act", textOf(act, "esbirka_get_act").split("\n")[0] || "(no name)");
 
   const nalus = await client.request("tools/call", {
-    name: "nalus_get_decision",
+    name: "us_get_decision",
     arguments: { sz: "1-709-05" },
   });
-  if (nalus.isError) throw new Error(`nalus_get_decision failed: ${nalus.content?.[0]?.text}`);
-  ok("nalus_get_decision", `sz=1-709-05, ${nalus.structuredContent?.total_pages} text pages`);
+  if (nalus.isError) throw new Error(`us_get_decision failed: ${nalus.content?.[0]?.text}`);
+  const nalusText = textOf(nalus, "us_get_decision");
+  if (!nalusText.includes("https://nalus.usoud.cz/")) throw new Error("us_get_decision text carries no link to cite");
+  ok("us_get_decision", `sz=1-709-05, ${nalusText.match(/\(page 1\/(\d+)/)?.[1] ?? 1} text page(s), link present`);
 
   const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10);
   const ns = await client.request("tools/call", {
@@ -200,7 +217,9 @@ async function checkLive(client) {
     arguments: { date_from: weekAgo, limit: 5 },
   });
   if (ns.isError) throw new Error(`ns_search failed: ${ns.content?.[0]?.text}`);
-  ok("ns_search", `last 7 days → ${ns.structuredContent?.count} hits of ${ns.structuredContent?.total ?? "?"}`);
+  const nsText = textOf(ns, "ns_search");
+  const nsHits = nsText.match(/^\d+\. /gm)?.length ?? 0;
+  ok("ns_search", `last 7 days → ${nsHits} hits listed (${nsText.match(/^(\S+) decisions/m)?.[1] ?? "?"} in all)`);
 }
 
 /**

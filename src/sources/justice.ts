@@ -319,7 +319,7 @@ async function runSearchJustice(
         SOURCE,
         "UPSTREAM_UNREACHABLE",
         `justice.cz did not answer the search within ${SEARCH_TIMEOUT_MS / 1000} s.`,
-        "Its full-text index is slow on multi-word queries and on large result sets, not down. Retry with ONE distinctive word (e.g. 'sazebník' rather than a sentence), a date window of months rather than years, and/or court_codes; for NS/NSS/ÚS case law use cz_caselaw_search.",
+        "Its full-text index is slow on multi-word queries and on large result sets, not down. Retry with ONE distinctive word (e.g. 'sazebník' rather than a sentence), a date window of months rather than years, and/or court_codes; for NS/NSS/ÚS case law use caselaw_search.",
       );
     }
     throw error;

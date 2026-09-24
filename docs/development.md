@@ -12,14 +12,14 @@ Uživatelský popis je v [README](../README.md).
 | `esbirka_get_text` | e-Sbírka | konsolidovaný text k datu — jeden §, jeden článek (`čl. 36`, `čl. I`), nebo celý předpis po ~45k znacích; verze se nejdřív určí přes REST detail (bez data = účinná dnes), odpověď nese „účinné od–do“ a upozornění na zveřejněné budoucí znění |
 | `ns_search` / `ns_get_decision` | rozhodnuti.nsoud.cz | judikatura NS: fulltext řazený podle relevance (holá slova spojena AND, fráze jen v uvozovkách, Domino operátory AND/OR/NOT, `nájem*`, NEAR/SENTENCE/PARAGRAPH), přesná sp. zn. (`[spzn1]`–`[spzn4]`), typ rozhodnutí, kategorie A–E, datum rozhodnutí i datum předání na web; hit nese soud a kategorii |
 | `nss_search` / `nss_get_decision` | vyhledavac.nssoud.cz | judikatura NSS i krajských správních soudů: fulltext, sp. zn., aplikovaný předpis a ustanovení (`applies_act`/`applies_treaty`/`applies_eu_regulation`/`applies_eu_directive` + `applies_provision`), soud/senát vč. rozšířeného, rejstřík, oblast úpravy, datum rozhodnutí i zpřístupnění — vše server-side dle zachyceného POSTu formuláře (číselníky se řeší za běhu z `ciselnikTreeData`) |
-| `nalus_search` / `nalus_get_decision` | nalus.usoud.cz | judikatura ÚS: fulltext (vč. zóny disentů a řazení dle významu), citace/ECLI, soudce zpravodaj i disentující, výrok, navrhovatel, napadený akt (druh/číslo/název/ust. — abstraktní přezkum bez klíčových slov), dotčený orgán, jen publikovaná, datum rozhodnutí i zpřístupnění — číselníky verbatim ze zachyceného POSTu formuláře |
-| `cz_caselaw_search` | NSS + NS + ÚS | jeden dotaz paralelně přes tři vrcholné soudy; varianty round-robin s počty za variantu, každá varianta s vlastním limitem (pomalá shodí jen sebe); dráha NSS jen NSS (krajské soudy přes `include_regional`), ÚS podle relevance, hit nese soud |
+| `us_search` / `us_get_decision` | nalus.usoud.cz | judikatura ÚS: fulltext (vč. zóny disentů a řazení dle významu), citace/ECLI, soudce zpravodaj i disentující, výrok, navrhovatel, napadený akt (druh/číslo/název/ust. — abstraktní přezkum bez klíčových slov), dotčený orgán, jen publikovaná, datum rozhodnutí i zpřístupnění — číselníky verbatim ze zachyceného POSTu formuláře |
+| `caselaw_search` | NSS + NS + ÚS | jeden dotaz paralelně přes tři vrcholné soudy; varianty round-robin s počty za variantu, každá varianta s vlastním limitem (pomalá shodí jen sebe); dráha NSS jen NSS (krajské soudy přes `include_regional`), ÚS podle relevance, hit nese soud |
 | `justice_search` / `justice_get_decision` | rozhodnuti.justice.cz | obecné soudy (okresní/krajské/vrchní): fulltext (`match` všechna slova/jedno ze slov/fráze), spisová značka, kódy soudů, druh rozhodnutí, datum vydání i zveřejnění, aplikovaný předpis a § (`applies_act` + `applies_section`) — vše server-side přes `/api/finaldoc`, backend SPA zachycený z živého požadavku; hit nese i `affects` (co rozhodnutí udělalo s rozhodnutím nižšího soudu: CHANGE/CONFIRM/CANCEL…) |
-| `curia_search` / `curia_get_document` | InfoCuria + Cellar | FULLTEXT judikatury SDEU (C i T) přes vlastní index soudu — hledá napříč všemi jazykovými verzemi; typ dokumentu, stav věci, citovaný předpis a článek (`cites_celex`/`cites_article`), předběžné otázky podle předkládajícího státu (`referred_from`), datumy — vše server-side dle zachyceného payloadu SPA | 
+| `sdeu_search` / `sdeu_get_document` | InfoCuria + Cellar | FULLTEXT judikatury SDEU (C i T) přes vlastní index soudu — hledá napříč všemi jazykovými verzemi; typ dokumentu, stav věci, citovaný předpis a článek (`cites_celex`/`cites_article`), předběžné otázky podle předkládajícího státu (`referred_from`), datumy — vše server-side dle zachyceného payloadu SPA | 
 | `eurlex_search` / `eurlex_get_document` | Cellar SPARQL (Publications Office) | EU legislativa, judikatura i legislativní materiály (návrhy COM, sdělení, zelené/bílé knihy, SWD, impact assessmenty, stanoviska EHSV/VR, postoje EP a Rady) dle názvů, CELEX/ECLI, typů a dat; texty z oficiálního Cellaru |
-| `eurlex_legislative_history` | Cellar SPARQL (Publications Office) | travaux préparatoires aktu z dossieru interinstitucionálního postupu (`cdm:dossier_contains_work` — obsahuje i přijatý akt, takže kotví CELEX aktu i kteréhokoli dokumentu postupu, případně číslo postupu `2012/0011(COD)`); vrací návrh s důvodovou zprávou, impact assessmenty, stanoviska, postoje EP/Rady + číslo postupu, právní základ a stav (přijato/projednáváno/staženo) |
+| `eurlex_get_history` | Cellar SPARQL (Publications Office) | travaux préparatoires aktu z dossieru interinstitucionálního postupu (`cdm:dossier_contains_work` — obsahuje i přijatý akt, takže kotví CELEX aktu i kteréhokoli dokumentu postupu, případně číslo postupu `2012/0011(COD)`); vrací návrh s důvodovou zprávou, impact assessmenty, stanoviska, postoje EP/Rady + číslo postupu, právní základ a stav (přijato/projednáváno/staženo) |
 | `doctrine_search` | cuni.primo.exlibrisgroup.com | doktrína: knihy, kapitoly a články z UKAŽ Univerzity Karlovy (Primo VE: katalog UK + Central Discovery Index licencovaných e-zdrojů); `query`/`queries` (≤ 3 varianty), `title`, `author`, `subject`, `language`, `year_from`/`year_to`; katalog stránkuje po 10, `limit` (≤ 20; nad 10 záznamy stručně, bez abstraktů) stáhne víc stránek v paralelní dávce a `page` kráčí dál (`total` = `total_local` + `total_central`) — vrací bibliografické záznamy s odkazem na záznam, abstraktem/obsahem a přístupovými odkazy, žádné plné texty; klient postavený na zachyceném požadavku SPA (HAR 2026-09), ověřený živě z produkce |
-| `doctrine_get_document` | cuni.primo.exlibrisgroup.com | jeden záznam v plném znění přes full-display endpoint Prima (ověřený živě): celý abstrakt, obsah (TOC), hesla, identifikátory a přístupové odkazy — hledání ukazuje jen začátek abstraktu a obsahu; text díla se nestahuje (k němu vede odkaz na záznam, licencované tituly si čtenář otevře sám přes vzdálený přístup UK) |
+| `doctrine_get_record` | cuni.primo.exlibrisgroup.com | jeden záznam v plném znění přes full-display endpoint Prima (ověřený živě): celý abstrakt, obsah (TOC), hesla, identifikátory a přístupové odkazy — hledání ukazuje jen začátek abstraktu a obsahu; text díla se nestahuje (k němu vede odkaz na záznam, licencované tituly si čtenář otevře sám přes vzdálený přístup UK) |
 | `dawmain_ping` | — | které nasazení odpovědělo |
 | `dawmain_probe_sources` | — | diagnostika všech upstreamů z nasazené funkce; `include_raw` pro záchyt fixtures, `discover` pro hledání neověřených endpointů |
 
@@ -27,8 +27,9 @@ Známá omezení (přiznaná i v popisech nástrojů): NS adresuje jen prvních 
 výsledků dotazu (zužuj dotazem, ne stránkováním) a při řazení podle relevance
 hlásí nejvýš 1000 shod (`matched_at_least`); justice.cz drží data od
 10/2020, převážně civilní prvoinstanční, a neohraničený fulltext je pomalý.
-Odkazy na rozhodnutí NS nesou `&Highlight=0,<termy>`, takže se dokument otevře
-rovnou na hledaném místě.
+Odkaz na rozhodnutí NS se zvýrazněním (`&Highlight=0,<termy>`) vrací
+`ns_get_decision` s `find` — otevře se rovnou na nalezené pasáži, tedy na tom,
+co memo cituje; seznam hitů nese holé odkazy.
 Doktrína, živě z produkce (fra1, 2026-09-02): **UKAŽ/Primo odpovídá bez
 tokenu** (hledání i full-display záznamu, verbatim fixtures v
 `tests/fixtures/primo/`); guest-token fallback zůstává pro případ, že by ho
@@ -44,7 +45,7 @@ zpět by vedla přes oficiální WorldCat Search API s WSKey knihovny).
 uloženým přihlášením čtenáře (CAS, stránka `/ucet`, hesla zapečetěná v
 private metadata Clerku); na přání zadavatele byla celá vrstva odstraněna —
 k orientaci v literatuře stačí celý abstrakt a obsah záznamu, které
-`doctrine_get_document` vrací (full-display endpoint Prima, ověřený živě,
+`doctrine_get_record` vrací (full-display endpoint Prima, ověřený živě,
 `tests/fixtures/primo/record-local-book.json`), a text díla si čtenář otevře
 sám přes odkaz na záznam (u licencovaných přes vzdálený přístup UK v
 prohlížeči). Co se o Unpaywallu, o přihlašovacím řetězu CAS a o proxy
@@ -79,11 +80,18 @@ scripts/smoke.mjs           end-to-end test po drátě (obě generace protokolu)
 ```
 
 Zásady: každý nástroj má `annotations` (vše read-only), stránkování
-(`limit`/`offset` či `page`, `has_more`), `structuredContent` + čitelný text a
+(`limit`/`offset` či `page`, `has_more`), čitelný text a
 chybové hlášky, které říkají, co zkusit jinak (`PARSE_DRIFT` = upstream změnil
 layout → spusť probe). Kde se dá kritérium ztratit (přejmenovaná pole
 formuláře NSS), se raději hlásí `PARSE_DRIFT` než tipuje podle datového typu:
-tichá odpověď na jinou otázku je pro rešerši horší než chyba. Rychlost: opakovaná identická volání jdou z per-instance
+tichá odpověď na jinou otázku je pro rešerši horší než chyba. Klient dostává
+**jen text**: `registerAllTools` (`src/mcp/tools/index.ts`) při registraci
+zahazuje `outputSchema` i `structuredContent` — Claude Code jinak předával
+modelu JSON místo textu (dražší a bez textových upozornění). Handlery
+strukturovaný výstup dál vracejí jako interní, testovaný kontrakt; cokoli
+potřebuje model (odkaz k citaci, varování, pokračování), musí být v textu.
+Jména nástrojů: `<zdroj>_search` hledá, `<zdroj>_get_*` čte (`us_` = Ústavní
+soud, `sdeu_` = SDEU, `caselaw_search` = všechny vrcholné soudy naráz). Rychlost: opakovaná identická volání jdou z per-instance
 cache (5 min hledání, 10 min texty rozhodnutí — stránka 2 dokumentu už text
 nestahuje znovu) a vícestránkové smyčky (e-Sbírka §-scan, justice day-walk,
 vícedílné dokumenty v Cellaru) běží v malých paralelních dávkách — stejný

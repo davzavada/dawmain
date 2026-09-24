@@ -65,7 +65,7 @@ export function parseNalusDecision(html: string, sz: string): NalusDecision {
       SOURCE,
       "NOT_FOUND",
       `NALUS has no document for sz=${sz}.`,
-      "Check the identifier (e.g. '1-1169-26_1' for I.ÚS 1169/26 #1) or find it via nalus_search. A docket can hold several decisions — try counter suffixes _1, _2.",
+      "Check the identifier (e.g. '1-1169-26_1' for I.ÚS 1169/26 #1) or find it via us_search. A docket can hold several decisions — try counter suffixes _1, _2.",
     );
   }
   const $ = loadHtml(html);

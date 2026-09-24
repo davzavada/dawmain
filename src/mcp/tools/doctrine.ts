@@ -16,7 +16,7 @@ import { READ_ONLY, toolFailure } from "./shared";
  * able to keep going.
  *
  * A record is the result. The search shows the first lines of each
- * record's abstract and contents; doctrine_get_document returns one record
+ * record's abstract and contents; doctrine_get_record returns one record
  * whole — the full abstract and table of contents are how a reader tells
  * whether a work is on point. The text of the work itself is NOT fetched:
  * an earlier layer downloaded open-access copies (Unpaywall, DOI, PDF
@@ -79,7 +79,7 @@ function renderHit(hit: BibHit, index?: number): string {
   if (hit.contents) lines.push(`   Contents: ${hit.contents}`);
   if (hit.url) lines.push(`   ${hit.url}`);
   if (hit.links?.length) lines.push(`   access: ${hit.links.join(" | ")}`);
-  // A list entry carries the id doctrine_get_document needs.
+  // A list entry carries the id doctrine_get_record needs.
   if (index !== undefined) lines.push(`   id ${hit.id}`);
   return lines.join("\n");
 }
@@ -111,7 +111,7 @@ export function registerDoctrine(server: McpServer): void {
     {
       title: "Doctrine: search the literature in UKAŽ",
       description:
-        "LITERATURE search — books, chapters and journal articles — in UKAŽ, the discovery service of Univerzita Karlova: the UK catalogue (Czech legal doctrine, commentaries, monographs) plus the Central Discovery Index of licensed e-resources (international journals and e-books). Criteria combine with AND: query (keywords anywhere), title, author, subject, language (cze/eng/ger/fre), year_from/year_to; 'queries' runs up to 3 keyword variants in parallel (Czech terms for the catalogue, English for the international literature). The catalogue answers with thousands of records: limit (up to 20; above 10 the records come brief, without abstracts) pulls several catalogue pages at once and page walks further — has_more and total say how far the list goes. Results are bibliographic records with the record's own link and, where the record carries them, the first lines of the abstract and contents plus access links; doctrine_get_document {id} returns one record whole (full abstract, table of contents). Cite the literature by author, title, year and the record link.",
+        "LITERATURE search — books, chapters and journal articles — in UKAŽ, the discovery service of Univerzita Karlova: the UK catalogue (Czech legal doctrine, commentaries, monographs) plus the Central Discovery Index of licensed e-resources (international journals and e-books). Criteria combine with AND: query (keywords anywhere), title, author, subject, language (cze/eng/ger/fre), year_from/year_to; 'queries' runs up to 3 keyword variants in parallel (Czech terms for the catalogue, English for the international literature). The catalogue answers with thousands of records: limit (up to 20; above 10 the records come brief, without abstracts) pulls several catalogue pages at once and page walks further — has_more and total say how far the list goes. Results are bibliographic records with the record's own link and, where the record carries them, the first lines of the abstract and contents plus access links; doctrine_get_record {id} returns one record whole (full abstract, table of contents). Cite the literature by author, title, year and the record link.",
       inputSchema: z.object({
         query: z.string().min(2).optional().describe("Keywords anywhere in the record (title, subject, abstract, contents)."),
         queries: z
@@ -225,7 +225,7 @@ export function registerDoctrine(server: McpServer): void {
           ...(items.length ? items.map((hit, i) => renderHit(hit, first + i)) : ["   no records on this page"]),
           "",
           items.length
-            ? "These are catalogue records, not texts: cite author, title, year and the record link; the whole abstract and contents of a hit: doctrine_get_document {id}. Different wording finds different literature — try the other language's term, or the subject heading a good hit carries."
+            ? "These are catalogue records, not texts: cite author, title, year and the record link; the whole abstract and contents of a hit: doctrine_get_record {id}. Different wording finds different literature — try the other language's term, or the subject heading a good hit carries."
             : "No records — broaden the keywords (drop a word, use the English or Czech term), remove the year or language filter, or search the subject heading instead of the title.",
         ].join("\n");
         return {
@@ -239,7 +239,7 @@ export function registerDoctrine(server: McpServer): void {
   );
 
   server.registerTool(
-    "doctrine_get_document",
+    "doctrine_get_record",
     {
       title: "Doctrine: one record in full — abstract and contents",
       description:

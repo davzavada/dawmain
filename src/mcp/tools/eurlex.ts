@@ -32,7 +32,7 @@ export function registerEurlex(server: McpServer): void {
     {
       title: "EUR-Lex: search EU law",
       description:
-        "Search EU legislation (regulations, directives, decisions), CJEU case law AND legislative materials (Commission proposals, communications, green/white papers, staff working documents, impact assessments, EESC/CoR opinions, EP and Council positions) through the official Publications Office Cellar SPARQL endpoint — the machine interface behind EUR-Lex. Matches TITLES, identifiers (CELEX/ECLI) and dates; document bodies are not full-text indexed here — for full-text search of CJEU judgments use curia_search. Fetch texts with eurlex_get_document (legislation and legislative materials) or curia_get_document (case law). For ALL travaux préparatoires of one act at once, use eurlex_legislative_history.",
+        "Search EU legislation (regulations, directives, decisions), CJEU case law AND legislative materials (Commission proposals, communications, green/white papers, staff working documents, impact assessments, EESC/CoR opinions, EP and Council positions) through the official Publications Office Cellar SPARQL endpoint — the machine interface behind EUR-Lex. Matches TITLES, identifiers (CELEX/ECLI) and dates; document bodies are not full-text indexed here — for full-text search of CJEU judgments use sdeu_search. Fetch texts with eurlex_get_document (legislation and legislative materials) or sdeu_get_document (case law). For ALL travaux préparatoires of one act at once, use eurlex_get_history.",
       inputSchema: z.object({
         query: z.string().optional().describe("Title keywords, e.g. 'data protection'. English titles by default."),
         celex: z.string().optional().describe("Exact CELEX, e.g. '32016R0679' (GDPR) or '52012PC0011' (its proposal)."),
@@ -103,8 +103,8 @@ export function registerEurlex(server: McpServer): void {
             `${offset + i + 1}. ${hit.celex}${hit.type ? ` [${hit.type}]` : ""}${hit.date ? ` ${hit.date}` : ""} — ${snippet(hit.title, 140)}\n   ${hit.url}`,
         );
         const text = hits.length
-          ? [...lines, "Full text: eurlex_get_document {celex} (case law also via curia_get_document)."].join("\n")
-          : "No EUR-Lex documents matched. This searches TITLES only — try the act's official name keywords, or use curia_search for full-text case-law search.";
+          ? [...lines, "Full text: eurlex_get_document {celex} (case law also via sdeu_get_document)."].join("\n")
+          : "No EUR-Lex documents matched. This searches TITLES only — try the act's official name keywords, or use sdeu_search for full-text case-law search.";
         return { content: [{ type: "text", text }], structuredContent: output };
       } catch (error) {
         return fail(error);
@@ -171,7 +171,7 @@ export function registerEurlex(server: McpServer): void {
   );
 
   server.registerTool(
-    "eurlex_legislative_history",
+    "eurlex_get_history",
     {
       title: "EUR-Lex: legislative history of an act",
       description:

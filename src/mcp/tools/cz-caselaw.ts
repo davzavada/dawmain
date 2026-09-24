@@ -33,9 +33,9 @@ import { runVariants } from "./variants";
  * civil, not the top courts' case law (see justice_search).
  */
 
-const SOURCES = ["nss", "ns", "nalus", "curia"] as const;
+const SOURCES = ["nss", "ns", "us", "sdeu"] as const;
 type SourceId = (typeof SOURCES)[number];
-const CZ_SOURCES: SourceId[] = ["nss", "ns", "nalus"];
+const CZ_SOURCES: SourceId[] = ["nss", "ns", "us"];
 const PER_VARIANT_DEADLINE_MS = 20_000;
 /** NSS answers a full-text POST within its own 25 s timeout or not at all. */
 const NSS_VARIANT_DEADLINE_MS = 26_000;
@@ -75,9 +75,9 @@ async function fetchPreviewText(hit: AggregatedHit): Promise<string> {
       return (await getNssDecision(hit.id)).text;
     case "ns":
       return (await getNsDecision(hit.id)).text;
-    case "nalus":
+    case "us":
       return (await getNalusDecision(hit.id)).text;
-    case "curia": {
+    case "sdeu": {
       const byEcli = hit.id.toUpperCase().startsWith("ECLI:");
       const document = await getCuriaDocument(
         byEcli ? { ecli: hit.id } : { logicDocId: hit.id },
@@ -99,11 +99,11 @@ function foreignCourt(hit: AggregatedHit): string | undefined {
 
 export function registerCzCaselaw(server: McpServer): void {
   server.registerTool(
-    "cz_caselaw_search",
+    "caselaw_search",
     {
       title: "Case law: search all top courts at once",
       description:
-        "FULL-TEXT search across NSS (administrative), NS (civil/criminal) and Ústavní soud (constitutional) in parallel — optionally also the CJEU (include_eu). Takes up to 3 query variants at once ('queries' — Czech inflects, so pass stems/synonyms: [\"bezpečný přístav\", \"bezpečného přístavu\", \"safe harbour\"]); each court's variants are merged round-robin, so every variant is represented, and each court reports what every variant found (variant_totals). Plain words are all required; \"quotes\" make a phrase. NS and ÚS hits come by relevance, NSS hits newest first. The NSS lane holds NSS decisions only (incl. the grand chamber) unless include_regional adds the regional administrative courts; every hit names its court where that is not obvious. With read_top: N the response ALSO carries excerpt previews of the N leading hits — search + first reading in one call. A court or a variant that fails or times out is reported by name while the rest still answer. Every court is searched across its whole archive — pass date_from/date_to only when the question has a time frame. For deeper digging use nss_search/ns_search/nalus_search/curia_search; fetch full texts with the *_get_* tool named in each hit.",
+        "FULL-TEXT search across NSS (administrative), NS (civil/criminal) and Ústavní soud (constitutional) in parallel — optionally also the CJEU (include_eu). Takes up to 3 query variants at once ('queries' — Czech inflects, so pass stems/synonyms: [\"bezpečný přístav\", \"bezpečného přístavu\", \"safe harbour\"]); each court's variants are merged round-robin, so every variant is represented, and each court reports what every variant found (variant_totals). Plain words are all required; \"quotes\" make a phrase. NS and ÚS hits come by relevance, NSS hits newest first. The NSS lane holds NSS decisions only (incl. the grand chamber) unless include_regional adds the regional administrative courts; every hit names its court where that is not obvious. With read_top: N the response ALSO carries excerpt previews of the N leading hits — search + first reading in one call. A court or a variant that fails or times out is reported by name while the rest still answer. Every court is searched across its whole archive — pass date_from/date_to only when the question has a time frame. For deeper digging use nss_search/ns_search/us_search/sdeu_search; fetch full texts with the *_get_* tool named in each hit.",
       inputSchema: z.object({
         query: z.string().min(2).optional().describe("Czech full-text query."),
         queries: z
@@ -117,7 +117,7 @@ export function registerCzCaselaw(server: McpServer): void {
         sources: z
           .array(z.enum(SOURCES))
           .optional()
-          .describe("Restrict to these courts. Default: the three Czech courts (plus curia with include_eu)."),
+          .describe("Restrict to these courts (us = Ústavní soud, sdeu = CJEU). Default: the three Czech courts (plus sdeu with include_eu)."),
         include_eu: z
           .boolean()
           .default(false)
@@ -190,7 +190,7 @@ export function registerCzCaselaw(server: McpServer): void {
         };
       }
 
-      const defaults: SourceId[] = include_eu ? [...CZ_SOURCES, "curia"] : CZ_SOURCES;
+      const defaults: SourceId[] = include_eu ? [...CZ_SOURCES, "sdeu"] : CZ_SOURCES;
       const active = sources?.length ? SOURCES.filter((s) => sources.includes(s)) : defaults;
 
       // One upstream search per court and variant; each RETURNS its result.
@@ -228,7 +228,7 @@ export function registerCzCaselaw(server: McpServer): void {
             })),
           };
         },
-        nalus: async (variant) => {
+        us: async (variant) => {
           // A topical fan-out wants the most relevant nálezy, not the newest
           // usnesení: NALUS ranks by its own "význam" here.
           const result = await searchNalus(
@@ -238,33 +238,33 @@ export function registerCzCaselaw(server: McpServer): void {
           );
           return {
             total: result.total,
-            // Hits without an sz cannot be fetched by nalus_get_decision —
+            // Hits without an sz cannot be fetched by us_get_decision —
             // never hand the model an id that the next tool will reject.
             hits: result.hits
               .filter((hit) => hit.sz)
               .map((hit) => ({
-                source: "nalus" as const,
+                source: "us" as const,
                 id: hit.sz as string,
                 caseNumber: hit.caseNumber,
                 date: hit.date,
-                detail_tool: "nalus_get_decision",
+                detail_tool: "us_get_decision",
                 url: hit.url,
               })),
           };
         },
-        curia: async (variant) => {
+        sdeu: async (variant) => {
           // searchCuria pages are 0-based — page 0 = the top-relevance rows.
           const result = await searchCuria({ query: variant, dateFrom: date_from, dateTo: date_to }, 0, per_source_limit);
           return {
             total: result.total,
             hits: result.hits.map((hit) => ({
-              source: "curia" as const,
+              source: "sdeu" as const,
               // || not ??: InfoCuria can return EMPTY-STRING ids, which must
               // fall through like missing ones.
               id: hit.ecli || hit.logicDocId || "?",
               caseNumber: hit.caseNumber ?? hit.caseName ?? "?",
               date: hit.date,
-              detail_tool: "curia_get_document",
+              detail_tool: "sdeu_get_document",
               url: hit.url,
             })),
           };
@@ -280,7 +280,7 @@ export function registerCzCaselaw(server: McpServer): void {
               source === "nss" ? NSS_VARIANT_DEADLINE_MS : PER_VARIANT_DEADLINE_MS,
             );
             const answered = values.filter((value): value is VariantResult => value !== null);
-            // A curia hit with neither ECLI nor logicDocId carries the
+            // A CJEU hit with neither ECLI nor logicDocId carries the
             // placeholder id "?" — key it by what it does have, or every such
             // hit would collapse into one.
             const hits = interleave(

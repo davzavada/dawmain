@@ -235,9 +235,11 @@ export function registerNss(server: McpServer): void {
           matches: paged.matches,
           text: paged.text,
         };
-        const meta = Object.entries(decision.metadata)
-          .map(([key, value]) => `${key}: ${value}`)
-          .join("\n");
+        // The link to cite rides in the text: clients read nothing else.
+        const meta = [
+          ...Object.entries(decision.metadata).map(([key, value]) => `${key}: ${value}`),
+          decision.url,
+        ].join("\n");
         return {
           content: [
             {

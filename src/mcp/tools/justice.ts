@@ -95,7 +95,7 @@ export function registerJustice(server: McpServer): void {
     {
       title: "Obecné soudy: search decisions",
       description:
-        "FULL-TEXT search of Czech general-court decisions (okresní, krajské, vrchní — plus NS/NSS/ÚS copies) in the Ministry of Justice database. Czech queries; match: all_words (default), any_word, phrase. Also filters by spisová značka, court (court_codes), decision type, decision date, publication date, and — the citator these courts otherwise lack — applies_act '89/2012' + applies_section '§ 2201' finds decisions that APPLIED that provision, with no keywords at all. Hits carry a uuid for justice_get_decision, the výrok, and 'affects': what the decision did to the lower court's ruling (CHANGE/CONFIRM/CANCEL…). Data starts 2020-10, mostly first-instance civil decisions; party names are anonymized. With no date and no case_number the search covers only the LAST 5 YEARS of decisions (the response says so) — pass date_from: '2020-10-01' for the whole archive. Full text is SLOW upstream: multi-word queries and large result sets can exceed the time limit even with a date range, while one distinctive word plus a date window of months answers in about a second — search with 1–2 key terms, not a sentence, and narrow with dates/court_codes. For NS/NSS/ÚS case law prefer cz_caselaw_search, whose indexes are richer.",
+        "FULL-TEXT search of Czech general-court decisions (okresní, krajské, vrchní — plus NS/NSS/ÚS copies) in the Ministry of Justice database. Czech queries; match: all_words (default), any_word, phrase. Also filters by spisová značka, court (court_codes), decision type, decision date, publication date, and — the citator these courts otherwise lack — applies_act '89/2012' + applies_section '§ 2201' finds decisions that APPLIED that provision, with no keywords at all. Hits carry a uuid for justice_get_decision, the výrok, and 'affects': what the decision did to the lower court's ruling (CHANGE/CONFIRM/CANCEL…). Data starts 2020-10, mostly first-instance civil decisions; party names are anonymized. With no date and no case_number the search covers only the LAST 5 YEARS of decisions (the response says so) — pass date_from: '2020-10-01' for the whole archive. Full text is SLOW upstream: multi-word queries and large result sets can exceed the time limit even with a date range, while one distinctive word plus a date window of months answers in about a second — search with 1–2 key terms, not a sentence, and narrow with dates/court_codes. For NS/NSS/ÚS case law prefer caselaw_search, whose indexes are richer.",
       inputSchema: z.object({
         query: z.string().optional().describe("Czech full-text query over the decision texts."),
         match: z
@@ -247,7 +247,7 @@ export function registerJustice(server: McpServer): void {
               ...lines,
               "Full text: justice_get_decision {uuid}.",
             ].join("\n")
-          : "No decisions matched. This database starts 2020-10 and holds mostly first-instance civil decisions — broaden the query, widen the dates, or try cz_caselaw_search for NS/NSS/ÚS case law.";
+          : "No decisions matched. This database starts 2020-10 and holds mostly first-instance civil decisions — broaden the query, widen the dates, or try caselaw_search for NS/NSS/ÚS case law.";
         const text = windowNote ? `${windowNote}\n\n${body}` : body;
         return { content: [{ type: "text", text }], structuredContent: output };
       } catch (error) {

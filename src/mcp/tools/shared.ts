@@ -33,12 +33,12 @@ export const FIND_DESCRIPTION =
 
 /** Tail of every *_get_* tool's description. Built from DOC_PAGE_CHARS so the
  * number the model is told matches the number the pager actually uses. */
-export const READING_DESCRIPTION = `Long texts come in ~${Math.round(DOC_PAGE_CHARS / 1000)}k-character pages. Token economy: to locate specific passages use 'find' (returns excerpts around matches); fetch further pages only when you genuinely need the whole text. Continue on your own — never ask the user whether to keep reading.`;
+export const READING_DESCRIPTION = `Long texts come in ~${Math.round(DOC_PAGE_CHARS / 1000)}k-character pages. 'find' returns excerpts around a term — for locating passages and screening. A decision you rely on (quote it, cite it as authority) you read WHOLE: page 1, then every page to the last. Continue on your own — never ask the user whether to keep reading.`;
 
 /** What a paged answer ends with when there is more — empty when there is not. */
 export function continuationHint(paged: Pick<DocumentView, "page" | "total_pages" | "has_more">): string {
   if (!paged.has_more) return "";
-  return `\n\n(page ${paged.page}/${paged.total_pages} — fetch ONLY what you need, without asking the user: full close reading → call again with page: ${paged.page + 1}; specific passages → call again with find: "term" for targeted excerpts instead of more pages)`;
+  return `\n\n(page ${paged.page}/${paged.total_pages} — continue without asking the user: page: ${paged.page + 1}. A decision you rely on is read to its last page; to locate one passage instead, use find: "term".)`;
 }
 
 /** `read_top` on the search tools that preview their best hits. */

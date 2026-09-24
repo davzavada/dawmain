@@ -18,11 +18,11 @@ const fail = toolFailure("CJEU (InfoCuria)");
 
 export function registerCuria(server: McpServer): void {
   server.registerTool(
-    "curia_search",
+    "sdeu_search",
     {
       title: "CJEU: search case law",
       description:
-        "FULL-TEXT search of CJEU case law (Court of Justice 'C', General Court 'T') via the court's own live InfoCuria index — the advanced-search surface: text of judgments/opinions + metadata, case number (C-311/18), case/party name, ECLI, case status (closed/pending), document type, court and date filters, relevance/date sort. The text search matches EVERY language version at once — Czech phrases work directly. Two filters work even without keywords: cites_celex (+cites_article) finds decisions citing a given act or article in their grounds, and referred_from lists preliminary rulings referred by a given member state's courts (e.g. ['CZ']). Includes same-day decisions. 'queries' searches up to 3 variants IN PARALLEL and merges them round-robin, so every variant is represented ('variant_totals' says what each found; a failed variant is named in 'failed_variants'); read_top: N also returns excerpt previews of the N best hits. Fetch texts with curia_get_document.",
+        "FULL-TEXT search of CJEU case law (Court of Justice 'C', General Court 'T') via the court's own live InfoCuria index — the advanced-search surface: text of judgments/opinions + metadata, case number (C-311/18), case/party name, ECLI, case status (closed/pending), document type, court and date filters, relevance/date sort. The text search matches EVERY language version at once — Czech phrases work directly. Two filters work even without keywords: cites_celex (+cites_article) finds decisions citing a given act or article in their grounds, and referred_from lists preliminary rulings referred by a given member state's courts (e.g. ['CZ']). Includes same-day decisions. 'queries' searches up to 3 variants IN PARALLEL and merges them round-robin, so every variant is represented ('variant_totals' says what each found; a failed variant is named in 'failed_variants'); read_top: N also returns excerpt previews of the N best hits. Fetch texts with sdeu_get_document.",
       inputSchema: z.object({
         query: z.string().optional().describe("Keywords (any EU language; English works best)."),
         queries: z
@@ -196,9 +196,9 @@ export function registerCuria(server: McpServer): void {
               `${result.total} matching cases, showing ${result.hits.length} ${result.hits.some((h) => h.docType) ? "documents" : "case listings"}${multi ? " (best variant)" : ""}${result.filtered ? ` (${result.filtered} documents hidden by doc_type/state/date filters)` : ""}:`,
               ...lines,
               result.hits.some((h) => h.docType)
-                ? "Full text: curia_get_document {ecli | case_number | logic_doc_id}."
-                : "Case listings carry no document ids — fetch a case's documents with curia_search {case_number}, then texts with curia_get_document.",
-              ...renderPreviews(previews, "curia_get_document"),
+                ? "Full text: sdeu_get_document {ecli | case_number | logic_doc_id}."
+                : "Case listings carry no document ids — fetch a case's documents with sdeu_search {case_number}, then texts with sdeu_get_document.",
+              ...renderPreviews(previews, "sdeu_get_document"),
             ].join("\n")
           : result.total > 0
             ? `${result.total} cases matched but no document scored for this query — add keywords (query), a case_number or an ecli; party names alone need the full-text route (put the name in 'query' or 'parties').`
@@ -212,17 +212,17 @@ export function registerCuria(server: McpServer): void {
   );
 
   server.registerTool(
-    "curia_get_document",
+    "sdeu_get_document",
     {
       title: "CJEU: document text",
       description:
-        `Full text of a CJEU judgment, order or AG opinion. Identify it by CELEX (62018CJ0311), ECLI (ECLI:EU:C:2020:559), or by case_number + doc_type (the CELEX is derived). For very recent documents not yet in Cellar, pass the logic_doc_id from curia_search. ${READING_DESCRIPTION}`,
+        `Full text of a CJEU judgment, order or AG opinion. Identify it by CELEX (62018CJ0311), ECLI (ECLI:EU:C:2020:559), or by case_number + doc_type (the CELEX is derived). For very recent documents not yet in Cellar, pass the logic_doc_id from sdeu_search. ${READING_DESCRIPTION}`,
       inputSchema: z.object({
         celex: z.string().optional().describe("CELEX number, e.g. '62018CJ0311'."),
         ecli: z.string().optional().describe("E.g. 'ECLI:EU:C:2020:559'."),
-        case_number: z.string().optional().describe("With doc_type, derives the CELEX. E.g. 'C-311/18'. Party names alone cannot identify a document — resolve them via curia_search first."),
+        case_number: z.string().optional().describe("With doc_type, derives the CELEX. E.g. 'C-311/18'. Party names alone cannot identify a document — resolve them via sdeu_search first."),
         doc_type: z.enum(["judgment", "order", "opinion"]).default("judgment"),
-        logic_doc_id: z.string().optional().describe("From curia_search, for very recent documents."),
+        logic_doc_id: z.string().optional().describe("From sdeu_search, for very recent documents."),
         language: z.string().default("en").describe("Preferred language (cs, en, …); falls back to English."),
         find: z.string().optional().describe(FIND_DESCRIPTION),
         page: z.number().int().min(1).default(1),
@@ -249,7 +249,7 @@ export function registerCuria(server: McpServer): void {
             "CJEU (InfoCuria)",
             "INPUT_INVALID",
             "No usable identifier provided.",
-            "Pass celex, ecli, case_number (+doc_type), or logic_doc_id from curia_search.",
+            "Pass celex, ecli, case_number (+doc_type), or logic_doc_id from sdeu_search.",
           );
         }
         const document = await getCuriaDocument({

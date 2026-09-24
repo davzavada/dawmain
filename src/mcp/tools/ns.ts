@@ -229,8 +229,10 @@ export function registerNs(server: McpServer): void {
         const decision = await getNsDecision(unid);
         const paged = pageOrExcerpt(decision.text, page, find);
         // With 'find', hand back a link that opens the document scrolled to the
-        // term — a citation the reader can check in one click.
-        const url = find ? withHighlight(decision.url, [find]) : decision.url;
+        // term — a citation the reader can check in one click. Only when the
+        // term is there: a highlight of nothing would promise a passage.
+        const found = Boolean(find?.trim() && paged.matches);
+        const url = found ? withHighlight(decision.url, [find]) : decision.url;
         const output = {
           unid: decision.unid,
           url,
@@ -241,9 +243,11 @@ export function registerNs(server: McpServer): void {
           matches: paged.matches,
           text: paged.text,
         };
-        const meta = Object.entries(decision.metadata)
-          .map(([key, value]) => `${key}: ${value}`)
-          .join("\n");
+        // The link to cite rides in the text: clients read nothing else.
+        const meta = [
+          ...Object.entries(decision.metadata).map(([key, value]) => `${key}: ${value}`),
+          found ? `${url} (opens at the found passage)` : url,
+        ].join("\n");
         // Never hand back a silent metadata echo — say plainly that NS has
         // no machine-readable body for this document.
         const text = nsBodyMissing(decision.text)

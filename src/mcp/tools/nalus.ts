@@ -19,11 +19,11 @@ const fail = toolFailure("Ústavní soud (NALUS)");
 
 export function registerNalus(server: McpServer): void {
   server.registerTool(
-    "nalus_search",
+    "us_search",
     {
       title: "Ústavní soud: search NALUS",
       description:
-        "FULL-TEXT search of Czech Constitutional Court decisions (nálezy, usnesení, stanoviska pléna) in NALUS — plus citace (sp. zn. like 'Pl. ÚS 24/10'), ECLI, soudce zpravodaj AND dissenting judge, populární název, outcome (výrok), petitioner type, contested act (druh/číslo/ustanovení — e.g. every decision reviewing zákon č. 106/1999), contested organ, decision/publication dates, only-published filter, relevance sort, and dissent-scope full text. Czech queries; 'queries' searches up to 3 variants IN PARALLEL and merges them round-robin, so every variant is represented ('variant_totals' says what each found; a failed variant is named in 'failed_variants'). Each hit carries an 'sz' identifier for nalus_get_decision. read_top: N also returns excerpt previews of the N best hits. Costs 3 upstream requests per variant.",
+        "FULL-TEXT search of Czech Constitutional Court decisions (nálezy, usnesení, stanoviska pléna) in NALUS — plus citace (sp. zn. like 'Pl. ÚS 24/10'), ECLI, soudce zpravodaj AND dissenting judge, populární název, outcome (výrok), petitioner type, contested act (druh/číslo/ustanovení — e.g. every decision reviewing zákon č. 106/1999), contested organ, decision/publication dates, only-published filter, relevance sort, and dissent-scope full text. Czech queries; 'queries' searches up to 3 variants IN PARALLEL and merges them round-robin, so every variant is represented ('variant_totals' says what each found; a failed variant is named in 'failed_variants'). Each hit carries an 'sz' identifier for us_get_decision. read_top: N also returns excerpt previews of the N best hits. Costs 3 upstream requests per variant.",
       inputSchema: z.object({
         query: z.string().optional().describe("Czech full-text query (právní věta, výrok, odůvodnění…)."),
         queries: z
@@ -220,8 +220,8 @@ export function registerNalus(server: McpServer): void {
               ...(variantLine ? [variantLine] : []),
               `${total ?? "?"} decisions${multi ? " (best variant)" : ""}:`,
               ...lines,
-              "Full text: nalus_get_decision {sz}.",
-              ...renderPreviews(previews, "nalus_get_decision"),
+              "Full text: us_get_decision {sz}.",
+              ...renderPreviews(previews, "us_get_decision"),
             ].join("\n");
         return { content: [{ type: "text", text }], structuredContent: output };
       } catch (error) {
@@ -231,11 +231,11 @@ export function registerNalus(server: McpServer): void {
   );
 
   server.registerTool(
-    "nalus_get_decision",
+    "us_get_decision",
     {
       title: "Ústavní soud: decision text",
       description:
-        `Full text, abstract and právní věta of one Constitutional Court decision. Identify it by the NALUS 'sz' (e.g. '1-1169-26_1' from nalus_search) or by ECLI. ${READING_DESCRIPTION}`,
+        `Full text, abstract and právní věta of one Constitutional Court decision. Identify it by the NALUS 'sz' (e.g. '1-1169-26_1' from us_search) or by ECLI. ${READING_DESCRIPTION}`,
       inputSchema: z.object({
         sz: z.string().optional().describe("NALUS id: '{senát}-{číslo}-{rok}[_{pořadí}]', e.g. 'Pl-24-10_1'."),
         ecli: z.string().optional().describe("Alternative: the decision's ECLI."),
@@ -267,7 +267,7 @@ export function registerNalus(server: McpServer): void {
             "Ústavní soud (NALUS)",
             "INPUT_INVALID",
             "Neither a valid sz nor a resolvable ECLI was provided.",
-            "Pass sz from nalus_search (e.g. '1-1169-26_1') or a full ECLI:CZ:US:… identifier.",
+            "Pass sz from us_search (e.g. '1-1169-26_1') or a full ECLI:CZ:US:… identifier.",
           );
         }
         const decision = await getNalusDecision(identifier);
@@ -289,16 +289,22 @@ export function registerNalus(server: McpServer): void {
         // The právní věta once, with the first page — not again with every
         // further page or `find` (it runs to thousands of characters).
         const firstRead = page === 1 && !find?.trim();
+        // NALUS fills the abstract slot with a placeholder when it has none.
+        const abstract = decision.abstract && !/^Abstrakt není k dispozici\.?$/i.test(decision.abstract.trim())
+          ? decision.abstract
+          : undefined;
         const header = [
           decision.registrySign,
           decision.form,
           decision.popularName ? `Populární název: ${decision.popularName}` : null,
+          decision.url,
           firstRead && decision.legalSentence
             ? `Právní věta:\n${decision.legalSentence
                 .split("\n")
                 .map((line) => `> ${line}`)
                 .join("\n")}`
             : null,
+          firstRead && abstract ? `Abstrakt:\n${abstract}` : null,
         ]
           .filter(Boolean)
           .join("\n");

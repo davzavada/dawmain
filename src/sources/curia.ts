@@ -429,6 +429,6 @@ export async function getCuriaDocument(options: {
     SOURCE,
     "NOT_FOUND",
     "No text could be retrieved for the given identifiers.",
-    "Check the CELEX (e.g. 62018CJ0311) or ECLI (ECLI:EU:C:2020:559). For very recent decisions pass the logic_doc_id from curia_search. Some documents exist only in selected languages — try language 'en' or 'fr'.",
+    "Check the CELEX (e.g. 62018CJ0311) or ECLI (ECLI:EU:C:2020:559). For very recent decisions pass the logic_doc_id from sdeu_search. Some documents exist only in selected languages — try language 'en' or 'fr'.",
   );
 }

@@ -55,7 +55,9 @@ const AFFECTED_TYPES = ["CHANGE", "COMPLETE", "CONFIRM", "CORRECT", "REPLACE", "
 describe("SKILL.md is pinned to the registered tool surface", () => {
   it("names only tools that exist", () => {
     const named = [
-      ...SKILL.matchAll(/\b((?:dawmain|esbirka|ns|nss|nalus|cz|justice|curia|eurlex|doctrine)_[a-z_]+)\b/g),
+      // Retired prefixes (nalus_, curia_, cz_) stay in the pattern, so a
+      // pre-rename name left in the skill fails here instead of mid-rešerše.
+      ...SKILL.matchAll(/\b((?:dawmain|esbirka|ns|nss|us|nalus|caselaw|cz|justice|sdeu|curia|eurlex|doctrine)_[a-z_]+)\b/g),
     ].map((match) => match[1]);
     expect(named.length).toBeGreaterThan(20);
     expect([...new Set(named)].filter((name) => !(name in tools))).toEqual([]);
@@ -79,8 +81,8 @@ describe("SKILL.md is pinned to the registered tool surface", () => {
       ["justice_search", "match", ["all_words", "any_word", "phrase"]],
       ["justice_search", "sort", ["published", "decided"]],
       ["nss_search", "court", ["rozsireny-senat", "krajske"]],
-      ["nalus_search", "types", ["nález"]],
-      ["curia_search", "doc_type", ["judgment", "opinion", "avis"]],
+      ["us_search", "types", ["nález"]],
+      ["sdeu_search", "doc_type", ["judgment", "opinion", "avis"]],
       ["esbirka_search", "match", ["phrase", "all_words"]],
     ];
     for (const [tool, param, values] of cases) {

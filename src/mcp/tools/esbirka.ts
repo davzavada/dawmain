@@ -178,7 +178,9 @@ export function registerEsbirka(server: McpServer): void {
           detail.uplnaCitaceSNovelami ? `Citace se změnami: ${detail.uplnaCitaceSNovelami}` : null,
           `staleUrl: ${output.staleUrl}`,
           detail.datumUcinnostiOd ? `Účinnost od: ${detail.datumUcinnostiOd}` : null,
-          versions.length ? `Znění (${versions.length}):\n${versionLines.join("\n")}${versions.length > 30 ? "\n  …" : ""}` : null,
+          versions.length
+            ? `Znění (${versions.length}, newest first):\n${versionLines.join("\n")}${versions.length > 30 ? `\n  … ${versions.length - 30} older versions not listed — pass 'date' for the one in force then` : ""}`
+            : null,
           `Portál: https://e-sbirka.gov.cz${output.staleUrl}`,
           `Text: use esbirka_get_text with the same identifiers${date ? "" : " (add 'date' for a historical version)"}.`,
         ]

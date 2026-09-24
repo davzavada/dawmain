@@ -284,7 +284,7 @@ describe("doctrine_search (stubbed catalogue)", () => {
     expect(text).toContain("✓ UKAŽ (Univerzita Karlova): 10789 records — 443 in the UK catalogue, 10346 in the Central Discovery Index; showing 1–10 (more: page 2)");
     expect(text).toContain("1. Chuguryan, Vahram, 1974-, Univerzita Mateja Bela. Fakulta politických vied a medzinárodných vzťahov (2015). 100 rokov ticha : Arménska genocída. Banská Bystrica : Belianum [book, slo] ISBN 978-80-557-0874-4");
     expect(text).toContain("   Contents: 01/01 - Obsah");
-    expect(text).toContain("the whole abstract and contents of a hit: doctrine_get_document {id}");
+    expect(text).toContain("the whole abstract and contents of a hit: doctrine_get_record {id}");
   });
 
   it("pulls two catalogue pages for a bigger limit, brief records above ten", async () => {
@@ -355,14 +355,14 @@ function documentHandler(): Handler {
   let handler: Handler | undefined;
   registerDoctrine({
     registerTool(name: string, _config: unknown, callback: Handler) {
-      if (name === "doctrine_get_document") handler = callback;
+      if (name === "doctrine_get_record") handler = callback;
     },
   } as never);
-  if (!handler) throw new Error("doctrine_get_document did not register");
+  if (!handler) throw new Error("doctrine_get_record did not register");
   return handler;
 }
 
-describe("doctrine_get_document (stubbed full-display endpoint)", () => {
+describe("doctrine_get_record (stubbed full-display endpoint)", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("returns the live catalogue record whole — the entire table of contents, not the search snippet", async () => {

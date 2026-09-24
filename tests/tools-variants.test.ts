@@ -85,7 +85,7 @@ describe("ns_search merges variants round-robin", () => {
   });
 });
 
-describe("cz_caselaw_search", () => {
+describe("caselaw_search", () => {
   const nssHit = (id: string, court: string) => ({
     id,
     caseNumber: `${id} As 1/2026`,
@@ -99,7 +99,7 @@ describe("cz_caselaw_search", () => {
     vi.mocked(searchNss).mockResolvedValue({ total: 1, hits: [nssHit("1", "Nejvyššího správního soudu")], pagination: null, blankForm: false, page: 1 } as never);
     vi.mocked(searchNs).mockResolvedValue(nsPage("A", 1) as never);
     vi.mocked(searchNalus).mockResolvedValue({ total: 0, empty: true, hits: [] } as never);
-    const handler = handlerOf(registerCzCaselaw as never, "cz_caselaw_search");
+    const handler = handlerOf(registerCzCaselaw as never, "caselaw_search");
     await handler({ query: "zásahová žaloba", per_source_limit: 5, include_eu: false, include_regional: false, read_top: 0 });
     expect(vi.mocked(searchNss).mock.calls[0][0]).toMatchObject({ court: "nss" });
     expect(vi.mocked(searchNalus).mock.calls[0][0]).toMatchObject({ sort: "relevance" });
@@ -115,7 +115,7 @@ describe("cz_caselaw_search", () => {
     } as never);
     vi.mocked(searchNs).mockResolvedValue(nsPage("A", 0) as never);
     vi.mocked(searchNalus).mockResolvedValue({ total: 0, empty: true, hits: [] } as never);
-    const handler = handlerOf(registerCzCaselaw as never, "cz_caselaw_search");
+    const handler = handlerOf(registerCzCaselaw as never, "caselaw_search");
     const result = await handler({ query: "zásahová žaloba", per_source_limit: 5, include_eu: false, include_regional: true, read_top: 0 });
     expect(vi.mocked(searchNss).mock.calls[0][0]).not.toHaveProperty("court");
     const items = result.structuredContent?.items as Array<{ court?: string }>;
@@ -130,7 +130,7 @@ describe("cz_caselaw_search", () => {
     });
     vi.mocked(searchNs).mockResolvedValue(nsPage("A", 1) as never);
     vi.mocked(searchNalus).mockResolvedValue({ total: 0, empty: true, hits: [] } as never);
-    const handler = handlerOf(registerCzCaselaw as never, "cz_caselaw_search");
+    const handler = handlerOf(registerCzCaselaw as never, "caselaw_search");
     const result = await handler({
       queries: ["zásahová žaloba", "nezákonný zásah správního orgánu"],
       per_source_limit: 5,

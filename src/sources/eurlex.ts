@@ -10,7 +10,7 @@ import { SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
  * legislative materials (sector-5 preparatory documents) in one graph.
  * Searches match TITLES + identifiers + dates — Cellar exposes no
  * full-text index of document bodies over SPARQL; for full-text CJEU search
- * use curia_search. Texts come from Cellar by CELEX/ECLI.
+ * use sdeu_search. Texts come from Cellar by CELEX/ECLI.
  *
  * Legislative history rides on the CDM dossier model (verified live against
  * the endpoint): a cdm:dossier is the interinstitutional procedure —
