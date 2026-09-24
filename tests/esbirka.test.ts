@@ -189,3 +189,209 @@ describe("keyed → keyless channel fallback", () => {
     expect(calls.filter((url) => url.includes(KEYLESS))).toHaveLength(0);
   });
 });
+
+describe("renderFragments / chunkFragments", () => {
+  it("opens a § after a blank line with its own label — no repeated citation heading", async () => {
+    const { renderFragments } = await import("@/src/sources/esbirka");
+    const text = renderFragments([
+      { text: "HLAVA I", kodTypuFragmentu: "Nadpis", zkracenaCitace: "zákon č. 89/2012 Sb." },
+      { text: "§ 1", kodTypuFragmentu: "Paragraf", zkracenaCitace: "§ 1 zákona č. 89/2012 Sb." },
+      { text: "(1) Ustanovení právního řádu…", kodTypuFragmentu: "Odstavec_Dc" },
+      { text: "", kodTypuFragmentu: "Virtual_Norma" },
+    ]).join("\n");
+    expect(text).toBe("HLAVA I\n\n§ 1\n(1) Ustanovení právního řádu…");
+    expect(text).not.toContain("zákona č. 89/2012 Sb.");
+  });
+
+  it("cuts pages at fragment boundaries and splits only an oversized fragment", async () => {
+    const { chunkFragments } = await import("@/src/sources/esbirka");
+    expect(chunkFragments(["aaaa", "bbbb", "cccc"], 9)).toEqual(["aaaa\nbbbb", "cccc"]);
+    expect(chunkFragments(["x".repeat(20)], 8)).toEqual(["xxxxxxxx", "xxxxxxxx", "xxxx"]);
+    expect(chunkFragments([], 8)).toEqual([""]);
+  });
+});
+
+describe("parseSectionLabel", () => {
+  it("tells sections from articles", async () => {
+    const { parseSectionLabel } = await import("@/src/sources/esbirka");
+    expect(parseSectionLabel("§ 2291")).toEqual({ kind: "paragraph", value: "2291" });
+    expect(parseSectionLabel("390a")).toEqual({ kind: "paragraph", value: "390a" });
+    expect(parseSectionLabel("čl. 36")).toEqual({ kind: "article", value: "36" });
+    expect(parseSectionLabel("Čl. I")).toEqual({ kind: "article", value: "I" });
+    expect(parseSectionLabel("článek 10a")).toEqual({ kind: "article", value: "10a" });
+    expect(parseSectionLabel("čl. ii")).toEqual({ kind: "article", value: "II" });
+    expect(parseSectionLabel("odst. 2")).toBeNull();
+    expect(parseSectionLabel("§ 12; DROP")).toBeNull();
+  });
+});
+
+// Line layout verbatim from the live Listina text (esbirka_get_text 1993/2,
+// 2026-09): "Čl. N" alone on a line, paragraphs "(N) …", two-line HLAVA
+// headings, lowercase cross-references inside the text.
+const LISTINA = [
+  "Čl. 35",
+  "(1) Každý má právo na příznivé životní prostředí.",
+  "HLAVA PÁTÁ",
+  "PRÁVO NA SOUDNÍ A JINOU PRÁVNÍ OCHRANU",
+  "Čl. 36",
+  "(1) Každý se může domáhat stanoveným postupem svého práva u nezávislého a nestranného soudu a ve stanovených případech u jiného orgánu.",
+  "(2) Kdo tvrdí, že byl na svých právech zkrácen rozhodnutím orgánu veřejné správy, může se obrátit na soud, … podle Listiny.",
+  "(3) Každý má právo na náhradu škody způsobené mu nezákonným rozhodnutím soudu, … nesprávným úředním postupem.",
+  "(4) Podmínky a podrobnosti upravuje zákon.",
+  "Čl. 37",
+  "(1) Každý má právo odepřít výpověď, … viz čl. 36 odst. 1.",
+].join("\n");
+
+describe("extractArticle", () => {
+  it("cuts one article from its heading to the next heading", async () => {
+    const { extractArticle } = await import("@/src/sources/esbirka");
+    const found = extractArticle(LISTINA, "36");
+    expect(found?.closed).toBe(true);
+    expect(found?.text.split("\n")[0]).toBe("Čl. 36");
+    expect(found?.text).toContain("(4) Podmínky a podrobnosti upravuje zákon.");
+    expect(found?.text).not.toContain("Čl. 37");
+  });
+
+  it("stops before a structural heading, and never matches a cross-reference", async () => {
+    const { extractArticle } = await import("@/src/sources/esbirka");
+    expect(extractArticle(LISTINA, "35")?.text).toBe(
+      "Čl. 35\n(1) Každý má právo na příznivé životní prostředí.",
+    );
+    expect(extractArticle("… viz čl. 36 odst. 1.", "36")).toBeNull();
+    expect(extractArticle(LISTINA, "37")?.closed).toBe(false);
+  });
+});
+
+/**
+ * Which time version a § comes from. The open data's "latest version" of
+ * the Civil Code is the one from 2027-01-01, not yet in force — the version
+ * has to be settled through the REST detail before anything is read.
+ */
+describe("getSection reads the version in force", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  const detail = {
+    nazev: "Zákon občanský zákoník",
+    staleUrl: "/sb/2012/89/2026-01-01",
+    datumUcinnostiZneniOd: "2026-01-01",
+    datumUcinnostiZneniDo: "2026-12-31",
+    typZneni: "AKTUALNI",
+  };
+  const fragments = {
+    pocetStranek: 1,
+    seznam: [
+      { kodTypuFragmentu: "Paragraf", zkracenaCitace: "§ 2291 zákona č. 89/2012 Sb.", xhtml: "§ 2291" },
+      {
+        kodTypuFragmentu: "Odstavec_Dc",
+        zkracenaCitace: "§ 2291 odst. 1 zákona č. 89/2012 Sb.",
+        xhtml: "(1) Poruší-li nájemce svou povinnost zvlášť závažným způsobem…",
+      },
+      { kodTypuFragmentu: "Paragraf", zkracenaCitace: "§ 2292 zákona č. 89/2012 Sb.", xhtml: "§ 2292" },
+    ],
+  };
+
+  it("resolves the current version, asks SPARQL only for that exact version, and reports it", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", async (input: string) => {
+      const url = decodeURIComponent(String(input));
+      calls.push(url);
+      if (url.includes("/sparql?")) {
+        return new Response(JSON.stringify({ results: { bindings: [] } }), {
+          headers: { "content-type": "application/sparql-results+json" },
+        });
+      }
+      if (url.includes("/fragmenty")) return new Response(JSON.stringify(fragments));
+      return new Response(JSON.stringify(detail));
+    });
+    const { getSection } = await import("@/src/sources/esbirka");
+    const result = await getSection("sb", 2012, 89, undefined, "§ 2291");
+    expect(result.via).toBe("scan");
+    expect(result.text).toContain("zvlášť závažným způsobem");
+    expect(result.text).not.toContain("§ 2292");
+    expect(result.version).toMatchObject({ staleUrl: "/sb/2012/89/2026-01-01", from: "2026-01-01", type: "AKTUALNI" });
+    const sparql = calls.find((url) => url.includes("/sparql?")) ?? "";
+    expect(sparql).toContain("/sb/2012/89/2026-01-01>");
+    expect(sparql).not.toContain("má-poslední-znění");
+    expect(calls.some((url) => url.includes("/sb/2012/89/2026-01-01/fragmenty"))).toBe(true);
+  });
+
+  it("reads an article out of the text", async () => {
+    vi.stubGlobal("fetch", async (input: string) => {
+      const url = decodeURIComponent(String(input));
+      if (url.includes("/fragmenty")) {
+        return new Response(
+          JSON.stringify({
+            pocetStranek: 1,
+            seznam: LISTINA.split("\n").map((line) => ({
+              kodTypuFragmentu: "Odstavec_Dc",
+              zkracenaCitace: "Usnesení Předsednictva České národní rady č. 2/1993 Sb.",
+              xhtml: line,
+            })),
+          }),
+        );
+      }
+      return new Response(JSON.stringify({ nazev: "Listina", staleUrl: "/sb/1993/2/2021-10-01", typZneni: "AKTUALNI" }));
+    });
+    const { getSection } = await import("@/src/sources/esbirka");
+    const result = await getSection("sb", 1993, 2, undefined, "čl. 36");
+    expect(result.via).toBe("text");
+    expect(result.text.startsWith("Čl. 36\n(1) Každý se může domáhat")).toBe(true);
+  });
+});
+
+describe("getActText pages the whole act to what a client accepts", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  it("splits oversized upstream pages and walks on across them", async () => {
+    // Two upstream pages of ~70k characters each → four pages of ≤ 45k.
+    const upstream = (page: number) => ({
+      pocetStranek: 2,
+      seznam: Array.from({ length: 70 }, (_, i) => ({
+        kodTypuFragmentu: "Odstavec_Dc",
+        xhtml: `${page}-${i} ${"x".repeat(990)}`,
+      })),
+    });
+    vi.stubGlobal("fetch", async (input: string) => {
+      const page = Number(/cisloStranky=(\d+)/.exec(String(input))?.[1] ?? 0);
+      return new Response(JSON.stringify(upstream(page)));
+    });
+    const { getActText } = await import("@/src/sources/esbirka");
+    const first = await getActText("/sb/2000/1", 1);
+    expect(first.text.length).toBeLessThanOrEqual(45_000);
+    expect(first.hasMore).toBe(true);
+    expect(first.totalPagesExact).toBe(false);
+    const third = await getActText("/sb/2000/1", 3);
+    expect(third.text.startsWith("1-0 ")).toBe(true);
+    expect(third.totalPagesExact).toBe(true);
+    expect(third.totalPages).toBe(4);
+    const last = await getActText("/sb/2000/1", 99);
+    expect(last.page).toBe(4);
+    expect(last.hasMore).toBe(false);
+  });
+});
+
+describe("searchActs requires all words through the advanced endpoint", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  it("sends all_words as fulltextVsechnaSlova, never the simple search", async () => {
+    const bodies: Array<{ url: string; body: string }> = [];
+    vi.stubGlobal("fetch", async (input: string, init?: { body?: string }) => {
+      bodies.push({ url: String(input), body: String(init?.body ?? "") });
+      return new Response(JSON.stringify({ pocetCelkem: 0, seznam: [] }));
+    });
+    const { searchActs } = await import("@/src/sources/esbirka");
+    await searchActs("zvlášť závažným způsobem nájemce", 0, 5);
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0].url).toContain("/rozsirena-vyhledavani");
+    expect(JSON.parse(bodies[0].body)).toMatchObject({ fulltextVsechnaSlova: "zvlášť závažným způsobem nájemce" });
+  });
+});

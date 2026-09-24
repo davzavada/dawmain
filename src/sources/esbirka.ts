@@ -3,6 +3,7 @@ import { SourceError } from "./shared/errors";
 import { fetchUpstream } from "./shared/http";
 import { htmlToText } from "./shared/html";
 import { DOCUMENT_TTL_MS, SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
+import { DOC_PAGE_CHARS } from "./shared/text";
 
 /**
  * e-Sbírka — the official Czech electronic Collection of Laws.
@@ -170,6 +171,8 @@ export interface EsbirkaActDetail {
   nazev: string;
   eli?: string;
   uplnaCitace?: string;
+  /** "Zákon č. 89/2012 Sb., občanský zákoník ve znění zákona č. 460/2016 Sb., …" — the citation with amendments. */
+  uplnaCitaceSNovelami?: string;
   datumCasVyhlaseni?: string;
   datumUcinnostiOd?: string;
   datumUcinnostiZneniOd?: string;
@@ -193,6 +196,7 @@ export function parseActDetail(json: unknown): EsbirkaActDetail {
     nazev: str("nazev") ?? "",
     eli: str("eli"),
     uplnaCitace: str("uplnaCitace"),
+    uplnaCitaceSNovelami: str("uplnaCitaceSNovelami"),
     datumCasVyhlaseni: str("datumCasVyhlaseni"),
     datumUcinnostiOd: str("datumUcinnostiOd"),
     datumUcinnostiZneniOd: str("datumUcinnostiZneniOd"),
@@ -285,24 +289,12 @@ async function runSearchActs(
   limit: number,
   options: EsbirkaSearchOptions,
 ): Promise<EsbirkaSearchPage> {
-  const paging = { start: offset, pocet: limit, razeni: ["+relevance"] };
-  const advanced =
-    (options.match && options.match !== "all_words") ||
-    options.excludeWords ||
-    options.dateFrom ||
-    options.dateTo;
-
-  if (!advanced) {
-    const json = await esbirkaFetch({
-      path: "/jednoducha-vyhledavani",
-      method: "POST",
-      body: { fulltext: query, ...paging },
-    });
-    return parseSearch(json);
-  }
-
-  // Advanced endpoint (body fields verbatim from the official OpenAPI).
-  const body: Record<string, unknown> = { ...paging };
+  // Always the advanced endpoint. The simple one (/jednoducha-vyhledavani)
+  // does NOT require all words: measured, "zvlášť závažným způsobem nájemce"
+  // matched 11 361 acts there (sanctions and covid laws on top) and 50 here
+  // with fulltextVsechnaSlova — the občanský zákoník among the first five.
+  // Name lookups keep their rank ("občanský zákoník" → 89/2012 first).
+  const body: Record<string, unknown> = { start: offset, pocet: limit, razeni: ["+relevance"] };
   if (options.match === "phrase") body.fulltextUvedenaFraze = query;
   else if (options.match === "any_word") body.fulltextJednoZeSlov = query;
   else body.fulltextVsechnaSlova = query;
@@ -310,8 +302,22 @@ async function runSearchActs(
   if (options.dateFrom) body.predmetneDatumOd = options.dateFrom;
   if (options.dateTo) body.predmetneDatumDo = options.dateTo;
 
-  const json = await esbirkaFetch({ path: "/rozsirena-vyhledavani", method: "POST", body });
-  return parseSearch(json);
+  try {
+    const json = await esbirkaFetch({ path: "/rozsirena-vyhledavani", method: "POST", body });
+    return parseSearch(json);
+  } catch (error) {
+    // Measured: a phrase carrying "č." and "Sb." got HTTP 500 twice while the
+    // service answered everything else — the query, not an outage.
+    if (error instanceof SourceError && error.kind === "UPSTREAM_ERROR") {
+      throw new SourceError(
+        SOURCE,
+        "UPSTREAM_ERROR",
+        error.message,
+        "e-Sbírka refused this search. It does so for some punctuation inside a query (\"č.\", \"Sb.\", commas) — retry without punctuation or with fewer words; if a plain query fails too, the service is down: run dawmain_probe_sources.",
+      );
+    }
+    throw error;
+  }
 }
 
 export async function getAct(staleUrl: string): Promise<EsbirkaActDetail> {
@@ -337,22 +343,237 @@ export async function getFragmentsPage(staleUrl: string, page: number): Promise<
   });
 }
 
-// ---------- single § ----------
+// ---------- rendering, time versions, whole-act paging ----------
+
+/**
+ * The act's text, fragment by fragment. A § opens after a blank line with its
+ * own label ("§ 1"); the zkracenaCitace heading ("§ 1 zákona č. 89/2012
+ * Sb.") that used to precede it repeated that label at ~25 characters a
+ * section. Pure — unit-tested.
+ */
+export function renderFragments(fragments: EsbirkaFragment[]): string[] {
+  const out: string[] = [];
+  for (const fragment of fragments) {
+    if (!fragment.text) continue;
+    out.push(fragment.kodTypuFragmentu === "Paragraf" ? `\n${fragment.text}` : fragment.text);
+  }
+  return out;
+}
+
+/**
+ * Cut rendered fragments into pages of at most `max` characters, breaking
+ * only between fragments; a single fragment longer than a page is split on
+ * its own. Pure — unit-tested.
+ */
+export function chunkFragments(pieces: string[], max = DOC_PAGE_CHARS): string[] {
+  const chunks: string[] = [];
+  let current = "";
+  const flush = () => {
+    const text = current.trim();
+    if (text) chunks.push(text);
+    current = "";
+  };
+  for (const piece of pieces) {
+    if (piece.length > max) {
+      flush();
+      for (let at = 0; at < piece.length; at += max) {
+        const part = piece.slice(at, at + max).trim();
+        if (part) chunks.push(part);
+      }
+      continue;
+    }
+    if (current && current.length + 1 + piece.length > max) flush();
+    current += (current ? "\n" : "") + piece;
+  }
+  flush();
+  return chunks.length ? chunks : [""];
+}
+
+export interface ActTextPage {
+  text: string;
+  page: number;
+  totalPages: number;
+  /** False while later upstream pages are unread — totalPages is then an estimate. */
+  totalPagesExact: boolean;
+  hasMore: boolean;
+}
+
+/** Upstream fragment pages fetched at once when a deep page needs those before it. */
+const FRAGMENT_PAGE_BATCH = 5;
+
+/**
+ * Page `page` (1-based) of the whole act, in pages of at most DOC_PAGE_CHARS.
+ * e-Sbírka serves fixed fragment pages of ~120 000 characters (the Civil
+ * Code has 11); handed out 1:1 one of them overflowed what a client accepts
+ * (measured: 120 658 characters in one answer). Every upstream page is cut
+ * at fragment boundaries; reaching page N reads the upstream pages before it
+ * — cached, so walking on costs nothing new.
+ */
+export async function getActText(staleUrl: string, page: number): Promise<ActTextPage> {
+  const first = await getFragmentsPage(staleUrl, 0);
+  const upstreamPages = Math.max(1, first.totalPages);
+  const chunksOf = new Map<number, string[]>([[0, chunkFragments(renderFragments(first.fragments))]]);
+  // A deep page needs every upstream page before it: fetch them in parallel
+  // batches up front instead of one round trip each.
+  const perUpstream = Math.max(1, chunksOf.get(0)!.length);
+  const lastNeeded = Math.min(upstreamPages - 1, Math.floor((page - 1) / perUpstream));
+  for (let from = 1; from <= lastNeeded; from += FRAGMENT_PAGE_BATCH) {
+    const batch: number[] = [];
+    for (let u = from; u <= Math.min(lastNeeded, from + FRAGMENT_PAGE_BATCH - 1); u++) batch.push(u);
+    const pages = await Promise.all(batch.map((u) => getFragmentsPage(staleUrl, u)));
+    pages.forEach((result, i) => chunksOf.set(batch[i], chunkFragments(renderFragments(result.fragments))));
+  }
+  let before = 0;
+  for (let u = 0; u < upstreamPages; u++) {
+    let chunks = chunksOf.get(u);
+    if (!chunks) {
+      chunks = chunkFragments(renderFragments((await getFragmentsPage(staleUrl, u)).fragments));
+      chunksOf.set(u, chunks);
+    }
+    const lastUpstream = u === upstreamPages - 1;
+    if (page <= before + chunks.length || lastUpstream) {
+      // Past the end: the last page, as charPage does.
+      const index = Math.min(page - before, chunks.length) - 1;
+      const known = before + chunks.length;
+      return {
+        text: chunks[index],
+        page: before + index + 1,
+        totalPages: lastUpstream ? known : Math.max(known + 1, Math.round((known / (u + 1)) * upstreamPages)),
+        totalPagesExact: lastUpstream,
+        hasMore: index < chunks.length - 1 || !lastUpstream,
+      };
+    }
+    before += chunks.length;
+  }
+  throw new SourceError(SOURCE, "PARSE_DRIFT", `e-Sbírka returned no text pages for ${staleUrl}.`, "Run dawmain_probe_sources.");
+}
+
+export interface ActVersion {
+  /** Canonical staleUrl of the version, e.g. "/sb/2012/89/2026-01-01". */
+  staleUrl: string;
+  /** The version's key date ("2026-01-01"; "0000-00-00" = as announced). */
+  date?: string;
+  /** In force from / until (until absent = open-ended). */
+  from?: string;
+  to?: string;
+  /** AKTUALNI, MINULE, BUDOUCI, VYHLASENE… */
+  type?: string;
+}
+
+/**
+ * The time version e-Sbírka serves for an act and a date: without a date the
+ * one in force today, otherwise the one in force on that date. The REST
+ * detail resolves either — /sb/2006/262/2015-06-01 answers as the version
+ * /sb/2006/262/2015-01-01 (in force 2015-01-01 – 2015-09-30), /sb/1993/1 as
+ * the current one. The open-data "má-poslední-znění" is NOT that: for the
+ * Civil Code it points at the version from 2027-01-01, not yet in force.
+ */
+export async function resolveVersion(
+  collection: string,
+  year: number,
+  number: number,
+  date?: string,
+): Promise<ActVersion> {
+  const requested = buildStaleUrl(collection, year, number, date);
+  const detail = await getAct(requested);
+  const staleUrl = detail.staleUrl || requested;
+  const key = /\/(\d{4}-\d{2}-\d{2})$/.exec(staleUrl)?.[1];
+  return {
+    staleUrl,
+    ...(key ? { date: key } : {}),
+    ...(detail.datumUcinnostiZneniOd ? { from: detail.datumUcinnostiZneniOd } : {}),
+    ...(detail.datumUcinnostiZneniDo ? { to: detail.datumUcinnostiZneniDo } : {}),
+    ...(detail.typZneni ? { type: detail.typZneni } : {}),
+  };
+}
+
+/** Effective dates of published versions not yet in force (BUDOUCI), ascending. */
+export async function futureVersions(collection: string, year: number, number: number): Promise<string[]> {
+  const history = await getHistory(buildStaleUrl(collection, year, number));
+  return history
+    .filter((version) => version.typZneni === "BUDOUCI" && version.datumUcinnostiOd)
+    .map((version) => version.datumUcinnostiOd as string)
+    .sort();
+}
+
+// ---------- one § or one článek ----------
 
 /** "§ 12", "§12", "12" → the paragraph number as written after the sign. */
 export function normalizeSectionLabel(section: string): string {
   return section.replace(/^§\s*/u, "").trim();
 }
 
-function sectionSparql(actIri: string, paragraph: string, dated: boolean): string {
-  // Version IRI: the act IRI itself dereferences to the current version when a
-  // date is embedded; otherwise follow má-poslední-znění.
-  const versionPattern = dated
-    ? `BIND(<${actIri}> AS ?zneni)`
-    : `<${actIri}> <${ESB}má-poslední-znění> ?zneni .`;
+export type SectionLabel = { kind: "paragraph"; value: string } | { kind: "article"; value: string };
+
+/**
+ * "§ 12", "12", "3a" → a paragraph; "čl. 36", "Čl. I", "článek 10a" → an
+ * article (Ústava, Listina, ústavní zákony, the articles of amending acts).
+ * The value feeds regexes, so only the shapes Czech acts use pass. Pure.
+ */
+export function parseSectionLabel(section: string): SectionLabel | null {
+  const trimmed = section.trim();
+  const article = /^čl(?:ánek)?\.?\s*([0-9]{1,3}[a-z]{0,2}|[ivxlc]{1,8})\.?$/iu.exec(trimmed);
+  if (article) {
+    const value = /^[ivxlc]+$/i.test(article[1]) ? article[1].toUpperCase() : article[1].toLowerCase();
+    return { kind: "article", value };
+  }
+  const paragraph = normalizeSectionLabel(trimmed);
+  return /^[0-9]{1,4}[a-z]{0,3}$/i.test(paragraph) ? { kind: "paragraph", value: paragraph } : null;
+}
+
+/** "Čl. 36" / "Článek 36" alone on a line — an article heading, never a cross-reference. */
+const ARTICLE_LINE_RE = /^(?:Čl\.|ČL\.|Článek)\s*([0-9]{1,3}[a-z]{0,2}|[IVXLC]{1,8})\.?$/u;
+/** Headings that close an article: the next part, hlava, oddíl or díl. */
+const STRUCTURE_LINE_RE = /^(?:ČÁST|Část|HLAVA|Hlava|ODDÍL|Oddíl|DÍL|Díl|PODODDÍL|Pododdíl)(?:\s|$)/u;
+
+/**
+ * One article out of an act's rendered text: from its own "Čl. N" line to
+ * the next article or structural heading. `closed` says a following heading
+ * was seen — an article cut by the end of the text read so far may go on.
+ * Pure — unit-tested.
+ */
+export function extractArticle(text: string, label: string): { text: string; closed: boolean } | null {
+  const lines = text.split("\n");
+  const wanted = label.toLowerCase();
+  const start = lines.findIndex((line) => ARTICLE_LINE_RE.exec(line.trim())?.[1].toLowerCase() === wanted);
+  if (start === -1) return null;
+  let end = start + 1;
+  while (end < lines.length) {
+    const line = lines[end].trim();
+    if (ARTICLE_LINE_RE.test(line) || STRUCTURE_LINE_RE.test(line)) break;
+    end++;
+  }
+  return { text: lines.slice(start, end).join("\n").trim(), closed: end < lines.length };
+}
+
+/** Fragment pages read at most when looking for an article. */
+const ARTICLE_SCAN_MAX_PAGES = 20;
+
+/**
+ * Articles have no per-fragment designation to scan for — in the Listina
+ * every fragment's zkracenaCitace is the act's own citation, and the open
+ * data returned no designations at all — so the article is cut out of the
+ * rendered text, where each one opens with its own "Čl. N" line.
+ */
+async function getArticleViaText(staleUrl: string, label: string): Promise<string | null> {
+  const first = await getFragmentsPage(staleUrl, 0);
+  const total = Math.min(first.totalPages, ARTICLE_SCAN_MAX_PAGES);
+  const pieces = renderFragments(first.fragments);
+  let found = extractArticle(pieces.join("\n"), label);
+  for (let from = 1; from < total && !found?.closed; from += FRAGMENT_PAGE_BATCH) {
+    const batch: number[] = [];
+    for (let u = from; u < Math.min(total, from + FRAGMENT_PAGE_BATCH); u++) batch.push(u);
+    const pages = await Promise.all(batch.map((u) => getFragmentsPage(staleUrl, u)));
+    for (const result of pages) pieces.push(...renderFragments(result.fragments));
+    found = extractArticle(pieces.join("\n"), label);
+  }
+  return found?.text || null;
+}
+
+function sectionSparql(versionIri: string, paragraph: string): string {
   return `
 SELECT ?ord ?ozn ?text WHERE {
-  ${versionPattern}
+  BIND(<${versionIri}> AS ?zneni)
   ?zneni <${ESB}má-fragment-znění> ?fz .
   ?fz <${ESB}má-předka>* ?parent .
   ?parent <${ESB}označení-fragmentu-znění-právního-aktu> ?ozn .
@@ -365,11 +586,17 @@ ORDER BY ?ord
 LIMIT 500`;
 }
 
+/**
+ * The open-data fast path for one §, for an EXACT version (its key date).
+ * Best-effort: in 2026-09 it answered no fragments even for canonical
+ * version IRIs (…/sb/2012/89/2026-01-01), and the REST scan below did the
+ * work. It is never asked for the "latest" version — that is a future one.
+ */
 async function getSectionViaSparql(
   collection: string,
   year: number,
   number: number,
-  date: string | undefined,
+  versionDate: string,
   paragraph: string,
 ): Promise<string | null> {
   // Defence in depth: the tool schema constrains `collection`, but this IRI is
@@ -383,8 +610,8 @@ async function getSectionViaSparql(
       "Use 'sb' (Sbírka zákonů) or 'sm' (mezinárodní smlouvy).",
     );
   }
-  const actIri = `https://opendata.eselpoint.gov.cz/esel-esb/eli/cz/${collection}/${year}/${number}${date ? `/${date}` : ""}`;
-  const query = sectionSparql(actIri, paragraph, Boolean(date));
+  const versionIri = `https://opendata.eselpoint.gov.cz/esel-esb/eli/cz/${collection}/${year}/${number}/${versionDate}`;
+  const query = sectionSparql(versionIri, paragraph);
   const response = await fetchUpstream(SOURCE, `${SPARQL_ENDPOINT}?query=${encodeURIComponent(query)}`, {
     headers: { accept: "application/sparql-results+json, application/json" },
     timeoutMs: 20_000,
@@ -438,32 +665,58 @@ async function getSectionViaScan(staleUrl: string, paragraph: string): Promise<s
   return collected.length ? collected.join("\n") : null;
 }
 
+export interface SectionResult {
+  text: string;
+  via: "sparql" | "scan" | "text";
+  /** The time version quoted — null only when e-Sbírka's detail did not answer. */
+  version: ActVersion | null;
+}
+
 export async function getSection(
   collection: string,
   year: number,
   number: number,
   date: string | undefined,
   section: string,
-): Promise<{ text: string; via: "sparql" | "scan" }> {
-  const paragraph = normalizeSectionLabel(section);
-  // The label feeds two regexes — restrict it to the shapes Czech acts use (12, 3a, 129b).
-  if (!/^[0-9]{1,4}[a-z]{0,3}$/i.test(paragraph)) {
+): Promise<SectionResult> {
+  const label = parseSectionLabel(section);
+  if (!label) {
     throw new SourceError(
       SOURCE,
       "INPUT_INVALID",
       `"${section}" is not a valid section label.`,
-      'Pass the section as "§ 12" or just "12" (letter suffixes like "3a" are fine).',
+      'Pass a section as "§ 12" or just "12" (letter suffixes like "3a" are fine), or an article as "čl. 36" or "čl. I".',
     );
   }
-  try {
-    const viaSparql = await getSectionViaSparql(collection, year, number, date, paragraph);
-    if (viaSparql) return { text: viaSparql, via: "sparql" };
-  } catch {
-    // SPARQL is best-effort — fall through to the REST scan.
+  // Settle WHICH version is being read before reading it: without a date the
+  // one in force today — never the latest published one, which may not be
+  // in force yet. If the detail does not answer, read what the plain
+  // staleUrl serves (the current version, or the one in force on `date`).
+  const version = await resolveVersion(collection, year, number, date).catch(() => null);
+  const staleUrl = version?.staleUrl ?? buildStaleUrl(collection, year, number, date);
+
+  if (label.kind === "article") {
+    const text = await getArticleViaText(staleUrl, label.value);
+    if (text) return { text, via: "text", version };
+    throw new SourceError(
+      SOURCE,
+      "NOT_FOUND",
+      `Article čl. ${label.value} was not found in ${staleUrl} (searched the text of the first ${ARTICLE_SCAN_MAX_PAGES} fragment pages for its "Čl. ${label.value}" heading).`,
+      "Verify the article exists in this act and time version, or read the act page by page (omit 'section').",
+    );
   }
-  const staleUrl = buildStaleUrl(collection, year, number, date);
+
+  const paragraph = label.value;
+  if (version?.date && version.date !== "0000-00-00") {
+    try {
+      const viaSparql = await getSectionViaSparql(collection, year, number, version.date, paragraph);
+      if (viaSparql) return { text: viaSparql, via: "sparql", version };
+    } catch {
+      // SPARQL is best-effort — fall through to the REST scan.
+    }
+  }
   const viaScan = await getSectionViaScan(staleUrl, paragraph);
-  if (viaScan) return { text: viaScan, via: "scan" };
+  if (viaScan) return { text: viaScan, via: "scan", version };
   throw new SourceError(
     SOURCE,
     "NOT_FOUND",
