@@ -383,8 +383,7 @@ export function parseNalusResults(html: string): NalusSearchPage {
     if (citation) {
       hit.citation = citation;
       hit.form = citation.split(" ")[0];
-      const dateMatch = /ze dne\s+([\d.\s/]+)$/.exec(citation);
-      if (dateMatch) hit.date = czechToIso(dateMatch[1]) ?? undefined;
+      hit.date = nalusCitationDate(citation);
     }
   });
 
@@ -397,6 +396,18 @@ export function parseNalusResults(html: string): NalusSearchPage {
     );
   }
   return { hits, total, empty: false };
+}
+
+/**
+ * Decision date from a NALUS citation. Published decisions carry the
+ * collection reference AFTER the date — "nález sp. zn. Pl. ÚS 24/10 ze dne
+ * 22. 3. 2011 (N 52/60 SbNU 625; 94/2011 Sb.)" — so the date is read where
+ * it stands, not from the end of the string (which left exactly the
+ * published, citable decisions without a date). Pure — unit-tested.
+ */
+export function nalusCitationDate(citation: string): string | undefined {
+  const m = /ze dne\s+(\d{1,2}\.\s*\d{1,2}\.\s*\d{4})/.exec(citation);
+  return m ? (czechToIso(m[1]) ?? undefined) : undefined;
 }
 
 /** Harvest the WebForms state fields from the search form. Pure. */

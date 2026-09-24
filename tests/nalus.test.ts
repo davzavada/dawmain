@@ -144,6 +144,17 @@ describe("resolveNalusValues", () => {
   });
 });
 
+describe("nalusCitationDate", () => {
+  it("reads the date of published and unpublished decisions alike", async () => {
+    const { nalusCitationDate } = await import("@/src/sources/nalus");
+    expect(nalusCitationDate("nález sp. zn. Pl. ÚS 24/10 ze dne 22. 3. 2011 (N 52/60 SbNU 625; 94/2011 Sb.)")).toBe(
+      "2011-03-22",
+    );
+    expect(nalusCitationDate("usnesení sp. zn. I. ÚS 1169/26 ze dne 7. 7. 2026")).toBe("2026-07-07");
+    expect(nalusCitationDate("nález sp. zn. Pl. ÚS 24/10")).toBeUndefined();
+  });
+});
+
 describe("parseNalusResults (live fixture)", () => {
   it("extracts hits with sz, ECLI, form and date", () => {
     const page = parseNalusResults(fixture("results-page-1.html"));
