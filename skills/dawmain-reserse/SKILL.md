@@ -65,8 +65,8 @@ whether it carries the argument or is mentioned in passing:
    never from a hit list, a preview or memory. Paraphrase alone is not enough.
 2. **Bod** — the numbered paragraph it comes from (…, bod 24). A `find` excerpt opens
    at the start of its paragraph when that is near, so the number usually heads the
-   passage. Where the decision has no numbering, say where in it the passage sits (odůvodnění, s. 5) — the quotation is
-   then what lets the reader find it.
+   passage. Where the decision has no numbering, say where in it the passage sits
+   (odůvodnění, s. 5) — the quotation is then what lets the reader find it.
 3. **Spisová značka** (or ECLI for SDEU), with the court, the form and the date.
 4. **Odkaz** — the `url` the tool gave you, opening the decision itself. Record it the
    moment it appears (going back for links after the memo is written is how they get
@@ -185,8 +185,8 @@ so re-running a search after reading is cheap.
   each has its own section below: every search form's fields are exposed, and the
   sections say which of them turn 900 hits into five.
 - **NSS lane of `caselaw_search`** — NSS decisions only (the grand chamber included);
-  `include_regional: true` lets the krajské správní soudy in, and every hit from
-  another court than the lane's own names it.
+  `include_regional: true` lets the krajské správní soudy in, and every hit from a
+  court other than the lane's own names it.
 - **EU legislation** — `eurlex_search` matches titles and identifiers only; for the
   text of judgments use `sdeu_search`.
 - **EU legislative materials** — when the question turns on purpose or history of an
@@ -419,8 +419,8 @@ This is the one question the top courts cannot answer — how a provision is app
 to day, in the ordinary case that never reaches dovolání. Pair it with `court_codes`
 for one region's practice, or with dates for the line since an amendment.
 
-**`affects` tells you whether the ruling survived.** Every hit carries what the decision
-did to the one below it: `CONFIRM` (potvrzeno), `CHANGE` (změněno), `CANCEL` (zrušeno),
+**"mění/potvrzuje" tells you whether the ruling survived.** Every hit carries, on that
+line, what the decision did to the one below it: `CONFIRM` (potvrzeno), `CHANGE` (změněno), `CANCEL` (zrušeno),
 and the rarer `CORRECT`, `COMPLETE`, `REPLACE`, each with the lower court and its sp.
 zn. So an appellate hit tells you the fate of the first-instance decision without a
 second search — and a first-instance decision you are about to cite deserves a check
@@ -556,8 +556,7 @@ what to read; it never supplies a quotation.
 
 **Locate.** `find: "term"` on any `*_get_*` tool returns the paragraphs around every
 match — usually with the bod number at their head — at most eight passages, with the
-match count.
-It answers "does this decision address X at all" in one call (zero matches is a real,
+match count. It answers "does this decision address X at all" in one call (zero matches is a real,
 citable finding), and it finds the bod you will quote. Every `find` answer ends by
 saying it is excerpts and how many pages the whole text has.
 
@@ -591,8 +590,8 @@ Precision has a time dimension — check it before you cite:
 - **The break.** Case law decided under the previous wording (typically pre-2014 civil
   law) may still hold, but say which wording it was decided under.
 - **Was it reversed?** For obecné soudy, `justice_search` answers this directly: the
-  `affects` field on an appellate hit names the decision below and what happened to it
-  (CONFIRM / CHANGE / CANCEL). Do not cite a first-instance rozsudek as practice
+  "mění/potvrzuje" line of an appellate hit names the decision below and what happened
+  to it (CONFIRM / CHANGE / CANCEL). Do not cite a first-instance rozsudek as practice
   without checking that it stood.
 - **Later authority.** For the top courts there is no citation graph, but decisions
   quote the sp. zn. they follow — so full-text search the citation itself:
