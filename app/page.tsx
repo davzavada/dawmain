@@ -1,8 +1,8 @@
 import { Suspense } from "react";
 import { headers } from "next/headers";
 import { DATABASES, databaseStatuses, formatTime } from "@/src/mcp/status";
-import { Endpoint } from "./_endpoint";
 import { Guide } from "./_guide";
+import { Mail } from "./_legal";
 
 export const dynamic = "force-dynamic";
 
@@ -81,13 +81,14 @@ export default async function Home() {
 
       <h2>Jak se připojit?</h2>
       <p>
-        Připojení má dva kroky: <strong>konektor</strong> dává asistentovi nástroje,{" "}
-        <strong>skill</strong> ho učí s nimi pracovat - jak se ptát, které databáze projít a jak
-        výsledek citovat. Obojí zabere pár minut.
+        Nastavení zabere asi pět minut a dělá se jen jednou. Přidáte <strong>konektor</strong>, který
+        asistentovi zpřístupní databáze, a <strong>skill</strong>, který ho naučí s nimi pracovat - jak
+        se ptát, co projít a jak výsledek citovat. Vyberte, kterého asistenta používáte:
       </p>
-      <Endpoint endpoint={endpoint} />
-      <Guide />
-      <p>Kdyby vás přihlášení nepustilo, ozvěte se mi.</p>
+      <Guide endpoint={endpoint} />
+      <p>
+        Kdyby cokoli nešlo, napište mi na <Mail />.
+      </p>
     </>
   );
 }

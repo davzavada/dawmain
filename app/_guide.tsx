@@ -1,133 +1,261 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { CopyField } from "./_copy";
 
 /**
  * The setup guide with a Claude / ChatGPT picker: one numbered list per
- * platform, connector and skill together. A client component only for the
- * picker's state; the steps are plain data.
+ * platform, connector and skill together. The chosen platform lives in the
+ * URL hash (#claude, #chatgpt), so a link can open the right tab directly.
  */
 
 interface Step {
+  title: string;
   body: ReactNode;
-  /** Screenshot slot: the file expected in public/navod/ and its alt text.
-   * Set `ready` once the file is there to show it instead of a placeholder. */
-  shot?: { file: string; alt: string; ready?: boolean };
+  /** Screenshot expected at public/navod/<shot>.png; until the file exists
+   * the slot shows a placeholder naming it. */
+  shot?: string;
+  alt?: string;
 }
 
-const SKILL = <a href="/dawmain-reserse.zip">dawmain-reserse.zip</a>;
+interface Platform {
+  id: string;
+  label: string;
+  note?: ReactNode;
+  steps: (endpoint: string) => Step[];
+  help: Array<{ q: string; a: ReactNode }>;
+}
 
-const LOGIN: Step["body"] = (
-  <>
-    Otevře se přihlašovací okno - stačí se zaregistrovat e-mailem (nebo přihlásit, pokud už účet
-    máte).
-  </>
+const SAMPLE_QUESTION =
+  "Najdi judikaturu Nejvyššího soudu k odpovědnosti provozovatele za škodu způsobenou psem.";
+
+const skillDownload = (
+  <a className="button" href="/dawmain-reserse.zip" download>
+    Stáhnout skill (dawmain-reserse.zip)
+  </a>
 );
 
-const PLATFORMS: Array<{ id: string; label: string; steps: Step[] }> = [
+const loginStep: Step = {
+  title: "Přihlaste se",
+  body: (
+    <p>
+      Otevře se okno Dawmain. Zaregistrujte se e-mailem, nebo se přihlaste, pokud už účet máte. Pak
+      se vrátíte zpět do aplikace.
+    </p>
+  ),
+};
+
+const firstQuestion = (how: ReactNode): Step => ({
+  title: "Zeptejte se",
+  body: (
+    <>
+      <p>{how} Pro vyzkoušení můžete použít třeba tento dotaz:</p>
+      <CopyField value={SAMPLE_QUESTION} label="Zkopírovat ukázkový dotaz" />
+    </>
+  ),
+});
+
+const PLATFORMS: Platform[] = [
   {
     id: "claude",
     label: "Claude",
-    steps: [
+    steps: (endpoint) => [
       {
+        title: "Přidejte konektor",
         body: (
           <>
-            V claude.ai otevřete <strong>Nastavení → Konektory</strong>, zvolte{" "}
-            <strong>Přidat vlastní konektor</strong>, pojmenujte ho „Dawmain“ a vložte adresu výše.
+            <p>
+              Na <a href="https://claude.ai/settings/connectors">claude.ai</a> otevřete{" "}
+              <strong>Nastavení → Konektory</strong> a zvolte{" "}
+              <strong>Přidat vlastní konektor</strong>. Jako název napište <em>Dawmain</em> a do
+              pole s adresou vložte:
+            </p>
+            <CopyField value={endpoint} label="Zkopírovat adresu" />
           </>
         ),
-        shot: { file: "claude-1-konektor.png", alt: "Přidání vlastního konektoru v claude.ai" },
+        shot: "claude-1-konektor",
+        alt: "Přidání vlastního konektoru v Nastavení → Konektory",
       },
+      { ...loginStep, shot: "claude-2-prihlaseni", alt: "Přihlašovací okno Dawmain" },
       {
-        body: LOGIN,
-        shot: { file: "claude-2-prihlaseni.png", alt: "Přihlašovací okno Dawmain" },
-      },
-      {
+        title: "Nahrajte skill",
         body: (
           <>
-            Stáhněte si skill {SKILL}, otevřete <strong>Nastavení → Funkce → Skills</strong>,
-            zvolte <strong>Nahrát skill</strong> a vyberte stažený soubor.
+            <p>
+              Skill asistenta naučí, jak s databázemi pracovat a jak citovat. Stáhněte si ho:
+            </p>
+            {skillDownload}
+            <p>
+              Pak otevřete <strong>Nastavení → Funkce</strong>, v části <strong>Skills</strong>{" "}
+              zvolte <strong>Nahrát skill</strong> a vyberte stažený soubor. Soubor nerozbalujte.
+            </p>
           </>
         ),
-        shot: { file: "claude-3-skill.png", alt: "Nahrání skillu v Nastavení → Funkce" },
+        shot: "claude-3-skill",
+        alt: "Nahrání skillu v Nastavení → Funkce",
       },
       {
-        body: (
+        ...firstQuestion(
           <>
-            V nové konverzaci zkontrolujte v nabídce nástrojů, že je Dawmain zapnutý, a napište, co
-            potřebujete najít.
+            Otevřete novou konverzaci a v nabídce nástrojů u pole pro zprávu zkontrolujte,
+            že je Dawmain zapnutý.
+          </>,
+        ),
+        shot: "claude-4-konverzace",
+        alt: "Zapnutý Dawmain v nabídce nástrojů",
+      },
+    ],
+    help: [
+      {
+        q: "V nabídce nástrojů Dawmain nevidím.",
+        a: (
+          <>
+            V <strong>Nastavení → Konektory</strong> zkontrolujte, že u Dawmain svítí{" "}
+            <em>Připojeno</em>. Pokud ne, klikněte na <strong>Připojit</strong> a přihlaste se znovu.
           </>
         ),
-        shot: { file: "claude-4-konverzace.png", alt: "Zapnutý Dawmain v konverzaci" },
+      },
+      {
+        q: "Asistent databáze nepoužívá.",
+        a: <>Napište mu to přímo: „Použij Dawmain a najdi…“. Se zapnutým skillem to dělá sám.</>,
       },
     ],
   },
   {
     id: "chatgpt",
     label: "ChatGPT",
-    steps: [
+    note: (
+      <>
+        Vlastní konektory ChatGPT zatím umí jen v <strong>placených tarifech</strong> (Plus, Pro,
+        Business…) a nastavují se na webu <a href="https://chatgpt.com">chatgpt.com</a>, ne v
+        mobilní aplikaci. Používat je pak můžete všude.
+      </>
+    ),
+    steps: (endpoint) => [
       {
+        title: "Zapněte režim vývojáře",
         body: (
-          <>
-            Na chatgpt.com otevřete <strong>Nastavení → Zabezpečení a přihlášení</strong> a zapněte{" "}
-            <strong>Režim vývojáře</strong>. Vlastní konektory jsou jen v placených tarifech.
-          </>
+          <p>
+            Klikněte vlevo dole na své jméno, otevřete{" "}
+            <strong>Nastavení → Zabezpečení a přihlášení</strong> a zapněte{" "}
+            <strong>Režim vývojáře</strong>. Bez něj vlastní konektor přidat nejde.
+          </p>
         ),
-        shot: { file: "chatgpt-1-rezim-vyvojare.png", alt: "Zapnutí režimu vývojáře" },
+        shot: "chatgpt-1-rezim-vyvojare",
+        alt: "Přepínač Režim vývojáře v Nastavení → Zabezpečení a přihlášení",
       },
       {
+        title: "Přidejte konektor",
         body: (
           <>
-            V postranním panelu otevřete <strong>Pluginy</strong>, klikněte na <strong>+</strong>,
-            pojmenujte konektor „Dawmain“, vložte adresu výše, jako ověření ponechte{" "}
-            <strong>OAuth</strong> a potvrďte.
+            <p>
+              V postranním panelu otevřete <strong>Pluginy</strong> a klikněte na{" "}
+              <strong>+</strong>. Jako název napište <em>Dawmain</em>, do pole s adresou vložte
+              adresu níže, ověření nechte na <strong>OAuth</strong> a potvrďte.
+            </p>
+            <CopyField value={endpoint} label="Zkopírovat adresu" />
           </>
         ),
-        shot: { file: "chatgpt-2-konektor.png", alt: "Formulář nového konektoru v ChatGPT" },
+        shot: "chatgpt-2-konektor",
+        alt: "Vyplněný formulář nového konektoru",
       },
+      { ...loginStep, shot: "chatgpt-3-prihlaseni", alt: "Přihlašovací okno Dawmain" },
       {
-        body: LOGIN,
-        shot: { file: "chatgpt-3-prihlaseni.png", alt: "Přihlašovací okno Dawmain" },
-      },
-      {
+        title: "Nahrajte skill",
         body: (
           <>
-            Stáhněte si skill {SKILL}, v postranním panelu otevřete <strong>Skills</strong>, zvolte{" "}
-            <strong>Vytvořit → Nahrát z počítače</strong> a vyberte stažený soubor.
+            <p>
+              Skill asistenta naučí, jak s databázemi pracovat a jak citovat. Stáhněte si ho:
+            </p>
+            {skillDownload}
+            <p>
+              Pak v postranním panelu otevřete <strong>Skills</strong>, zvolte{" "}
+              <strong>Vytvořit → Nahrát z počítače</strong> a vyberte stažený soubor. Soubor
+              nerozbalujte.
+            </p>
           </>
         ),
-        shot: { file: "chatgpt-4-skill.png", alt: "Nahrání skillu v ChatGPT" },
+        shot: "chatgpt-4-skill",
+        alt: "Nahrání skillu přes Skills → Vytvořit",
       },
       {
-        body: (
+        ...firstQuestion(
           <>
-            V nové konverzaci klikněte na <strong>+</strong>, zapněte Dawmain a napište, co
-            potřebujete najít.
+            Otevřete novou konverzaci, klikněte na <strong>+</strong> vedle pole pro zprávu a
+            zapněte Dawmain.
+          </>,
+        ),
+        shot: "chatgpt-5-konverzace",
+        alt: "Zapnutý Dawmain v nové konverzaci",
+      },
+    ],
+    help: [
+      {
+        q: "Režim vývojáře v nastavení nemám.",
+        a: <>Je jen v placených tarifech a jen na webu. Ve firemním účtu ho musí povolit správce.</>,
+      },
+      {
+        q: "Přihlášení proběhlo, ale Dawmain v konverzaci nevidím.",
+        a: (
+          <>
+            Obnovte stránku. Pokud to nepomůže, konektor v <strong>Pluginech</strong> odeberte a
+            přidejte znovu.
           </>
         ),
-        shot: { file: "chatgpt-5-konverzace.png", alt: "Zapnutý Dawmain v konverzaci" },
       },
     ],
   },
 ];
 
-function Shot({ file, alt, ready }: NonNullable<Step["shot"]>) {
-  if (ready) return <img className="shot" src={`/navod/${file}`} alt={alt} />;
+/**
+ * A screenshot slot: shows public/navod/<name>.png once the file exists and
+ * a labelled placeholder until then, so adding a screenshot needs no code.
+ */
+function Shot({ name, alt }: { name: string; alt: string }) {
+  const [missing, setMissing] = useState(false);
+  const img = useRef<HTMLImageElement>(null);
+
+  // An error that fired before hydration never reaches onError - catch it here.
+  useEffect(() => {
+    const el = img.current;
+    if (el?.complete && el.naturalWidth === 0) setMissing(true);
+  }, []);
+
+  if (missing) {
+    return (
+      <div className="shot placeholder" role="img" aria-label={alt}>
+        <span>Obrázek: {alt}</span>
+        <code>public/navod/{name}.png</code>
+      </div>
+    );
+  }
+  const src = `/navod/${name}.png`;
   return (
-    <div className="shot placeholder" role="img" aria-label={alt}>
-      <span>Obrázek: {alt}</span>
-      <code>public/navod/{file}</code>
-    </div>
+    <a href={src} target="_blank" rel="noreferrer" className="shot-link">
+      <img ref={img} className="shot" src={src} alt={alt} onError={() => setMissing(true)} />
+    </a>
   );
 }
 
-export function Guide() {
+export function Guide({ endpoint }: { endpoint: string }) {
   const [active, setActive] = useState(PLATFORMS[0].id);
+
+  // Open the tab a shared link names (#chatgpt), and keep the hash in step.
+  useEffect(() => {
+    const fromHash = window.location.hash.slice(1);
+    if (PLATFORMS.some((p) => p.id === fromHash)) setActive(fromHash);
+  }, []);
+
+  function choose(id: string) {
+    setActive(id);
+    history.replaceState(null, "", `#${id}`);
+  }
+
   const platform = PLATFORMS.find((p) => p.id === active)!;
 
   return (
-    <>
-      <div className="tabs" role="tablist" aria-label="Platforma">
+    <div className="guide">
+      <div className="tabs" role="tablist" aria-label="Kterého asistenta používáte?">
         {PLATFORMS.map(({ id, label }) => (
           <button
             key={id}
@@ -136,21 +264,34 @@ export function Guide() {
             id={`guide-tab-${id}`}
             aria-selected={id === active}
             aria-controls="guide-panel"
-            onClick={() => setActive(id)}
+            onClick={() => choose(id)}
           >
             {label}
           </button>
         ))}
       </div>
 
-      <ol className="steps" role="tabpanel" id="guide-panel" aria-labelledby={`guide-tab-${active}`}>
-        {platform.steps.map((step, i) => (
-          <li key={i}>
-            {step.body}
-            {step.shot && <Shot {...step.shot} />}
-          </li>
+      <div role="tabpanel" id="guide-panel" aria-labelledby={`guide-tab-${active}`}>
+        {platform.note && <p className="note">{platform.note}</p>}
+
+        <ol className="steps">
+          {platform.steps(endpoint).map((step) => (
+            <li key={step.title}>
+              <h3>{step.title}</h3>
+              {step.body}
+              {step.shot && <Shot key={step.shot} name={step.shot} alt={step.alt ?? step.title} />}
+            </li>
+          ))}
+        </ol>
+
+        <h3 className="help-title">Něco nefunguje?</h3>
+        {platform.help.map(({ q, a }) => (
+          <details key={q} className="help">
+            <summary>{q}</summary>
+            <p>{a}</p>
+          </details>
         ))}
-      </ol>
-    </>
+      </div>
+    </div>
   );
 }
