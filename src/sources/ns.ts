@@ -68,6 +68,52 @@ export function parseSpisovaZnacka(raw: string): SpisovaZnacka | null {
   };
 }
 
+/**
+ * A spisová značka inside a free-text query — "31 Cdo 1945/2010",
+ * "29 ICdo 41/2014", "Pl. ÚS 24/10", "I. ÚS 1234/20". It must stay one
+ * phrase: split into words and AND-ed it would also match decisions that
+ * merely contain the senate, the registry and the number somewhere apart.
+ * A senate number (or the ÚS form) is required on purpose: "Zákon 89/2012"
+ * must NOT be frozen into a phrase no decision contains.
+ */
+const NS_CASE_MARK_RE =
+  /(?<![\p{L}\p{N}])(?:\d{1,3}\s+\p{Lu}\p{L}{0,5}|(?:Pl|IV|I{1,3})\.\s*ÚS)\s+\d{1,6}\s*\/\s*\d{2,4}(?!\p{N})/gu;
+
+/**
+ * Turn the caller's full-text query into the Domino expression we send.
+ *
+ * Domino reads several words without an operator as ONE EXACT PHRASE —
+ * measured live: `nájemce výpověď` matched 1 decision, `nájemce AND
+ * výpověď` 1 501; `výpověď z nájmu bez výpovědní doby` 1 vs 409 with AND.
+ * A research query written as plain words means "all of these words", so
+ * bare words are joined with AND. Anything the caller composed — quotes,
+ * parentheses, an operator — goes up untouched: they asked for exactly
+ * that. Spisové značky stay phrases, tokens with inner punctuation
+ * ("1945/2010", "89/2012") are quoted so Domino keeps them together, and
+ * one-character words (z, v, a, o…) are dropped: as AND terms they only
+ * cost time. Pure — unit-tested.
+ */
+export function nsFullText(raw: string): string {
+  const text = sanitizeNsFullText(raw);
+  if (!text) return text;
+  const composed =
+    /["()&|!]/.test(text) || text.split(" ").some((token) => SEARCH_OPERATORS.has(token.toUpperCase()));
+  if (composed) return text;
+
+  const units: string[] = [];
+  const rest = text.replace(NS_CASE_MARK_RE, (mark) => {
+    units.push(`"${mark.replace(/\s*\/\s*/, "/").replace(/\s+/g, " ")}"`);
+    return " ";
+  });
+  for (const token of rest.split(/\s+/)) {
+    const word = token.replace(/^[^\p{L}\p{N}*?]+|[^\p{L}\p{N}*?]+$/gu, "");
+    if ([...word.replace(/[*?]/g, "")].length < 2) continue;
+    const unit = /[^\p{L}\p{N}*?]/u.test(word) ? `"${word}"` : word;
+    if (!units.includes(unit)) units.push(unit);
+  }
+  return units.length ? units.join(" AND ") : text;
+}
+
 /** Balanced-delimiter check for the FT sanitizer. Pure. */
 function balancedParens(text: string): boolean {
   let depth = 0;
@@ -141,7 +187,7 @@ export function buildNsQuery(input: NsSearchInput): string {
   if (input.publishedFrom) clauses.push(`[datum_predani_na_web]>=${nsDate(input.publishedFrom)}`);
   if (input.publishedTo) clauses.push(`[datum_predani_na_web]<=${nsDate(input.publishedTo)}`);
   // Last, exactly as the form writes it.
-  if (input.query) clauses.push(`([ARozhodnutiRT]=(${sanitizeNsFullText(input.query)}))`);
+  if (input.query) clauses.push(`([ARozhodnutiRT]=(${nsFullText(input.query)}))`);
   if (!clauses.length) {
     throw new SourceError(
       SOURCE,
@@ -156,6 +202,10 @@ export function buildNsQuery(input: NsSearchInput): string {
 export interface NsSearchHit {
   unid: string;
   caseNumbers: string[];
+  /** "Nejvyšší soud", or the lower court whose decision made the Sbírka. */
+  court?: string;
+  /** Kategorie rozhodnutí A–E (A = Sbírka, E = procedural) — the cheapest authority signal. */
+  category?: string;
   url: string;
 }
 
@@ -183,6 +233,8 @@ export interface NsSearchPage {
   total: number | null;
   /** True count when the result set exceeds the 900-document window. */
   matched: number | null;
+  /** True when `matched` is only a floor: relevance order caps the count at SearchMax. */
+  matchedIsMinimum?: boolean;
   truncated: boolean;
   empty: boolean;
 }
@@ -202,14 +254,24 @@ export function parseNsSearch(html: string): NsSearchPage {
     const match = UNID_HREF_RE.exec(href);
     if (!match) return;
     const unid = match[1].toUpperCase();
+    // A decision filed under two categories can come back as two rows
+    // (seen with date ordering) — one hit per document.
+    if (hits.some((hit) => hit.unid === unid)) return;
     // The anchor may stack several spisové značky separated by <br/>.
     const caseNumbers = htmlToText($(el).html() ?? "")
       .split("\n")
       .map((line) => line.trim())
       .filter(Boolean);
+    // The same row carries the court and the category (live markup,
+    // 2026-09: td.td-short-wrap = Soud, td.category = Kategorie).
+    const row = $(el).closest("tr");
+    const court = row.find("td.td-short-wrap").first().text().replace(/\s+/g, " ").trim();
+    const category = row.find("td.category").first().text().trim().toUpperCase();
     hits.push({
       unid,
       caseNumbers,
+      ...(court ? { court } : {}),
+      ...(/^[A-E]$/.test(category) ? { category } : {}),
       url: `${BASE}/WebSearch/${unid}?openDocument`,
     });
   });
@@ -405,16 +467,29 @@ export function nsFetchCount(count: number): number {
   return Math.max(count, NS_MIN_COUNT);
 }
 
-async function runNsSearch(
-  input: NsSearchInput,
-  start: number,
-  count: number,
-): Promise<NsSearchPage> {
-  const query = buildNsQuery(input);
-  const url =
-    `${BASE}/$$WebSearch1?SearchView&Query=${encodeURIComponent(query)}` +
-    // SearchMax must stay large: SearchMax=1 provokes HTTP 500 upstream.
-    `&SearchMax=1000&SearchOrder=4&Start=${start}&Count=${nsFetchCount(count)}&pohled=1`;
+/** "Podmínce vyhovuje" never exceeds this under relevance order. */
+export const NS_SEARCH_MAX = 1000;
+/** Rows read from the top per relevance request (see nsRelevanceCount). */
+const NS_RELEVANCE_BLOCK = 100;
+
+/**
+ * Rows to request for a relevance-ordered page. Domino's relevance order
+ * (SearchOrder=1) serves rows ONLY from the top of the list — measured live
+ * 2026-09: Start=21, 101 and 401 each came back as an empty table under a
+ * banner claiming that very range, while Start=0 with Count=900 returned the
+ * rows. So every relevance page is read from the top and sliced here. The
+ * count is bucketed to blocks of 100 so consecutive pages come from one and
+ * the same ranking (the order shifted slightly between Count=20 and 900) and
+ * share one cached upstream response. Pure — unit-tested.
+ */
+export function nsRelevanceCount(start: number, count: number): number {
+  return Math.min(900, Math.ceil((start + count) / NS_RELEVANCE_BLOCK) * NS_RELEVANCE_BLOCK);
+}
+
+/** Parsed result pages by exact upstream URL — relevance pages share blocks. */
+const upstreamCache = new TtlCache<NsSearchPage>(SEARCH_TTL_MS);
+
+async function fetchNsResults(url: string): Promise<NsSearchPage> {
   // No automatic 5xx retry: NS 500s are deterministic for the given window
   // (capacity, not flakiness) — re-sending the same query just hammers the box;
   // the caller falls back to a narrower window instead.
@@ -436,12 +511,35 @@ async function runNsSearch(
       return send();
     }
   });
-  const page = parseNsSearch(await response.text());
-  // We asked for a full page even when the caller wanted three rows.
-  const hits = page.hits.slice(0, count);
-  if (!input.query) return { ...page, hits };
+  return parseNsSearch(await response.text());
+}
+
+async function runNsSearch(
+  input: NsSearchInput,
+  start: number,
+  count: number,
+): Promise<NsSearchPage> {
+  const query = buildNsQuery(input);
+  // Full text is ordered by relevance. The view order (4) used before is the
+  // order of internal UNIDs — measured, the first 20 of 1 501 matches were a
+  // random mix of 1999–2023, criminal cases included, for a civil question.
+  // A field-only listing has no ranking to offer, so it keeps the view order,
+  // which pages with Start and reports the true count.
+  const relevance = Boolean(input.query);
+  const url =
+    `${BASE}/$$WebSearch1?SearchView&Query=${encodeURIComponent(query)}` +
+    // SearchMax must stay large: SearchMax=1 provokes HTTP 500 upstream.
+    `&SearchMax=${NS_SEARCH_MAX}&SearchOrder=${relevance ? 1 : 4}` +
+    `&Start=${relevance ? 0 : start}&Count=${relevance ? nsRelevanceCount(start, count) : nsFetchCount(count)}&pohled=1`;
+  const page = await upstreamCache.through(url, () => fetchNsResults(url));
+  // We asked for a full page (or block) even when the caller wanted three rows.
+  const hits = relevance ? page.hits.slice(start, start + count) : page.hits.slice(0, count);
+  // Under relevance the banner counts at most SearchMax matches.
+  const matchedIsMinimum = relevance && page.matched !== null && page.matched >= NS_SEARCH_MAX;
+  if (!input.query) return { ...page, hits, matchedIsMinimum };
   return {
     ...page,
+    matchedIsMinimum,
     hits: hits.map((hit) => ({ ...hit, url: withHighlight(hit.url, [input.query]) })),
   };
 }

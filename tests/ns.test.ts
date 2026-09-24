@@ -4,6 +4,8 @@ import path from "node:path";
 import {
   buildNsQuery,
   nsFetchCount,
+  nsFullText,
+  nsRelevanceCount,
   parseSpisovaZnacka,
   sanitizeNsFullText,
   withHighlight,
@@ -65,7 +67,7 @@ describe("buildNsQuery", () => {
       buildNsQuery({ query: "náhrada škody", dateFrom: "2025-02-24", dateTo: "2025-03-01" }),
     ).toBe(
       "[datum_rozhodnuti]>=24.02.2025 AND [datum_rozhodnuti]<=01.03.2025" +
-        " AND ([ARozhodnutiRT]=(náhrada škody))",
+        " AND ([ARozhodnutiRT]=(náhrada AND škody))",
     );
   });
   it("rejects empty criteria", () => {
@@ -78,7 +80,7 @@ describe("buildNsQuery", () => {
   });
   it("strips braces, and delimiters left unbalanced", () => {
     expect(buildNsQuery({ query: 'pojem "dobré mravy {test}' })).toBe(
-      "([ARozhodnutiRT]=(pojem dobré mravy test))",
+      "([ARozhodnutiRT]=(pojem AND dobré AND mravy AND test))",
     );
     expect(buildNsQuery({ query: "nájem AND (výpověď" })).toBe(
       "([ARozhodnutiRT]=(nájem AND výpověď))",
@@ -88,6 +90,48 @@ describe("buildNsQuery", () => {
     const query = buildNsQuery({ query: "x)) OR [kategorie_rozhodnuti1]=A OR ((y" });
     expect(query).not.toContain("[kategorie_rozhodnuti1]");
     expect(query).toBe("([ARozhodnutiRT]=(x OR kategorie_rozhodnuti1 =A OR y))");
+  });
+});
+
+describe("nsFullText", () => {
+  it("requires every plain word — Domino reads bare words as one exact phrase", () => {
+    expect(nsFullText("nájemce výpověď")).toBe("nájemce AND výpověď");
+    expect(nsFullText("výpověď z nájmu bez výpovědní doby")).toBe(
+      "výpověď AND nájmu AND bez AND výpovědní AND doby",
+    );
+  });
+  it("keeps a single word as it is", () => {
+    expect(nsFullText("nájem*")).toBe("nájem*");
+  });
+  it("keeps a spisová značka together as a phrase", () => {
+    expect(nsFullText("31 Cdo 1945/2010")).toBe('"31 Cdo 1945/2010"');
+    expect(nsFullText("rozhodčí doložka 31 Cdo 1945/2010")).toBe(
+      '"31 Cdo 1945/2010" AND rozhodčí AND doložka',
+    );
+    expect(nsFullText("Pl. ÚS 24/10 soukromí")).toBe('"Pl. ÚS 24/10" AND soukromí');
+    expect(nsFullText("29 ICdo 41/2014")).toBe('"29 ICdo 41/2014"');
+  });
+  it("does not freeze an act citation into a phrase no decision contains", () => {
+    expect(nsFullText("zákon 89/2012")).toBe('zákon AND "89/2012"');
+  });
+  it("drops one-character words and stray punctuation", () => {
+    expect(nsFullText("nájem a výpověď , § 2291")).toBe("nájem AND výpověď AND 2291");
+  });
+  it("leaves a composed expression exactly as written", () => {
+    expect(nsFullText('"zvlášť závažné porušení" nájemce')).toBe('"zvlášť závažné porušení" nájemce');
+    expect(nsFullText("nájem OR pacht")).toBe("nájem OR pacht");
+    expect(nsFullText("nájem or pacht")).toBe("nájem or pacht");
+    expect(nsFullText("nájem NEAR výpověď")).toBe("nájem NEAR výpověď");
+    expect(nsFullText("(nájem pacht) výpověď")).toBe("(nájem pacht) výpověď");
+  });
+});
+
+describe("nsRelevanceCount", () => {
+  it("reads relevance pages from the top in blocks of 100, within the 900 window", () => {
+    expect(nsRelevanceCount(0, 20)).toBe(100);
+    expect(nsRelevanceCount(80, 20)).toBe(100);
+    expect(nsRelevanceCount(90, 20)).toBe(200);
+    expect(nsRelevanceCount(880, 100)).toBe(900);
   });
 });
 
@@ -152,6 +196,25 @@ describe("parseNsSearch", () => {
   it("detects the 900-document window truncation", () => {
     const page = parseNsSearch(TRUNCATED_HTML);
     expect(page.matched).toBe(50454);
+    expect(page.truncated).toBe(true);
+  });
+
+  it("reads court and category from the live row markup, one hit per document", () => {
+    const page = parseNsSearch(
+      readFileSync(path.join(__dirname, "fixtures", "ns-search-results.html"), "utf8"),
+    );
+    expect(page.hits.map((hit) => hit.caseNumbers[0])).toEqual([
+      "30 Cdo 2192/2026",
+      "28 Cdo 1677/2025",
+      "21 Cdo 1215/2025",
+      "3 Cmo 100/2019",
+      "5 Tdo 407/2026",
+    ]);
+    expect(page.hits.map((hit) => hit.category)).toEqual(["E", "C", "B", "A", "C"]);
+    expect(page.hits[0].court).toBe("Nejvyšší soud");
+    expect(page.hits[3].court).toBe("Vrchní soud v Praze");
+    expect(page.matched).toBe(1000);
+    expect(page.total).toBe(900);
     expect(page.truncated).toBe(true);
   });
 
