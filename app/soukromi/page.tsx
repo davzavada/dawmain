@@ -1,4 +1,4 @@
-import { LegalHeader, Mail, Section, list } from "../_legal";
+import { LegalHeader, Mail, Section } from "../_legal";
 
 export const metadata = {
   title: "Zásady ochrany osobních údajů - Dawmain",
@@ -22,7 +22,7 @@ export default function Soukromi() {
 
       <Section heading="2. Jaké údaje zpracovávám">
         <p>Při přihlášení a používání služby zpracovávám tyto údaje:</p>
-        <ul style={list}>
+        <ul>
           <li>
             <strong>e-mailová adresa</strong> - pro rozlišení uživatelů a komunikaci s vámi,
           </li>
@@ -56,7 +56,7 @@ export default function Soukromi() {
       </Section>
 
       <Section heading="3. Účel zpracování">
-        <ul style={list}>
+        <ul>
           <li>umožnění přihlášení a přístupu ke službě,</li>
           <li>udržení přihlašovací relace,</li>
           <li>vyřízení rešerše; krátká mezipaměť šetří zdroje, ze kterých se čerpá,</li>
@@ -79,7 +79,7 @@ export default function Soukromi() {
       </Section>
 
       <Section heading="5. Doba uchování">
-        <ul style={list}>
+        <ul>
           <li>údaje o účtu - dokud účet trvá,</li>
           <li>přihlašovací relace - do svého vypršení,</li>
           <li>dočasná paměť - vyhledávání nejdéle 5 minut, texty rozhodnutí a předpisů nejdéle 10 minut,</li>
@@ -98,7 +98,7 @@ export default function Soukromi() {
           Vaše osobní údaje nepředávám nikomu k jeho vlastním účelům a neprodávám je. Na provozu se
           podílejí dva zpracovatelé, se kterými mám uzavřenou smlouvu o zpracování osobních údajů:
         </p>
-        <ul style={list}>
+        <ul>
           <li>
             <strong>Clerk, Inc.</strong> - přihlašování a správa účtů; společnost sídlí v USA a
             účty vede tam,
@@ -171,7 +171,7 @@ export default function Soukromi() {
 
       <Section heading="11. Vaše práva">
         <p>V souvislosti se svými údaji můžete uplatnit tato práva:</p>
-        <ul style={list}>
+        <ul>
           <li>
             <strong>Právo na přístup.</strong> Můžete se mě zeptat, zda o vás nějaké údaje
             zpracovávám, a chtít jejich kopii spolu s informací, k čemu je používám, jak dlouho je

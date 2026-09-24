@@ -6,16 +6,6 @@ import { Guide } from "./_guide";
 
 export const dynamic = "force-dynamic";
 
-
-const sourceRow: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: "0.6rem",
-  padding: "0.35rem 0",
-  borderBottom: "1px solid #f3f4f6",
-  fontSize: "0.95rem",
-};
-
 /**
  * The database list with its status lights. Its own async component so the
  * page shell streams immediately - a slow upstream check can then only delay
@@ -24,23 +14,12 @@ const sourceRow: React.CSSProperties = {
 async function SourceList() {
   const statuses = await databaseStatuses();
   return (
-    <ul style={{ padding: 0, margin: "0.5rem 0 0", listStyle: "none", textAlign: "left" }}>
+    <ul className="sources">
       {statuses.map((status) => (
-        <li key={status.label} style={sourceRow}>
-          <span
-            aria-hidden="true"
-            style={{
-              width: "0.6rem",
-              height: "0.6rem",
-              borderRadius: "50%",
-              flexShrink: 0,
-              background: status.ok === null ? "#d1d5db" : status.ok ? "#16a34a" : "#dc2626",
-            }}
-          />
-          <a href={status.href} style={{ color: "#111827", textDecoration: "none" }}>
-            {status.label}
-          </a>
-          <span style={{ marginLeft: "auto", color: "#9ca3af", fontSize: "0.8rem" }}>
+        <li key={status.label}>
+          <span aria-hidden="true" className="light" data-ok={status.ok ?? undefined} />
+          <a href={status.href}>{status.label}</a>
+          <span className="when">
             {status.ok === null
               ? "neověřeno"
               : `${status.ok ? "dostupné" : (status.detail ?? "nedostupné")} · ${formatTime(status.at!)}`}
@@ -56,21 +35,12 @@ async function SourceList() {
  * promising a database the server no longer queries. */
 function SourceListFallback() {
   return (
-    <ul style={{ padding: 0, margin: "0.5rem 0 0", listStyle: "none", textAlign: "left" }}>
+    <ul className="sources">
       {DATABASES.map(({ label: name }) => (
-        <li key={name} style={sourceRow}>
-          <span
-            aria-hidden="true"
-            style={{
-              width: "0.6rem",
-              height: "0.6rem",
-              borderRadius: "50%",
-              flexShrink: 0,
-              background: "#e5e7eb",
-            }}
-          />
+        <li key={name}>
+          <span aria-hidden="true" className="light" data-ok="pending" />
           <span>{name}</span>
-          <span style={{ marginLeft: "auto", color: "#d1d5db", fontSize: "0.8rem" }}>zjišťuji…</span>
+          <span className="when">zjišťuji…</span>
         </li>
       ))}
     </ul>
@@ -86,27 +56,21 @@ export default async function Home() {
 
   return (
     <>
-      <header style={{ display: "flex", alignItems: "center", gap: "0.9rem" }}>
-        <img
-          src="/logo.svg"
-          alt=""
-          width={52}
-          height={52}
-          style={{ display: "block", borderRadius: "0.75rem" }}
-        />
+      <header className="brand">
+        <img src="/logo.svg" alt="" width={52} height={52} />
         <div>
-          <h1 style={{ fontSize: "1.75rem", margin: 0, letterSpacing: "-0.01em" }}>Dawmain</h1>
-          <p style={{ color: "#6b7280", margin: 0, fontSize: "0.95rem" }}>David Závada</p>
+          <h1>Dawmain</h1>
+          <p className="muted">David Závada</p>
         </div>
       </header>
 
-      <p style={{ marginTop: "1.75rem" }}>
+      <p>
         Právní rešerše s AI jsou super. Přístup k judikatuře a právním předpisům s AI by ale podle
         mě neměl vést jen přes komerční nástroje. Data jsou dnes dobře dostupná a provoz je v zásadě
         zdarma. Proto jsem vytvořil nekomerční alternativu. Budu rád, když ji vyzkoušíte :)
       </p>
 
-      <h2 style={{ fontSize: "1.1rem", marginTop: "2rem" }}>Jak to funguje?</h2>
+      <h2>Jak to funguje?</h2>
       <p>
         Server nemá vlastní databázi - funguje jako nachytřený Google: vyhledává živě přímo v
         oficiálních databázích. Konkrétně je napojený na tyto zdroje:
@@ -115,20 +79,15 @@ export default async function Home() {
         <SourceList />
       </Suspense>
 
-      <h2 style={{ fontSize: "1.1rem", marginTop: "2rem" }}>Jak se připojit?</h2>
+      <h2>Jak se připojit?</h2>
+      <p>
+        Připojení má dva kroky: <strong>konektor</strong> dává asistentovi nástroje,{" "}
+        <strong>skill</strong> ho učí s nimi pracovat - jak se ptát, které databáze projít a jak
+        výsledek citovat. Obojí zabere pár minut.
+      </p>
       <Endpoint endpoint={endpoint} />
       <Guide />
-      <p>
-        Kdyby vás přihlášení nepustilo, ozvěte se mi.
-      </p>
-
-      <h2 style={{ fontSize: "1.1rem", marginTop: "2rem" }}>Skill - naučte asistenta rešeršovat</h2>
-      <p>
-        Konektor dává asistentovi nástroje, skill ho učí s nimi pracovat - jak se ptát, které
-        databáze projít a jak výsledek citovat. K optimálnímu fungování proto doporučuji přidat i
-        skill - <a href="/dawmain-reserse.md">ke stažení zde</a>. Jak ho přidat, najdete v návodu
-        výše u zvolené platformy.
-      </p>
+      <p>Kdyby vás přihlášení nepustilo, ozvěte se mi.</p>
     </>
   );
 }

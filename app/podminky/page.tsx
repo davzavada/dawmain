@@ -47,8 +47,8 @@ export default function Podminky() {
         </p>
       </Section>
 
-      <p style={{ marginTop: "2rem" }}>Díky a ať to šlape :)</p>
-      <p style={{ color: "#6b7280" }}>David Závada</p>
+      <p className="signoff">Díky a ať to šlape :)</p>
+      <p className="muted">David Závada</p>
     </>
   );
 }
