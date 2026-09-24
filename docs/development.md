@@ -7,13 +7,13 @@ Uživatelský popis je v [README](../README.md).
 
 | Nástroj | Zdroj | Co dělá |
 | --- | --- | --- |
-| `esbirka_search` | e-Sbírka | fulltext v Sbírce zákonů |
+| `esbirka_search` | e-Sbírka | fulltext v Sbírce zákonů — vždy přes rozšířené vyhledávání (`all_words` = opravdu všechna slova; jednoduché vyhledávání bralo kterékoli slovo) |
 | `esbirka_get_act` | e-Sbírka | metadata a historie znění předpisu |
-| `esbirka_get_text` | e-Sbírka | konsolidovaný text k datu — celý předpis, nebo jeden § |
-| `ns_search` / `ns_get_decision` | rozhodnuti.nsoud.cz | judikatura NS: fulltext s Domino operátory (AND/OR/NOT, fráze, `nájem*`, NEAR/SENTENCE/PARAGRAPH), přesná sp. zn. (`[spzn1]`–`[spzn4]`), typ rozhodnutí, kategorie A–E, datum rozhodnutí i datum předání na web |
+| `esbirka_get_text` | e-Sbírka | konsolidovaný text k datu — jeden §, jeden článek (`čl. 36`, `čl. I`), nebo celý předpis po ~45k znacích; verze se nejdřív určí přes REST detail (bez data = účinná dnes), odpověď nese „účinné od–do“ a upozornění na zveřejněné budoucí znění |
+| `ns_search` / `ns_get_decision` | rozhodnuti.nsoud.cz | judikatura NS: fulltext řazený podle relevance (holá slova spojena AND, fráze jen v uvozovkách, Domino operátory AND/OR/NOT, `nájem*`, NEAR/SENTENCE/PARAGRAPH), přesná sp. zn. (`[spzn1]`–`[spzn4]`), typ rozhodnutí, kategorie A–E, datum rozhodnutí i datum předání na web; hit nese soud a kategorii |
 | `nss_search` / `nss_get_decision` | vyhledavac.nssoud.cz | judikatura NSS i krajských správních soudů: fulltext, sp. zn., aplikovaný předpis a ustanovení (`applies_act`/`applies_treaty`/`applies_eu_regulation`/`applies_eu_directive` + `applies_provision`), soud/senát vč. rozšířeného, rejstřík, oblast úpravy, datum rozhodnutí i zpřístupnění — vše server-side dle zachyceného POSTu formuláře (číselníky se řeší za běhu z `ciselnikTreeData`) |
 | `nalus_search` / `nalus_get_decision` | nalus.usoud.cz | judikatura ÚS: fulltext (vč. zóny disentů a řazení dle významu), citace/ECLI, soudce zpravodaj i disentující, výrok, navrhovatel, napadený akt (druh/číslo/název/ust. — abstraktní přezkum bez klíčových slov), dotčený orgán, jen publikovaná, datum rozhodnutí i zpřístupnění — číselníky verbatim ze zachyceného POSTu formuláře |
-| `cz_caselaw_search` | NSS + NS + ÚS | jeden dotaz paralelně přes tři vrcholné soudy |
+| `cz_caselaw_search` | NSS + NS + ÚS | jeden dotaz paralelně přes tři vrcholné soudy; varianty round-robin s počty za variantu, každá varianta s vlastním limitem (pomalá shodí jen sebe); dráha NSS jen NSS (krajské soudy přes `include_regional`), ÚS podle relevance, hit nese soud |
 | `justice_search` / `justice_get_decision` | rozhodnuti.justice.cz | obecné soudy (okresní/krajské/vrchní): fulltext (`match` všechna slova/jedno ze slov/fráze), spisová značka, kódy soudů, druh rozhodnutí, datum vydání i zveřejnění, aplikovaný předpis a § (`applies_act` + `applies_section`) — vše server-side přes `/api/finaldoc`, backend SPA zachycený z živého požadavku; hit nese i `affects` (co rozhodnutí udělalo s rozhodnutím nižšího soudu: CHANGE/CONFIRM/CANCEL…) |
 | `curia_search` / `curia_get_document` | InfoCuria + Cellar | FULLTEXT judikatury SDEU (C i T) přes vlastní index soudu — hledá napříč všemi jazykovými verzemi; typ dokumentu, stav věci, citovaný předpis a článek (`cites_celex`/`cites_article`), předběžné otázky podle předkládajícího státu (`referred_from`), datumy — vše server-side dle zachyceného payloadu SPA | 
 | `eurlex_search` / `eurlex_get_document` | Cellar SPARQL (Publications Office) | EU legislativa, judikatura i legislativní materiály (návrhy COM, sdělení, zelené/bílé knihy, SWD, impact assessmenty, stanoviska EHSV/VR, postoje EP a Rady) dle názvů, CELEX/ECLI, typů a dat; texty z oficiálního Cellaru |
@@ -24,7 +24,8 @@ Uživatelský popis je v [README](../README.md).
 | `dawmain_probe_sources` | — | diagnostika všech upstreamů z nasazené funkce; `include_raw` pro záchyt fixtures, `discover` pro hledání neověřených endpointů |
 
 Známá omezení (přiznaná i v popisech nástrojů): NS adresuje jen prvních 900
-výsledků dotazu (zužuj dotazem, ne stránkováním); justice.cz drží data od
+výsledků dotazu (zužuj dotazem, ne stránkováním) a při řazení podle relevance
+hlásí nejvýš 1000 shod (`matched_at_least`); justice.cz drží data od
 10/2020, převážně civilní prvoinstanční, a neohraničený fulltext je pomalý.
 Odkazy na rozhodnutí NS nesou `&Highlight=0,<termy>`, takže se dokument otevře
 rovnou na hledaném místě.
@@ -170,15 +171,25 @@ ne hádat.
 - Neměnná data se cachují per warm instance: metadata a historie znění
   e-Sbírky (10 min), NSS handshake (10 min), texty dokumentů (10 min)
   a výsledky hledání (5 min).
-- NS: fulltext hledá v celé databázi, dotaz jde nahoru tak, jak ho volající
-  napsal. Dřív tu byla záchrana, která odmítnutý bezdatumový dotaz tiše
+- NS: fulltext hledá v celé databázi a řadí se podle relevance
+  (`SearchOrder=1`). Dřív se používalo pořadí pohledu (`SearchOrder=4`), což
+  je pořadí interních UNID — prvních 20 z 1 501 shod byla náhodná směs let
+  1999–2023. Relevance ale vrací řádky jen od začátku seznamu (živě ověřeno:
+  `Start=21`, `101`, `401` = prázdná tabulka), takže se čte vždy od `Start=0`
+  po blocích 100 řádků a stránka se odřízne lokálně; banner pak počítá nejvýš
+  `SearchMax` (1000). Víc slov bez operátoru Domino bere jako jednu přesnou
+  frázi (`nájemce výpověď` = 1 rozhodnutí, s AND 1 501), proto se holá slova
+  spojují AND; sp. zn. zůstává frází, výraz s uvozovkami, závorkami nebo
+  operátorem jde nahoru beze změny. Dřív tu byla záchrana, která odmítnutý bezdatumový dotaz tiše
   zopakovala v okně 12 měsíců a pak 90 dnů; byl to workaround na HTTP 500,
   které způsoboval náš vlastní malý `Count` (viz `NS_MIN_COUNT`), a po jeho
   opravě už jen schovávala archiv, aniž by se kdo ptal. Odmítnutí se dnes
   hlásí jako odmítnutí. Domino odmítá malé `Count`, takže se vždy žádá aspoň
   20 řádků a ořezává se lokálně.
 - Scan § v e-Sbírce je stropovaný 15 stránkami a končí hned po naplnění
-  limitu; hledání na justice.cz má 30s timeout (neohraničený fulltext je nad
+  limitu (SPARQL rychlá cesta v 2026-09 nevracela žádné fragmenty, takže § jde
+  v praxi přes scan; články se vyřezávají z textu podle řádku „Čl. N“, max. 20
+  stránek); hledání na justice.cz má 30s timeout (neohraničený fulltext je nad
   výchozích 15 s).
 - Texty dokumentů se vracejí po stránkách 45 000 znaků (bezpečně pod limity klientů) — typické rozhodnutí
   v jedné odpovědi; delší texty nesou pokyn agentovi pokračovat bez ptaní.

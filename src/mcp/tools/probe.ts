@@ -71,7 +71,7 @@ export function canaries(): Canary[] {
     {
       id: "ns",
       source: "Nejvyšší soud",
-      note: "Domino $$WebSearch1, last-30-days window (the box 500s on wide queries)",
+      note: "Domino $$WebSearch1, Cdo decisions put online in the last 30 days (a small, cheap listing)",
       request: () => {
         const from = new Date(Date.now() - 30 * 86_400_000);
         const czech = `${from.getUTCDate()}.${from.getUTCMonth() + 1}.${from.getUTCFullYear()}`;

@@ -98,10 +98,10 @@ quoted passages stay in the original.
 
 | Need | Tool |
 |---|---|
-| Case law on a topic (start here) | `cz_caselaw_search` — NSS + NS + ÚS in parallel, `include_eu` adds the CJEU |
+| Case law on a topic (start here) | `cz_caselaw_search` — NSS + NS + ÚS in parallel, `include_eu` adds the CJEU, `include_regional` the krajské správní soudy |
 | Deeper digging in one court | `ns_search`, `nss_search`, `nalus_search` |
 | Full text of a decision | `ns_get_decision {unid}`, `nss_get_decision {document_id}`, `nalus_get_decision {sz}` |
-| Which act, and its wording | `esbirka_search` → `esbirka_get_act` → `esbirka_get_text` (whole act, or one § via `section: "§ 12"`, any date) |
+| Which act, and its wording | `esbirka_search` → `esbirka_get_act` → `esbirka_get_text` (one § via `section: "§ 12"`, one article via `section: "čl. 36"`, or the whole act; any date) |
 | Lower courts (okresní/krajské/vrchní) | `justice_search` → `justice_get_decision` — full text, spisová značka, soud, druh, data, and applied provision |
 | CJEU | `curia_search` → `curia_get_document` (`language: "cs"` falls back to English) |
 | EU legislation | `eurlex_search` (titles/CELEX/ECLI only, NOT full text) → `eurlex_get_document` |
@@ -142,8 +142,9 @@ cz_caselaw_search {
 }
 ```
 
-`read_top: 2` fetches the best hits' texts and returns excerpts around your terms —
-search and first reading in one round. `include_eu: true` when the issue has an EU
+`read_top: 2` fetches the leading hits' texts and returns excerpts around your terms —
+search and first reading in one round. Each court's variants are merged round-robin and
+its status line shows what every variant found — a variant with 0 is a formulation to drop. `include_eu: true` when the issue has an EU
 dimension.
 
 **Distinctive phrases beat common words.** A two- or three-word term of art discriminates;
@@ -225,6 +226,12 @@ the merits are. Filter to rozsudek when you want the holding, not the procedure.
 **`category: "A"` is a hard filter** — decisions selected for the Sbírka. If it empties
 an otherwise good result set, drop it: most decisions are not in the Sbírka.
 
+**Plain words are all required** — the server joins them with AND, because the NS box
+itself reads bare words as one exact phrase (`nájemce výpověď`: 1 decision as a phrase,
+1 501 with AND). Quote a phrase when you want the exact wording. Results come by
+**relevance**, and every hit shows its court and category — A and B mark the decisions
+that carry weight.
+
 **Operators inside `query`** — the same Domino syntax the NS form uses:
 
 - `AND`, `OR`, `NOT` — `nájem AND výpověď NOT podnájem`
@@ -245,8 +252,10 @@ and anything in square brackets is stripped.
 query is.
 
 A full-text search covers the **whole** database — there is no hidden recency window,
-so a dateless search reaches judgments from the 1990s as readily as last month's. The
-query goes upstream exactly as you wrote it; nothing narrows it behind your back.
+so a dateless search reaches judgments from the 1990s as readily as last month's. An
+expression with quotes, parentheses or an operator goes upstream exactly as you wrote it;
+nothing narrows it behind your back. Under relevance ordering NS counts at most 1000
+matches (`matched_at_least`) — read that as "too broad", not as a total.
 
 **When the ceiling bites, narrow — don't page.** `matched` above 900 means the query is
 too wide to address: add a term, a date range, `type` or `category`. Paging to offset
@@ -524,7 +533,9 @@ odůvodnění, together with the facts that limit it.
 Precision has a time dimension — check it before you cite:
 
 - **The wording.** `esbirka_get_act` lists the version history; if the facts predate an
-  amendment, fetch the text with `date` and cite that version.
+  amendment, fetch the text with `date` and cite that version. `esbirka_get_text` names
+  the version it quotes (in force from–to) and warns when a future version is already
+  published — carry both into the memo.
 - **The break.** Case law decided under the previous wording (typically pre-2014 civil
   law) may still hold, but say which wording it was decided under.
 - **Was it reversed?** For obecné soudy, `justice_search` answers this directly: the
