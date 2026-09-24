@@ -30,8 +30,8 @@ const SAMPLE_QUESTION =
   "Najdi judikaturu Nejvyššího soudu k odpovědnosti provozovatele za škodu způsobenou psem.";
 
 const skillDownload = (
-  <a className="button" href="/dawmain-reserse.zip" download>
-    Stáhnout skill (dawmain-reserse.zip)
+  <a className="button" href="/dawmain-reserse.md" download>
+    Stáhnout skill (SKILL.md)
   </a>
 );
 
@@ -87,7 +87,7 @@ const PLATFORMS: Platform[] = [
             {skillDownload}
             <p>
               Pak otevřete <strong>Nastavení → Funkce</strong>, v části <strong>Skills</strong>{" "}
-              zvolte <strong>Nahrát skill</strong> a vyberte stažený soubor. Soubor nerozbalujte.
+              zvolte <strong>Nahrát skill</strong> a vyberte stažený soubor.
             </p>
           </>
         ),
@@ -170,8 +170,7 @@ const PLATFORMS: Platform[] = [
             {skillDownload}
             <p>
               Pak v postranním panelu otevřete <strong>Skills</strong>, zvolte{" "}
-              <strong>Vytvořit → Nahrát z počítače</strong> a vyberte stažený soubor. Soubor
-              nerozbalujte.
+              <strong>Vytvořit → Nahrát z počítače</strong> a vyberte stažený soubor.
             </p>
           </>
         ),
