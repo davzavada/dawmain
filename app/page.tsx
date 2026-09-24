@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { headers } from "next/headers";
 import { DATABASES, databaseStatuses, formatTime } from "@/src/mcp/status";
 import { Endpoint } from "./_endpoint";
+import { Guide } from "./_guide";
 
 export const dynamic = "force-dynamic";
 
@@ -116,19 +117,7 @@ export default async function Home() {
 
       <h2 style={{ fontSize: "1.1rem", marginTop: "2rem" }}>Jak se připojit?</h2>
       <Endpoint endpoint={endpoint} />
-      <ol style={{ paddingLeft: "1.4rem", lineHeight: 1.9 }}>
-        <li>
-          V aplikaci claude.ai otevřete <strong>Nastavení → Konektory</strong>.
-        </li>
-        <li>
-          Zvolte <strong>Přidat vlastní konektor</strong> a vložte adresu výše.
-        </li>
-        <li>
-          Otevře se přihlašovací okno - stačí se zaregistrovat e-mailem (nebo přihlásit, pokud už
-          účet máte).
-        </li>
-        <li>V nové konverzaci pak stačí napsat, co potřebujete najít.</li>
-      </ol>
+      <Guide />
       <p>
         Kdyby vás přihlášení nepustilo, ozvěte se mi.
       </p>
@@ -137,7 +126,8 @@ export default async function Home() {
       <p>
         Konektor dává asistentovi nástroje, skill ho učí s nimi pracovat - jak se ptát, které
         databáze projít a jak výsledek citovat. K optimálnímu fungování proto doporučuji přidat i
-        skill - <a href="/dawmain-reserse.md">ke stažení zde</a>.
+        skill - <a href="/dawmain-reserse.md">ke stažení zde</a>. Jak ho přidat, najdete v návodu
+        výše u zvolené platformy.
       </p>
     </>
   );
