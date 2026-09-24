@@ -10,8 +10,9 @@ import {
   toolFailure,
 } from "./shared";
 import { getNssDecision, searchNss } from "@/src/sources/nss";
-import { dedupeBy, maxTotal, pageOrExcerpt, uniqueQueries } from "@/src/sources/shared/text";
+import { interleave, maxTotal, pageOrExcerpt, uniqueQueries } from "@/src/sources/shared/text";
 import { buildPreviews, renderPreviews } from "./previews";
+import { failureLines, runVariants, variantFailureSchema, variantTotalsSchema } from "./variants";
 
 const fail = toolFailure("Nejvyšší správní soud");
 
@@ -21,14 +22,14 @@ export function registerNss(server: McpServer): void {
     {
       title: "Nejvyšší správní soud: search decisions",
       description:
-        "FULL-TEXT search of Czech Supreme Administrative Court decisions (kasační stížnosti — tax, immigration, public procurement, administrative law) — plus spisová značka/čj., decision/publication date ranges, court/senate (incl. rozšířený senát and KRAJSKÉ SOUDY — the index covers regional administrative courts too), rejstřík code, oblast úpravy, and applied-provision filters: applies_act '106/1999' + applies_provision '§ 17 odst. 2' finds decisions that APPLIED that provision (metadata-based — works without keywords; the citator Czech courts lack). Czech queries. 'queries' searches up to 3 variants IN PARALLEL in one call (Czech inflects — pass stems/synonyms) and merges deduplicated results. Page 1 returns up to 40 hits, later pages 20. Results carry a numeric document_id for nss_get_decision. read_top: N also returns excerpt previews of the N best hits — search + first reading in one call.",
+        "FULL-TEXT search of Czech Supreme Administrative Court decisions (kasační stížnosti — tax, immigration, public procurement, administrative law) — plus spisová značka/čj., decision/publication date ranges, court/senate (incl. rozšířený senát and KRAJSKÉ SOUDY — the index covers regional administrative courts too), rejstřík code, oblast úpravy, and applied-provision filters: applies_act '106/1999' + applies_provision '§ 17 odst. 2' finds decisions that APPLIED that provision (metadata-based — works without keywords; the citator Czech courts lack). Czech queries. 'queries' searches up to 3 variants IN PARALLEL in one call (Czech inflects — pass stems/synonyms) and merges them round-robin, so every variant is represented; 'variant_totals' says what each found, and a variant that fails or times out is named in 'failed_variants' while the others still answer. Results are ordered by DECISION DATE, newest first — the NSS index has no relevance order, so distinctive terms and filters (court, registry, applies_*) decide what comes first. Page 1 returns up to 40 hits, later pages 20. Results carry a numeric document_id for nss_get_decision. read_top: N also returns excerpt previews of the N best hits — search + first reading in one call.",
       inputSchema: z.object({
         query: z.string().optional().describe("Czech full-text query."),
         queries: z
           .array(z.string().min(2))
           .max(3)
           .optional()
-          .describe("Up to 3 query variants searched in parallel and merged (inflections, synonyms)."),
+          .describe("Up to 3 query variants searched in parallel and merged round-robin (inflections, synonyms)."),
         case_number: z.string().optional().describe("Spisová značka / čj., e.g. '1 Afs 25/2024'."),
         date_from: isoDate.optional().describe("Decision date from (ISO)."),
         date_to: isoDate.optional().describe("Decision date to (ISO)."),
@@ -100,6 +101,8 @@ export function registerNss(server: McpServer): void {
             url: z.string(),
           }),
         ),
+        variant_totals: variantTotalsSchema,
+        failed_variants: variantFailureSchema,
         previews: z
           .array(
             z.object({
@@ -116,64 +119,74 @@ export function registerNss(server: McpServer): void {
     async ({ query, queries, case_number, date_from, date_to, published_from, published_to, court, registry, area, applies_act, applies_treaty, applies_eu_regulation, applies_eu_directive, applies_provision, page, read_top }) => {
       try {
         const variants = uniqueQueries(query, queries);
-        // One upstream request per variant, in parallel; hits merged in
-        // variant order and deduplicated. Totals/has_more follow the largest
-        // variant — the union across variants is unknowable.
-        const results = await Promise.all(
-          (variants.length ? variants : [undefined]).map((variant) =>
-            searchNss(
-              {
-                query: variant,
-                caseNumber: case_number,
-                dateFrom: date_from,
-                dateTo: date_to,
-                publishedFrom: published_from,
-                publishedTo: published_to,
-                court,
-                registry,
-                area,
-                appliesAct: applies_act,
-                appliesTreaty: applies_treaty,
-                appliesEuRegulation: applies_eu_regulation,
-                appliesEuDirective: applies_eu_directive,
-                appliesProvision: applies_provision,
-              },
-              page,
-            ),
-          ),
-        );
-        const cap = page === 1 ? 40 : 20;
-        const result = {
-          total: maxTotal(results.map((r) => r.total)),
-          page: results[0].page,
-          hits: dedupeBy(
-            results.flatMap((r) => r.hits),
-            (hit) => hit.id,
-          ).slice(0, cap),
-        };
+        const keyed: Array<string | undefined> = variants.length ? variants : [undefined];
+        const inputFor = (variant: string | undefined) => ({
+          query: variant,
+          caseNumber: case_number,
+          dateFrom: date_from,
+          dateTo: date_to,
+          publishedFrom: published_from,
+          publishedTo: published_to,
+          court,
+          registry,
+          area,
+          appliesAct: applies_act,
+          appliesTreaty: applies_treaty,
+          appliesEuRegulation: applies_eu_regulation,
+          appliesEuDirective: applies_eu_directive,
+          appliesProvision: applies_provision,
+        });
+        // The portal pages by 40, then 20. One variant pages straight
+        // through it. Several: each variant is read from its own top through
+        // this page, the lists are merged round-robin, and the page is a
+        // slice of the merged list — no variant's hits fall between pages.
+        const multi = keyed.length > 1;
+        const start = page === 1 ? 0 : 40 + (page - 2) * 20;
+        const end = page === 1 ? 40 : start + 20;
+        const { values, failures } = await runVariants(keyed, async (variant) => {
+          if (!multi) return [await searchNss(inputFor(variant), page)];
+          const upstream = Array.from({ length: page }, (_, i) => i + 1);
+          return Promise.all(upstream.map((p) => searchNss(inputFor(variant), p)));
+        });
+        const answered = values.filter((value): value is NonNullable<typeof value> => value !== null);
+        const listOf = (pages: typeof answered[number]) => pages.flatMap((p) => p.hits);
+        const totalOf = (pages: typeof answered[number]) => pages[0]?.total ?? null;
+        const merged = multi ? interleave(answered.map(listOf), (hit) => hit.id) : listOf(answered[0]);
+        const hits = multi ? merged.slice(start, end) : merged.slice(0, end - start);
+        const total = maxTotal(answered.map(totalOf));
+        const hasMore = multi
+          ? merged.length > end || answered.some((pages) => (totalOf(pages) ?? 0) > listOf(pages).length)
+          : total !== null && end < total;
         const previews = await buildPreviews(
-          result.hits.slice(0, read_top).map((hit) => ({ id: hit.id, caseNumber: hit.caseNumber ?? "?" })),
+          hits.slice(0, read_top).map((hit) => ({ id: hit.id, caseNumber: hit.caseNumber ?? "?" })),
           ({ id }) => getNssDecision(id).then((d) => d.text),
           variants,
         );
-        const seen = page === 1 ? result.hits.length : 40 + (page - 1) * 20;
+        const variantTotals = multi ? values.map((value) => (value ? totalOf(value) : null)) : undefined;
         const output = {
-          total: result.total,
-          count: result.hits.length,
-          page: result.page,
-          has_more: result.total !== null && seen < result.total,
-          items: result.hits,
+          total,
+          count: hits.length,
+          page,
+          has_more: hasMore,
+          items: hits,
+          ...(variantTotals ? { variant_totals: variantTotals } : {}),
+          ...(failures.length ? { failed_variants: failures } : {}),
           previews,
         };
-        const lines = result.hits.map(
+        const lines = hits.map(
           (hit, i) =>
-            `${i + 1}. ${hit.caseNumber ?? "?"}${hit.form ? ` (${hit.form})` : ""}${hit.date ? ` ${hit.date}` : ""} — id ${hit.id}\n   ${hit.url}`,
+            `${start + i + 1}. ${hit.caseNumber ?? "?"}${hit.form ? ` (${hit.form})` : ""}${hit.date ? ` ${hit.date}` : ""} — id ${hit.id}\n   ${hit.url}`,
         );
+        const variantLine = variantTotals
+          ? `Variants: ${keyed.map((v, i) => `"${v}" ${variantTotals[i] ?? "✗"}`).join(" · ")} (merged round-robin)`
+          : null;
         const text =
-          result.total === 0 || (!result.hits.length && result.total === null)
-            ? "No NSS decisions matched. Broaden the query or the date range."
+          total === 0 || (!hits.length && total === null)
+            ? ["No NSS decisions matched. Broaden the query or the date range.", ...failureLines(failures)].join("\n")
             : [
-                `${result.total ?? "?"} decisions${variants.length > 1 ? ` (best of ${variants.length} variants, merged)` : ""} (page ${result.page}):`,
+                ...failureLines(failures),
+                ...(variantLine ? [variantLine] : []),
+                `${total ?? "?"} decisions${multi ? " (best variant)" : ""}, newest first (page ${page}):`,
                 ...lines,
                 "Full text: nss_get_decision {document_id}.",
                 ...renderPreviews(previews, "nss_get_decision"),

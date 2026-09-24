@@ -11,8 +11,9 @@ import {
 } from "./shared";
 import { ecliToSz, getNalusDecision, searchNalus } from "@/src/sources/nalus";
 import { SourceError } from "@/src/sources/shared/errors";
-import { dedupeBy, maxTotal, pageOrExcerpt, uniqueQueries } from "@/src/sources/shared/text";
+import { interleave, maxTotal, pageOrExcerpt, uniqueQueries } from "@/src/sources/shared/text";
 import { buildPreviews, renderPreviews } from "./previews";
+import { failureLines, runVariants, variantFailureSchema, variantTotalsSchema } from "./variants";
 
 const fail = toolFailure("Ústavní soud (NALUS)");
 
@@ -22,14 +23,14 @@ export function registerNalus(server: McpServer): void {
     {
       title: "Ústavní soud: search NALUS",
       description:
-        "FULL-TEXT search of Czech Constitutional Court decisions (nálezy, usnesení, stanoviska pléna) in NALUS — plus citace (sp. zn. like 'Pl. ÚS 24/10'), ECLI, soudce zpravodaj AND dissenting judge, populární název, outcome (výrok), petitioner type, contested act (druh/číslo/ustanovení — e.g. every decision reviewing zákon č. 106/1999), contested organ, decision/publication dates, only-published filter, relevance sort, and dissent-scope full text. Czech queries; 'queries' searches up to 3 variants IN PARALLEL and merges deduplicated results. Each hit carries an 'sz' identifier for nalus_get_decision. read_top: N also returns excerpt previews of the N best hits. Costs 3 upstream requests per variant.",
+        "FULL-TEXT search of Czech Constitutional Court decisions (nálezy, usnesení, stanoviska pléna) in NALUS — plus citace (sp. zn. like 'Pl. ÚS 24/10'), ECLI, soudce zpravodaj AND dissenting judge, populární název, outcome (výrok), petitioner type, contested act (druh/číslo/ustanovení — e.g. every decision reviewing zákon č. 106/1999), contested organ, decision/publication dates, only-published filter, relevance sort, and dissent-scope full text. Czech queries; 'queries' searches up to 3 variants IN PARALLEL and merges them round-robin, so every variant is represented ('variant_totals' says what each found; a failed variant is named in 'failed_variants'). Each hit carries an 'sz' identifier for nalus_get_decision. read_top: N also returns excerpt previews of the N best hits. Costs 3 upstream requests per variant.",
       inputSchema: z.object({
         query: z.string().optional().describe("Czech full-text query (právní věta, výrok, odůvodnění…)."),
         queries: z
           .array(z.string().min(2))
           .max(3)
           .optional()
-          .describe("Up to 3 query variants searched in parallel and merged (inflections, synonyms)."),
+          .describe("Up to 3 query variants searched in parallel and merged round-robin (inflections, synonyms)."),
         case_number: z.string().optional().describe("Citace / sp. zn., e.g. 'Pl. ÚS 24/10' or 'I. ÚS 1169/26'."),
         ecli: z.string().optional().describe("ECLI, e.g. 'ECLI:CZ:US:2026:1.US.1169.26.1'."),
         judge: z.string().optional().describe("Soudce zpravodaj, e.g. 'Wagnerová'."),
@@ -117,6 +118,8 @@ export function registerNalus(server: McpServer): void {
             url: z.string().nullable(),
           }),
         ),
+        variant_totals: variantTotalsSchema,
+        failed_variants: variantFailureSchema,
         previews: z
           .array(
             z.object({
@@ -133,71 +136,87 @@ export function registerNalus(server: McpServer): void {
     async ({ query, queries, case_number, ecli, judge, dissenting_judge, popular_name, date_from, date_to, published_from, published_to, types, only_published, include_dissents, outcome, petitioner, contested_organ_type, contested_organ, contested_act_kind, contested_act_number, contested_act_name, contested_act_clause, sort, page, read_top }) => {
       try {
         const variants = uniqueQueries(query, queries);
-        // One 3-step NALUS session per variant, in parallel; merged + deduped.
-        const results = await Promise.all(
-          (variants.length ? variants : [undefined]).map((variant) =>
-            searchNalus(
-              {
-                query: variant,
-                citace: case_number,
-                ecli,
-                judge,
-                dissentingJudge: dissenting_judge,
-                popularName: popular_name,
-                dateFrom: date_from,
-                dateTo: date_to,
-                publishedFrom: published_from,
-                publishedTo: published_to,
-                types,
-                onlyPublished: only_published,
-                includeDissents: include_dissents,
-                outcome,
-                petitioner,
-                contestedOrganType: contested_organ_type,
-                contestedOrgan: contested_organ,
-                contestedActKind: contested_act_kind,
-                contestedActNumber: contested_act_number,
-                contestedActName: contested_act_name,
-                contestedActClause: contested_act_clause,
-                sort,
-              },
-              page,
-            ),
-          ),
-        );
-        const result = {
-          total: maxTotal(results.map((r) => r.total)),
-          empty: results.every((r) => r.empty),
-          hits: dedupeBy(
-            results.flatMap((r) => r.hits),
-            (hit) => hit.sz ?? hit.caseNumber,
-          ).slice(0, 20),
-        };
+        const keyed: Array<string | undefined> = variants.length ? variants : [undefined];
+        const inputFor = (variant: string | undefined) => ({
+          query: variant,
+          citace: case_number,
+          ecli,
+          judge,
+          dissentingJudge: dissenting_judge,
+          popularName: popular_name,
+          dateFrom: date_from,
+          dateTo: date_to,
+          publishedFrom: published_from,
+          publishedTo: published_to,
+          types,
+          onlyPublished: only_published,
+          includeDissents: include_dissents,
+          outcome,
+          petitioner,
+          contestedOrganType: contested_organ_type,
+          contestedOrgan: contested_organ,
+          contestedActKind: contested_act_kind,
+          contestedActNumber: contested_act_number,
+          contestedActName: contested_act_name,
+          contestedActClause: contested_act_clause,
+          sort,
+        });
+        // One 3-step NALUS session per variant and page, in parallel. With
+        // several variants each is read from its own top through this page,
+        // merged round-robin, and the page is a slice of the merged list.
+        const multi = keyed.length > 1;
+        const start = page * 20;
+        const { values, failures } = await runVariants(keyed, async (variant) => {
+          if (!multi) return [await searchNalus(inputFor(variant), page)];
+          const upstream = Array.from({ length: page + 1 }, (_, i) => i);
+          return Promise.all(upstream.map((p) => searchNalus(inputFor(variant), p)));
+        });
+        const answered = values.filter((value): value is NonNullable<typeof value> => value !== null);
+        const listOf = (pages: typeof answered[number]) => pages.flatMap((p) => p.hits);
+        const totalOf = (pages: typeof answered[number]) => pages[0]?.total ?? null;
+        const keyOf = (hit: { sz: string | null; caseNumber: string }) => hit.sz ?? hit.caseNumber;
+        const merged = multi ? interleave(answered.map(listOf), keyOf) : listOf(answered[0]);
+        const hits = (multi ? merged.slice(start, start + 20) : merged).slice(0, 20);
+        const total = maxTotal(answered.map(totalOf));
+        const empty = answered.every((pages) => pages.every((p) => p.empty)) && !hits.length;
         const previews = await buildPreviews(
-          result.hits
+          hits
             .slice(0, read_top)
             .filter((hit) => hit.sz)
             .map((hit) => ({ id: hit.sz as string, caseNumber: hit.caseNumber })),
           ({ id }) => getNalusDecision(id).then((d) => d.text),
           variants,
         );
-        const shown = (page + 1) * 20;
+        const hasMore = multi
+          ? merged.length > start + 20 || answered.some((pages) => (totalOf(pages) ?? 0) > listOf(pages).length)
+          : total !== null && start + 20 < total;
+        const variantTotals = multi ? values.map((value) => (value ? totalOf(value) : null)) : undefined;
         const output = {
-          total: result.total,
-          count: result.hits.length,
+          total,
+          count: hits.length,
           page,
-          has_more: result.total !== null && shown < result.total,
-          items: result.hits,
+          has_more: hasMore,
+          items: hits,
+          ...(variantTotals ? { variant_totals: variantTotals } : {}),
+          ...(failures.length ? { failed_variants: failures } : {}),
           previews,
         };
-        const lines = result.hits.map(
+        const lines = hits.map(
           (hit, i) =>
-            `${page * 20 + i + 1}. ${hit.caseNumber}${hit.form ? ` (${hit.form})` : ""}${hit.date ? ` ${hit.date}` : ""} — sz ${hit.sz ?? "?"}${hit.url ? `\n   ${hit.url}` : ""}`,
+            `${start + i + 1}. ${hit.caseNumber}${hit.form ? ` (${hit.form})` : ""}${hit.date ? ` ${hit.date}` : ""} — sz ${hit.sz ?? "?"}${hit.url ? `\n   ${hit.url}` : ""}`,
         );
-        const text = result.empty
-          ? "No Constitutional Court decisions matched. Broaden the criteria or check the citace format ('I. ÚS 123/20')."
+        const variantLine = variantTotals
+          ? `Variants: ${keyed.map((v, i) => `"${v}" ${variantTotals[i] ?? "✗"}`).join(" · ")} (merged round-robin)`
+          : null;
+        const text = empty
+          ? [
+              "No Constitutional Court decisions matched. Broaden the criteria or check the citace format ('I. ÚS 123/20').",
+              ...failureLines(failures),
+            ].join("\n")
           : [
-              `${result.total ?? "?"} decisions:`,
+              ...failureLines(failures),
+              ...(variantLine ? [variantLine] : []),
+              `${total ?? "?"} decisions${multi ? " (best variant)" : ""}:`,
               ...lines,
               "Full text: nalus_get_decision {sz}.",
               ...renderPreviews(previews, "nalus_get_decision"),

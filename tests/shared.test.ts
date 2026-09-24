@@ -238,6 +238,38 @@ describe("parallel-search helpers", () => {
     ]);
   });
 
+  it("interleave merges variants round-robin, first occurrence wins", async () => {
+    const { interleave } = await import("@/src/sources/shared/text");
+    const first = ["a", "b", "c", "d"];
+    const second = ["x", "b", "y"];
+    const third: string[] = [];
+    // Concatenation would have been a, b, c, d — the second variant never shown.
+    expect(interleave([first, second, third], (id) => id)).toEqual(["a", "x", "b", "c", "y", "d"]);
+    expect(interleave([], (id: string) => id)).toEqual([]);
+  });
+
+  it("runVariants keeps the variants that answered and names the ones that failed", async () => {
+    const { runVariants } = await import("@/src/mcp/tools/variants");
+    const outcome = await runVariants(["rychlá", "pomalá", "chybná"], async (variant) => {
+      if (variant === "pomalá") return new Promise<string>(() => {});
+      if (variant === "chybná") throw new Error("HTTP 500");
+      return `hits for ${variant}`;
+    }, 50);
+    expect(outcome.values).toEqual(["hits for rychlá", null, null]);
+    expect(outcome.failures.map((failure) => failure.variant)).toEqual(["pomalá", "chybná"]);
+    expect(outcome.failures[0].error).toContain("timed out");
+    expect(outcome.failures[1].error).toBe("HTTP 500");
+  });
+
+  it("runVariants fails only when every variant fails — with the first error", async () => {
+    const { runVariants } = await import("@/src/mcp/tools/variants");
+    await expect(
+      runVariants(["a", "b"], async (variant) => {
+        throw new Error(`boom ${variant}`);
+      }),
+    ).rejects.toThrow("boom a");
+  });
+
   it("maxTotal reports the largest known variant total", async () => {
     const { maxTotal } = await import("@/src/sources/shared/text");
     expect(maxTotal([12, null, 179])).toBe(179);

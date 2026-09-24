@@ -158,6 +158,30 @@ export function maxTotal(totals: Array<number | null>): number | null {
   return known.length ? Math.max(...known) : null;
 }
 
+/**
+ * Round-robin merge of per-variant hit lists: rank 0 of every list, then
+ * rank 1, and so on; the first occurrence of a key wins. Concatenating the
+ * lists instead lets the first variant fill the page on its own, so the
+ * other formulations — fetched at full cost — never reach the reader.
+ * Pure — unit-tested.
+ */
+export function interleave<T>(lists: T[][], key: (item: T) => string): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  const longest = lists.reduce((max, list) => Math.max(max, list.length), 0);
+  for (let rank = 0; rank < longest; rank++) {
+    for (const list of lists) {
+      const item = list[rank];
+      if (item === undefined) continue;
+      const k = key(item);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(item);
+    }
+  }
+  return out;
+}
+
 
 export interface CaseNumberParts {
   /** Senát — absent in marks that carry none (Cpjn, Tpjn…). */

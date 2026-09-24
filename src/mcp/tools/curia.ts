@@ -10,8 +10,9 @@ import {
 } from "./shared";
 import { caseNumberToCelex, getCuriaDocument, searchCuria } from "@/src/sources/curia";
 import { SourceError } from "@/src/sources/shared/errors";
-import { dedupeBy, maxTotal, pageOrExcerpt, uniqueQueries } from "@/src/sources/shared/text";
+import { interleave, maxTotal, pageOrExcerpt, uniqueQueries } from "@/src/sources/shared/text";
 import { buildPreviews, renderPreviews } from "./previews";
+import { failureLines, runVariants, variantFailureSchema, variantTotalsSchema } from "./variants";
 
 const fail = toolFailure("CJEU (InfoCuria)");
 
@@ -21,14 +22,14 @@ export function registerCuria(server: McpServer): void {
     {
       title: "CJEU: search case law",
       description:
-        "FULL-TEXT search of CJEU case law (Court of Justice 'C', General Court 'T') via the court's own live InfoCuria index — the advanced-search surface: text of judgments/opinions + metadata, case number (C-311/18), case/party name, ECLI, case status (closed/pending), document type, court and date filters, relevance/date sort. The text search matches EVERY language version at once — Czech phrases work directly. Two filters work even without keywords: cites_celex (+cites_article) finds decisions citing a given act or article in their grounds, and referred_from lists preliminary rulings referred by a given member state's courts (e.g. ['CZ']). Includes same-day decisions. 'queries' searches up to 3 variants IN PARALLEL and merges deduplicated results; read_top: N also returns excerpt previews of the N best hits. Fetch texts with curia_get_document.",
+        "FULL-TEXT search of CJEU case law (Court of Justice 'C', General Court 'T') via the court's own live InfoCuria index — the advanced-search surface: text of judgments/opinions + metadata, case number (C-311/18), case/party name, ECLI, case status (closed/pending), document type, court and date filters, relevance/date sort. The text search matches EVERY language version at once — Czech phrases work directly. Two filters work even without keywords: cites_celex (+cites_article) finds decisions citing a given act or article in their grounds, and referred_from lists preliminary rulings referred by a given member state's courts (e.g. ['CZ']). Includes same-day decisions. 'queries' searches up to 3 variants IN PARALLEL and merges them round-robin, so every variant is represented ('variant_totals' says what each found; a failed variant is named in 'failed_variants'); read_top: N also returns excerpt previews of the N best hits. Fetch texts with curia_get_document.",
       inputSchema: z.object({
         query: z.string().optional().describe("Keywords (any EU language; English works best)."),
         queries: z
           .array(z.string().min(2))
           .max(3)
           .optional()
-          .describe("Up to 3 query variants searched in parallel and merged (synonyms, CS/EN terms)."),
+          .describe("Up to 3 query variants searched in parallel and merged round-robin (synonyms, CS/EN terms)."),
         case_number: z.string().optional().describe("E.g. 'C-311/18' or 'T-655/17'."),
         ecli: z.string().optional().describe("E.g. 'ECLI:EU:C:2020:559'."),
         parties: z
@@ -94,6 +95,8 @@ export function registerCuria(server: McpServer): void {
             url: z.string().nullable(),
           }),
         ),
+        variant_totals: variantTotalsSchema,
+        failed_variants: variantFailureSchema,
         previews: z
           .array(
             z.object({
@@ -110,40 +113,47 @@ export function registerCuria(server: McpServer): void {
     async ({ query, queries, case_number, ecli, parties, court, state, doc_type, referred_from, cites_celex, cites_article, date_from, date_to, sort, limit, page, language, read_top }) => {
       try {
         const variants = uniqueQueries(query, queries);
-        // One InfoCuria request per variant, in parallel; merged + deduped.
-        const results = await Promise.all(
-          (variants.length ? variants : [undefined]).map((variant) =>
-            searchCuria(
-              {
-                query: variant,
-                caseNumber: case_number,
-                ecli,
-                parties,
-                court,
-                state,
-                docType: doc_type,
-                referredFrom: referred_from,
-                citesCelex: cites_celex,
-                citesArticle: cites_article,
-                dateFrom: date_from,
-                dateTo: date_to,
-                sort,
-                language,
-              },
-              page,
-              limit,
-            ),
-          ),
-        );
+        const keyed: Array<string | undefined> = variants.length ? variants : [undefined];
+        const inputFor = (variant: string | undefined) => ({
+          query: variant,
+          caseNumber: case_number,
+          ecli,
+          parties,
+          court,
+          state,
+          docType: doc_type,
+          referredFrom: referred_from,
+          citesCelex: cites_celex,
+          citesArticle: cites_article,
+          dateFrom: date_from,
+          dateTo: date_to,
+          sort,
+          language,
+        });
+        // || not ??: InfoCuria can return EMPTY-STRING ids, which must fall
+        // through like missing ones.
+        const keyOf = (hit: { ecli?: string; logicDocId?: string; caseNumber?: string; date?: string; docType?: string }) =>
+          hit.ecli || hit.logicDocId || `${hit.caseNumber}|${hit.date}|${hit.docType}`;
+        // One InfoCuria request per variant and page, in parallel. With
+        // several variants each is read from its own top through this page,
+        // merged round-robin, and the page is a slice of the merged list.
+        const multi = keyed.length > 1;
+        const { values, failures } = await runVariants(keyed, async (variant) => {
+          if (!multi) return [await searchCuria(inputFor(variant), page, limit)];
+          const upstream = Array.from({ length: page + 1 }, (_, i) => i);
+          return Promise.all(upstream.map((p) => searchCuria(inputFor(variant), p, limit)));
+        });
+        const answered = values.filter((value): value is NonNullable<typeof value> => value !== null);
+        const listOf = (pages: typeof answered[number]) => pages.flatMap((p) => p.hits);
+        const totalOf = (pages: typeof answered[number]) => pages[0]?.total ?? null;
+        const merged = multi ? interleave(answered.map(listOf), keyOf) : listOf(answered[0]);
         const result = {
-          total: maxTotal(results.map((r) => r.total)) ?? 0,
-          filtered: results.reduce((n, r) => n + r.filtered, 0),
-          hits: dedupeBy(
-            results.flatMap((r) => r.hits),
-            // || not ??: empty-string ids must fall through like missing ones.
-            (hit) => hit.ecli || hit.logicDocId || `${hit.caseNumber}|${hit.date}|${hit.docType}`,
-          ).slice(0, limit),
+          total: maxTotal(answered.map(totalOf)) ?? 0,
+          // Documents hidden by doc_type/state/date filters on THIS page.
+          filtered: answered.reduce((n, pages) => n + (pages[pages.length - 1]?.filtered ?? 0), 0),
+          hits: (multi ? merged.slice(page * limit, (page + 1) * limit) : merged).slice(0, limit),
         };
+        const variantTotals = multi ? values.map((value) => (value ? totalOf(value) : null)) : undefined;
         const previewTargets = result.hits
           .slice(0, read_top)
           .map((hit) => ({
@@ -163,8 +173,12 @@ export function registerCuria(server: McpServer): void {
           total: result.total,
           count: result.hits.length,
           page,
-          has_more: (page + 1) * limit < result.total,
+          has_more: multi
+            ? merged.length > (page + 1) * limit || answered.some((pages) => (totalOf(pages) ?? 0) > listOf(pages).length)
+            : (page + 1) * limit < result.total,
           items: result.hits,
+          ...(variantTotals ? { variant_totals: variantTotals } : {}),
+          ...(failures.length ? { failed_variants: failures } : {}),
           previews,
         };
         const lines = result.hits.map(
@@ -173,9 +187,13 @@ export function registerCuria(server: McpServer): void {
         );
         // total counts matching CASES (affairs); the listed items are the
         // documents (or bare case listings) inside them — say both.
-        const text = result.hits.length
+        const variantLine = variantTotals
+          ? `Variants: ${keyed.map((v, i) => `"${v}" ${variantTotals[i] ?? "✗"}`).join(" · ")} (merged round-robin)`
+          : null;
+        const body = result.hits.length
           ? [
-              `${result.total} matching cases, showing ${result.hits.length} ${result.hits.some((h) => h.docType) ? "documents" : "case listings"}${variants.length > 1 ? ` (best of ${variants.length} variants, merged)` : ""}${result.filtered ? ` (${result.filtered} documents hidden by doc_type/state/date filters)` : ""}:`,
+              ...(variantLine ? [variantLine] : []),
+              `${result.total} matching cases, showing ${result.hits.length} ${result.hits.some((h) => h.docType) ? "documents" : "case listings"}${multi ? " (best variant)" : ""}${result.filtered ? ` (${result.filtered} documents hidden by doc_type/state/date filters)` : ""}:`,
               ...lines,
               result.hits.some((h) => h.docType)
                 ? "Full text: curia_get_document {ecli | case_number | logic_doc_id}."
@@ -185,6 +203,7 @@ export function registerCuria(server: McpServer): void {
           : result.total > 0
             ? `${result.total} cases matched but no document scored for this query — add keywords (query), a case_number or an ecli; party names alone need the full-text route (put the name in 'query' or 'parties').`
             : "No CJEU documents matched. Try English keywords or the exact case number.";
+        const text = [...failureLines(failures), body].join("\n");
         return { content: [{ type: "text", text }], structuredContent: output };
       } catch (error) {
         return fail(error);

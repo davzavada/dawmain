@@ -10,8 +10,9 @@ import {
   toolFailure,
 } from "./shared";
 import { getNsDecision, nsBodyMissing, searchNs, withHighlight } from "@/src/sources/ns";
-import { dedupeBy, maxTotal, pageOrExcerpt, uniqueQueries } from "@/src/sources/shared/text";
+import { interleave, maxTotal, pageOrExcerpt, uniqueQueries } from "@/src/sources/shared/text";
 import { buildPreviews, renderPreviews } from "./previews";
+import { failureLines, runVariants, variantFailureSchema, variantTotalsSchema } from "./variants";
 
 const fail = toolFailure("Nejvyšší soud");
 
@@ -21,14 +22,17 @@ export function registerNs(server: McpServer): void {
     {
       title: "Nejvyšší soud: search decisions",
       description:
-        "FULL-TEXT search of Czech Supreme Court decisions (civil & criminal law: dovolání, sjednocující stanoviska), with the fields the NS search form exposes: spisová značka (exact), kategorie rozhodnutí A–E, typ rozhodnutí (rozsudek/usnesení/stanovisko), soud, decision date and publication date. The database also carries decisions of LOWER courts — they are in it because they were published in the Sbírka soudních rozhodnutí a stanovisek, so they carry comparable weight; keep them unless the user asked for NS only. Czech queries; 'query' accepts Domino full-text operators — AND / OR / NOT, \"exact phrase\", (grouping), wildcards (nájem*), proximity (NEAR, SENTENCE, PARAGRAPH) — so one precise expression beats several vague searches; 'queries' searches up to 3 variants IN PARALLEL and merges deduplicated results. case_number matches the značka itself, NOT decisions citing it — to find those, pass the značka as 'query'. A full-text search covers the WHOLE database. Any query addresses at most its first 900 documents — 'matched' reports the true count, so narrow with dates, type or category to get inside the window rather than paging. Results carry a UNID for ns_get_decision, and their URLs open the decision with the query terms highlighted. read_top: N also returns excerpt previews of the N best hits.",
+        "FULL-TEXT search of Czech Supreme Court decisions (civil & criminal law: dovolání, sjednocující stanoviska), with the fields the NS search form exposes: spisová značka (exact), kategorie rozhodnutí A–E, typ rozhodnutí (rozsudek/usnesení/stanovisko), soud, decision date and publication date. The database also carries decisions of LOWER courts — they are in it because they were published in the Sbírka soudních rozhodnutí a stanovisek, so they carry comparable weight; keep them unless the user asked for NS only. Czech queries. Plain words are ALL required (joined with AND, anywhere in the text); \"quoted words\" are an exact phrase; a spisová značka in the query stays one phrase. 'query' also accepts Domino operators — AND / OR / NOT, (grouping), wildcards (nájem*), proximity (NEAR, SENTENCE, PARAGRAPH) — and an expression with any of them goes upstream exactly as written. Full-text results come ordered by RELEVANCE; each hit carries its court and category (A = Sbírka … E = mostly procedural). 'queries' searches up to 3 variants IN PARALLEL and merges them round-robin, so every variant is represented; 'variant_totals' says what each found. case_number matches the značka itself, NOT decisions citing it — to find those, pass the značka as 'query'. A full-text search covers the WHOLE database. Any query addresses at most its first 900 documents — 'matched' reports the true count (under relevance order at most 1000; 'matched_at_least' then marks it as a floor), so narrow with dates, type or category rather than paging deep. Results carry a UNID for ns_get_decision, and their URLs open the decision with the query terms highlighted. read_top: N also returns excerpt previews of the N best hits.",
       inputSchema: z.object({
-        query: z.string().optional().describe("Czech full-text query over decision bodies."),
+        query: z
+          .string()
+          .optional()
+          .describe("Czech full-text query over decision bodies. Plain words = all required; \"quotes\" = exact phrase."),
         queries: z
           .array(z.string().min(2))
           .max(3)
           .optional()
-          .describe("Up to 3 query variants searched in parallel and merged (inflections, synonyms)."),
+          .describe("Up to 3 query variants searched in parallel and merged round-robin (inflections, synonyms)."),
         case_number: z
           .string()
           .optional()
@@ -67,12 +71,25 @@ export function registerNs(server: McpServer): void {
       outputSchema: z.object({
         total: z.number().nullable(),
         matched: z.number().nullable().describe("True match count when the 900-doc window truncates."),
+        matched_at_least: z
+          .boolean()
+          .optional()
+          .describe("True when 'matched' is only a floor — under relevance order NS counts at most 1000."),
         truncated: z.boolean(),
         count: z.number(),
         offset: z.number(),
+        order: z.enum(["relevance", "view"]).describe("relevance for full-text queries; view order (arbitrary) for field-only listings."),
         items: z.array(
-          z.object({ unid: z.string(), caseNumbers: z.array(z.string()), url: z.string() }),
+          z.object({
+            unid: z.string(),
+            caseNumbers: z.array(z.string()),
+            court: z.string().optional(),
+            category: z.string().optional(),
+            url: z.string(),
+          }),
         ),
+        variant_totals: variantTotalsSchema,
+        failed_variants: variantFailureSchema,
         previews: z
           .array(
             z.object({
@@ -103,36 +120,42 @@ export function registerNs(server: McpServer): void {
     }) => {
       try {
         const variants = uniqueQueries(query, queries);
-        // One Domino request per variant, in parallel; merged and deduplicated.
-        const results = await Promise.all(
-          (variants.length ? variants : [undefined]).map((variant) =>
-            searchNs(
-              {
-                query: variant,
-                caseNumber: case_number,
-                category,
-                // The field carries the Czech label with its initial capital.
-                type: type && type.charAt(0).toUpperCase() + type.slice(1),
-                court,
-                dateFrom: date_from,
-                dateTo: date_to,
-                publishedFrom: published_from,
-                publishedTo: published_to,
-              },
-              offset,
-              limit,
-            ),
-          ),
+        const keyed: Array<string | undefined> = variants.length ? variants : [undefined];
+        const inputFor = (variant: string | undefined) => ({
+          query: variant,
+          caseNumber: case_number,
+          category,
+          // The field carries the Czech label with its initial capital.
+          type: type && type.charAt(0).toUpperCase() + type.slice(1),
+          court,
+          dateFrom: date_from,
+          dateTo: date_to,
+          publishedFrom: published_from,
+          publishedTo: published_to,
+        });
+        // One variant pages straight through the source. Several: each is
+        // read from its own top, the lists are merged round-robin, and this
+        // page is a slice of that merged list — the same page however the
+        // reader got here, and no variant's hits fall between pages.
+        const multi = keyed.length > 1;
+        const window = Math.min(offset + limit, 900);
+        const { values, failures } = await runVariants(keyed, (variant) =>
+          multi ? searchNs(inputFor(variant), 0, window) : searchNs(inputFor(variant), offset, limit),
         );
+        const answered = values.filter((value): value is NonNullable<typeof value> => value !== null);
+        const hits = multi
+          ? interleave(
+              answered.map((result) => result.hits),
+              (hit) => hit.unid,
+            ).slice(offset, offset + limit)
+          : answered[0].hits;
         const page = {
-          total: maxTotal(results.map((r) => r.total)),
-          matched: maxTotal(results.map((r) => r.matched)),
-          truncated: results.some((r) => r.truncated),
-          empty: results.every((r) => r.empty),
-          hits: dedupeBy(
-            results.flatMap((r) => r.hits),
-            (hit) => hit.unid,
-          ).slice(0, limit),
+          total: maxTotal(answered.map((r) => r.total)),
+          matched: maxTotal(answered.map((r) => r.matched)),
+          matchedAtLeast: answered.some((r) => r.matchedIsMinimum),
+          truncated: answered.some((r) => r.truncated),
+          empty: answered.every((r) => r.empty) && !hits.length,
+          hits,
         };
         const previews = await buildPreviews(
           page.hits
@@ -141,22 +164,33 @@ export function registerNs(server: McpServer): void {
           ({ id }) => getNsDecision(id).then((d) => d.text),
           variants,
         );
+        const variantTotals = multi ? values.map((value) => (value ? (value.matched ?? value.total) : null)) : undefined;
         const output = {
           total: page.total,
           matched: page.matched,
+          ...(page.matchedAtLeast ? { matched_at_least: true } : {}),
           truncated: page.truncated,
           count: page.hits.length,
           offset,
+          order: variants.length ? ("relevance" as const) : ("view" as const),
           items: page.hits,
+          ...(variantTotals ? { variant_totals: variantTotals } : {}),
+          ...(failures.length ? { failed_variants: failures } : {}),
           previews,
         };
         const lines = page.hits.map(
-          (hit, i) => `${offset + i + 1}. ${hit.caseNumbers.join("; ")} — unid ${hit.unid}\n   ${hit.url}`,
+          (hit, i) =>
+            `${offset + i + 1}. ${hit.caseNumbers.join("; ")}${hit.category ? ` [${hit.category}]` : ""}${hit.court && hit.court !== "Nejvyšší soud" ? ` — ${hit.court}` : ""} — unid ${hit.unid}\n   ${hit.url}`,
         );
+        const variantLine = variantTotals
+          ? `Variants: ${keyed.map((v, i) => `"${v}" ${variantTotals[i] ?? "✗"}`).join(" · ")} (merged round-robin)`
+          : null;
         const text = page.empty
-          ? "No NS decisions matched. Broaden the query or the date range."
+          ? ["No NS decisions matched. Broaden the query or the date range.", ...failureLines(failures)].join("\n")
           : [
-              `${page.total ?? "?"} decisions${page.truncated ? ` (window-capped; ${page.matched} match in total — narrow by date to see the rest)` : ""}:`,
+              ...failureLines(failures),
+              ...(variantLine ? [variantLine] : []),
+              `${page.total ?? "?"} decisions${variants.length ? ", by relevance" : ""}${page.truncated ? ` (window-capped; ${page.matchedAtLeast ? "≥ " : ""}${page.matched} match in total — narrow by date, type or category to see the rest)` : ""}:`,
               ...lines,
               ...renderPreviews(previews, "ns_get_decision"),
             ].join("\n");
