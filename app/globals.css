@@ -104,6 +104,10 @@ h2 {
 
 /* Phones: type steps down a notch, as on Owl. */
 @media (max-width: 640px) {
+  :root {
+    --header: 52px;
+    --anchor-offset: 124px;
+  }
   h1 {
     font-size: 24px;
   }
@@ -747,4 +751,15 @@ main > footer a {
 .signoff p.muted {
   font-size: 14px;
   color: var(--muted);
+}
+
+/* Phones: tighter header and page margins, as on Owl. */
+@media (max-width: 640px) {
+  .site-header {
+    padding: 0 16px;
+    gap: 10px;
+  }
+  main {
+    padding: 20px 16px 32px;
+  }
 }
