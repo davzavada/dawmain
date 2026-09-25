@@ -2,11 +2,13 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { CopyField } from "./_copy";
+import { Icon } from "./_icons";
+import { platformFromHash, setPlatform, usePlatform, type PlatformId } from "./_platform";
 
 /**
  * The setup guide with a Claude / ChatGPT picker: one numbered list per
- * platform, connector and skill together. The chosen platform lives in the
- * URL hash (#claude, #chatgpt), so a link can open the right tab directly.
+ * platform, connector and skill together. The chosen platform is shared with
+ * the sidebar and kept in the URL hash (see _platform.ts).
  */
 
 interface Step {
@@ -19,7 +21,7 @@ interface Step {
 }
 
 interface Platform {
-  id: string;
+  id: PlatformId;
   label: string;
   note?: ReactNode;
   steps: (endpoint: string) => Step[];
@@ -223,7 +225,7 @@ function Shot({ name, alt }: { name: string; alt: string }) {
   if (missing) {
     return (
       <div className="shot placeholder" role="img" aria-label={alt}>
-        <span>Obrázek: {alt}</span>
+        <span>{alt}</span>
         <code>public/navod/{name}.png</code>
       </div>
     );
@@ -237,18 +239,17 @@ function Shot({ name, alt }: { name: string; alt: string }) {
 }
 
 export function Guide({ endpoint }: { endpoint: string }) {
-  const [active, setActive] = useState(PLATFORMS[0].id);
+  const active = usePlatform();
 
-  // Open the tab a shared link names (#chatgpt), and keep the hash in step.
+  // Open the guide a shared link names (#chatgpt) and bring it into view.
   useEffect(() => {
-    const fromHash = window.location.hash.slice(1);
-    if (PLATFORMS.some((p) => p.id === fromHash)) setActive(fromHash);
+    function follow() {
+      if (platformFromHash()) document.getElementById("pripojeni")?.scrollIntoView();
+    }
+    follow();
+    window.addEventListener("hashchange", follow);
+    return () => window.removeEventListener("hashchange", follow);
   }, []);
-
-  function choose(id: string) {
-    setActive(id);
-    history.replaceState(null, "", `#${id}`);
-  }
 
   const platform = PLATFORMS.find((p) => p.id === active)!;
 
@@ -263,7 +264,7 @@ export function Guide({ endpoint }: { endpoint: string }) {
             id={`guide-tab-${id}`}
             aria-selected={id === active}
             aria-controls="guide-panel"
-            onClick={() => choose(id)}
+            onClick={() => setPlatform(id)}
           >
             {label}
           </button>
@@ -271,14 +272,26 @@ export function Guide({ endpoint }: { endpoint: string }) {
       </div>
 
       <div role="tabpanel" id="guide-panel" aria-labelledby={`guide-tab-${active}`}>
-        {platform.note && <p className="note">{platform.note}</p>}
+        {platform.note && (
+          <p className="note">
+            <Icon name="info" size={15} />
+            <span>{platform.note}</span>
+          </p>
+        )}
 
         <ol className="steps">
-          {platform.steps(endpoint).map((step) => (
+          {platform.steps(endpoint).map((step, index) => (
             <li key={step.title}>
-              <h3>{step.title}</h3>
-              {step.body}
-              {step.shot && <Shot key={step.shot} name={step.shot} alt={step.alt ?? step.title} />}
+              <span className="step-number" aria-hidden="true">
+                {index + 1}
+              </span>
+              <div className="step-body">
+                <h3>{step.title}</h3>
+                {step.body}
+                {step.shot && (
+                  <Shot key={step.shot} name={step.shot} alt={step.alt ?? step.title} />
+                )}
+              </div>
             </li>
           ))}
         </ol>

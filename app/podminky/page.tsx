@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { LegalHeader, Mail, Section } from "../_legal";
 
 export const metadata = {
@@ -7,7 +8,7 @@ export const metadata = {
 
 export default function Podminky() {
   return (
-    <>
+    <article className="legal">
       <LegalHeader title="Podmínky užití" />
 
       <p>
@@ -27,7 +28,7 @@ export default function Podminky() {
         <p>
           Snažím se, aby server šlapal, ale dostupnost nezaručuji - výpadky zdrojů jsou úplně mimo
           mou kontrolu. Jak na tom databáze zrovna jsou, ukazují kontrolky na{" "}
-          <a href="/">hlavní stránce</a>.
+          <Link href="/#zdroje">hlavní stránce</Link>.
         </p>
         <p>
           Za správnost, úplnost ani aktuálnost obsahu ze zdrojů neručím, stejně jako za to, co z
@@ -47,8 +48,10 @@ export default function Podminky() {
         </p>
       </Section>
 
-      <p className="signoff">Díky a ať to šlape :)</p>
-      <p className="muted">David Závada</p>
-    </>
+      <div className="signoff">
+        <p>Díky a ať to šlape :)</p>
+        <p className="muted">David Závada</p>
+      </div>
+    </article>
   );
 }

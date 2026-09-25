@@ -40,8 +40,11 @@ const CANARY_TTL_MS = 60 * 1000;
 const CANARY_TIMEOUT_MS = 12_000;
 
 export interface DatabaseStatus {
+  /** The canary id - a stable key the page hangs its icon on. */
+  id: string;
   /** Display name of the database. */
   label: string;
+  group: DatabaseGroup;
   /** Where a human can verify the source themselves. */
   href: string;
   ok: boolean | null;
@@ -52,55 +55,73 @@ export interface DatabaseStatus {
   detail?: string;
 }
 
+/** The headings the home page sorts the databases under, in this order. */
+export const DATABASE_GROUPS = ["Judikatura", "Předpisy", "Literatura"] as const;
+export type DatabaseGroup = (typeof DATABASE_GROUPS)[number];
+
 /**
  * The databases shown on the page, each tied to the SOURCE constant its
  * client reports under and to the probe canary that can stand in for it.
  */
-export const DATABASES: Array<{ label: string; href: string; source: string; canaryId: string }> = [
+export const DATABASES: Array<{
+  label: string;
+  group: DatabaseGroup;
+  href: string;
+  source: string;
+  canaryId: string;
+}> = [
   {
     label: "Nejvyšší soud",
+    group: "Judikatura",
     href: "https://rozhodnuti.nsoud.cz",
     source: "Nejvyšší soud",
     canaryId: "ns",
   },
   {
     label: "Nejvyšší správní soud",
+    group: "Judikatura",
     href: "https://vyhledavac.nssoud.cz",
     source: "Nejvyšší správní soud",
     canaryId: "nss",
   },
   {
-    label: "Ústavní soud (NALUS)",
+    label: "Ústavní soud",
+    group: "Judikatura",
     href: "https://nalus.usoud.cz",
     source: "Ústavní soud (NALUS)",
     canaryId: "nalus",
   },
   {
-    label: "obecné soudy",
+    label: "Obecné soudy",
+    group: "Judikatura",
     href: "https://rozhodnuti.justice.cz",
     source: "rozhodnuti.justice.cz",
     canaryId: "justice",
   },
   {
-    label: "Soudní dvůr EU (InfoCuria)",
+    label: "Soudní dvůr EU",
+    group: "Judikatura",
     href: "https://infocuria.curia.europa.eu",
     source: "CJEU (InfoCuria)",
     canaryId: "curia",
   },
   {
     label: "e-Sbírka",
+    group: "Předpisy",
     href: "https://www.e-sbirka.cz",
     source: "e-Sbírka",
     canaryId: "esbirka-api",
   },
   {
-    label: "EUR-Lex (Cellar)",
+    label: "EUR-Lex",
+    group: "Předpisy",
     href: "https://eur-lex.europa.eu",
     source: "EUR-Lex (Cellar)",
     canaryId: "cellar-sparql",
   },
   {
-    label: "UKAŽ (Univerzita Karlova)",
+    label: "UKAŽ",
+    group: "Literatura",
     href: "https://cuni.primo.exlibrisgroup.com/discovery/search?vid=420CKIS_INST:UKAZ",
     source: "UKAŽ (Univerzita Karlova, Primo)",
     canaryId: "primo",
@@ -172,14 +193,14 @@ export async function databaseStatuses(): Promise<DatabaseStatus[]> {
   for (const entry of allSourceResults()) observed.set(entry.source, entry);
 
   return Promise.all(
-    DATABASES.map(async ({ label, href, source, canaryId }): Promise<DatabaseStatus> => {
+    DATABASES.map(async ({ label, group, href, source, canaryId }): Promise<DatabaseStatus> => {
+      const row = { id: canaryId, label, group, href };
       // A real call this instance saw recently beats any canary - it is the
       // genuine article and costs nothing.
       const live = observed.get(source);
       if (live && fresh(live, FRESH_MS)) {
         return {
-          label,
-          href,
+          ...row,
           ok: live.ok,
           at: live.at,
           via: "provoz",
@@ -189,8 +210,7 @@ export async function databaseStatuses(): Promise<DatabaseStatus[]> {
       try {
         const canary = await cachedCanary(canaryId);
         return {
-          label,
-          href,
+          ...row,
           ok: canary.ok,
           at: canary.at,
           via: "kontrola",
@@ -198,7 +218,7 @@ export async function databaseStatuses(): Promise<DatabaseStatus[]> {
         };
       } catch {
         // A status widget must never take the page down.
-        return { label, href, ok: null, at: null, via: null };
+        return { ...row, ok: null, at: null, via: null };
       }
     }),
   );

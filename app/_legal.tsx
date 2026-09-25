@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { ReactNode } from "react";
 
 /**
@@ -14,8 +15,13 @@ export const CONTACT = "davzavada@gmail.com";
 export function LegalHeader({ title }: { title: string }) {
   return (
     <>
-      <h1>{title}</h1>
-      <p className="muted effective">Účinné od {EFFECTIVE}</p>
+      <Link href="/" className="back">
+        ← Hlavní stránka
+      </Link>
+      <header className="legal-head">
+        <h1>{title}</h1>
+        <p className="muted">Účinné od {EFFECTIVE}</p>
+      </header>
     </>
   );
 }

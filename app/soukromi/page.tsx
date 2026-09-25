@@ -7,7 +7,7 @@ export const metadata = {
 
 export default function Soukromi() {
   return (
-    <>
+    <article className="legal">
       <LegalHeader title="Zásady ochrany osobních údajů" />
 
       <Section heading="1. Správce osobních údajů">
@@ -228,6 +228,6 @@ export default function Soukromi() {
           vždy na této stránce a o podstatné změně vás budu informovat e-mailem.
         </p>
       </Section>
-    </>
+    </article>
   );
 }

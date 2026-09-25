@@ -1,49 +1,135 @@
 import { Suspense } from "react";
 import { headers } from "next/headers";
-import { DATABASES, databaseStatuses, formatTime } from "@/src/mcp/status";
+import {
+  DATABASE_GROUPS,
+  DATABASES,
+  databaseStatuses,
+  formatTime,
+  type DatabaseStatus,
+} from "@/src/mcp/status";
 import { Guide } from "./_guide";
+import { Icon, type IconName } from "./_icons";
 import { Mail } from "./_legal";
 
 export const dynamic = "force-dynamic";
 
+/** Each database's icon and tint, keyed by its canary id. */
+const LOOK: Record<string, { icon: IconName; color: string }> = {
+  ns: { icon: "court", color: "var(--indigo)" },
+  nss: { icon: "scale", color: "var(--teal)" },
+  nalus: { icon: "shield", color: "var(--rose)" },
+  justice: { icon: "court", color: "#52525b" },
+  curia: { icon: "eu", color: "var(--blue)" },
+  "esbirka-api": { icon: "list", color: "var(--green)" },
+  "cellar-sparql": { icon: "eu", color: "var(--blue)" },
+  primo: { icon: "book", color: "var(--amber)" },
+};
+
+/** What a row needs to render; the pending fallback has no status yet. */
+type Row = Pick<DatabaseStatus, "id" | "label" | "group" | "href"> & {
+  state: "ok" | "down" | "pending" | "unknown";
+  badge: string;
+  at?: string;
+};
+
+function toRow(status: DatabaseStatus): Row {
+  const { id, label, group, href } = status;
+  if (status.ok === null) return { id, label, group, href, state: "unknown", badge: "neověřeno" };
+  return {
+    id,
+    label,
+    group,
+    href,
+    state: status.ok ? "ok" : "down",
+    badge: status.ok ? "dostupné" : (status.detail ?? "nedostupné"),
+    at: formatTime(status.at!),
+  };
+}
+
+function host(href: string): string {
+  return new URL(href).host;
+}
+
+function Sources({ rows }: { rows: Row[] }) {
+  return DATABASE_GROUPS.map((group) => {
+    const items = rows.filter((row) => row.group === group);
+    return (
+      <div key={group} className="source-group">
+        <div className="source-group-head">
+          <span className="source-group-name">{group}</span>
+          <span className="source-group-count">{items.length}</span>
+        </div>
+        <ul>
+          {items.map((row) => {
+            const look = LOOK[row.id] ?? { icon: "list", color: "#52525b" };
+            return (
+              <li key={row.id} className="source">
+                <Icon name={look.icon} style={{ color: look.color }} />
+                <div className="source-name">
+                  <a href={row.href}>{row.label}</a>
+                  <span className="source-host">{host(row.href)}</span>
+                </div>
+                <div className="source-state">
+                  {row.at && <span className="source-at">{row.at}</span>}
+                  <span className="badge" data-state={row.state}>
+                    {row.badge}
+                  </span>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    );
+  });
+}
+
 /**
- * The database list with its status lights. Its own async component so the
+ * The databases with their status badges. Its own async component so the
  * page shell streams immediately - a slow upstream check can then only delay
- * the lights, never the text around them.
+ * the badges, never the text around them.
  */
 async function SourceList() {
   const statuses = await databaseStatuses();
-  return (
-    <ul className="sources">
-      {statuses.map((status) => (
-        <li key={status.label}>
-          <span aria-hidden="true" className="light" data-ok={status.ok ?? undefined} />
-          <a href={status.href}>{status.label}</a>
-          <span className="when">
-            {status.ok === null
-              ? "neověřeno"
-              : `${status.ok ? "dostupné" : (status.detail ?? "nedostupné")} · ${formatTime(status.at!)}`}
-          </span>
-        </li>
-      ))}
-    </ul>
-  );
+  return <Sources rows={statuses.map(toRow)} />;
 }
 
-/** What stands in while the lights are still being checked. The names come
+/** What stands in while the badges are still being checked. The names come
  * from the same list the real rows do - a hand-kept copy would go on
  * promising a database the server no longer queries. */
 function SourceListFallback() {
   return (
-    <ul className="sources">
-      {DATABASES.map(({ label: name }) => (
-        <li key={name}>
-          <span aria-hidden="true" className="light" data-ok="pending" />
-          <span>{name}</span>
-          <span className="when">zjišťuji…</span>
-        </li>
-      ))}
-    </ul>
+    <Sources
+      rows={DATABASES.map(({ canaryId, label, group, href }) => ({
+        id: canaryId,
+        label,
+        group,
+        href,
+        state: "pending",
+        badge: "zjišťuji…",
+      }))}
+    />
+  );
+}
+
+/** Uploading one's own documents - shown locked, not offered yet. */
+function OwnSources() {
+  return (
+    <div className="source-group locked">
+      <div className="source-group-head">
+        <span className="source-group-name">Vlastní zdroje</span>
+        <Icon name="lock" size={13} label="zamčeno" />
+      </div>
+      <div className="source" aria-disabled="true" title="Dostupné v placené verzi">
+        <Icon name="upload" />
+        <div className="source-name">
+          <span className="source-title">Nahrát vlastní zdroje</span>
+          <span className="source-desc">
+            Vlastní dokumenty, ve kterých bude asistent hledat vedle oficiálních databází.
+          </span>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -55,40 +141,41 @@ export default async function Home() {
   const endpoint = `${proto}://${host}/api/mcp`;
 
   return (
-    <>
-      <header className="brand">
-        <img src="/logo.svg" alt="" width={52} height={52} />
-        <div>
-          <h1>Dawmain</h1>
-          <p className="muted">David Závada</p>
-        </div>
-      </header>
+    <div className="home">
+      <section id="uvod" className="intro">
+        <header className="brand">
+          <img src="/logo.svg" alt="" width={52} height={52} />
+          <div>
+            <h1>Dawmain - právní rešerše s AI</h1>
+            <p className="muted">MCP server pro české a unijní právo · David Závada</p>
+          </div>
+        </header>
+        <p className="lead">
+          Právní rešerše s AI jsou super. Přístup k judikatuře a právním předpisům s AI by ale podle
+          mě neměl vést jen přes komerční nástroje. Data jsou dnes dobře dostupná a provoz je v
+          zásadě zdarma. Proto jsem vytvořil nekomerční alternativu. Budu rád, když ji vyzkoušíte :)
+        </p>
+        <p className="lead">
+          Server nemá vlastní databázi – funguje jako nachytřený Google: vyhledává živě přímo v
+          oficiálních databázích.
+        </p>
+      </section>
 
-      <p>
-        Právní rešerše s AI jsou super. Přístup k judikatuře a právním předpisům s AI by ale podle
-        mě neměl vést jen přes komerční nástroje. Data jsou dnes dobře dostupná a provoz je v zásadě
-        zdarma. Proto jsem vytvořil nekomerční alternativu. Budu rád, když ji vyzkoušíte :)
-      </p>
+      <section id="zdroje" className="sources">
+        <h2>Zdroje</h2>
+        <OwnSources />
+        <Suspense fallback={<SourceListFallback />}>
+          <SourceList />
+        </Suspense>
+      </section>
 
-      <h2>Jak to funguje?</h2>
-      <p>
-        Server nemá vlastní databázi - funguje jako nachytřený Google: vyhledává živě přímo v
-        oficiálních databázích. Konkrétně je napojený na tyto zdroje:
-      </p>
-      <Suspense fallback={<SourceListFallback />}>
-        <SourceList />
-      </Suspense>
-
-      <h2>Jak se připojit?</h2>
-      <p>
-        Nastavení zabere asi pět minut a dělá se jen jednou. Přidáte <strong>konektor</strong>, který
-        asistentovi zpřístupní databáze, a <strong>skill</strong>, který ho naučí s nimi pracovat - jak
-        se ptát, co projít a jak výsledek citovat. Vyberte, kterého asistenta používáte:
-      </p>
-      <Guide endpoint={endpoint} />
-      <p>
-        Kdyby cokoli nešlo, napište mi na <Mail />.
-      </p>
-    </>
+      <section id="pripojeni" className="connect">
+        <h2>Jak se připojit</h2>
+        <Guide endpoint={endpoint} />
+        <p className="muted small">
+          Kdyby cokoli nešlo, napište mi na <Mail />.
+        </p>
+      </section>
+    </div>
   );
 }

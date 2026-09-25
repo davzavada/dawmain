@@ -1,6 +1,14 @@
 import type { Metadata, Viewport } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
+import Link from "next/link";
 import type { ReactNode } from "react";
+import { DATABASES } from "@/src/mcp/status";
+import { SiteNav } from "./_nav";
 import "./globals.css";
+
+// Self-hosted by next/font at build time: the browser never asks Google.
+const geist = Geist({ subsets: ["latin", "latin-ext"], variable: "--font-sans" });
+const geistMono = Geist_Mono({ subsets: ["latin", "latin-ext"], variable: "--font-mono" });
 
 export const metadata: Metadata = {
   title: "Dawmain - MCP server",
@@ -12,14 +20,18 @@ export const viewport: Viewport = { themeColor: "#0E1938" };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="cs">
+    <html lang="cs" className={`${geist.variable} ${geistMono.variable}`}>
       <body>
-        <main>{children}</main>
-        <footer>
-          <a href="/">Hlavní stránka</a> ·{" "}
-          <a href="/podminky">Podmínky užití</a> ·{" "}
-          <a href="/soukromi">Zásady ochrany osobních údajů</a>
-        </footer>
+        <div className="shell">
+          <SiteNav sourceCount={DATABASES.length} />
+          <main>
+            {children}
+            <footer>
+              <Link href="/podminky">Podmínky užití</Link>
+              <Link href="/soukromi">Ochrana osobních údajů</Link>
+            </footer>
+          </main>
+        </div>
       </body>
     </html>
   );
