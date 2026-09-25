@@ -157,6 +157,7 @@ export default async function Home() {
           oficiálních databázích.
         </p>
         <a href={OWL_URL} className="project-card">
+          <img src="/owl.svg" alt="" width={36} height={36} />
           <span className="project-text">
             <span className="project-name">Owl</span>
             <span className="project-desc">
