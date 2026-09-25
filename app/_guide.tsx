@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { CopyField } from "./_copy";
-import { Icon } from "./_icons";
 import { platformFromHash, setPlatform, usePlatform, type PlatformId } from "./_platform";
 
 /**
@@ -14,16 +13,11 @@ import { platformFromHash, setPlatform, usePlatform, type PlatformId } from "./_
 interface Step {
   title: string;
   body: ReactNode;
-  /** Screenshot expected at public/navod/<shot>.png; until the file exists
-   * the slot shows a placeholder naming it. */
-  shot?: string;
-  alt?: string;
 }
 
 interface Platform {
   id: PlatformId;
   label: string;
-  note?: ReactNode;
   steps: (endpoint: string) => Step[];
   help: Array<{ q: string; a: ReactNode }>;
 }
@@ -75,10 +69,8 @@ const PLATFORMS: Platform[] = [
             <CopyField value={endpoint} label="Zkopírovat adresu" />
           </>
         ),
-        shot: "claude-1-konektor",
-        alt: "Přidání vlastního konektoru v Nastavení → Konektory",
       },
-      { ...loginStep, shot: "claude-2-prihlaseni", alt: "Přihlašovací okno Dawmain" },
+      loginStep,
       {
         title: "Nahrajte skill",
         body: (
@@ -93,8 +85,6 @@ const PLATFORMS: Platform[] = [
             </p>
           </>
         ),
-        shot: "claude-3-skill",
-        alt: "Nahrání skillu v Nastavení → Funkce",
       },
       {
         ...firstQuestion(
@@ -103,8 +93,6 @@ const PLATFORMS: Platform[] = [
             že je Dawmain zapnutý.
           </>,
         ),
-        shot: "claude-4-konverzace",
-        alt: "Zapnutý Dawmain v nabídce nástrojů",
       },
     ],
     help: [
@@ -126,13 +114,6 @@ const PLATFORMS: Platform[] = [
   {
     id: "chatgpt",
     label: "ChatGPT",
-    note: (
-      <>
-        Vlastní konektory ChatGPT zatím umí jen v <strong>placených tarifech</strong> (Plus, Pro,
-        Business…) a nastavují se na webu <a href="https://chatgpt.com">chatgpt.com</a>, ne v
-        mobilní aplikaci. Používat je pak můžete všude.
-      </>
-    ),
     steps: (endpoint) => [
       {
         title: "Zapněte režim vývojáře",
@@ -143,8 +124,6 @@ const PLATFORMS: Platform[] = [
             <strong>Režim vývojáře</strong>. Bez něj vlastní konektor přidat nejde.
           </p>
         ),
-        shot: "chatgpt-1-rezim-vyvojare",
-        alt: "Přepínač Režim vývojáře v Nastavení → Zabezpečení a přihlášení",
       },
       {
         title: "Přidejte konektor",
@@ -158,10 +137,8 @@ const PLATFORMS: Platform[] = [
             <CopyField value={endpoint} label="Zkopírovat adresu" />
           </>
         ),
-        shot: "chatgpt-2-konektor",
-        alt: "Vyplněný formulář nového konektoru",
       },
-      { ...loginStep, shot: "chatgpt-3-prihlaseni", alt: "Přihlašovací okno Dawmain" },
+      loginStep,
       {
         title: "Nahrajte skill",
         body: (
@@ -176,8 +153,6 @@ const PLATFORMS: Platform[] = [
             </p>
           </>
         ),
-        shot: "chatgpt-4-skill",
-        alt: "Nahrání skillu přes Skills → Vytvořit",
       },
       {
         ...firstQuestion(
@@ -186,8 +161,6 @@ const PLATFORMS: Platform[] = [
             zapněte Dawmain.
           </>,
         ),
-        shot: "chatgpt-5-konverzace",
-        alt: "Zapnutý Dawmain v nové konverzaci",
       },
     ],
     help: [
@@ -207,36 +180,6 @@ const PLATFORMS: Platform[] = [
     ],
   },
 ];
-
-/**
- * A screenshot slot: shows public/navod/<name>.png once the file exists and
- * a labelled placeholder until then, so adding a screenshot needs no code.
- */
-function Shot({ name, alt }: { name: string; alt: string }) {
-  const [missing, setMissing] = useState(false);
-  const img = useRef<HTMLImageElement>(null);
-
-  // An error that fired before hydration never reaches onError - catch it here.
-  useEffect(() => {
-    const el = img.current;
-    if (el?.complete && el.naturalWidth === 0) setMissing(true);
-  }, []);
-
-  if (missing) {
-    return (
-      <div className="shot placeholder" role="img" aria-label={alt}>
-        <span>{alt}</span>
-        <code>public/navod/{name}.png</code>
-      </div>
-    );
-  }
-  const src = `/navod/${name}.png`;
-  return (
-    <a href={src} target="_blank" rel="noreferrer" className="shot-link">
-      <img ref={img} className="shot" src={src} alt={alt} onError={() => setMissing(true)} />
-    </a>
-  );
-}
 
 export function Guide({ endpoint }: { endpoint: string }) {
   const active = usePlatform();
@@ -272,12 +215,6 @@ export function Guide({ endpoint }: { endpoint: string }) {
       </div>
 
       <div role="tabpanel" id="guide-panel" aria-labelledby={`guide-tab-${active}`}>
-        {platform.note && (
-          <p className="note">
-            <Icon name="info" size={15} />
-            <span>{platform.note}</span>
-          </p>
-        )}
 
         <ol className="steps">
           {platform.steps(endpoint).map((step, index) => (
@@ -288,9 +225,6 @@ export function Guide({ endpoint }: { endpoint: string }) {
               <div className="step-body">
                 <h3>{step.title}</h3>
                 {step.body}
-                {step.shot && (
-                  <Shot key={step.shot} name={step.shot} alt={step.alt ?? step.title} />
-                )}
               </div>
             </li>
           ))}

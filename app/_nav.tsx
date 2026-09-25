@@ -29,7 +29,7 @@ const LEGAL: Array<{ href: string; label: string; icon: IconName }> = [
 ];
 
 /** A section counts as "in view" once its top passes this line. */
-const SPY_OFFSET = 80;
+const SPY_OFFSET = 140;
 
 function useActiveSection(enabled: boolean): string | null {
   const [active, setActive] = useState<string>(SECTIONS[0].id);

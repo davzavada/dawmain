@@ -3,15 +3,18 @@ import { headers } from "next/headers";
 import {
   DATABASE_GROUPS,
   DATABASES,
-  databaseStatuses,
   formatTime,
   type DatabaseStatus,
 } from "@/src/mcp/status";
+import { getStatuses } from "./_status";
 import { Guide } from "./_guide";
 import { Icon, type IconName } from "./_icons";
 import { Mail } from "./_legal";
 
 export const dynamic = "force-dynamic";
+
+/** The author's other project, linked from the intro. */
+const OWL_URL = "https://owl.davidzavada.cz/";
 
 /** Each database's icon and tint, keyed by its canary id. */
 const LOOK: Record<string, { icon: IconName; color: string }> = {
@@ -90,7 +93,7 @@ function Sources({ rows }: { rows: Row[] }) {
  * the badges, never the text around them.
  */
 async function SourceList() {
-  const statuses = await databaseStatuses();
+  const statuses = await getStatuses();
   return <Sources rows={statuses.map(toRow)} />;
 }
 
@@ -143,13 +146,7 @@ export default async function Home() {
   return (
     <div className="home">
       <section id="uvod" className="intro">
-        <header className="brand">
-          <img src="/logo.svg" alt="" width={52} height={52} />
-          <div>
-            <h1>Dawmain - právní rešerše s AI</h1>
-            <p className="muted">MCP server pro české a unijní právo · David Závada</p>
-          </div>
-        </header>
+        <h1>MCP server pro právní systémy</h1>
         <p className="lead">
           Právní rešerše s AI jsou super. Přístup k judikatuře a právním předpisům s AI by ale podle
           mě neměl vést jen přes komerční nástroje. Data jsou dnes dobře dostupná a provoz je v
@@ -159,6 +156,18 @@ export default async function Home() {
           Server nemá vlastní databázi – funguje jako nachytřený Google: vyhledává živě přímo v
           oficiálních databázích.
         </p>
+        <a href={OWL_URL} className="project-card">
+          <span className="project-text">
+            <span className="project-name">Owl</span>
+            <span className="project-desc">
+              Pokud vás zajímá monitoring recentní rozhodovací praxe a doktrinálního vývoje,
+              podívejte se na můj další projekt.
+            </span>
+          </span>
+          <span className="project-arrow" aria-hidden="true">
+            →
+          </span>
+        </a>
       </section>
 
       <section id="zdroje" className="sources">

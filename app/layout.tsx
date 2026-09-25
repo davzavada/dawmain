@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { DATABASES } from "@/src/mcp/status";
+import { SiteHeader } from "./_header";
 import { SiteNav } from "./_nav";
 import "./globals.css";
 
@@ -22,6 +23,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="cs" className={`${geist.variable} ${geistMono.variable}`}>
       <body>
+        <SiteHeader />
         <div className="shell">
           <SiteNav sourceCount={DATABASES.length} />
           <main>
