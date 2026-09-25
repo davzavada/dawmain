@@ -102,6 +102,16 @@ h2 {
   font-size: 14px;
 }
 
+/* Phones: type steps down a notch, as on Owl. */
+@media (max-width: 640px) {
+  h1 {
+    font-size: 24px;
+  }
+  h2 {
+    font-size: 17px;
+  }
+}
+
 /* Page frame: header on top; sidebar + content on wide screens, tab strip +
    content below */
 
@@ -135,7 +145,7 @@ h2 {
 .site-name img {
   display: block;
   flex: none;
-  border-radius: 7px;
+  border-radius: 6px;
 }
 .site-name span {
   white-space: nowrap;
