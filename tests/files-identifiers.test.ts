@@ -203,7 +203,7 @@ describe("extractIdentKeys — §, acts, ISBN, DOI", () => {
     expect(extractIdentKeys("ISBN 978-80-7400-587-9")).toEqual(["isbn:9788074005879"]);
     expect(extractIdentKeys("ISBN: 978 80 7400 587 9 (váz.)")).toEqual(["isbn:9788074005879"]);
     expect(extractIdentKeys("ISBN 80-7179-890-8")).toEqual(["isbn:9788071798903"]);
-    expect(extractIdentKeys("ISBN 0-8044-2957-X")).toEqual(["isbn:9780804429571"]);
+    expect(extractIdentKeys("ISBN 0-8044-2957-X")).toEqual(["isbn:9780804429573"]);
     expect(extractIdentKeys("bez štítku 9788074005879.")).toEqual(["isbn:9788074005879"]);
     expect(extractIdentKeys("ISBN 978-80-7400-587-1")).toEqual([]); // bad checksum
     expect(extractIdentKeys("tel. 9788074005871")).toEqual([]);
@@ -246,7 +246,7 @@ describe("queryIdentKeys", () => {
   });
   it("act anywhere in the query applies to its §§", () => {
     expect(queryIdentKeys("OZ § 2913 odst. 2")).toEqual({
-      keys: ["par:2913", "par:2913/2", "parz:89/2012/2913"],
+      keys: ["par:2913", "parz:89/2012/2913", "par:2913/2"],
       act: "zak:89/2012",
       sections: ["par:2913"],
     });
