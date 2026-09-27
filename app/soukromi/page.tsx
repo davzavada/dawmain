@@ -53,8 +53,9 @@ export default function Soukromi() {
         <p>Máte-li Vlastní zdroje (režim Pro), přibývá k tomu:</p>
         <ul>
           <li>
-            <strong>text nahraných dokumentů</strong> - na text se převádějí přímo ve vašem
-            prohlížeči; původní soubor vaše zařízení neopustí a na server jde jen převedený text,
+            <strong>text nahraných dokumentů</strong> - dokumenty se na text převádějí přímo ve
+            vašem prohlížeči; původní soubor vaše zařízení neopustí a na server jde jen převedený
+            text,
           </li>
           <li>
             <strong>metadata dokumentů</strong> - název, autoři, rok, typ dokumentu a podobně, a
@@ -149,12 +150,16 @@ export default function Soukromi() {
             může správce týmu,
           </li>
           <li>
-            po odebrání režimu Pro - asistent v knihovně přestane hledat, ale ještě 90 dní ji uvidíte
-            na webu, můžete dokumenty mazat a na požádání vám pošlu jejich text a metadata. Pak
-            knihovnu smažu; předem vám o tom napíšu,
+            po odebrání režimu Pro - asistent v knihovně přestane hledat, ale ještě 90 dní ji
+            uvidíte na webu, můžete dokumenty mazat a na požádání vám pošlu jejich text a metadata.
+            Pak knihovnu smažu; předem vám o tom napíšu,
           </li>
-          <li>text poslaný k návrhu metadat (bod 6) - Vercel ho smaže hned po vyřízení požadavku,</li>
-          <li>záznamy o tom, kdo co v knihovně nahrál, potvrdil nebo smazal - dokud knihovna trvá,</li>
+          <li>
+            text poslaný k návrhu metadat (bod 6) - Vercel ho smaže hned po vyřízení požadavku,
+          </li>
+          <li>
+            záznamy o tom, kdo co v knihovně nahrál, potvrdil nebo smazal - dokud knihovna trvá,
+          </li>
           <li>záznam o přijetí pravidel Vlastních zdrojů - dokud trvá účet.</li>
         </ul>
         <p>
@@ -188,10 +193,10 @@ export default function Soukromi() {
           center, služba pro odesílání ověřovacích e-mailů), které váže stejná povinnost
           mlčenlivosti a stejná pravidla. U návrhu metadat je takovým dodavatelem Vercelu{" "}
           <strong>Google</strong>: když nahrajete dokument, pošlu přes AI Gateway jeho úvodní
-          strany, tiráž a osnovu nadpisů (dohromady nejvýš asi 16 000 znaků) a název souboru
-          jazykovému modelu Gemini. Model z toho jen navrhne název, autory, rok a podobné údaje,
-          které pak sami zkontrolujete. Vercel ani Google text nepoužijí k trénování modelů a
-          Vercel ho po vyřízení požadavku smaže.
+          strany, tiráž, osnovu nadpisů a záhlaví stran (dohromady nejvýš asi 16 000 znaků) a
+          název souboru, u PDF i s údaji z jeho vlastností, jazykovému modelu Gemini. Model z toho
+          jen navrhne název, autory, rok a podobné údaje, které pak sami zkontrolujete. Vercel ani
+          Google text nepoužijí k trénování modelů a Vercel ho po vyřízení požadavku smaže.
         </p>
         <p>
           Dokumenty v osobní knihovně vidíte jen vy. Dokumenty v týmové knihovně vidí všichni
@@ -220,7 +225,7 @@ export default function Soukromi() {
           Vlastní zdroje: text dokumentů, index i hledání v nich zůstávají v databázi ve
           Frankfurtu.
         </p>
-        <p>Mimo Evropskou unii jde jen tohle:</p>
+        <p>Mimo Evropskou unii jde z mé strany jen tohle:</p>
         <ul>
           <li>údaje o vašem účtu a týmech, které Clerk vede ve Spojených státech,</li>
           <li>přístup k platformám Vercel a Neon, spravovaným rovněž odtamtud,</li>
@@ -274,9 +279,9 @@ export default function Soukromi() {
         </ul>
         <p>
           Kromě mě mají k údajům přístup jen poskytovatelé uvedení výše a jejich dodavatelé, a to v
-          rozsahu nutném k tomu, aby služba běžela, a u týmových dokumentů členové týmu. Do obsahu
-          vašich dokumentů se nedívám, ledaže mě o to požádáte (třeba kvůli chybě převodu) nebo to
-          vyžaduje oznámení nezákonného obsahu či zákon.
+          rozsahu nutném k tomu, aby služba běžela; k týmovým dokumentům navíc členové týmu. Do
+          obsahu vašich dokumentů se nedívám, ledaže mě o to požádáte (třeba kvůli chybě převodu)
+          nebo to vyžaduje oznámení nezákonného obsahu či zákon.
         </p>
       </Section>
 

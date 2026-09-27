@@ -22,8 +22,8 @@ import { isUuid } from "./documents";
  * Isolation: every statement filters library_id = ANY($1) on chunks AND on
  * documents; RLS is the backstop. The tsquery strings come from
  * buildTsQuery (sanitized lexemes only) and travel as parameters; a string
- * with characters that builder never produces is refused, so a bug upstream
- * cannot abort the transaction with a tsquery syntax error.
+ * that builder could not have produced is refused (isWellFormedTsQuery), so
+ * a bug upstream cannot abort the transaction with a tsquery syntax error.
  */
 
 export interface SearchParams {
@@ -62,14 +62,67 @@ export const RRF_K = 60;
 /** ts_rank_cd weights {D, C, B, A}: footnotes, body, parent heading, own heading. */
 const RANK_WEIGHTS = "'{0.05,0.12,0.2,1.0}'::float4[]";
 
-/** Everything buildTsQuery can emit: quoted [a-z0-9] lexemes, :* prefixes, weights A–D, & | ! <-> ( ). */
-const TSQUERY_RE = /^[a-z0-9':*&|!()<> \-ABCD]{1,4000}$/;
+const MAX_TSQUERY_CHARS = 4_000;
 const DOC_TYPE_SET = new Set<string>(DOC_TYPES);
 const ACT_RE = /^(zak:[0-9]{1,4}\/[0-9]{4}|eu:[0-9]{5}[A-Z][0-9]{4})$/;
 const MAX_KEYS = 100;
 
 function safeTsQuery(q: string | null): string | null {
-  return q && TSQUERY_RE.test(q) ? q : null;
+  return q && isWellFormedTsQuery(q) ? q : null;
+}
+
+/** Tokens of the tsquery subset buildTsQuery emits. */
+const TSQ_TOKEN = /\s*(?:('[a-z0-9]+'|[a-z0-9]+)(?::\*?[ABCD]*)?|(<->|<[0-9]{1,4}>|[&|!()]))/y;
+
+/**
+ * True when `q` is a well-formed tsquery built ONLY from what buildTsQuery
+ * emits: [a-z0-9] lexemes (optionally quoted) with an optional `:*` prefix
+ * marker and A–D weights, `!`, `&`, `|`, `<->` / `<N>` and balanced
+ * parentheses. Anything else is refused before it reaches to_tsquery, whose
+ * syntax errors would abort the caller's transaction. Pure.
+ */
+export function isWellFormedTsQuery(q: string): boolean {
+  const text = q.trim();
+  if (text.length === 0 || q.length > MAX_TSQUERY_CHARS) return false;
+  const tokens: string[] = [];
+  let at = 0;
+  while (at < text.length) {
+    TSQ_TOKEN.lastIndex = at;
+    const m = TSQ_TOKEN.exec(text);
+    if (!m) return false;
+    tokens.push(m[1] !== undefined ? "L" : m[2]);
+    at = TSQ_TOKEN.lastIndex;
+  }
+  // Grammar: expr := unary (binop unary)*; unary := "!" unary | "(" expr ")" | L.
+  let i = 0;
+  const unary = (): boolean => {
+    const tok = tokens[i];
+    if (tok === "!") {
+      i++;
+      return unary();
+    }
+    if (tok === "(") {
+      i++;
+      if (!expr() || tokens[i] !== ")") return false;
+      i++;
+      return true;
+    }
+    if (tok === "L") {
+      i++;
+      return true;
+    }
+    return false;
+  };
+  const isBinary = (tok: string | undefined) => tok === "&" || tok === "|" || (tok !== undefined && tok.startsWith("<"));
+  const expr = (): boolean => {
+    if (!unary()) return false;
+    while (isBinary(tokens[i])) {
+      i++;
+      if (!unary()) return false;
+    }
+    return true;
+  };
+  return tokens.length > 0 && expr() && i === tokens.length;
 }
 
 function clampInt(v: number, lo: number, hi: number, fallback: number): number {
@@ -254,8 +307,8 @@ export function fuse(hits: ChannelHit[], opts?: { perDoc?: number }): FusedDoc[]
     { meta: number; chunks: Map<number, number>; channels: Set<Channel>; maxTotal: number }
   >();
   for (const h of hits) {
+    if (!Object.hasOwn(CHANNEL_WEIGHTS, h.channel) || !(h.rank >= 1)) continue;
     const weight = CHANNEL_WEIGHTS[h.channel];
-    if (weight === undefined || !(h.rank >= 1)) continue;
     let d = docs.get(h.docId);
     if (!d) {
       d = { meta: 0, chunks: new Map(), channels: new Set(), maxTotal: 0 };

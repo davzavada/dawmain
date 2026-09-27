@@ -96,8 +96,8 @@ export async function loadReadDoc(db: Queryable, id: string, libraryIds: string[
  * offsets) — better than rendering text at wrong offsets.
  */
 export async function loadText(db: Queryable, id: string, libraryId: string, from: number, to: number): Promise<TextSource> {
-  const lo = Math.max(0, Math.floor(from));
-  const hi = Math.floor(to);
+  const lo = Number.isFinite(from) ? Math.max(0, Math.floor(from)) : 0;
+  const hi = Number.isFinite(to) ? Math.floor(to) : lo;
   if (!isUuid(id) || !(hi > lo)) return emptySource(lo);
   const { rows } = await db.query(
     `SELECT ord, char_start, char_end, body FROM doc_blocks

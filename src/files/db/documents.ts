@@ -896,7 +896,7 @@ export async function listDocuments(
   const whereSql = where.join(" AND ");
   const limit = Math.min(200, Math.max(1, Math.floor(args.limit) || 1));
   const offset = Math.max(0, Math.floor(args.offset) || 0);
-  const order = SORTS[args.sort ?? "added"] ?? SORTS.added;
+  const order = args.sort && Object.hasOwn(SORTS, args.sort) ? SORTS[args.sort] : SORTS.added;
   const total = await db.query(`SELECT count(*) AS n FROM documents d WHERE ${whereSql}`, params);
   const { rows } = await db.query(
     `SELECT ${documentColumns("d")} FROM documents d WHERE ${whereSql}

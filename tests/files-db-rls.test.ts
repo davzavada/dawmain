@@ -81,3 +81,14 @@ describe("RLS on the files schema", () => {
     expect(Number(usage.rows[0].reserved_pages)).toBe(5);
   });
 });
+
+describe("child rows cannot point across libraries", () => {
+  it("the composite (doc_id, library_id) FK rejects a chunk claiming another library's document, even with both in scope", async () => {
+    const { rows } = await t.owner.query<{ id: string }>("SELECT id FROM documents WHERE library_id = 'org_b'");
+    await expect(
+      t.runner(["user_a", "org_b"], (db) =>
+        db.query("INSERT INTO chunks (doc_id, library_id, ord, char_start, char_end, tsv) VALUES ($1, 'user_a', 0, 0, 1, 'x')", [rows[0].id]),
+      ),
+    ).rejects.toThrow(/foreign key/);
+  });
+});

@@ -11,8 +11,8 @@ Budu rád, pokud nástroj vyzkoušíte :)
 
 ## Jak to funguje?
 
-Server nemá vlastní databázi - funguje jako nachytřený Google: vyhledává živě
-přímo v oficiálních databázích. Konkrétně je napojený na judikaturu:
+V oficiálních databázích server hledá živě - funguje jako nachytřený Google a
+nic si z nich nekopíruje. Konkrétně je napojený na judikaturu:
 
 - Nejvyššího soudu - dostupné [zde](https://rozhodnuti.nsoud.cz)
 - Nejvyššího správního soudu - dostupné [zde](https://vyhledavac.nssoud.cz)
@@ -31,6 +31,14 @@ jeden záznam v plném znění — celý abstrakt a obsah, podle kterých se poz
 zda je dílo k věci. Text díla se nestahuje; k němu vede odkaz na záznam
 (u licencovaných titulů přes vzdálený přístup UK). (Peace Palace Library
 byla vyřazena: její WorldCat Discovery blokuje adresy serverů.)
+
+**Vlastní zdroje (Pro).** Kdo má režim Pro (je zdarma, přiděluji ho ručně), si
+na webu nahraje vlastní knihy, články, komentáře a vzory - pro sebe, nebo pro
+celý tým. Dokument se převede na text přímo v prohlížeči, takže originál
+počítač neopustí; na server jde jen text. Asistent v dokumentech pak hledá a
+čte vedle oficiálních databází. Funguje to jen s přihlášením vlastním účtem,
+ne se starším přístupovým kódem. Pravidla jsou v
+[podmínkách užití](https://dawmain.davidzavada.cz/podminky).
 
 ## Endpoint
 

@@ -81,7 +81,8 @@ export function SiteNav({ sourceCount }: { sourceCount: number }) {
   }
 
   const current = (on: boolean) => (on ? { "aria-current": "location" as const } : {});
-  const ownSources = pathname.startsWith(OWN_SOURCES_HREF);
+  const ownSources =
+    pathname === OWN_SOURCES_HREF || pathname.startsWith(`${OWN_SOURCES_HREF}/`);
 
   return (
     <>
