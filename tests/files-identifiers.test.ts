@@ -200,13 +200,13 @@ describe("extractIdentKeys — §, acts, ISBN, DOI", () => {
     expect(extractIdentKeys("č. 12/2001 Sb. m. s.")).toEqual([]);
   });
   it("ISBN-13 and ISBN-10 with checksum", () => {
-    expect(extractIdentKeys("ISBN 978-80-7400-587-1")).toEqual(["isbn:9788074005871"]);
-    expect(extractIdentKeys("ISBN: 978 80 7400 587 1 (váz.)")).toEqual(["isbn:9788074005871"]);
-    expect(extractIdentKeys("ISBN 80-7179-890-9")).toEqual(["isbn:9788071798905"]);
-    expect(extractIdentKeys("ISBN 0-8044-2957-X")).toEqual(["isbn:9780804429573"]);
-    expect(extractIdentKeys("bez štítku 9788074005871.")).toEqual(["isbn:9788074005871"]);
-    expect(extractIdentKeys("ISBN 978-80-7400-587-2")).toEqual([]); // bad checksum
-    expect(extractIdentKeys("tel. 9788074005872")).toEqual([]);
+    expect(extractIdentKeys("ISBN 978-80-7400-587-9")).toEqual(["isbn:9788074005879"]);
+    expect(extractIdentKeys("ISBN: 978 80 7400 587 9 (váz.)")).toEqual(["isbn:9788074005879"]);
+    expect(extractIdentKeys("ISBN 80-7179-890-8")).toEqual(["isbn:9788071798903"]);
+    expect(extractIdentKeys("ISBN 0-8044-2957-X")).toEqual(["isbn:9780804429571"]);
+    expect(extractIdentKeys("bez štítku 9788074005879.")).toEqual(["isbn:9788074005879"]);
+    expect(extractIdentKeys("ISBN 978-80-7400-587-1")).toEqual([]); // bad checksum
+    expect(extractIdentKeys("tel. 9788074005871")).toEqual([]);
   });
   it("DOI, lowercased, trailing punctuation dropped", () => {
     expect(extractIdentKeys("doi:10.1000/XYZ123.")).toEqual(["doi:10.1000/xyz123"]);
@@ -317,9 +317,9 @@ describe("helpers", () => {
     expect(fullYear("2005")).toBe("2005");
   });
   it("ISBN normalization", () => {
-    expect(isbn10to13("8071798909")).toBe("9788071798905");
-    expect(normalizeIsbn("80-7179-890-9")).toBe("9788071798905");
-    expect(normalizeIsbn("978-80-7400-587-1")).toBe("9788074005871");
+    expect(isbn10to13("8071798908")).toBe("9788071798903");
+    expect(normalizeIsbn("80-7179-890-8")).toBe("9788071798903");
+    expect(normalizeIsbn("978-80-7400-587-9")).toBe("9788074005879");
     expect(normalizeIsbn("1234567890")).toBeNull();
     expect(normalizeIsbn("")).toBeNull();
   });

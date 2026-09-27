@@ -169,7 +169,7 @@ for (const entry of ACT_ABBREVIATIONS) if (!NAMES.has(entry.act)) NAMES.set(entr
  * reset lastIndex. Groups 1–2 or 3–4 hold number and year.
  */
 export const ACT_NUMBER_RE =
-  /(?<![\p{L}\p{N}/])(\d{1,4})\s*\/\s*(\d{4})\s*Sb(?:\.|(?![\p{L}]))(?!\s*(?:m\.\s*s\.|NSS))|(?<![\p{L}])(?:zákon|zákona|zákonu|zákonem|zák\.)\s+č\.\s*(\d{1,4})\s*\/\s*(\d{4})(?![\p{N}])/gu;
+  /(?<![\p{L}\p{N}/])(\d{1,4})\s*\/\s*(\d{4})\s*Sb(?![\p{L}])(?!\.?\s*(?:m\.\s*s\.|NSS))\.?|(?<![\p{L}])(?:zákon|zákona|zákonu|zákonem|zák\.)\s+č\.\s*(\d{1,4})\s*\/\s*(\d{4})(?![\p{N}])/gu;
 
 /** "zak:<n>/<yyyy>" from a number and year; the number without leading zeros. */
 export function zakId(number: string, year: string): string {
