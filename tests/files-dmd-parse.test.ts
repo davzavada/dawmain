@@ -734,10 +734,11 @@ describe("stripMarkup", () => {
       const { text, map } = stripMarkup(original);
       expect(text, JSON.stringify(original)).toBe(expected);
       expect(map.length).toBe(text.length);
-      for (let i = 0; i < map.length; i++) {
-        expect(original[map[i]]).toBe(text[i]);
-        if (i) expect(map[i]).toBeGreaterThan(map[i - 1]);
+      let bad = -1;
+      for (let i = 0; i < map.length && bad === -1; i++) {
+        if (original[map[i]] !== text[i] || (i > 0 && map[i] <= map[i - 1])) bad = i;
       }
+      expect(bad, JSON.stringify(original)).toBe(-1);
       // …and the parser's billing base agrees whenever the doc is paged.
       const parsed = parseDmd(original);
       if (parsed.paged) expect(parsed.stats.countedChars).toBe(text.length);

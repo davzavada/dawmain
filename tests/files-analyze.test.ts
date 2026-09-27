@@ -40,7 +40,7 @@ describe("tokenize", () => {
   it("keeps combining marks inside a token and NFC-normalizes `lower`", () => {
     const text = "smlouvách x"; // decomposed á
     const [first] = tokenize(text);
-    expect(first).toEqual({ lower: "smlouvách", start: 0, end: 9 });
+    expect(first).toEqual({ lower: "smlouvách", start: 0, end: 10 });
   });
   it("splits on superscript digits, punctuation and hyphens", () => {
     expect(tokenize("smlouvy² e-mail don't").map((t) => t.lower)).toEqual(["smlouvy", "e", "mail", "don", "t"]);
@@ -225,8 +225,8 @@ describe("buildTsvector", () => {
     const tsv = buildTsvector([{ text: "úvod", weight: "A" }, { text, weight: "C" }]);
     const positions = /'slov':([^ ]+)/.exec(tsv)![1].split(",");
     expect(positions).toHaveLength(256);
-    const last = buildTsvector([{ text: "a ".repeat(MAX_POSITION + 5) + "konec", weight: "C" }]);
-    expect(last).toContain("'konec':16383C");
+    const last = buildTsvector([{ text: "a ".repeat(MAX_POSITION + 5) + "soud", weight: "C" }]);
+    expect(last).toContain("'soud':16383C");
   });
   it("keeps the strongest weight when capped positions collide", () => {
     const tsv = buildTsvector([
@@ -285,9 +285,9 @@ describe("Postgres round trip (PGlite)", () => {
   });
 
   it("stores the position cap as Postgres does", async () => {
-    const tsv = buildTsvector([{ text: "a ".repeat(MAX_POSITION + 5) + "konec", weight: "C" }]);
+    const tsv = buildTsvector([{ text: "a ".repeat(MAX_POSITION + 5) + "soud", weight: "C" }]);
     expect(await scalar<string>("SELECT (ts_debug_pos) AS v FROM (SELECT $1::tsvector::text AS ts_debug_pos) s", [tsv])).toContain(
-      "'konec':16383C",
+      "'soud':16383C",
     );
   });
 
