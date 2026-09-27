@@ -28,6 +28,10 @@ const LEGAL: Array<{ href: string; label: string; icon: IconName }> = [
   { href: "/soukromi", label: "Ochrana osobních údajů", icon: "lock" },
 ];
 
+/** Own documents (Pro, granted by hand) - the stable entry point to the library. */
+const OWN_SOURCES_HREF = "/vlastni-zdroje";
+const OWN_SOURCES_TITLE = "Vlastní zdroje — v režimu Pro, přiděluji zdarma";
+
 /** A section counts as "in view" once its top passes this line. */
 const SPY_OFFSET = 140;
 
@@ -77,6 +81,7 @@ export function SiteNav({ sourceCount }: { sourceCount: number }) {
   }
 
   const current = (on: boolean) => (on ? { "aria-current": "location" as const } : {});
+  const ownSources = pathname.startsWith(OWN_SOURCES_HREF);
 
   return (
     <>
@@ -89,11 +94,16 @@ export function SiteNav({ sourceCount }: { sourceCount: number }) {
               {id === "zdroje" && <span className="nav-count">{sourceCount}</span>}
             </Link>
           ))}
-          <span className="nav-item locked" aria-disabled="true" title="Dostupné v placené verzi">
+          <Link
+            href={OWN_SOURCES_HREF}
+            className="nav-item"
+            title={OWN_SOURCES_TITLE}
+            {...current(ownSources)}
+          >
             <Icon name="upload" />
-            <span className="nav-ellipsis">Nahrát vlastní zdroje</span>
-            <Icon name="lock" size={13} label="zamčeno" className="nav-lock" />
-          </span>
+            <span className="nav-ellipsis">Vlastní zdroje</span>
+            <span className="pro-pill">Pro</span>
+          </Link>
         </div>
 
         <div className="nav-group">
@@ -129,14 +139,15 @@ export function SiteNav({ sourceCount }: { sourceCount: number }) {
               {short}
             </Link>
           ))}
-          <span
-            className="tab-item locked"
-            aria-disabled="true"
-            title="Nahrát vlastní zdroje – v placené verzi"
+          <Link
+            href={OWN_SOURCES_HREF}
+            className="tab-item"
+            title={OWN_SOURCES_TITLE}
+            {...current(ownSources)}
           >
             <span>Vlastní zdroje</span>
-            <Icon name="lock" size={13} label="zamčeno" />
-          </span>
+            <span className="pro-pill">Pro</span>
+          </Link>
         </nav>
       </div>
     </>

@@ -286,9 +286,7 @@ describe("Postgres round trip (PGlite)", () => {
 
   it("stores the position cap as Postgres does", async () => {
     const tsv = buildTsvector([{ text: "a ".repeat(MAX_POSITION + 5) + "soud", weight: "C" }]);
-    expect(await scalar<string>("SELECT (ts_debug_pos) AS v FROM (SELECT $1::tsvector::text AS ts_debug_pos) s", [tsv])).toContain(
-      "'soud':16383C",
-    );
+    expect(await scalar<string>("SELECT $1::tsvector::text AS v", [tsv])).toContain("'soud':16383C");
   });
 
   it("parses every tsquery buildTsQuery produces, including from hostile input", async () => {

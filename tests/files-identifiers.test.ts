@@ -91,7 +91,7 @@ describe("acts", () => {
   });
 
   it("names unknown Sbírka numbers generically", () => {
-    expect(resolveAct("zákon č. 7/2099 Sb.")).toEqual({ act: "zak:7/2099", name: "zákon č. 7/2099 Sb." });
+    expect(resolveAct("zákon č. 7/2099 Sb.")).toEqual({ act: "zak:7/2099", name: "předpis č. 7/2099 Sb." });
   });
 
   it("actName", () => {

@@ -352,6 +352,7 @@ describe("parseDmd — footnotes", () => {
   it("title footnotes in headings bind to the heading's section", () => {
     const doc = parseDmd("# Článek o něčem[^*]\n\n[^*]: Autor je advokát.\n\nText.");
     expect(doc.sections[0].heading).toBe("Článek o něčem");
+    expect(parseDmd("## Nadpis \\[^1] a[^2]  b").sections[0].heading).toBe("Nadpis [^1] a b");
     expect(doc.footnotes[0]).toMatchObject({ label: "*", section: 0 });
     expect(doc.footnotes[0].refAt).toBe(at(doc, "[^*]"));
   });

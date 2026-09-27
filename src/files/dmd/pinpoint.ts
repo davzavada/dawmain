@@ -185,7 +185,7 @@ function editionPart(edition: string | null | undefined): string | null {
   return `${e} vyd.`;
 }
 
-function imprint(meta: Partial<BibMeta>, pagesRange?: string | null): string | null {
+function imprint(meta: Pick<Partial<BibMeta>, "place" | "publisher" | "year">, pagesRange?: string | null): string | null {
   const place = field(meta.place, 60);
   const publisher = field(meta.publisher, 120);
   const year = meta.year ? String(meta.year) : null;
@@ -200,7 +200,7 @@ function pagesRangePart(range: string | null | undefined): string | null {
   return r ? `s. ${r.replace(/\s*[-‒–—]\s*/g, "–")}` : null;
 }
 
-function titlePart(meta: Partial<BibMeta> & { title: string | null }): string {
+function titlePart(meta: { title: string | null; subtitle?: string | null }): string {
   const title = field(meta.title) ?? "[bez názvu]";
   const subtitle = field(meta.subtitle);
   return subtitle ? `${title}: ${subtitle}` : title;
@@ -211,7 +211,7 @@ function czechDate(iso: string | null | undefined): string | null {
   return m ? `${Number(m[3])}. ${Number(m[2])}. ${m[1]}` : null;
 }
 
-function isbnPart(meta: Partial<BibMeta>): string | null {
+function isbnPart(meta: Pick<Partial<BibMeta>, "isbn">): string | null {
   const isbn = field(meta.isbn?.[0], 20);
   return isbn ? `ISBN ${isbn}` : null;
 }
@@ -238,7 +238,7 @@ function assemble(parts: Array<string | null | undefined>): string {
  * Pure.
  */
 export function citationLine(
-  meta: Partial<BibMeta> & { doc_type: DocType | null; title: string | null },
+  meta: Omit<Partial<BibMeta>, "doc_type" | "title"> & { doc_type: DocType | null; title: string | null },
   opts: { sectionAuthor?: string | null } = {},
 ): string {
   const authors = meta.authors ?? [];

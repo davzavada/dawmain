@@ -65,12 +65,12 @@ const num = (s: string) => String(Number(s));
 
 /** Registries of the Nejvyšší soud. */
 const NS_REGISTRIES = new Set([
-  "cdo", "odo", "tdo", "tz", "tcu", "ntd", "nd", "cpjn", "tpjn", "cpj", "tpj", "nscr", "icdo", "cdon", "tvo", "ncu", "cz", "zp",
+  "cdo", "odo", "tdo", "tz", "tcu", "ntd", "nd", "cpjn", "tpjn", "cpj", "tpj", "nscr", "icdo", "cdon", "tvo", "ncu",
 ]);
 /** Registries of the Nejvyšší správní soud. */
 const NSS_REGISTRIES = new Set([
   "as", "afs", "ads", "ars", "azs", "aps", "ao", "aos", "ans", "aprk", "konf", "komp", "nad", "na", "nao", "kse", "ksz", "kseo",
-  "kss", "pst", "vol", "ntd",
+  "kss", "pst", "vol",
 ]);
 /** Registries that appear without a senate number (plenary / grand panel). */
 const SENATELESS = new Set(["cpjn", "tpjn", "cpj", "tpj", "konf", "komp"]);

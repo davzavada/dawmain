@@ -261,10 +261,11 @@ export function queryTerms(lower: string): string[] {
   if (isExactTerm(primary) || word.length > MAX_STEM_LENGTH) {
     return /^[a-z0-9]+$/.test(primary) ? [primary] : [];
   }
+  const typedFolded = foldWord(word) === word;
   const candidates = [primary];
-  if (foldWord(word) === word) candidates.push(indexTerm(word));
-  const folded = foldWord(word);
-  const iContext = folded === word && /(?:i|ich|iho|im|imi|imu|in[aeouy]?|inou|inach|inami)$/.test(folded);
+  if (typedFolded) candidates.push(indexTerm(word));
+  // Endings before which Snowball palatalises (-i/-í forms, the -in possessive).
+  const iContext = typedFolded && /(?:i|ich|iho|im|imi|imu|in[aeouy]?|inou|inach|inami)$/.test(word);
   for (const c of [...candidates]) candidates.push(...alternatives(c, iContext));
   const minLen = Math.min(3, primary.length);
   const valid = [...new Set(candidates)].filter((c) => c.length >= minLen && /^[a-z0-9]+$/.test(c));

@@ -12,7 +12,8 @@ const texts = (text: string, spans: Array<{ start: number; end: number }>) => sp
 describe("findMatches", () => {
   it("finds inflected forms: „náhradu škody“ highlights „náhrada škody“", () => {
     const text = "Náhrada škody se poskytuje v penězích. Škodu nahradí škůdce.";
-    expect(texts(text, findMatches(text, q("náhradu škody")))).toEqual(["Náhrada", "škody", "Škodu"]);
+    // The verb "nahradí" shares the stem — a prefix match, as in Postgres.
+    expect(texts(text, findMatches(text, q("náhradu škody")))).toEqual(["Náhrada", "škody", "Škodu", "nahradí"]);
   });
 
   it("matches queries typed without diacritics", () => {

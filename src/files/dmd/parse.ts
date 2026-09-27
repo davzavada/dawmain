@@ -261,11 +261,13 @@ export function unescapeDmd(s: string): string {
   return s.replace(ESCAPE_ANYWHERE_RE, "").replace(ESCAPE_LEADING_RE, "$1");
 }
 
-const REF_IN_TEXT_RE = new RegExp(String.raw`\s?(?<!\\)\[\^(?:${FOOTNOTE_LABEL_SOURCE})\]`, "g");
+// No lookbehind: the parser also runs in older browsers (Safari < 16.4).
+const REF_IN_TEXT_RE = new RegExp(String.raw`(\\)?\s?\[\^(?:${FOOTNOTE_LABEL_SOURCE})\]`, "g");
 
-/** Heading text for display: refs dropped, escapes removed, one line. */
+/** Heading text for display: refs dropped (escaped ones kept), escapes removed, one line. */
 function cleanHeading(raw: string): string {
-  return unescapeDmd(raw.replace(REF_IN_TEXT_RE, "")).replace(/\s+/g, " ").trim();
+  const withoutRefs = raw.replace(REF_IN_TEXT_RE, (match, escape: string | undefined) => (escape ? match : ""));
+  return unescapeDmd(withoutRefs).replace(/\s+/g, " ").trim();
 }
 
 const ROMAN_RE = /^[ivxlcdm]{1,8}$/i;

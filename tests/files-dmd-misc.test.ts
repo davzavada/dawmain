@@ -29,11 +29,12 @@ describe("billablePages", () => {
   });
 
   it("markup does not change the price, footnote text does", () => {
-    const body = "x".repeat(3600);
+    const body = "slovo ".repeat(599); // 3594 chars; index 1799 is a space
     const plain = parseDmd(body).stats.countedChars;
-    const marked = parseDmd(`[s. 1]\n${body.slice(0, 1800)} [s. 2] ${body.slice(1800)}`).stats.countedChars;
+    const marked = parseDmd(`[s. 1]\n${body.slice(0, 1799)} [s. 2] ${body.slice(1800)}`).stats.countedChars;
+    expect(marked).toBe(plain + 1); // only the line break after the page marker is text
     expect(billablePages(marked)).toBe(billablePages(plain));
-    const withNote = parseDmd(`${body}[^1]\n\n[^1]: poznámka`).stats.countedChars;
+    const withNote = parseDmd(`${body}xxxxxx[^1]\n\n[^1]: poznámka`).stats.countedChars;
     expect(billablePages(withNote)).toBe(2);
   });
 });

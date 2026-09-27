@@ -42,121 +42,171 @@ function named(source: string): RegExp {
 }
 const W = "\\p{L}*"; // case ending
 const SP = "\\s+";
+/** "zákon(a|u|em…) o <words>", any whitespace between the words. */
+const zakonO = (words: string) => `zákon${W}${SP}o${SP}${words.split(" ").join(SP)}`;
 
-/**
- * Order matters only for names that contain other names: a more specific
- * entry must come before one that would match inside it (e.g. the EU Charter
- * before the Czech Listina). resolveAct takes the EARLIEST match in the text
- * and, at equal position, the longest.
- */
-export const ACT_ABBREVIATIONS: ReadonlyArray<ActEntry> = [
+interface ActSpec {
+  act: string;
+  name: string;
+  /** Case-sensitive abbreviations (regex sources), each a whole word. */
+  abbr?: string[];
+  /** Case-insensitive name patterns (regex sources); W absorbs case endings. */
+  names?: string[];
+  /** Patterns that need their own flags or lookarounds. */
+  custom?: RegExp[];
+}
+
+const ACTS: ActSpec[] = [
   // Civil law
-  { act: "zak:89/2012", name: "občanský zákoník", abbreviation: true, pattern: abbr(`o\\.${S}z\\.`, "OZ", "NOZ", "ObčZ", `obč\\.${S}zák\\.`) },
-  { act: "zak:89/2012", name: "občanský zákoník", abbreviation: false, pattern: named(`občansk${W}${SP}zákoník${W}`) },
-  { act: "zak:99/1963", name: "občanský soudní řád", abbreviation: true, pattern: abbr(`o\\.${S}s\\.${S}ř\\.`, "OSŘ") },
-  { act: "zak:99/1963", name: "občanský soudní řád", abbreviation: false, pattern: named(`občansk${W}${SP}soudní${W}${SP}řád${W}`) },
-  { act: "zak:292/2013", name: "zákon o zvláštních řízeních soudních", abbreviation: true, pattern: abbr(`z\\.${S}ř\\.${S}s\\.`, "ZŘS", "ZZŘS", "ZOSŘ") },
-  { act: "zak:292/2013", name: "zákon o zvláštních řízeních soudních", abbreviation: false, pattern: named(`zákon${W}${SP}o${SP}zvláštních${SP}řízeních${SP}soudních`) },
-  { act: "zak:90/2012", name: "zákon o obchodních korporacích", abbreviation: true, pattern: abbr(`z\\.${S}o\\.${S}k\\.`, "ZOK", "ZObchK") },
-  { act: "zak:90/2012", name: "zákon o obchodních korporacích", abbreviation: false, pattern: named(`zákon${W}${SP}o${SP}obchodních${SP}korporacích`) },
-  { act: "zak:513/1991", name: "obchodní zákoník", abbreviation: true, pattern: abbr(`obch\\.${S}zák\\.`, "ObchZ", "ObZ") },
-  { act: "zak:513/1991", name: "obchodní zákoník", abbreviation: false, pattern: named(`obchodní${W}${SP}zákoník${W}`) },
-  { act: "zak:91/2012", name: "zákon o mezinárodním právu soukromém", abbreviation: true, pattern: abbr("ZMPS") },
-  { act: "zak:91/2012", name: "zákon o mezinárodním právu soukromém", abbreviation: false, pattern: named(`zákon${W}${SP}o${SP}mezinárodním${SP}právu${SP}soukromém`) },
-  { act: "zak:304/2013", name: "zákon o veřejných rejstřících", abbreviation: true, pattern: abbr("ZVR", "ZVeřRej") },
-  { act: "zak:304/2013", name: "zákon o veřejných rejstřících", abbreviation: false, pattern: named(`zákon${W}${SP}o${SP}veřejných${SP}rejstřících`) },
-  { act: "zak:256/2013", name: "katastrální zákon", abbreviation: false, pattern: named(`katastrální${W}${SP}zákon${W}`) },
-  { act: "zak:634/1992", name: "zákon o ochraně spotřebitele", abbreviation: true, pattern: abbr("ZOS", "ZOchS") },
-  { act: "zak:634/1992", name: "zákon o ochraně spotřebitele", abbreviation: false, pattern: named(`zákon${W}${SP}o${SP}ochraně${SP}spotřebitele`) },
-  { act: "zak:216/1994", name: "zákon o rozhodčím řízení", abbreviation: true, pattern: abbr("ZRŘ") },
-  { act: "zak:216/1994", name: "zákon o rozhodčím řízení", abbreviation: false, pattern: named(`zákon${W}${SP}o${SP}rozhodčím${SP}řízení`) },
-  { act: "zak:120/2001", name: "exekuční řád", abbreviation: true, pattern: abbr(`ex\\.${S}ř\\.`, "EŘ", "ExŘ") },
-  { act: "zak:120/2001", name: "exekuční řád", abbreviation: false, pattern: named(`exekuční${W}${SP}řád${W}`) },
-  { act: "zak:358/1992", name: "notářský řád", abbreviation: true, pattern: abbr(`not\\.${S}ř\\.`, "NotŘ") },
-  { act: "zak:358/1992", name: "notářský řád", abbreviation: false, pattern: named(`notářsk${W}${SP}řád${W}`) },
-  { act: "zak:182/2006", name: "insolvenční zákon", abbreviation: true, pattern: abbr(`ins\\.${S}z\\.`, `insolv\\.${S}zák\\.`, "InsZ", "IZ") },
-  { act: "zak:182/2006", name: "insolvenční zákon", abbreviation: false, pattern: named(`insolvenční${W}${SP}zákon${W}`) },
+  {
+    act: "zak:89/2012",
+    name: "občanský zákoník",
+    abbr: [`o\\.${S}z\\.`, "OZ", "NOZ", "ObčZ", `obč\\.${S}zák\\.`],
+    names: [`občansk${W}${SP}zákoník${W}`],
+  },
+  { act: "zak:99/1963", name: "občanský soudní řád", abbr: [`o\\.${S}s\\.${S}ř\\.`, "OSŘ"], names: [`občansk${W}${SP}soudní${W}${SP}řád${W}`] },
+  {
+    act: "zak:292/2013",
+    name: "zákon o zvláštních řízeních soudních",
+    abbr: [`z\\.${S}ř\\.${S}s\\.`, "ZŘS", "ZZŘS", "ZOSŘ"],
+    names: [zakonO("zvláštních řízeních soudních")],
+  },
+  {
+    act: "zak:90/2012",
+    name: "zákon o obchodních korporacích",
+    abbr: [`z\\.${S}o\\.${S}k\\.`, "ZOK", "ZObchK"],
+    names: [zakonO("obchodních korporacích")],
+  },
+  { act: "zak:513/1991", name: "obchodní zákoník", abbr: [`obch\\.${S}zák\\.`, "ObchZ", "ObZ"], names: [`obchodní${W}${SP}zákoník${W}`] },
+  { act: "zak:91/2012", name: "zákon o mezinárodním právu soukromém", abbr: ["ZMPS"], names: [zakonO("mezinárodním právu soukromém")] },
+  { act: "zak:304/2013", name: "zákon o veřejných rejstřících", abbr: ["ZVR", "ZVeřRej"], names: [zakonO("veřejných rejstřících")] },
+  { act: "zak:256/2013", name: "katastrální zákon", names: [`katastrální${W}${SP}zákon${W}`] },
+  { act: "zak:634/1992", name: "zákon o ochraně spotřebitele", abbr: ["ZOS", "ZOchS"], names: [zakonO("ochraně spotřebitele")] },
+  { act: "zak:216/1994", name: "zákon o rozhodčím řízení", abbr: ["ZRŘ"], names: [zakonO("rozhodčím řízení")] },
+  { act: "zak:120/2001", name: "exekuční řád", abbr: [`ex\\.${S}ř\\.`, "EŘ", "ExŘ"], names: [`exekuční${W}${SP}řád${W}`] },
+  { act: "zak:358/1992", name: "notářský řád", abbr: [`not\\.${S}ř\\.`, "NotŘ"], names: [`notářsk${W}${SP}řád${W}`] },
+  {
+    act: "zak:182/2006",
+    name: "insolvenční zákon",
+    abbr: [`ins\\.${S}z\\.`, `insolv\\.${S}zák\\.`, "InsZ", "IZ"],
+    names: [`insolvenční${W}${SP}zákon${W}`],
+  },
   // Not "ZA": all-caps headings ("ODPOVĚDNOST ZA ŠKODU") would match it.
-  { act: "zak:85/1996", name: "zákon o advokacii", abbreviation: true, pattern: abbr("ZAdv") },
-  { act: "zak:85/1996", name: "zákon o advokacii", abbreviation: false, pattern: named(`zákon${W}${SP}o${SP}advokacii`) },
-  { act: "zak:121/2000", name: "autorský zákon", abbreviation: true, pattern: abbr(`aut\\.${S}zák\\.`, "AZ", "AutZ") },
-  { act: "zak:121/2000", name: "autorský zákon", abbreviation: false, pattern: named(`autorsk${W}${SP}zákon${W}`) },
-  { act: "zak:6/2002", name: "zákon o soudech a soudcích", abbreviation: true, pattern: abbr("ZSS", "ZSaS") },
-  { act: "zak:6/2002", name: "zákon o soudech a soudcích", abbreviation: false, pattern: named(`zákon${W}${SP}o${SP}soudech${SP}a${SP}soudcích`) },
-  { act: "zak:257/2016", name: "zákon o spotřebitelském úvěru", abbreviation: true, pattern: abbr("ZSÚ", "ZSpÚ") },
-  { act: "zak:257/2016", name: "zákon o spotřebitelském úvěru", abbreviation: false, pattern: named(`zákon${W}${SP}o${SP}spotřebitelském${SP}úvěru`) },
-  { act: "zak:370/2017", name: "zákon o platebním styku", abbreviation: true, pattern: abbr("ZPS", "ZPlS") },
-  { act: "zak:370/2017", name: "zákon o platebním styku", abbreviation: false, pattern: named(`zákon${W}${SP}o${SP}platebním${SP}styku`) },
-  { act: "zak:256/2004", name: "zákon o podnikání na kapitálovém trhu", abbreviation: true, pattern: abbr("ZPKT") },
-  { act: "zak:256/2004", name: "zákon o podnikání na kapitálovém trhu", abbreviation: false, pattern: named(`zákon${W}${SP}o${SP}podnikání${SP}na${SP}kapitálovém${SP}trhu`) },
-  { act: "zak:21/1992", name: "zákon o bankách", abbreviation: false, pattern: named(`zákon${W}${SP}o${SP}bankách`) },
+  { act: "zak:85/1996", name: "zákon o advokacii", abbr: ["ZAdv"], names: [zakonO("advokacii")] },
+  { act: "zak:121/2000", name: "autorský zákon", abbr: [`aut\\.${S}zák\\.`, "AZ", "AutZ"], names: [`autorsk${W}${SP}zákon${W}`] },
+  { act: "zak:6/2002", name: "zákon o soudech a soudcích", abbr: ["ZSS", "ZSaS"], names: [zakonO("soudech a soudcích")] },
+  { act: "zak:257/2016", name: "zákon o spotřebitelském úvěru", abbr: ["ZSÚ", "ZSpÚ"], names: [zakonO("spotřebitelském úvěru")] },
+  { act: "zak:370/2017", name: "zákon o platebním styku", abbr: ["ZPS", "ZPlS"], names: [zakonO("platebním styku")] },
+  {
+    act: "zak:256/2004",
+    name: "zákon o podnikání na kapitálovém trhu",
+    abbr: ["ZPKT"],
+    names: [zakonO("podnikání na kapitálovém trhu")],
+  },
+  { act: "zak:21/1992", name: "zákon o bankách", names: [zakonO("bankách")] },
   // Labour and social law
-  { act: "zak:262/2006", name: "zákoník práce", abbreviation: true, pattern: abbr(`zák\\.${S}práce`, `zák\\.${S}pr\\.`, "ZP", "ZPr") },
-  { act: "zak:262/2006", name: "zákoník práce", abbreviation: false, pattern: named(`zákoník${W}${SP}práce`) },
-  { act: "zak:435/2004", name: "zákon o zaměstnanosti", abbreviation: true, pattern: abbr("ZZam") },
-  { act: "zak:435/2004", name: "zákon o zaměstnanosti", abbreviation: false, pattern: named(`zákon${W}${SP}o${SP}zaměstnanosti`) },
-  { act: "zak:234/2014", name: "zákon o státní službě", abbreviation: true, pattern: abbr("ZSSl") },
-  { act: "zak:234/2014", name: "zákon o státní službě", abbreviation: false, pattern: named(`zákon${W}${SP}o${SP}státní${SP}službě`) },
-  { act: "zak:187/2006", name: "zákon o nemocenském pojištění", abbreviation: false, pattern: named(`zákon${W}${SP}o${SP}nemocenském${SP}pojištění`) },
+  { act: "zak:262/2006", name: "zákoník práce", abbr: [`zák\\.${S}práce`, `zák\\.${S}pr\\.`, "ZP", "ZPr"], names: [`zákoník${W}${SP}práce`] },
+  { act: "zak:435/2004", name: "zákon o zaměstnanosti", abbr: ["ZZam"], names: [zakonO("zaměstnanosti")] },
+  { act: "zak:234/2014", name: "zákon o státní službě", abbr: ["ZSSl"], names: [zakonO("státní službě")] },
+  { act: "zak:187/2006", name: "zákon o nemocenském pojištění", names: [zakonO("nemocenském pojištění")] },
   // Criminal law
-  { act: "zak:40/2009", name: "trestní zákoník", abbreviation: true, pattern: abbr(`tr\\.${S}zák\\.`, `tr\\.${S}z\\.`, "TZ", "TrZ", "TZk") },
-  { act: "zak:40/2009", name: "trestní zákoník", abbreviation: false, pattern: named(`trestní${W}${SP}zákoník${W}`) },
-  { act: "zak:141/1961", name: "trestní řád", abbreviation: true, pattern: abbr(`tr\\.${S}ř\\.`, "TŘ", "TrŘ") },
-  { act: "zak:141/1961", name: "trestní řád", abbreviation: false, pattern: named(`trestní${W}${SP}řád${W}`) },
-  { act: "zak:418/2011", name: "zákon o trestní odpovědnosti právnických osob", abbreviation: true, pattern: abbr("TOPO", "ZTOPO") },
-  { act: "zak:418/2011", name: "zákon o trestní odpovědnosti právnických osob", abbreviation: false, pattern: named(`zákon${W}${SP}o${SP}trestní${SP}odpovědnosti${SP}právnických${SP}osob`) },
-  { act: "zak:45/2013", name: "zákon o obětech trestných činů", abbreviation: false, pattern: named(`zákon${W}${SP}o${SP}obětech${SP}trestných${SP}činů`) },
-  { act: "zak:250/2016", name: "zákon o odpovědnosti za přestupky a řízení o nich", abbreviation: true, pattern: abbr("ZOP", "PřZ") },
-  { act: "zak:250/2016", name: "zákon o odpovědnosti za přestupky a řízení o nich", abbreviation: false, pattern: named(`zákon${W}${SP}o${SP}odpovědnosti${SP}za${SP}přestupky`) },
-  // Administrative and public law ("soudní řád správní" before "správní řád":
-  // the latter never matches inside the former, the words are reversed).
-  { act: "zak:150/2002", name: "soudní řád správní", abbreviation: true, pattern: abbr(`s\\.${S}ř\\.${S}s\\.`, "SŘS") },
-  { act: "zak:150/2002", name: "soudní řád správní", abbreviation: false, pattern: named(`soudní${W}${SP}řád${W}${SP}správní${W}`) },
-  { act: "zak:500/2004", name: "správní řád", abbreviation: true, pattern: abbr(`spr\\.${S}ř\\.`, "SŘ", "SpŘ") },
-  { act: "zak:500/2004", name: "správní řád", abbreviation: false, pattern: named(`správní${W}${SP}řád${W}`) },
-  { act: "zak:280/2009", name: "daňový řád", abbreviation: true, pattern: abbr(`daň\\.${S}ř\\.`, "DŘ", "DaŘ") },
-  { act: "zak:280/2009", name: "daňový řád", abbreviation: false, pattern: named(`daňov${W}${SP}řád${W}`) },
-  { act: "zak:586/1992", name: "zákon o daních z příjmů", abbreviation: true, pattern: abbr("ZDP", "ZDaP") },
-  { act: "zak:586/1992", name: "zákon o daních z příjmů", abbreviation: false, pattern: named(`zákon${W}${SP}o${SP}daních${SP}z${SP}příjmů`) },
-  { act: "zak:235/2004", name: "zákon o dani z přidané hodnoty", abbreviation: true, pattern: abbr("ZDPH") },
-  { act: "zak:235/2004", name: "zákon o dani z přidané hodnoty", abbreviation: false, pattern: named(`zákon${W}${SP}o${SP}(?:dani${SP}z${SP}přidané${SP}hodnoty|DPH)`) },
-  { act: "zak:134/2016", name: "zákon o zadávání veřejných zakázek", abbreviation: true, pattern: abbr("ZZVZ") },
-  { act: "zak:134/2016", name: "zákon o zadávání veřejných zakázek", abbreviation: false, pattern: named(`zákon${W}${SP}o${SP}zadávání${SP}veřejných${SP}zakázek`) },
-  { act: "zak:106/1999", name: "zákon o svobodném přístupu k informacím", abbreviation: true, pattern: abbr("InfZ", "ZSPI", "ZSvPI") },
-  { act: "zak:106/1999", name: "zákon o svobodném přístupu k informacím", abbreviation: false, pattern: named(`zákon${W}${SP}o${SP}svobodném${SP}přístupu${SP}k${SP}informacím`) },
-  { act: "zak:110/2019", name: "zákon o zpracování osobních údajů", abbreviation: true, pattern: abbr("ZZOÚ") },
-  { act: "zak:110/2019", name: "zákon o zpracování osobních údajů", abbreviation: false, pattern: named(`zákon${W}${SP}o${SP}zpracování${SP}osobních${SP}údajů`) },
-  { act: "zak:128/2000", name: "zákon o obcích", abbreviation: false, pattern: named(`zákon${W}${SP}o${SP}obcích`) },
-  { act: "zak:129/2000", name: "zákon o krajích", abbreviation: false, pattern: named(`zákon${W}${SP}o${SP}krajích`) },
-  { act: "zak:182/1993", name: "zákon o Ústavním soudu", abbreviation: true, pattern: abbr("ZÚS", "ZoÚS") },
-  { act: "zak:182/1993", name: "zákon o Ústavním soudu", abbreviation: false, pattern: named(`zákon${W}${SP}o${SP}Ústavním${SP}soudu`) },
-  // Constitutional order. The EU Charter comes before the Czech Listina.
-  { act: "zak:1/1993", name: "Ústava České republiky", abbreviation: false, pattern: new RegExp(`${B}Ústav(?:a|y|ě|u|ou)${E}`, "u") },
-  { act: "zak:2/1993", name: "Listina základních práv a svobod", abbreviation: true, pattern: abbr("LZPS") },
-  // Not the EU Charter ("Listina základních práv Evropské unie / EU"), which
-  // has no id the schema accepts.
+  {
+    act: "zak:40/2009",
+    name: "trestní zákoník",
+    abbr: [`tr\\.${S}zák\\.`, `tr\\.${S}z\\.`, "TZ", "TrZ", "TZk"],
+    names: [`trestní${W}${SP}zákoník${W}`],
+  },
+  { act: "zak:141/1961", name: "trestní řád", abbr: [`tr\\.${S}ř\\.`, "TŘ", "TrŘ"], names: [`trestní${W}${SP}řád${W}`] },
+  {
+    act: "zak:418/2011",
+    name: "zákon o trestní odpovědnosti právnických osob",
+    abbr: ["TOPO", "ZTOPO"],
+    names: [zakonO("trestní odpovědnosti právnických osob")],
+  },
+  { act: "zak:45/2013", name: "zákon o obětech trestných činů", names: [zakonO("obětech trestných činů")] },
+  {
+    act: "zak:250/2016",
+    name: "zákon o odpovědnosti za přestupky a řízení o nich",
+    abbr: ["ZOP", "PřZ"],
+    names: [zakonO("odpovědnosti za přestupky")],
+  },
+  // Administrative and public law. "soudní řád správní" and "správní řád"
+  // never match inside each other (the words are reversed).
+  { act: "zak:150/2002", name: "soudní řád správní", abbr: [`s\\.${S}ř\\.${S}s\\.`, "SŘS"], names: [`soudní${W}${SP}řád${W}${SP}správní${W}`] },
+  { act: "zak:500/2004", name: "správní řád", abbr: [`spr\\.${S}ř\\.`, "SŘ", "SpŘ"], names: [`správní${W}${SP}řád${W}`] },
+  { act: "zak:280/2009", name: "daňový řád", abbr: [`daň\\.${S}ř\\.`, "DŘ", "DaŘ"], names: [`daňov${W}${SP}řád${W}`] },
+  { act: "zak:586/1992", name: "zákon o daních z příjmů", abbr: ["ZDP", "ZDaP"], names: [zakonO("daních z příjmů")] },
+  {
+    act: "zak:235/2004",
+    name: "zákon o dani z přidané hodnoty",
+    abbr: ["ZDPH"],
+    names: [`zákon${W}${SP}o${SP}(?:dani${SP}z${SP}přidané${SP}hodnoty|DPH)`],
+  },
+  {
+    act: "zak:134/2016",
+    name: "zákon o zadávání veřejných zakázek",
+    abbr: ["ZZVZ"],
+    names: [zakonO("zadávání veřejných zakázek")],
+  },
+  {
+    act: "zak:106/1999",
+    name: "zákon o svobodném přístupu k informacím",
+    abbr: ["InfZ", "ZSPI", "ZSvPI"],
+    names: [zakonO("svobodném přístupu k informacím")],
+  },
+  {
+    act: "zak:110/2019",
+    name: "zákon o zpracování osobních údajů",
+    abbr: ["ZZOÚ"],
+    names: [zakonO("zpracování osobních údajů")],
+  },
+  { act: "zak:128/2000", name: "zákon o obcích", names: [zakonO("obcích")] },
+  { act: "zak:129/2000", name: "zákon o krajích", names: [zakonO("krajích")] },
+  { act: "zak:182/1993", name: "zákon o Ústavním soudu", abbr: ["ZÚS", "ZoÚS"], names: [zakonO("Ústavním soudu")] },
+  // Constitutional order. "Ústava" only capitalized and in its case forms
+  // ("ústav", "Ústavní soud" are other words).
+  { act: "zak:1/1993", name: "Ústava České republiky", custom: [new RegExp(`${B}Ústav(?:a|y|ě|u|ou)${E}`, "u")] },
   {
     act: "zak:2/1993",
     name: "Listina základních práv a svobod",
-    abbreviation: false,
-    pattern: new RegExp(
-      `${B}Listin(?:a|y|ě|u|ou)(?:${SP}základních${SP}práv${SP}a${SP}svobod)?${E}(?!${SP}základních${SP}práv${SP}(?:Evropské|EU))`,
-      "u",
-    ),
+    abbr: ["LZPS"],
+    // Not the EU Charter ("Listina základních práv Evropské unie / EU"),
+    // which has no id the schema accepts.
+    custom: [
+      new RegExp(
+        `${B}Listin(?:a|y|ě|u|ou)(?:${SP}základních${SP}práv${SP}a${SP}svobod)?${E}(?!${SP}základních${SP}práv${SP}(?:Evropské|EU))`,
+        "u",
+      ),
+    ],
   },
   // EU secondary law (CELEX; the treaties have no id the schema accepts).
-  { act: "eu:32016R0679", name: "obecné nařízení o ochraně osobních údajů (GDPR)", abbreviation: true, pattern: abbr("GDPR", "ONOOÚ") },
-  { act: "eu:32016R0679", name: "obecné nařízení o ochraně osobních údajů (GDPR)", abbreviation: false, pattern: named(`obecn${W}${SP}nařízení${SP}o${SP}ochraně${SP}osobních${SP}údajů`) },
-  { act: "eu:32012R1215", name: "nařízení Brusel I bis", abbreviation: false, pattern: new RegExp(`${B}Brusel${SP}I${SP}bis${E}`, "iu") },
-  { act: "eu:32008R0593", name: "nařízení Řím I", abbreviation: false, pattern: new RegExp(`${B}Řím${SP}I${E}`, "u") },
-  { act: "eu:32007R0864", name: "nařízení Řím II", abbreviation: false, pattern: new RegExp(`${B}Řím${SP}II${E}`, "u") },
-  { act: "eu:32015R0848", name: "nařízení o insolvenčním řízení (přepracované znění)", abbreviation: false, pattern: named(`insolvenční${W}${SP}nařízení${W}`) },
-  { act: "eu:32019R1111", name: "nařízení Brusel II ter", abbreviation: false, pattern: new RegExp(`${B}Brusel${SP}II${SP}ter${E}`, "iu") },
-  { act: "eu:32022R2065", name: "akt o digitálních službách (DSA)", abbreviation: true, pattern: abbr("DSA") },
-  { act: "eu:32022R1925", name: "akt o digitálních trzích (DMA)", abbreviation: true, pattern: abbr("DMA") },
-  { act: "eu:32024R1689", name: "akt o umělé inteligenci (AI Act)", abbreviation: true, pattern: abbr("AI Act", "AIA") },
-  { act: "eu:32014R0910", name: "nařízení eIDAS", abbreviation: true, pattern: abbr("eIDAS") },
+  {
+    act: "eu:32016R0679",
+    name: "obecné nařízení o ochraně osobních údajů (GDPR)",
+    abbr: ["GDPR", "ONOOÚ"],
+    names: [`obecn${W}${SP}nařízení${SP}o${SP}ochraně${SP}osobních${SP}údajů`],
+  },
+  { act: "eu:32012R1215", name: "nařízení Brusel I bis", names: [`Brusel${SP}I${SP}bis`] },
+  { act: "eu:32019R1111", name: "nařízení Brusel II ter", names: [`Brusel${SP}II${SP}ter`] },
+  // Case-sensitive: "Řím I" is not "řím i".
+  { act: "eu:32008R0593", name: "nařízení Řím I", custom: [new RegExp(`${B}Řím${SP}I${E}`, "u")] },
+  { act: "eu:32007R0864", name: "nařízení Řím II", custom: [new RegExp(`${B}Řím${SP}II${E}`, "u")] },
+  { act: "eu:32015R0848", name: "nařízení o insolvenčním řízení (přepracované znění)", names: [`insolvenční${W}${SP}nařízení${W}`] },
+  { act: "eu:32022R2065", name: "akt o digitálních službách (DSA)", abbr: ["DSA"] },
+  { act: "eu:32022R1925", name: "akt o digitálních trzích (DMA)", abbr: ["DMA"] },
+  { act: "eu:32024R1689", name: "akt o umělé inteligenci (AI Act)", abbr: ["AI Act", "AIA"] },
+  { act: "eu:32014R0910", name: "nařízení eIDAS", abbr: ["eIDAS"] },
 ];
+
+/**
+ * One entry per pattern. resolveAct takes the EARLIEST match in the text
+ * and, at equal position, the longest — so the order here does not matter.
+ */
+export const ACT_ABBREVIATIONS: ReadonlyArray<ActEntry> = ACTS.flatMap(({ act, name, abbr: forms, names, custom }) => [
+  ...(forms ? [{ act, name, abbreviation: true, pattern: abbr(...forms) }] : []),
+  ...(names ?? []).map((source) => ({ act, name, abbreviation: false, pattern: named(source) })),
+  ...(custom ?? []).map((pattern) => ({ act, name, abbreviation: false, pattern })),
+]);
 
 /** Canonical names by act id (first entry wins). */
 const NAMES = new Map<string, string>();
@@ -187,7 +237,8 @@ export function resolveAct(text: string): { act: string; name: string } | null {
   for (const m of text.matchAll(ACT_NUMBER_RE)) {
     const [number, year] = m[1] ? [m[1], m[2]] : [m[3], m[4]];
     const act = zakId(number, year);
-    candidates.push({ index: m.index, length: m[0].length, act, name: NAMES.get(act) ?? `zákon č. ${Number(number)}/${year} Sb.` });
+    const name = NAMES.get(act) ?? `předpis č. ${Number(number)}/${year} Sb.`;
+    candidates.push({ index: m.index, length: m[0].length, act, name });
     break; // matchAll runs left to right: the first is the earliest
   }
   for (const entry of ACT_ABBREVIATIONS) {

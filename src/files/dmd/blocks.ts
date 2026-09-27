@@ -32,14 +32,17 @@ function cutPoint(text: string, start: number, size: number): number {
   const min = start + Math.floor(size / 2);
   const ideal = start + size;
   const max = Math.min(text.length - 1, start + Math.floor(size * 1.5));
+  // Both searches run on bounded slices: an unbounded lastIndexOf / indexOf
+  // would rescan the whole text for every block of a text without breaks.
+  const before = text.slice(min, ideal);
+  const after = text.slice(ideal - 1, max);
   for (const sep of ["\n\n", "\n"]) {
     // Backwards from the target: the separator must END by `ideal`.
-    const back = text.lastIndexOf(sep, ideal - sep.length);
-    if (back >= min) return back + sep.length;
-    // Forwards, within a bounded window (never an unbounded indexOf).
-    const window = text.slice(ideal - sep.length + 1, max);
-    const fwd = window.indexOf(sep);
-    if (fwd !== -1) return ideal - sep.length + 1 + fwd + sep.length;
+    const back = before.lastIndexOf(sep);
+    if (back !== -1) return min + back + sep.length;
+    // Forwards: the first separator that ends after `ideal`.
+    const fwd = after.indexOf(sep, sep.length === 2 ? 0 : 1);
+    if (fwd !== -1) return ideal - 1 + fwd + sep.length;
   }
   const code = text.charCodeAt(ideal - 1);
   // Never end a block between a high and a low surrogate.

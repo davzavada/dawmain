@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import Link from "next/link";
 import { headers } from "next/headers";
 import {
   DATABASE_GROUPS,
@@ -115,23 +116,29 @@ function SourceListFallback() {
   );
 }
 
-/** Uploading one's own documents - shown locked, not offered yet. */
+/** Own documents (Pro, granted by hand for free) - a card into the library. */
 function OwnSources() {
   return (
-    <div className="source-group locked">
+    <div className="source-group">
       <div className="source-group-head">
         <span className="source-group-name">Vlastní zdroje</span>
-        <Icon name="lock" size={13} label="zamčeno" />
+        <span className="pro-pill">Pro</span>
+        <span className="source-group-count">zdarma, přiděluji ručně</span>
       </div>
-      <div className="source" aria-disabled="true" title="Dostupné v placené verzi">
-        <Icon name="upload" />
-        <div className="source-name">
-          <span className="source-title">Nahrát vlastní zdroje</span>
-          <span className="source-desc">
-            Vlastní dokumenty, ve kterých bude asistent hledat vedle oficiálních databází.
+      <Link href="/vlastni-zdroje" className="project-card">
+        <Icon name="upload" size={20} style={{ color: "var(--accent)" }} />
+        <span className="project-text">
+          <span className="project-name">Nahrát vlastní zdroje</span>
+          <span className="project-desc">
+            Nahrajete knihy, články, komentáře a vzory. Na text se převedou přímo ve vašem
+            prohlížeči, takže originál váš počítač neopustí. Asistent v nich pak hledá vedle
+            oficiálních databází.
           </span>
-        </div>
-      </div>
+        </span>
+        <span className="project-arrow" aria-hidden="true">
+          →
+        </span>
+      </Link>
     </div>
   );
 }
@@ -153,8 +160,8 @@ export default async function Home() {
           zásadě zdarma. Proto jsem vytvořil nekomerční alternativu. Budu rád, když ji vyzkoušíte :)
         </p>
         <p className="lead">
-          Server nemá vlastní databázi – funguje jako nachytřený Google: vyhledává živě přímo v
-          oficiálních databázích.
+          V oficiálních databázích server hledá živě – funguje jako nachytřený Google a nic si z
+          nich nekopíruje. Kdo má režim Pro, může si k nim přidat vlastní dokumenty.
         </p>
         <a href={OWL_URL} className="project-card">
           <img src="/owl.svg" alt="" width={36} height={36} />
