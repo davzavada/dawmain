@@ -317,7 +317,7 @@ const INDEX_RE = /^(?:vecny |jmenny |pojmovy |heslovy )?rejstrik(?: (?:judikatur
 const ABBREV_RE = /^(?:(?:seznam|prehled) (?:pouzitych )?zkratek|(?:pouzite )?zkratky)$/;
 const BIBLIO_RE =
   /^(?:(?:seznam )?(?:pouzite |doporucene |vybrane |zakladni )?literatury|(?:pouzita |doporucena |vybrana |zakladni )?literatura|bibliografie|vyber (?:z )?literatury|prameny a literatura|literatura a prameny|pouzite prameny)$/;
-const ANNEX_RE = /^prilohy?(?![\p{L}\d])/u;
+const ANNEX_RE = /^priloh[ay](?![\p{L}\d])/u;
 const FRONT_RE = /^(?:predmluva(?![\p{L}\d]).*|uvod k .*vydani|uvodem|slovo (?:uvodem|autora|autoru)|o autorech|autorsky kolektiv|seznam autoru)$/u;
 
 /** "Č Á S T  P R V N Í" → "ČÁST PRVNÍ": runs of ≥ 3 single letters separated by single spaces. */
