@@ -29,14 +29,16 @@ export type { Access, LibraryAccess } from "./access-types";
  *
  * Two Clerk calls per lookup (getUser + getOrganizationMembershipList, in
  * parallel), cached per user for 60 s on the instance; `fresh` (uploads,
- * edits) accepts at most 10 s — which also caps the Backend API rate one
- * user can cause. Concurrent lookups of one user share a single request.
+ * edits) accepts at most 10 s, `joined` (right after accepting a team
+ * invitation, so the team shows up at once) at most 2 s — which also caps
+ * the Backend API rate one user can cause. Concurrent lookups of one user share a single request.
  * Cached objects are frozen: one warm instance serves many users at once,
  * and nothing may mutate what another request is reading.
  */
 
 const CACHE_TTL_MS = 60_000;
 const FRESH_TTL_MS = 10_000;
+const JOINED_TTL_MS = 2_000;
 /** Clerk's page size cap for membership lists; a user in more teams is an operator anomaly. */
 const MEMBERSHIP_LIMIT = 100;
 /** Name of the personal library in the UI and in tool output. */
@@ -57,6 +59,15 @@ export function __setAccessLoaderForTests(loader: Loader | null): void {
   inflight.clear();
 }
 
+/**
+ * Forget a user's cached access on this instance — after a change made
+ * here that alters it (a member removed from a team). Other instances
+ * catch up within their TTL.
+ */
+export function invalidateAccess(userId: string): void {
+  cache.delete(userId);
+}
+
 /** Deep-freeze an Access so a cached value can be shared across requests. */
 export function freezeAccess(access: Access): Access {
   for (const lib of access.all) Object.freeze(lib);
@@ -72,15 +83,16 @@ export function emptyAccess(userId: string, banned = false): Access {
 }
 
 /**
- * The caller's access, from the instance cache when young enough (60 s, or
- * 10 s with `fresh`). A malformed id never reaches Clerk. Clerk failures
- * throw (the caller answers "temporarily unavailable"); a user Clerk does
- * not know gets an empty access, which is cached like any other.
+ * The caller's access, from the instance cache when young enough (60 s,
+ * 10 s with `fresh`, 2 s with `joined`). A malformed id never reaches
+ * Clerk. Clerk failures throw (the caller answers "temporarily
+ * unavailable"); a user Clerk does not know gets an empty access, which is
+ * cached like any other.
  */
-export async function getAccess(userId: string, opts: { fresh?: boolean } = {}): Promise<Access> {
+export async function getAccess(userId: string, opts: { fresh?: boolean; joined?: boolean } = {}): Promise<Access> {
   if (!USER_ID_RE.test(userId)) return emptyAccess(userId);
   const hit = cache.get(userId);
-  const maxAge = opts.fresh ? FRESH_TTL_MS : CACHE_TTL_MS;
+  const maxAge = opts.joined ? JOINED_TTL_MS : opts.fresh ? FRESH_TTL_MS : CACHE_TTL_MS;
   if (hit && Date.now() - hit.at <= maxAge) return hit.access;
 
   const pending = inflight.get(userId);

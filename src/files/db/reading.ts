@@ -2,7 +2,7 @@ import "server-only";
 import type { RenderFootnote, SectionKind, TextSource } from "../dmd/types";
 import type { Queryable } from "./client";
 import { inflateText, num, numOrNull } from "./codec";
-import { getDocument, isUuid, type DocumentRow } from "./documents";
+import { documentColumns, getDocument, isUuid, mapDocumentRow, type DocumentRow } from "./documents";
 
 /**
  * Reading a stored document: its page and section tables (small — offsets
@@ -191,4 +191,108 @@ export async function loadFootnotes(
     sectionOrd: numOrNull(r.section_ord),
     anchor: (r.anchor as string | null) ?? null,
   }));
+}
+
+/** A section as search hits and read windows need it (offsets and pages only). */
+export interface SectionLite {
+  ord: number;
+  parent: number | null;
+  level: number;
+  kind: SectionKind;
+  key: string | null;
+  heading: string;
+  author: string | null;
+  start: number;
+  end: number;
+  pageFrom: number | null;
+  pageTo: number | null;
+}
+
+export interface PageLite {
+  ord: number;
+  label: string;
+  start: number;
+  end: number;
+  flags: number;
+}
+
+// ---------------------------------------------------------------------------
+// Lookups for search hits and read windows (explicit library filter on top of RLS)
+
+/** Document rows by id, only those in `libraryIds`. */
+export async function documentsByIds(db: Queryable, ids: string[], libraryIds: string[]): Promise<Map<string, DocumentRow>> {
+  const valid = ids.filter(isUuid);
+  if (!valid.length || !libraryIds.length) return new Map();
+  const { rows } = await db.query(
+    `SELECT ${documentColumns("d")} FROM documents d WHERE d.id = ANY($1::uuid[]) AND d.library_id = ANY($2::text[])`,
+    [valid, libraryIds],
+  );
+  const out = new Map<string, DocumentRow>();
+  for (const r of rows) {
+    const row = mapDocumentRow(r);
+    out.set(row.id, row);
+  }
+  return out;
+}
+
+/** Library of each document id (light: for the "in K libraries" count). */
+export async function librariesOf(db: Queryable, ids: string[], libraryIds: string[]): Promise<Map<string, string>> {
+  const valid = ids.filter(isUuid);
+  if (!valid.length) return new Map();
+  const { rows } = await db.query(
+    "SELECT id, library_id FROM documents WHERE id = ANY($1::uuid[]) AND library_id = ANY($2::text[])",
+    [valid, libraryIds],
+  );
+  return new Map(rows.map((r) => [String(r.id), String(r.library_id)]));
+}
+
+/** Root-to-leaf section chains of the given section ords of one document. */
+export async function sectionChains(db: Queryable, docId: string, libraryId: string, ords: number[]): Promise<Map<number, SectionLite[]>> {
+  const wanted = [...new Set(ords.filter((o) => Number.isInteger(o) && o >= 0))];
+  const out = new Map<number, SectionLite[]>();
+  if (!wanted.length) return out;
+  const { rows } = await db.query(
+    `WITH RECURSIVE up AS (
+       SELECT s.ord AS leaf, s.ord, s.parent_ord, 0 AS depth
+         FROM doc_sections s WHERE s.doc_id = $1 AND s.library_id = $2 AND s.ord = ANY($3::int[])
+       UNION ALL
+       SELECT up.leaf, p.ord, p.parent_ord, up.depth + 1
+         FROM up JOIN doc_sections p ON p.doc_id = $1 AND p.library_id = $2 AND p.ord = up.parent_ord
+        WHERE up.depth < 32
+     )
+     SELECT up.leaf, up.depth, s.ord, s.parent_ord, s.level, s.kind, s.key, s.heading, s.author,
+            s.char_start, s.char_end, s.page_from, s.page_to
+       FROM up JOIN doc_sections s ON s.doc_id = $1 AND s.library_id = $2 AND s.ord = up.ord
+      ORDER BY up.leaf, up.depth DESC`,
+    [docId, libraryId, wanted],
+  );
+  for (const r of rows) {
+    const leaf = Number(r.leaf);
+    const list = out.get(leaf) ?? [];
+    list.push({
+      ord: Number(r.ord),
+      parent: r.parent_ord === null ? null : Number(r.parent_ord),
+      level: Number(r.level),
+      kind: r.kind as SectionKind,
+      key: (r.key as string | null) ?? null,
+      heading: String(r.heading),
+      author: (r.author as string | null) ?? null,
+      start: Number(r.char_start),
+      end: Number(r.char_end),
+      pageFrom: r.page_from === null ? null : Number(r.page_from),
+      pageTo: r.page_to === null ? null : Number(r.page_to),
+    });
+    out.set(leaf, list);
+  }
+  return out;
+}
+
+/** Pages overlapping [from, to] of one document. */
+export async function pagesAround(db: Queryable, docId: string, libraryId: string, from: number, to: number): Promise<PageLite[]> {
+  const { rows } = await db.query(
+    `SELECT ord, label, char_start, char_end, flags FROM doc_pages
+      WHERE doc_id = $1 AND library_id = $2 AND char_end > $3 AND char_start <= $4 ORDER BY ord`,
+    [docId, libraryId, from, to],
+  );
+  return rows.map((r) => ({ ord: Number(r.ord), label: String(r.label), start: Number(r.char_start), end: Number(r.char_end), flags: Number(r.flags) }));
 }

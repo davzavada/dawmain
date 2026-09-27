@@ -152,16 +152,20 @@ describe("site navigation", () => {
     return html.match(/<a[^>]*href="\/vlastni-zdroje"[^>]*>.*?<\/a>/g) ?? [];
   }
 
-  it("links Vlastní zdroje from the sidebar and the tab strip with a Pro pill", () => {
+  it("links Vlastní zdroje from the sidebar and the tab strip, locked for visitors (design 1a)", () => {
     const html = renderToStaticMarkup(createElement(SiteNav, { sourceCount: 8 }));
     const links = ownSourcesLinks(html);
     expect(links).toHaveLength(2);
     for (const link of links) {
       expect(link).toContain('title="Vlastní zdroje — v režimu Pro, přiděluji zdarma"');
-      expect(link).toContain('<span class="pro-pill">Pro</span>');
+      expect(link).toContain("zd-nav-locked");
+      expect(link).toContain("zd-nav-lock");
+      expect(link).not.toContain("pro-pill");
       expect(link).not.toContain("aria-current");
       expect(link).not.toContain("aria-disabled");
     }
+    expect(links[0]).toContain("Nahrát vlastní zdroje");
+    expect(links[1]).toContain(">Vlastní zdroje<");
     expect(html).not.toContain("placené verzi");
   });
 

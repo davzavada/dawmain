@@ -46,7 +46,10 @@ export function OwnSourcesNavItem({ variant, current }: { variant: "sidebar" | "
   const className = variant === "sidebar" ? "nav-item" : "tab-item";
   const signedIn = auth === "signed_in";
   const count = signedIn && summary?.state === "ok" ? totalDocuments(summary.libraries) : null;
-  const locked = auth === "signed_out";
+  // Visitors see the locked invitation of design 1a; so does the server
+  // render and the moment before Clerk loads (most visitors are signed out,
+  // and nothing jumps when they are).
+  const locked = !signedIn;
 
   return (
     <Link href={OWN_SOURCES_HREF} className={locked ? `${className} zd-nav-locked` : className} title={OWN_SOURCES_TITLE} onClick={intercept(auth)} {...aria}>
@@ -55,11 +58,9 @@ export function OwnSourcesNavItem({ variant, current }: { variant: "sidebar" | "
       <span className={variant === "sidebar" ? "nav-ellipsis" : undefined}>{locked && variant === "sidebar" ? "Nahrát vlastní zdroje" : "Vlastní zdroje"}</span>
       {locked ? (
         <ZIcon name="lock" size={13} className="zd-nav-lock" />
-      ) : signedIn ? (
-        count !== null && variant === "sidebar" ? <span className="nav-count">{count}</span> : null
-      ) : (
-        <span className="pro-pill">Pro</span>
-      )}
+      ) : count !== null && variant === "sidebar" ? (
+        <span className="nav-count">{count}</span>
+      ) : null}
     </Link>
   );
 }

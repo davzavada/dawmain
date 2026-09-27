@@ -9,6 +9,7 @@ import {
   failIngest,
   finishIngest,
   getDocument,
+  ingestCandidates,
   MAX_INGEST_ATTEMPTS,
   writeDocumentIndex,
   type DocumentRow,
@@ -52,11 +53,13 @@ import { DOC_TYPES, type BibMeta, type DocType, type ProposedMeta } from "./type
  *              MAX_INGEST_ATTEMPTS, then 'error' and the reservation is
  *              released; a document over its attempts is failed on claim.
  *
- * Status after a successful run: 'ready' when the library auto-confirms or
- * when the document replaces an already confirmed one (whose confirmed
- * metadata it keeps — the replacement was authorized at upload: uploader or
- * admin, same library); otherwise 'review', searchable only after the user
- * confirms. Never throws. Records the run's CPU time in usage_daily.
+ * Status after a successful run: 'ready' when the library auto-confirms;
+ * otherwise 'review', searchable only after the user confirms. A document
+ * that replaces an already confirmed one (authorized at upload: uploader or
+ * admin, same library) starts from the confirmed metadata instead of a new
+ * proposal, but still goes back to 'review' (plan §7): the new conversion
+ * may have moved pages, sections or the commented range, so a person looks
+ * once more. Never throws. Records the run's CPU time in usage_daily.
  */
 
 export type IngestResult = "done" | "lost" | "failed";
@@ -167,6 +170,8 @@ interface Prepared {
   status: "review" | "ready";
 }
 
+const REPLACED_DETAIL = "Nový převod dokumentu: metadata jsou převzata z původní verze, zkontrolujte je a potvrďte.";
+
 /** Parse the text and settle the metadata (see the header). */
 async function prepare(claim: Claimed): Promise<Prepared> {
   const { row, replaced, settings } = claim;
@@ -184,7 +189,15 @@ async function prepare(claim: Claimed): Promise<Prepared> {
       section_range: old.doc_type === "komentar" ? (sectionRangeOf(parsed.sections) ?? old.section_range ?? null) : (old.section_range ?? null),
       anchor_label: old.anchor_label ?? parsed.anchorLabel,
     };
-    return { text, parsed, meta, proposed: confirmedOld.proposed_meta ?? heuristic, statusDetail: null, status: "ready" };
+    const status = settings.autoConfirm === true ? "ready" : "review";
+    return {
+      text,
+      parsed,
+      meta,
+      proposed: confirmedOld.proposed_meta ?? heuristic,
+      statusDetail: status === "review" ? REPLACED_DETAIL : null,
+      status,
+    };
   }
 
   const ai =
@@ -341,15 +354,6 @@ export async function ingestDocument(docId: string, libraryId: string): Promise<
   } finally {
     if (claim) await recordCpu(libraryId, cpuStart);
   }
-}
-
-/** Queued documents, and processing ones whose lease expired (files_ingest_candidates — ids only). */
-export async function ingestCandidates(db: Queryable, limit: number): Promise<Array<{ id: string; libraryId: string; attempts: number }>> {
-  const { rows } = await db.query<{ id: string; library_id: string; attempts: number }>(
-    "SELECT id, library_id, attempts FROM files_ingest_candidates($1)",
-    [limit],
-  );
-  return rows.map((r) => ({ id: String(r.id), libraryId: String(r.library_id), attempts: Number(r.attempts) }));
 }
 
 /**

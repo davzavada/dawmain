@@ -178,7 +178,7 @@ export function Uploader({
       {replace ? (
         <div className="zd-banner">
           <span>
-            Nahráváte novou verzi dokumentu <strong>{replace.title}</strong>. Potvrzená metadata zůstanou, starý převod se po zpracování nahradí.
+            Nahráváte novou verzi dokumentu <strong>{replace.title}</strong>. Metadata se převezmou z původní verze a jen je znovu potvrdíte; starý převod se po zpracování nahradí.
           </span>
           <button type="button" className="zd-link-button" onClick={onCancelReplace}>
             Zrušit

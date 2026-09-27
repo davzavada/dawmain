@@ -156,6 +156,15 @@ export async function listAllLibraries(db: Queryable): Promise<Array<LibraryRow 
   return rows.map((r) => ({ ...mapLibrary({ ...r, settings: {} }), created_at: iso(r.created_at) }));
 }
 
+/** Mark (keeping the first date) or clear the Pro revocation of a library in scope. */
+export async function setProRevoked(db: Queryable, libraryId: string, revoked: boolean): Promise<void> {
+  await db.query(
+    `UPDATE libraries SET pro_revoked_at = CASE WHEN $2 THEN coalesce(pro_revoked_at, now()) ELSE NULL END
+      WHERE id = $1 AND purged_at IS NULL`,
+    [libraryId, revoked],
+  );
+}
+
 /**
  * Soft delete (Clerk user/org deleted, or Pro revoked for too long): the
  * cron purges after `after`. A repeated mark never postpones an earlier date.

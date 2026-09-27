@@ -977,3 +977,24 @@ export async function isBlocked(db: Queryable, contentSha256: string): Promise<b
   const { rows } = await db.query("SELECT 1 FROM blocked_content WHERE content_sha256 = $1", [sha]);
   return rows.length > 0;
 }
+
+/** Drop pending_gz of documents that ended in 'error' more than `days` ago. Returns how many. */
+export async function clearStalePending(db: Queryable, libraryId: string, days: number): Promise<number> {
+  const { rows } = await db.query(
+    `UPDATE documents SET pending_gz = NULL
+      WHERE library_id = $1 AND status = 'error' AND pending_gz IS NOT NULL
+        AND updated_at < now() - make_interval(days => $2)
+      RETURNING id`,
+    [libraryId, days],
+  );
+  return rows.length;
+}
+
+/** Queued documents, and processing ones whose lease expired (files_ingest_candidates — ids only). */
+export async function ingestCandidates(db: Queryable, limit: number): Promise<Array<{ id: string; libraryId: string; attempts: number }>> {
+  const { rows } = await db.query<{ id: string; library_id: string; attempts: number }>(
+    "SELECT id, library_id, attempts FROM files_ingest_candidates($1)",
+    [limit],
+  );
+  return rows.map((r) => ({ id: String(r.id), libraryId: String(r.library_id), attempts: Number(r.attempts) }));
+}

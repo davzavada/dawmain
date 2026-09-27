@@ -110,6 +110,12 @@ export async function acceptTerms(db: Queryable, userId: string, version: string
   await db.query("INSERT INTO terms_acceptance (user_id, version) VALUES ($1, $2) ON CONFLICT DO NOTHING", [userId, version]);
 }
 
+/** A deleted Clerk user: their acceptances go with the account. */
+export async function forgetTermsAcceptance(db: Queryable, userId: string): Promise<void> {
+  if (!USER_ID_RE.test(userId)) return;
+  await db.query("DELETE FROM terms_acceptance WHERE user_id = $1", [userId]);
+}
+
 /**
  * Append to the audit log (who did what in which library). `detail` is
  * stored as JSON — callers put ids and counts there, never document text.

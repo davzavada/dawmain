@@ -26,6 +26,7 @@ import {
   canEditDocument,
   emptyAccess,
   getAccess,
+  invalidateAccess,
   libraryOwnerState,
   proFrom,
   quotaFrom,
@@ -189,6 +190,23 @@ describe("getAccess", () => {
     expect(loader).toHaveBeenCalledTimes(3);
     await getAccess("user_b");
     expect(loader).toHaveBeenCalledTimes(4);
+  });
+
+  it("joined accepts 2 s; invalidateAccess forgets the user", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-27T10:00:00Z"));
+    const loader = vi.fn(async (userId: string): Promise<Access> => emptyAccess(userId));
+    __setAccessLoaderForTests(loader);
+    await getAccess("user_a");
+    vi.setSystemTime(new Date("2026-09-27T10:00:01Z"));
+    await getAccess("user_a", { joined: true });
+    expect(loader).toHaveBeenCalledTimes(1);
+    vi.setSystemTime(new Date("2026-09-27T10:00:03Z"));
+    await getAccess("user_a", { joined: true });
+    expect(loader).toHaveBeenCalledTimes(2);
+    invalidateAccess("user_a");
+    await getAccess("user_a");
+    expect(loader).toHaveBeenCalledTimes(3);
   });
 
   it("the test loader's result is frozen too", async () => {

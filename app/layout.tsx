@@ -1,4 +1,5 @@
 import { ClerkProvider } from "@clerk/nextjs";
+import { csCZ } from "@clerk/localizations";
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
@@ -55,7 +56,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   );
   return (
     <html lang="cs" className={`${geist.variable} ${geistMono.variable}`}>
-      <body>{clerk ? <ClerkProvider afterSignOutUrl="/">{page}</ClerkProvider> : page}</body>
+      <body>{clerk ? <ClerkProvider afterSignOutUrl="/" localization={csCZ}>{page}</ClerkProvider> : page}</body>
     </html>
   );
 }

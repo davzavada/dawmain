@@ -768,7 +768,7 @@ main > footer a {
    Vlastní zdroje (Pro) — the account control, the Vlastní zdroje and team
    modals, the home page group, the nav item and the operator page
    (app/_zdroje/*, app/vlastni-zdroje/provoz). Owner's design: frames 1a–3f.
-   Everything here is prefixed zd- except .pro-pill (the nav's "Pro" mark).
+   Everything here is prefixed zd-.
    The dark theme below derives from the same tokens for the whole site.
    ========================================================================== */
 
@@ -849,22 +849,6 @@ main > footer a {
 
 /* Small shared pieces */
 
-.pro-pill {
-  margin-left: auto;
-  flex: none;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: var(--accent-bg);
-  color: var(--accent);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  line-height: 1.5;
-}
-.tab-item .pro-pill,
-.source-group-head .pro-pill {
-  margin-left: 0;
-}
 .zd-muted {
   color: var(--muted);
 }

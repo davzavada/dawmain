@@ -152,12 +152,13 @@ function detailOf(row: DocumentRow, lib: LibraryAccess, userId: string, names: M
  * The database is touched only for a user with at least one Pro library
  * (anyone else — signed out, never Pro — never wakes it); libraries
  * without Pro come without counts (their list loads when opened). `fresh`
- * (after accepting a team invitation) accepts access at most 10 s old.
+ * (right after accepting a team invitation) accepts access at most 2 s old,
+ * so the new team shows up at once.
  */
 export async function summaryFor(userId: string, opts: { fresh?: boolean } = {}): Promise<SummaryResponse> {
   const env = envOnlyMode();
   if (env === "off" || env === "unconfigured") return { state: "unavailable", mode: env };
-  const access = await getAccess(userId, { fresh: opts.fresh === true });
+  const access = await getAccess(userId, { joined: opts.fresh === true });
   const pro = access.libraries.map((l) => l.id);
   let mode: FilesMode = env;
   let termsAccepted = false;

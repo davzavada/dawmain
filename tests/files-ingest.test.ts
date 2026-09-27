@@ -235,7 +235,7 @@ describe("ingestDocument — success", () => {
 });
 
 describe("ingestDocument — replaces", () => {
-  it("a re-upload of a confirmed document keeps the confirmed metadata, becomes ready and deletes the old one", async () => {
+  it("a re-upload of a confirmed document keeps the confirmed metadata, goes back to review and deletes the old one", async () => {
     const old = await seed(LIB, commentaryDmd(6, "stará verze"));
     expect(await ingestDocument(old.id, LIB)).toBe("done");
     await t.owner.query(
@@ -249,7 +249,8 @@ describe("ingestDocument — replaces", () => {
     expect(await ingestDocument(fresh.id, LIB)).toBe("done");
 
     const d = await doc(fresh.id);
-    expect(d).toMatchObject({ status: "ready", title: "Potvrzený název", doc_type: "komentar", authors: ["Jan Petrov"] });
+    expect(d).toMatchObject({ status: "review", title: "Potvrzený název", doc_type: "komentar", authors: ["Jan Petrov"], confirmed_at: null });
+    expect(d.status_detail).toMatch(/převzata z původní verze/);
     expect(d.section_range).toBe("§ 2913–2916");
     expect(d.ident_keys as string[]).toContain("zak:89/2012");
     expect(await doc(old.id)).toBeUndefined();
@@ -258,6 +259,16 @@ describe("ingestDocument — replaces", () => {
     expect(propose.fn).toHaveBeenCalledTimes(1); // only for the original
     const audit = await t.owner.query<{ action: string; detail: { replaced: string } }>("SELECT action, detail FROM audit_log WHERE doc_id = $1", [fresh.id]);
     expect(audit.rows).toEqual([expect.objectContaining({ action: "document.replaced", detail: expect.objectContaining({ replaced: old.id }) })]);
+  });
+
+  it("a re-upload of a confirmed document in an auto-confirming library is ready at once", async () => {
+    const old = await seed(LIB, commentaryDmd(4, "a"));
+    await t.owner.query(`UPDATE libraries SET settings = '{"autoConfirm": true}'::jsonb WHERE id = $1`, [LIB]);
+    await ingestDocument(old.id, LIB);
+    await t.owner.query("UPDATE documents SET status = 'ready', confirmed_at = now(), title = 'Potvrzený' WHERE id = $1", [old.id]);
+    const fresh = await seed(LIB, commentaryDmd(4, "b"), { replaces: old.id });
+    expect(await ingestDocument(fresh.id, LIB)).toBe("done");
+    expect(await doc(fresh.id)).toMatchObject({ status: "ready", title: "Potvrzený", status_detail: null });
   });
 
   it("replacing a document still in review: the new one goes to review, the old one is deleted", async () => {

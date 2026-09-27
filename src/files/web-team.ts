@@ -1,6 +1,6 @@
 import "server-only";
 import { z } from "zod";
-import { getAccess, type Access, type LibraryAccess } from "./access";
+import { getAccess, invalidateAccess, type Access, type LibraryAccess } from "./access";
 import { envOnlyMode } from "./guards";
 import { LIBRARY_ID_RE, USER_ID_RE } from "./config";
 import { withScope } from "./db/client";
@@ -135,5 +135,6 @@ export async function removeFor(userId: string, orgId: string, memberId: string)
   const lib = adminLibrary(await getAccess(userId, { fresh: true }), orgId);
   if (!USER_ID_RE.test(memberId)) throw new FilesUserError(404, "Člen nenalezen.");
   await removeMember(lib.id, memberId, userId);
+  invalidateAccess(memberId);
   await auditQuietly({ libraryId: lib.id, actor: userId, action: "member.remove", detail: { member: memberId } });
 }

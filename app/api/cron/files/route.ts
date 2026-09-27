@@ -1,12 +1,12 @@
 import { libraryOwnerState } from "@/src/files/access";
 import { cronSecret, envMode } from "@/src/files/config";
-import { withScope, type Queryable } from "@/src/files/db/client";
-import { MAX_INGEST_ATTEMPTS } from "@/src/files/db/documents";
-import { listAllLibraries, markLibraryForPurge, purgeLibraryContent, type LibraryRow } from "@/src/files/db/libraries";
+import { withScope } from "@/src/files/db/client";
+import { clearStalePending, ingestCandidates, MAX_INGEST_ATTEMPTS } from "@/src/files/db/documents";
+import { listAllLibraries, markLibraryForPurge, purgeLibraryContent, setProRevoked, type LibraryRow } from "@/src/files/db/libraries";
 import { audit, setSystemState } from "@/src/files/db/usage";
 import { errorCode, filesJson } from "@/src/files/errors";
 import { effectiveMode, GUARDS_STATE_KEY, measureGuards } from "@/src/files/guards";
-import { ingestCandidates, ingestDocument } from "@/src/files/ingest";
+import { ingestDocument } from "@/src/files/ingest";
 import { tokenMatches } from "@/src/mcp/config";
 
 export const runtime = "nodejs";
@@ -217,25 +217,4 @@ function rotate<T>(items: T[], n: number, day: number): T[] {
   if (items.length <= n) return items;
   const start = (day * n) % items.length;
   return [...items.slice(start), ...items.slice(0, start)].slice(0, n);
-}
-
-/** Mark (keeping the first date) or clear the Pro revocation of a library in scope. */
-async function setProRevoked(db: Queryable, libraryId: string, revoked: boolean): Promise<void> {
-  await db.query(
-    `UPDATE libraries SET pro_revoked_at = CASE WHEN $2 THEN coalesce(pro_revoked_at, now()) ELSE NULL END
-      WHERE id = $1 AND purged_at IS NULL`,
-    [libraryId, revoked],
-  );
-}
-
-/** Drop pending_gz of documents that ended in 'error' more than `days` ago. Returns how many. */
-async function clearStalePending(db: Queryable, libraryId: string, days: number): Promise<number> {
-  const { rows } = await db.query(
-    `UPDATE documents SET pending_gz = NULL
-      WHERE library_id = $1 AND status = 'error' AND pending_gz IS NOT NULL
-        AND updated_at < now() - make_interval(days => $2)
-      RETURNING id`,
-    [libraryId, days],
-  );
-  return rows.length;
 }

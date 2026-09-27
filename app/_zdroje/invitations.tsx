@@ -41,9 +41,10 @@ export function useInvitations(): {
 
   async function settle(): Promise<void> {
     await userInvitations?.revalidate?.();
-    // Access is cached on the server for up to 10 s even when fresh: ask now and once more later.
+    // The server re-reads access at most 2 s old after a join: ask now, and
+    // once more in case Clerk had not propagated the membership yet.
     void refreshSummary({ fresh: true });
-    window.setTimeout(() => void refreshSummary({ fresh: true }), 11_000);
+    window.setTimeout(() => void refreshSummary({ fresh: true }), 3_000);
   }
 
   return {
