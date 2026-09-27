@@ -30,8 +30,8 @@ export interface Furniture {
   removed: Set<Row>;
   /** Pure-number rows at the top or bottom edge not confirmed by the cluster: removed only if they match the label. */
   loose: Map<Row, PrintedNumber>;
-  /** Printed page number read per physical page. */
-  numbers: Map<number, PrintedNumber>;
+  /** Printed page numbers read per physical page (a head and a footer may both carry one). */
+  numbers: Map<number, PrintedNumber[]>;
   /** Running-head text per page (page number removed, watermarks excluded). */
   heads: Map<number, string[]>;
   /** Watermark rows removed (count). */
@@ -43,13 +43,24 @@ const BAND = 0.16;
 /**
  * Header/footer detection. Candidates per page: the top rows (≤ 2) above
  * the first gap ≥ 1.4 × lineGap inside the top 16 % of the page, and the
- * same at the bottom. Candidates are clustered by y (± `tolerance` pt);
- * a cluster present on ≥ 50 % of the text pages (or of the pages of one
- * parity; at least 2) is furniture. A candidate that looks like the start
- * of a footnote needs its digit-masked text to repeat as well. Watermark
- * text in the band is always removed. Pure.
+ * same at the bottom — not larger than the body text and not an outline
+ * heading (`isHeading`). Candidates are clustered by y (± tolerance, 1.5 pt;
+ * 3 pt for OCR); a cluster present on ≥ 50 % of the text pages (or of the
+ * pages of one parity; at least 2) is furniture. Two pages are weak
+ * evidence: then every row must carry a page number, or all repeat the
+ * same text (digits masked). A bottom candidate that looks like the start of a footnote needs its
+ * digit-masked text to repeat as well. Watermark text in the band is always
+ * removed. Pure.
  */
-export function detectFurniture(pages: PageRows[], lineGap: number, tolerance = 1.5): Furniture {
+export function detectFurniture(
+  pages: PageRows[],
+  lineGap: number,
+  opts: { bodySize: number; tolerance?: number; isHeading?: (page: number, text: string) => boolean },
+): Furniture {
+  const tolerance = opts.tolerance ?? 1.5;
+  // Running heads are set at or below the body size; a larger row at the
+  // same y on every page is a heading that opens each page (short documents).
+  const eligible = (page: number, row: Row) => row.size <= opts.bodySize + 0.5 && !opts.isHeading?.(page, runsText(row.runs));
   type Cand = { page: number; row: Row; band: "top" | "bottom" };
   const cands: Cand[] = [];
   const textPages = pages.filter((p) => p.rows.length);
@@ -78,12 +89,12 @@ export function detectFurniture(pages: PageRows[], lineGap: number, tolerance = 
         break;
       }
     }
-    for (const row of top) cands.push({ page: p.ord, row, band: "top" });
-    for (const row of bottom) if (!top.includes(row)) cands.push({ page: p.ord, row, band: "bottom" });
+    for (const row of top) if (eligible(p.ord, row)) cands.push({ page: p.ord, row, band: "top" });
+    for (const row of bottom) if (!top.includes(row) && eligible(p.ord, row)) cands.push({ page: p.ord, row, band: "bottom" });
   }
 
   const loose = new Map<Row, PrintedNumber>();
-  const numbers = new Map<number, PrintedNumber>();
+  const numbers = new Map<number, PrintedNumber[]>();
   const heads = new Map<number, string[]>();
   const accept = (c: Cand) => {
     if (removed.has(c.row)) return;
@@ -94,7 +105,7 @@ export function detectFurniture(pages: PageRows[], lineGap: number, tolerance = 
       return;
     }
     const num = pageNumberIn(text);
-    if (num && !numbers.has(c.page)) numbers.set(c.page, num.number);
+    if (num) numbers.set(c.page, [...(numbers.get(c.page) ?? []), num.number]);
     const head = (num ? num.rest : text).trim();
     if (head && /\p{L}/u.test(head)) heads.set(c.page, [...(heads.get(c.page) ?? []), head]);
   };
@@ -113,11 +124,14 @@ export function detectFurniture(pages: PageRows[], lineGap: number, tolerance = 
       const parity = new Set(cluster.map((c) => c.page % 2));
       const need = Math.max(2, Math.ceil(0.5 * total));
       const needParity = parity.size === 1 ? Math.max(2, Math.ceil(0.5 * byParity[[...parity][0]])) : Infinity;
-      const supported = pagesIn.size >= need || pagesIn.size >= needParity;
       const masked = new Map<string, number>();
       for (const c of cluster) {
         const key = foldText(runsText(c.row.runs)).replace(/\d+/g, "#");
         masked.set(key, (masked.get(key) ?? 0) + 1);
+      }
+      let supported = pagesIn.size >= need || pagesIn.size >= needParity;
+      if (supported && pagesIn.size < 3) {
+        supported = cluster.every((c) => pageNumberIn(runsText(c.row.runs))) || [...masked.values()].some((n) => n === cluster.length);
       }
       for (const c of cluster) {
         const text = runsText(c.row.runs);
@@ -127,7 +141,7 @@ export function detectFurniture(pages: PageRows[], lineGap: number, tolerance = 
         }
         const num = pageNumberIn(text);
         if (supported) {
-          const noteLike = c.row.runs[0]?.sup || /^\d{1,4}\)?\s+\p{L}/u.test(text);
+          const noteLike = band === "bottom" && (c.row.runs[0]?.sup || /^\d{1,4}\)?\s+\p{L}/u.test(text));
           const repeated = (masked.get(foldText(text).replace(/\d+/g, "#")) ?? 0) >= Math.max(2, 0.5 * cluster.length);
           if (!noteLike || repeated || (num && !num.rest.trim())) accept(c);
         } else if (num && !num.rest.trim()) loose.set(c.row, num.number);
@@ -156,7 +170,10 @@ export function pageNumberIn(text: string): { number: PrintedNumber; rest: strin
   m = /^(\d{1,4})\s+(\S.*)$/.exec(t);
   if (m && !/^(?:odst|písm|zák|Sb|č)\b/.test(m[2])) return { number: { value: Number(m[1]), roman: null }, rest: m[2] };
   m = /^(.*\S)\s+(\d{1,4})$/.exec(t);
-  if (m && !/(?:§|čl\.|odst\.|Sb\.|č\.)\s*$/i.test(m[1])) return { number: { value: Number(m[2]), roman: null }, rest: m[1] };
+  // "Hlava 2", "Kapitola 3", "§ 12", "čl. 4" name a division, not a page.
+  if (m && !/(?:^|\s)(?:§|čl\.|odst\.|Sb\.|č\.|hlava|kapitola|díl|část|oddíl|článek|chapter|part|teil)$/iu.test(m[1])) {
+    return { number: { value: Number(m[2]), roman: null }, rest: m[1] };
+  }
   return null;
 }
 

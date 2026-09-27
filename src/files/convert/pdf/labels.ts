@@ -34,28 +34,30 @@ export function cleanLabel(raw: string): string | null {
 
 /**
  * Labels for `count` physical pages. `printed` holds the page numbers read
- * from the page furniture; `textPages` the pages that carry text (the 70 %
- * base). Pure.
+ * from each page's furniture (several per page possible); `textPages` the
+ * pages that carry text (the 70 % base). Pure.
  */
 export function computeLabels(args: {
   count: number;
   pdfLabels: string[] | null;
-  printed: Map<number, PrintedNumber>;
+  printed: Map<number, PrintedNumber[]>;
   textPages: number[];
   calibration?: number | null;
 }): LabelResult {
   const { count, pdfLabels, printed, textPages } = args;
   const flags = new Array<number>(count).fill(0);
+  const reads = (ord: number, n: number) => (printed.get(ord) ?? []).some((p) => p.value === n);
+  const romanOf = (ord: number) => (printed.get(ord) ?? []).find((p) => p.roman !== null)?.roman ?? null;
   const byOffset = (offset: number, guess: boolean): string[] =>
     Array.from({ length: count }, (_, i) => {
       const ord = i + 1;
       const n = ord + offset;
       if (n >= 1) {
-        if (guess && printed.get(ord)?.value !== n) flags[i] |= PAGE_FLAGS.LABEL_GUESSED;
+        if (guess && !reads(ord, n)) flags[i] |= PAGE_FLAGS.LABEL_GUESSED;
         return String(n);
       }
       // Front matter before printed page 1: its own Roman numeral when printed, else one by position.
-      const roman = printed.get(ord)?.roman;
+      const roman = romanOf(ord);
       if (guess && !roman) flags[i] |= PAGE_FLAGS.LABEL_GUESSED;
       return roman ?? toRoman(ord);
     });
@@ -74,11 +76,19 @@ export function computeLabels(args: {
     }
   }
 
+  // Every offset any page's number suggests; a page votes once per offset.
   const votes = new Map<number, number>();
-  for (const [ord, num] of printed) if (num.value !== null) votes.set(num.value - ord, (votes.get(num.value - ord) ?? 0) + 1);
+  for (const [ord, nums] of printed) {
+    for (const d of new Set(nums.filter((n) => n.value !== null).map((n) => n.value! - ord))) votes.set(d, (votes.get(d) ?? 0) + 1);
+  }
   let offset = 0;
-  let support = 0;
-  for (const [d, n] of votes) if (n > support || (n === support && Math.abs(d) < Math.abs(offset))) [offset, support] = [d, n];
+  let support = -1;
+  for (const d of votes.keys()) {
+    // Roman-numbered front matter before printed page 1 agrees with the offset too.
+    let s = votes.get(d)!;
+    for (const [ord, nums] of printed) if (ord + d < 1 && nums.some((n) => n.roman !== null)) s++;
+    if (s > support || (s === support && Math.abs(d) < Math.abs(offset))) [offset, support] = [d, s];
+  }
   const base = Math.max(1, textPages.length);
   const minSupport = textPages.length <= 2 ? 1 : 2;
   if (support >= minSupport && support >= 0.7 * base) {

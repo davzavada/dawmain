@@ -148,7 +148,8 @@ function attachSuperscriptRows(rows: Row[]): Row[] {
       for (const run of row.runs) {
         const small = run.size <= 0.85 * next.size || (run.size <= next.size + 0.01 && LABELISH_RE.test(run.str.trim()));
         const liftOk = lift >= 0.12 * next.size && lift <= 0.75 * next.size;
-        const inside = run.x >= next.x0 - next.size && run.x <= next.x1 + next.size;
+        // A note label may sit well left of its line's text (label, then a tab).
+        const inside = run.x >= next.x0 - 2.5 * next.size && run.x <= next.x1 + next.size;
         if (small && liftOk && inside) {
           run.sup = true;
           next.runs.push(run);
@@ -279,9 +280,9 @@ export interface Edges {
 /**
  * Left and right edges of the text block per page parity (books mirror
  * their margins): the 20th percentile of line starts and the 80th of line
- * ends, over body-size rows with ≥ 20 characters, ignoring digit-only runs
- * (marginal numbers). A parity with too few rows uses both; a document with
- * too few uses each page's own extent. Pure.
+ * ends, over body-size rows with ≥ 20 characters, ignoring runs without a
+ * letter (marginal numbers). A parity with fewer than 12 such rows uses
+ * both parities; a document without any uses each page's own extent. Pure.
  */
 export function textEdges(pages: Array<{ ord: number; rows: Row[]; width: number }>, bodySize: number): (ord: number) => Edges {
   const starts: [number[], number[]] = [[], []];
@@ -303,15 +304,16 @@ export function textEdges(pages: Array<{ ord: number; rows: Row[]; width: number
   const byParity: Array<Edges | null> = [0, 1].map((k) => {
     const s = starts[k].length >= 12 ? starts[k] : both.s;
     const e = ends[k].length >= 12 ? ends[k] : both.e;
-    return s.length >= 3 ? { left: pct(s, 0.2), right: pct(e, 0.8) } : null;
+    return s.length ? { left: pct(s, 0.2), right: pct(e, 0.8) } : null;
   });
   const own = new Map(pages.map((p) => [p.ord, p]));
   return (ord: number) => {
     const edges = byParity[ord % 2];
     if (edges) return edges;
-    const rows = own.get(ord)?.rows ?? [];
-    if (!rows.length) return { left: 0, right: own.get(ord)?.width ?? 0 };
-    return { left: Math.min(...rows.map((r) => r.x0)), right: Math.max(...rows.map((r) => r.x1)) };
+    const page = own.get(ord);
+    const runs = (page?.rows ?? []).flatMap((r) => r.runs.filter((x) => /\p{L}/u.test(x.str)));
+    if (!runs.length) return { left: 0, right: page?.width ?? 0 };
+    return { left: Math.min(...runs.map((r) => r.x)), right: Math.max(...runs.map((r) => r.x1)) };
   };
 }
 
@@ -391,8 +393,10 @@ function spans(row: Row): Array<[number, number]> {
  * Two-column detection (one vertical gutter per band): the x in the middle
  * 40 % of the text block covered by the fewest rows is the gutter
  * candidate; rows crossing it cut the page into bands; a band of ≥ 3 rows
- * with a gutter ≥ max(7 pt, 0.8 em) where ≥ 30 % of rows have text on both
- * sides is read left column first. Pure.
+ * with a gutter ≥ max(7 pt, 0.8 em), ≥ 3 rows on each side, a right
+ * column with a common left edge, and text on both sides — in ≥ 30 % of
+ * its rows, or (baselines of the columns not aligned) in two blocks side
+ * by side — is read left column first. Pure.
  */
 export function splitColumns(rows: Row[], edges: Edges, enabled: boolean): ColumnResult {
   const single = (): ColumnResult => ({
@@ -407,12 +411,27 @@ export function splitColumns(rows: Row[], edges: Edges, enabled: boolean): Colum
   const covers = (i: number, x: number) => rowSpans[i].some(([a, b]) => a - 0.5 <= x && x <= b + 0.5);
   const lo = Math.ceil(edges.left + 0.3 * width);
   const hi = Math.floor(edges.left + 0.7 * width);
+  // Fast path (almost every page of a book): most rows run through the whole middle.
+  const through = rowSpans.filter((sp) => sp.some(([a, b]) => a - 0.5 <= lo && hi <= b + 0.5)).length;
+  if (through >= 0.8 * rows.length) return single();
   const mid = edges.left + width / 2;
+  // Rows NOT covering each x of [lo, hi], from the gaps between spans (a difference array).
+  const open = new Int32Array(hi - lo + 2);
+  for (const sp of rowSpans) {
+    const gaps: Array<[number, number]> = [[-Infinity, sp[0][0]], ...sp.slice(1).map((s, k): [number, number] => [sp[k][1], s[0]]), [sp[sp.length - 1][1], Infinity]];
+    for (const [a, b] of gaps) {
+      const from = Math.max(lo, Math.floor(a + 0.5) + 1);
+      const to = Math.min(hi, Math.ceil(b - 0.5) - 1);
+      if (from > to) continue;
+      open[from - lo]++;
+      open[to - lo + 1]--;
+    }
+  }
   let gx = -1;
   let gCover = Infinity;
-  for (let x = lo; x <= hi; x++) {
-    let c = 0;
-    for (let i = 0; i < rows.length; i++) if (covers(i, x)) c++;
+  for (let x = lo, run = 0; x <= hi; x++) {
+    run += open[x - lo];
+    const c = rows.length - run;
     if (c < gCover || (c === gCover && Math.abs(x - mid) < Math.abs(gx - mid))) [gx, gCover] = [x, c];
   }
   if (gx < 0 || gCover >= 0.8 * rows.length) return single();
@@ -478,8 +497,20 @@ function tryGutter(rows: Row[], gx: number) {
     if (l.length && r.length) both++;
   }
   const ratio = both / rows.length;
-  if (leftRows < 2 || rightRows < 2 || ratio < 0.3 || rightStart - leftEnd < Math.max(7, 0.8 * size)) return null;
-  return { left, right, leftEnd, rightStart, unsure: ratio < 0.6 };
+  // Two lines whose wide word gaps happen to line up are not a column.
+  if (leftRows < 3 || rightRows < 3 || rightStart - leftEnd < Math.max(7, 0.8 * size)) return null;
+  // Side by side, not one block above the other: the two sides' vertical
+  // extents overlap (baselines of the columns need not line up).
+  const extent = (side: Array<{ row: Row }>) => [side[0].row.y, side[side.length - 1].row.y];
+  const [lTop, lBottom] = extent(left);
+  const [rTop, rBottom] = extent(right);
+  const overlap = Math.min(lBottom, rBottom) - Math.max(lTop, rTop);
+  if (ratio < 0.3 && overlap < 0.5 * Math.min(lBottom - lTop, rBottom - rTop)) return null;
+  // A real right column has a common left edge (paragraph indents aside); a
+  // loosely justified short line split at a wide word gap does not.
+  const aligned = right.filter(({ runs }) => Math.min(...runs.map((r) => r.x)) - rightStart <= 1.5 * size).length;
+  if (aligned < 0.6 * right.length) return null;
+  return { left, right, leftEnd, rightStart, unsure: ratio < 0.3 ? overlap < 0.8 * Math.min(lBottom - lTop, rBottom - rTop) : ratio < 0.6 };
 }
 
 // ─────────────────────────────────────────────────────────────── lines
@@ -556,6 +587,11 @@ export function buildSegments(columns: ColumnResult, page: number, mns: Map<Row,
 /** Hyphenated compounds written mid-line anywhere in the body. Pure. */
 export function hyphenDictionary(lines: Iterable<Line>): Set<string> {
   const dict = new Set<string>();
-  for (const line of lines) collectHyphenated(line.plain.replace(/\S+[-‐‑]$/u, ""), dict);
+  for (const line of lines) {
+    // Leave out the line-end fragment ("povin-"): it is the split word itself.
+    const text = line.plain;
+    const cut = /[-\u2010\u2011]$/.test(text) ? text.lastIndexOf(" ") + 1 : text.length;
+    collectHyphenated(text.slice(0, cut), dict);
+  }
   return dict;
 }

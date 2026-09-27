@@ -112,10 +112,6 @@ export interface PageModel {
   notes: Note[];
   /** Footnote-zone text kept as body text at the page end (unsure zone, orphan continuation). */
   endText: Line[];
-  /** Characters of text on the page before any removal (scan check). */
-  rawChars: number;
-  /** Private-use-area glyphs among them. */
-  puaChars: number;
   /** Running heads (header/footer text without the page number). */
   heads: string[];
   /** In the selected page range (emitted). */

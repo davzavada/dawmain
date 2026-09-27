@@ -63,6 +63,7 @@ export function normalizeLabel(raw: string): string | null {
 const SUP_DIGITS = "⁰¹²³⁴⁵⁶⁷⁸⁹";
 const SUP_CHARS: Record<string, string> = { "⁾": ")", "⁽": "(", "⁺": "+", "⁻": "-", "ⁱ": "i", "ⁿ": "n" };
 const SUPERSCRIPT_RE = /[⁰¹²³⁴-⁹⁾]+/g;
+const HAS_SUPERSCRIPT_RE = /[⁰¹²³⁴-⁹⁾]/;
 
 /** "¹²⁾" → "12)". Other characters pass through. Pure. */
 export function fromSuperscript(s: string): string {
@@ -88,6 +89,8 @@ export function toSuperscript(s: string): string {
 
 /** Split text at runs of Unicode superscript digits: "škody¹² a" → text "škody", sup "¹²", text " a". Pure. */
 export function splitSuperscripts(s: string): Array<{ sup: boolean; s: string }> {
+  if (!s) return [];
+  if (!HAS_SUPERSCRIPT_RE.test(s)) return [{ sup: false, s }];
   const out: Array<{ sup: boolean; s: string }> = [];
   let last = 0;
   for (const m of s.matchAll(SUPERSCRIPT_RE)) {
@@ -139,6 +142,7 @@ export type HyphenDict = ReadonlySet<string>;
 
 /** Collect folded "left-right" compounds from a line (not its line-end fragment). Pure. */
 export function collectHyphenated(text: string, into: Set<string>): void {
+  if (!text.includes("-")) return;
   for (const m of text.matchAll(/(\p{L}+)-(\p{L}+)/gu)) into.add(`${foldText(m[1])}-${foldText(m[2])}`);
 }
 
@@ -169,7 +173,7 @@ export interface Join {
 export function joinLines(left: string, right: string, dict: HyphenDict): Join {
   const l = left.replace(/\s+$/, "");
   const r = right.replace(/^\s+/, "");
-  const m = LINE_END_HYPHEN_RE.exec(l);
+  const m = HYPHENS.includes(l[l.length - 1] ?? " ") ? LINE_END_HYPHEN_RE.exec(l) : null;
   if (m && r.length) {
     const hyphen = l[l.length - 1];
     const stem = l.slice(0, -1);
@@ -268,6 +272,11 @@ export const WATERMARK_RE =
 /** Czech plural of "strana" in the locative ("na 1 straně", "na 2 stranách"). Pure. */
 export function pagesLoc(n: number): string {
   return n === 1 ? "1 straně" : `${n} stranách`;
+}
+
+/** Czech count phrase: plural(1, "řádek", "řádky", "řádků") → "1 řádek"; 3 → "3 řádky"; 5 → "5 řádků". Pure. */
+export function plural(n: number, one: string, few: string, many: string): string {
+  return `${n} ${n === 1 ? one : n >= 2 && n <= 4 ? few : many}`;
 }
 
 /** "s. 3, 5, 12 a další" — at most `max` labels. Pure. */

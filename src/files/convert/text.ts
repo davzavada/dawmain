@@ -506,8 +506,9 @@ function emitBlock(lines: Array<{ text: string; code: boolean }>, st: TextState,
  * Unpaged: labelSource "none", no page markers. Pure.
  */
 export function convertText(text: string, kind: "txt" | "md"): ConvertResult {
-  // Tabs first: pandoc indents continuations with a tab; normalizeDmd would make it one space.
-  const normalized = normalizeDmd(text.replace(/\t/g, "    ")).text;
+  // Leading tabs first: pandoc indents continuations with a tab, and
+  // normalizeDmd turns every tab into one space.
+  const normalized = normalizeDmd(text.replace(/^\t+/gm, (tabs) => "    ".repeat(tabs.length))).text;
   const { items, defs } = splitDefinitions(normalized.split("\n"));
   const referenced = referencedLabels(items);
   const st: TextState = {
