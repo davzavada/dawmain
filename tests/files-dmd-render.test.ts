@@ -173,7 +173,7 @@ describe("renderRange", () => {
 
   it("clamps the range to the source and returns '' for an empty one", () => {
     expect(renderRange(src, 50, 50, fns, { mode: "after" })).toBe("");
-    expect(renderRange(source(DOC, 10, 20), 0, 1000, [], { mode: "after" })).toBe(DOC.slice(10, 20));
+    expect(renderRange(source(DOC, 10, 19), 0, 1000, [], { mode: "after" })).toBe("## § 2913");
   });
 
   it("content can never produce reserved brackets", () => {
