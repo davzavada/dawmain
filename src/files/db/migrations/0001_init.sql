@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS documents (
   attempts          smallint NOT NULL DEFAULT 0,
   file_kind         text NOT NULL CHECK (file_kind IN ('pdf','docx','txt','md')),
   file_name         text NOT NULL CHECK (length(file_name) <= 255),
+  file_bytes        bigint CHECK (file_bytes IS NULL OR file_bytes >= 0),  -- size of the original (never stored)
   file_sha256       text NOT NULL CHECK (file_sha256 ~ '^[0-9a-f]{64}$'),    -- client-asserted
   content_sha256    text NOT NULL CHECK (content_sha256 ~ '^[0-9a-f]{64}$'), -- server-verified
   converter         text NOT NULL CHECK (length(converter) <= 40),
@@ -50,6 +51,7 @@ CREATE TABLE IF NOT EXISTS documents (
   confirmed_at      timestamptz,
   confirmed_by      text,
   injection_flag    boolean NOT NULL DEFAULT false,
+  enabled           boolean NOT NULL DEFAULT true,   -- "vypnutý dokument asistent přeskočí"
   -- bibliographic metadata (typed, for filters and citations)
   doc_type          text CHECK (doc_type IN ('kniha','kapitola','clanek','komentar','vzor','rozhodnuti','jine')),
   title             text CHECK (length(title) <= 500),
