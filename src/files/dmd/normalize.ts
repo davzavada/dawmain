@@ -3,7 +3,7 @@
  * conversion AND on the server before parsing (the server never trusts the
  * client's normalization). Isomorphic and pure.
  *
- * Besides hygiene (NFC, line ends) it closes two injection paths:
+ * Besides hygiene (NFC; CRLF, CR and U+2028/U+2029 → "\n") it closes two injection paths:
  * - bidi and zero-width characters, which can make text read differently
  *   to a human than to a model;
  * - the reserved brackets ⟦ ⟧ that tool output uses for page markers,
@@ -22,14 +22,17 @@ const RESERVED_CLOSE = /⟧/g; // ⟧
 
 export function normalizeDmd(input: string): { text: string; changed: boolean } {
   const text = input
-    .normalize("NFC")
-    .replace(/\r\n?/g, "\n")
+    .replace(/\r\n?|[\u2028\u2029]/g, "\n")
     .replace(/\t/g, " ")
     .replace(CONTROLS, "")
     .replace(BIDI, "")
     .replace(ZERO_WIDTH, "")
     .replace(RESERVED_OPEN, "[")
-    .replace(RESERVED_CLOSE, "]");
+    .replace(RESERVED_CLOSE, "]")
+    // NFC last: removing a zero-width or control character between a base
+    // letter and a combining mark leaves a sequence that only now composes,
+    // and a second pass must be a no-op.
+    .normalize("NFC");
   return { text, changed: text !== input };
 }
 
