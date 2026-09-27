@@ -1,5 +1,4 @@
 import { Suspense } from "react";
-import Link from "next/link";
 import { headers } from "next/headers";
 import {
   DATABASE_GROUPS,
@@ -11,6 +10,7 @@ import { getStatuses } from "./_status";
 import { Guide } from "./_guide";
 import { Icon, type IconName } from "./_icons";
 import { Mail } from "./_legal";
+import { OwnSourcesGroup } from "./_zdroje/own-sources";
 
 export const dynamic = "force-dynamic";
 
@@ -116,33 +116,6 @@ function SourceListFallback() {
   );
 }
 
-/** Own documents (Pro, granted by hand for free) - a card into the library. */
-function OwnSources() {
-  return (
-    <div className="source-group">
-      <div className="source-group-head">
-        <span className="source-group-name">Vlastní zdroje</span>
-        <span className="pro-pill">Pro</span>
-        <span className="source-group-count">zdarma, přiděluji ručně</span>
-      </div>
-      <Link href="/vlastni-zdroje" className="project-card">
-        <Icon name="upload" size={20} style={{ color: "var(--accent)" }} />
-        <span className="project-text">
-          <span className="project-name">Nahrát vlastní zdroje</span>
-          <span className="project-desc">
-            Nahrajete knihy, články, komentáře a vzory. Na text se převedou přímo ve vašem
-            prohlížeči, takže originál váš počítač neopustí. Asistent v nich pak hledá vedle
-            oficiálních databází.
-          </span>
-        </span>
-        <span className="project-arrow" aria-hidden="true">
-          →
-        </span>
-      </Link>
-    </div>
-  );
-}
-
 export default async function Home() {
   const headerList = await headers();
   const host = headerList.get("x-forwarded-host") ?? headerList.get("host") ?? "localhost:3000";
@@ -180,7 +153,8 @@ export default async function Home() {
 
       <section id="zdroje" className="sources">
         <h2>Zdroje</h2>
-        <OwnSources />
+        {/* Client island: counts from GET /api/files/summary; the page stays server-rendered. */}
+        <OwnSourcesGroup />
         <Suspense fallback={<SourceListFallback />}>
           <SourceList />
         </Suspense>

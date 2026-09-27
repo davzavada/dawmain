@@ -3,10 +3,13 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { formatTime } from "@/src/mcp/status";
 import { getStatuses } from "./_status";
+import { AccountControl } from "./_zdroje/account";
 
 /**
- * The sticky bar across the top of every page: the name, and on wide screens
- * a one-line summary of the source checks.
+ * The sticky bar across the top of every page: the name, on wide screens a
+ * one-line summary of the source checks, and at the right end the account
+ * control (sign-in, or the avatar with the account menu — see
+ * app/_zdroje/account.tsx; nothing when Clerk is not configured).
  */
 
 function Summary({ state, text }: { state: "ok" | "down" | "pending"; text: string }) {
@@ -43,6 +46,7 @@ export function SiteHeader() {
       <Suspense fallback={<Summary state="pending" text="Ověřuji zdroje…" />}>
         <StatusSummary />
       </Suspense>
+      <AccountControl />
     </header>
   );
 }

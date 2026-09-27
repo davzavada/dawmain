@@ -17,6 +17,17 @@ export const READ_ONLY = {
   openWorldHint: true,
 } as const;
 
+/**
+ * The files_* tools read the caller's own uploaded documents (Vlastní
+ * zdroje): nothing outside this deployment is touched, so openWorld is false.
+ */
+export const PRIVATE_READ_ONLY = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false,
+} as const;
+
 export const isoDate = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "Use ISO format YYYY-MM-DD")
@@ -39,6 +50,20 @@ export const READING_DESCRIPTION = `Long texts come in ~${Math.round(DOC_PAGE_CH
 export function continuationHint(paged: Pick<DocumentView, "page" | "total_pages" | "has_more">): string {
   if (!paged.has_more) return "";
   return `\n\n(page ${paged.page}/${paged.total_pages} — continue without asking the user: page: ${paged.page + 1}. A decision you rely on is read to its last page; to locate one passage instead, use find: "term".)`;
+}
+
+/**
+ * What a window of a BOUNDED read ends with when the requested range has more
+ * — empty on its last window. `locator` repeats the call's own range
+ * parameters (`section: "§ 2913", mn: "14"`; "" for a whole short text), so
+ * the next call reads the next window of the same range and nothing beyond
+ * it: the continuation of a section read stops where the section ends, and
+ * a model following it never pages on through a whole book. Pure.
+ */
+export function rangeContinuationHint(locator: string, window: number, totalWindows: number): string {
+  if (!(window >= 1) || window >= totalWindows) return "";
+  const call = [locator.trim(), `page: ${window + 1}`].filter(Boolean).join(", ");
+  return `\n\n(okno ${window}/${totalWindows} — pokračuj bez ptaní: ${call}. The requested range ends with window ${totalWindows}: stop there, never read on through the whole document.)`;
 }
 
 /** `read_top` on the search tools that preview their best hits. */

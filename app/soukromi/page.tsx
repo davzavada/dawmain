@@ -242,7 +242,8 @@ export default function Soukromi() {
 
       <Section heading="8. Cookies">
         <p>
-          Kvůli přihlášení nastavuje na těchto stránkách poskytovatel přihlášení Clerk cookies{" "}
+          Kvůli přihlášení nastavuje na všech stránkách tohoto webu (v záhlaví je vidět, kdo je
+          přihlášen) poskytovatel přihlášení Clerk cookies{" "}
           <code>__session</code>, <code>__client_uat</code> a několik souvisejících (jejich
           varianty s příponou a krátkodobé cookies pro obnovení relace). Bez nich by přihlášení
           nefungovalo, jsou tedy nezbytné a souhlas k nim nepotřebuji. Další cookies nutné k

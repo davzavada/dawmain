@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { authMode } from "../auth";
 import { SERVER_NAME, SERVER_VERSION } from "../config";
+import { envMode } from "@/src/files/config";
 
 const outputSchema = z.object({
   ok: z.literal(true),
@@ -18,6 +19,11 @@ const outputSchema = z.object({
     .describe(
       "What this deployment accepts: OAuth login (via Clerk), a shared bearer token, both, or 'open' = anyone can call it.",
     ),
+  files: z
+    .enum(["on", "readonly", "off", "unconfigured"])
+    .describe(
+      "Vlastní zdroje (files_* tools) as configured by the environment: on, readonly (search and reading only), off, or unconfigured (no database). The free-tier guards may restrict it further at call time.",
+    ),
 });
 
 /**
@@ -31,7 +37,7 @@ export function registerPing(server: McpServer): void {
     {
       title: "Ping",
       description:
-        "Check that the MCP server is reachable and report which deployment answered: server name and version, current server time, Vercel environment, region and git commit. Takes no arguments.",
+        "Check that the MCP server is reachable and report which deployment answered: server name and version, current server time, Vercel environment, region and git commit, the accepted auth and whether Vlastní zdroje (files_*) are enabled. Takes no arguments.",
       inputSchema: z.object({}),
       outputSchema,
       annotations: {
@@ -53,6 +59,9 @@ export function registerPing(server: McpServer): void {
         // Surfaces a misconfigured token: without this, an accidentally
         // anonymous deployment looks identical to a protected one.
         auth: authMode(),
+        // Env only — the ping never wakes the database (envOnlyMode in
+        // src/files/guards.ts is this same function, minus the DB-bound imports).
+        files: envMode(),
       };
 
       return {

@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState, type MouseEvent } from "react";
 import { Icon, type IconName } from "./_icons";
 import { setPlatform, usePlatform, type PlatformId } from "./_platform";
+import { OWN_SOURCES_HREF, OwnSourcesNavItem } from "./_zdroje/own-sources";
 
 /**
  * Site navigation: a sticky sidebar on wide screens, a sticky tab strip on
@@ -27,10 +28,6 @@ const LEGAL: Array<{ href: string; label: string; icon: IconName }> = [
   { href: "/podminky", label: "Podmínky užití", icon: "book" },
   { href: "/soukromi", label: "Ochrana osobních údajů", icon: "lock" },
 ];
-
-/** Own documents (Pro, granted by hand) - the stable entry point to the library. */
-const OWN_SOURCES_HREF = "/vlastni-zdroje";
-const OWN_SOURCES_TITLE = "Vlastní zdroje — v režimu Pro, přiděluji zdarma";
 
 /** A section counts as "in view" once its top passes this line. */
 const SPY_OFFSET = 140;
@@ -95,16 +92,8 @@ export function SiteNav({ sourceCount }: { sourceCount: number }) {
               {id === "zdroje" && <span className="nav-count">{sourceCount}</span>}
             </Link>
           ))}
-          <Link
-            href={OWN_SOURCES_HREF}
-            className="nav-item"
-            title={OWN_SOURCES_TITLE}
-            {...current(ownSources)}
-          >
-            <Icon name="upload" />
-            <span className="nav-ellipsis">Vlastní zdroje</span>
-            <span className="pro-pill">Pro</span>
-          </Link>
+          {/* Opens the Vlastní zdroje modal (or sign-in); the count once signed in. */}
+          <OwnSourcesNavItem variant="sidebar" current={ownSources} />
         </div>
 
         <div className="nav-group">
@@ -140,15 +129,7 @@ export function SiteNav({ sourceCount }: { sourceCount: number }) {
               {short}
             </Link>
           ))}
-          <Link
-            href={OWN_SOURCES_HREF}
-            className="tab-item"
-            title={OWN_SOURCES_TITLE}
-            {...current(ownSources)}
-          >
-            <span>Vlastní zdroje</span>
-            <span className="pro-pill">Pro</span>
-          </Link>
+          <OwnSourcesNavItem variant="tab" current={ownSources} />
         </nav>
       </div>
     </>
