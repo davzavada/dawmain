@@ -14,6 +14,8 @@
  * - A session advisory lock serializes concurrent runs.
  * - An applied file whose content changed since is a hard stop: fix forward
  *   with a new file instead of editing history.
+ * - The connecting role must bypass row-level security (the owner): the
+ *   SECURITY DEFINER system functions run with its rights.
  */
 
 import { createHash } from "node:crypto";
@@ -70,6 +72,26 @@ export function plan(files, applied) {
   };
 }
 
+/**
+ * The migrations run as — and their SECURITY DEFINER system functions run
+ * with the rights of — the connecting role. Those functions read across
+ * libraries through tables that FORCE row-level security, so that role must
+ * bypass RLS (Neon's console owner does; a role created by SQL does not).
+ * Under a role that does not, every system function would silently see
+ * nothing: refuse before touching anything.
+ * @param {Client} client
+ */
+export async function assertOwnerBypassesRls(client) {
+  const { rows } = await client.query(
+    "SELECT current_user AS name, rolsuper OR rolbypassrls AS bypass FROM pg_roles WHERE rolname = current_user",
+  );
+  if (rows[0]?.bypass === true) return;
+  throw new Error(
+    `role ${rows[0]?.name ?? "(unknown)"} does not bypass row-level security — run migrations as the database owner ` +
+      "(DATABASE_URL_UNPOOLED of neondb_owner), never as dawmain_app",
+  );
+}
+
 async function appliedMigrations(client) {
   const { rows } = await client.query("SELECT to_regclass('public.schema_migrations') IS NOT NULL AS present");
   if (!rows[0]?.present) return [];
@@ -86,6 +108,7 @@ async function appliedMigrations(client) {
 export async function migrate(client, options = {}) {
   const { dir = MIGRATIONS_DIR, dryRun = false, log = console.log } = options;
   const files = readMigrations(dir);
+  await assertOwnerBypassesRls(client);
   await client.query("SELECT pg_advisory_lock($1)", [LOCK_KEY]);
   try {
     const { pending, missing } = plan(files, await appliedMigrations(client));

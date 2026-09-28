@@ -28,6 +28,8 @@ import type { ConvertResult } from "./types";
 const INLINE_MARKER_RE = /\[(?=s\. |\^|m\. č\. )/g;
 /** Characters that are markup at the start of a line. */
 const LEADING_MARKER_RE = /^[#>|]/;
+/** A line opening with a note reference and ":" reads as that note's definition. */
+const DEFINITION_SHAPE_RE = /^(\[\^[^\]\s]+\]):/;
 
 /**
  * Escape inline text that imitates DMD markup: `[s. `, `[^` and `[m. č. `
@@ -38,9 +40,15 @@ export function escapeInline(text: string): string {
   return text.replace(INLINE_MARKER_RE, "\\[");
 }
 
-/** Escape a line that starts with `#`, `>` or `|` (heading, quote, table row). Pure. */
+/**
+ * Escape a line that starts with `#`, `>` or `|` (heading, quote, table
+ * row); a line opening with a reference followed by ":" gets a space
+ * before the colon ("[^1] :"), as the PDF emitter does, or it would read
+ * as the note's definition. Pure.
+ */
 export function escapeLineStart(line: string): string {
-  return LEADING_MARKER_RE.test(line) ? `\\${line}` : line;
+  if (LEADING_MARKER_RE.test(line)) return `\\${line}`;
+  return line.replace(DEFINITION_SHAPE_RE, "$1 :");
 }
 
 /** Both escapes — for one line of plain text. Pure. */

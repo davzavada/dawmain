@@ -2,7 +2,7 @@
 
 import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
-import { isOperator, recordReindex, writeModeOverride } from "@/src/files/operator";
+import { isOperator, recordReindex, takedownContent, writeModeOverride } from "@/src/files/operator";
 import { reindexBatch } from "@/src/files/reindex";
 
 /**
@@ -33,10 +33,25 @@ export async function setModeOverride(formData: FormData): Promise<void> {
   revalidatePath(PAGE);
 }
 
-/** "Přeindexovat dávku": re-derive up to 200 documents built by an older analyzer. */
+/** "Přeindexovat dávku": re-derive up to 200 documents built by an older analyzer (fewer, or none, as the guards allow). */
 export async function reindexBatchAction(): Promise<void> {
   const actor = await operator();
   const report = await reindexBatch();
   await recordReindex(actor, report);
+  revalidatePath(PAGE);
+}
+
+/**
+ * Notice-and-takedown: block a content hash (or the hash of the reported
+ * document id) and delete every copy in every library. The reason (the
+ * notice's reference) is required; the confirmation box guards a misclick.
+ */
+export async function takedownAction(formData: FormData): Promise<void> {
+  const actor = await operator();
+  const target = String(formData.get("target") ?? "").trim();
+  const reason = String(formData.get("reason") ?? "").trim();
+  if (formData.get("confirm") !== "yes") throw new Error("Not confirmed.");
+  if (!/^([0-9a-fA-F]{64}|[0-9a-fA-F-]{36})$/.test(target) || !reason || reason.length > 500) throw new Error("Invalid takedown.");
+  await takedownContent(actor, target, reason);
   revalidatePath(PAGE);
 }

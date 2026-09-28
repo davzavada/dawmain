@@ -178,6 +178,11 @@ describe("markLibraryForPurge / purgeLibraryContent", () => {
     await seedDocs(lib, 45);
     await seedDocs("user_a", 2);
     expect(await scoped([lib], (db) => reservePages(db, lib, 3, 100, 1_000_000))).toBe("ok");
+    // Not marked, or marked for later: nothing happens.
+    expect(await scoped([lib], (db) => purgeLibraryContent(db, lib))).toBe(0);
+    await scoped([lib], (db) => markLibraryForPurge(db, lib, new Date(Date.now() + 86_400_000)));
+    expect(await scoped([lib], (db) => purgeLibraryContent(db, lib))).toBe(0);
+    await t.owner.query("UPDATE libraries SET purge_after = now() - interval '1 minute' WHERE id = $1", [lib]);
     expect(await scoped([lib], (db) => purgeLibraryContent(db, lib))).toBe(45);
     const left = await t.owner.query<{ n: number }>("SELECT count(*)::int AS n FROM chunks WHERE library_id = $1", [lib]);
     expect(left.rows[0].n).toBe(0);

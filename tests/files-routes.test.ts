@@ -414,6 +414,45 @@ describe("GET /api/cron/files", () => {
     expect(guards.rows[0].value).toMatchObject({ mode: "on", dbBytes: expect.any(Number), at: expect.any(String) });
   });
 
+  it("a purge-marked library revived meanwhile keeps its counters and gets no purge record; restored Pro revives a revoked_expired mark", async () => {
+    // Listed as due, but revived by an upload after the cron read its list and before the purge ran.
+    await t.owner.query(`INSERT INTO libraries (id, purge_after, pro_revoked_at) VALUES ('org_soon', now() - interval '1 hour', now() - interval '95 days')`);
+    await t.owner.query(`INSERT INTO usage_daily (scope, day, uploads) VALUES ('org_soon', current_date, 3)`);
+    // Marked after 90 days without Pro; Pro is back before the purge date.
+    await t.owner.query(`INSERT INTO libraries (id, purge_after, pro_revoked_at) VALUES ('org_back2', now() + interval '1 day', now() - interval '92 days')`);
+    // Marked because the owner was deleted: never looked up again.
+    await t.owner.query(`INSERT INTO libraries (id, purge_after) VALUES ('user_del', now() + interval '6 days')`);
+    const lookups: string[] = [];
+    __setOwnerLookupForTests(async (id) => {
+      lookups.push(id);
+      return "pro";
+    });
+    let revived = false;
+    setScopeRunner(async (scope, fn, options) => {
+      if (!revived && scope.length === 1 && scope[0] === "org_soon") {
+        revived = true;
+        await t.owner.query("UPDATE libraries SET purge_after = NULL, pro_revoked_at = NULL WHERE id = 'org_soon'");
+      }
+      return t.runner(scope, fn, options);
+    });
+    const summary = await (await cron("Bearer cron-secret-value")).json();
+    expect(summary).toMatchObject({ ok: true, purged: 0, purgedDocuments: 0, proRestored: 1, errors: [] });
+    expect(lookups).toContain("org_back2");
+    expect(lookups).not.toContain("user_del");
+    const row = async (id: string) =>
+      (await t.owner.query<{ purge_after: Date | null; pro_revoked_at: Date | null; purged_at: Date | null }>(
+        "SELECT purge_after, pro_revoked_at, purged_at FROM libraries WHERE id = $1",
+        [id],
+      )).rows[0];
+    expect((await row("org_soon")).purged_at).toBeNull();
+    expect((await t.owner.query("SELECT 1 FROM usage_daily WHERE scope = 'org_soon'")).rows).toHaveLength(1);
+    const audits = await t.owner.query<{ library_id: string; action: string }>("SELECT library_id, action FROM audit_log ORDER BY id");
+    expect(audits.rows.filter((a) => a.action === "library.purged")).toEqual([]);
+    expect(audits.rows).toContainEqual({ library_id: "org_back2", action: "library.revived" });
+    expect(await row("org_back2")).toMatchObject({ purge_after: null, pro_revoked_at: null, purged_at: null });
+    expect((await row("user_del")).purge_after).toBeInstanceOf(Date);
+  });
+
   it("read-only: waiting ingests stay queued, over-attempt ones are still failed; Clerk errors are counted, not fatal", async () => {
     const waiting = await uploaded("user_a", "user_a", "waiting");
     const crashed = await uploaded("user_a", "user_a", "crashed");

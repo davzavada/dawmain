@@ -3,9 +3,9 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { canEditDocument, getAccess } from "./access";
 import { LIBRARY_ID_RE, LIMITS, TERMS_VERSION, USER_ID_RE } from "./config";
-import { withScope } from "./db/client";
-import { getDocument, insertUploadedDocument, isBlocked } from "./db/documents";
-import { ensureLibrary, getLibraries, reservePages } from "./db/libraries";
+import { withScope, type Queryable } from "./db/client";
+import { getDocument, insertUploadedDocument, isBlocked, replacementCredit } from "./db/documents";
+import { ensureLibrary, getLibraries, reservePages, reviveLibrary } from "./db/libraries";
 import { audit, bumpUsage, hasAcceptedTerms, usageSum } from "./db/usage";
 import { billablePages } from "./dmd/billing";
 import { normalizeDmd, sanitizeLine } from "./dmd/normalize";
@@ -13,6 +13,7 @@ import { parseDmd } from "./dmd/parse";
 import { DmdLimitError, type ParsedDoc } from "./dmd/types";
 import { FilesUserError, logFilesError, MESSAGES } from "./errors";
 import { effectiveMode, envOnlyMode } from "./guards";
+import { CpuMeter } from "./ingest";
 import { writeScope } from "./scope";
 import {
   DOC_TYPES,
@@ -39,16 +40,24 @@ import {
  *      a proxy may truncate silently); multipart + meta schema;
  *   2. access from Clerk (fresh): Pro library, canUpload, not banned;
  *      effective mode (guards) — readonly/off → 503;
- *   3. terms accepted, per-library upload rate (usage_daily);
+ *   3. terms accepted; the daily volume (usage_daily): uploads per library
+ *      and in all, CPU time of uploads and ingests today and over 30 days
+ *      (UPLOAD_GUARDS) — a quick refusal before the costly steps;
  *   4. streaming gunzip with a byte cap and a ratio cap (zip bomb), strict
- *      UTF-8, SHA-256 of the text = meta.content.sha256 (truncation);
+ *      UTF-8, SHA-256 of the bytes = meta.content.sha256 (truncation);
  *   5. normalizeDmd, parseDmd with its safety caps (DmdLimitError → 413 for
  *      size, 422 for structure), scan heuristic, billable pages from the
- *      server's own parse;
+ *      server's own parse; the content hash is that of the normalized
+ *      text — what is stored (the browser sends normalized text, so for it
+ *      both hashes agree);
  *   6. one transaction: blocked content (notice-and-action), library row,
- *      `replaces` (same library, uploader or admin), atomic page
- *      reservation against the library and global caps, insert (duplicate
- *      content in the library → 409, reservation rolled back), usage, audit.
+ *      `replaces` (same library, uploader or admin; the replaced document's
+ *      pages are credited against the library cap), atomic page
+ *      reservation against the library and global caps, a library its
+ *      owner uses again is revived (reviveLibrary), insert (duplicate
+ *      content in the library → 409, reservation rolled back), the daily
+ *      counters bumped and re-checked (a concurrent upload waits on the
+ *      counter row; over the limit → 429, everything rolled back), audit.
  * Every refusal is a fixed Czech message; unexpected errors are logged
  * without content and answered 503.
  */
@@ -67,6 +76,41 @@ const SCAN_SHARE = 0.3;
 const SCAN_MIN_CHARS = 40;
 
 const HEX64 = /^[0-9a-f]{64}$/i;
+
+/**
+ * Global daily volume. Overusing a Vercel Hobby allowance pauses the whole
+ * team, the public MCP endpoint included, and the feature may take at most
+ * a quarter of it (plan §8): of the 4 h of Active CPU a month that is 1 h
+ * per 30 days for uploads and ingests together (usage_daily.cpu_ms,
+ * measured by both), with a day allowed up to 10 minutes of it; and at most
+ * 200 uploads a day in all (each up to 4.4 MB of request body). cpu_ms is
+ * the feature's own parse/derive/hash work (CpuMeter, synchronous sections
+ * only — never another request's CPU on the same instance), so it
+ * understates the Active CPU billed by the request overhead (Clerk, the
+ * database driver, TLS); compare it with the Vercel usage page. The caps
+ * live in LIMITS with env overrides (FILES_GLOBAL_UPLOADS_PER_DAY,
+ * FILES_CPU_MS_DAY, FILES_CPU_MS_30D), read at call time.
+ */
+export const UPLOAD_GUARDS = {
+  /** FILES_GLOBAL_UPLOADS_PER_DAY, default 200 (LIMITS). */
+  get globalUploadsPerDay(): number {
+    return LIMITS.globalUploadsPerDay;
+  },
+  /** FILES_CPU_MS_DAY, default 10 min (LIMITS). */
+  get globalCpuMsPerDay(): number {
+    return LIMITS.globalCpuMsPerDay;
+  },
+  /** FILES_CPU_MS_30D, default 60 min (LIMITS). */
+  get globalCpuMs30Days(): number {
+    return LIMITS.globalCpuMs30Days;
+  },
+};
+
+const LIBRARY_DAY_FULL = `Do této knihovny se dnes nahrálo už ${LIMITS.uploadsPerLibraryPerDay} dokumentů. Další půjde nahrát zítra.`;
+const GLOBAL_DAY_FULL = "Vlastní zdroje dnes přijaly tolik dokumentů, kolik služba za den zvládne zpracovat. Další půjde nahrát zítra.";
+const CPU_DAY_FULL = "Zpracování nahraných dokumentů dnes vyčerpalo výpočetní rezervu služby. Další dokumenty půjde nahrát zítra.";
+const CPU_MONTH_FULL =
+  "Zpracování nahraných dokumentů vyčerpalo výpočetní rezervu služby na posledních 30 dní. Nahrávání bude znovu možné během několika dní.";
 
 // ---------------------------------------------------------------------------
 // Meta schema
@@ -326,8 +370,18 @@ function isOutcomeStatus(s: number): s is 400 | 403 | 413 | 422 | 429 | 503 {
   return s === 400 || s === 403 || s === 413 || s === 422 || s === 429 || s === 503;
 }
 
+/** The daily volume of step 3; null when an upload may start. */
+async function volumeRefusal(db: Queryable, libraryId: string): Promise<UploadOutcome | null> {
+  if ((await usageSum(db, libraryId, "uploads", 1)) >= LIMITS.uploadsPerLibraryPerDay) return refuse(429, LIBRARY_DAY_FULL);
+  if ((await usageSum(db, "global", "uploads", 1)) >= UPLOAD_GUARDS.globalUploadsPerDay) return refuse(429, GLOBAL_DAY_FULL);
+  if ((await usageSum(db, "global", "cpu_ms", 1)) >= UPLOAD_GUARDS.globalCpuMsPerDay) return refuse(429, CPU_DAY_FULL);
+  if ((await usageSum(db, "global", "cpu_ms", 30)) >= UPLOAD_GUARDS.globalCpuMs30Days) return refuse(429, CPU_MONTH_FULL);
+  return null;
+}
+
 async function upload(request: Request, userId: string): Promise<UploadOutcome> {
   if (!USER_ID_RE.test(userId)) return refuse(403, MESSAGES.signIn);
+  const cpu = new CpuMeter();
   const envRefusal = modeRefusal(envOnlyMode());
   if (envRefusal) return envRefusal;
 
@@ -343,41 +397,38 @@ async function upload(request: Request, userId: string): Promise<UploadOutcome> 
   const guardRefusal = modeRefusal(await effectiveMode());
   if (guardRefusal) return guardRefusal;
 
-  // 3. Terms and the upload rate.
+  // 3. Terms and the daily volume (re-checked atomically in step 6).
   const pre = await withScope([libraryId], async (db) => {
     if (!(await hasAcceptedTerms(db, userId, TERMS_VERSION))) {
       return refuse(403, "Před prvním nahráním je třeba přijmout pravidla Vlastních zdrojů.");
     }
-    if ((await usageSum(db, libraryId, "uploads", 1)) >= LIMITS.uploadsPerLibraryPerDay) {
-      return refuse(429, `Do této knihovny se dnes nahrálo už ${LIMITS.uploadsPerLibraryPerDay} dokumentů. Další půjde nahrát zítra.`);
-    }
-    return null;
+    return volumeRefusal(db, libraryId);
   });
   if (pre) return pre;
 
   // 4. The text: capped gunzip, strict UTF-8, the hash the client computed.
-  const raw = await gunzipCapped(gz);
-  if (createHash("sha256").update(raw).digest("hex") !== meta.content.sha256) {
+  const raw = await cpu.runAsync(() => gunzipCapped(gz));
+  if (cpu.run(() => createHash("sha256").update(raw).digest("hex")) !== meta.content.sha256) {
     return refuse(400, "Kontrolní součet textu nesouhlasí — nahrávání se nejspíš přerušilo. Zkuste to znovu.");
   }
   let decoded: string;
   try {
-    decoded = new TextDecoder("utf-8", { fatal: true }).decode(raw);
+    decoded = cpu.run(() => new TextDecoder("utf-8", { fatal: true }).decode(raw));
   } catch {
     return refuse(400, "Text dokumentu není platné UTF-8.");
   }
 
   // 5. The server's own parse decides pages, price and plausibility.
-  const text = normalizeDmd(decoded).text;
+  const text = cpu.run(() => normalizeDmd(decoded).text);
   let parsed: ParsedDoc;
   try {
-    parsed = parseDmd(text);
+    parsed = cpu.run(() => parseDmd(text));
   } catch (error) {
     if (error instanceof DmdLimitError) return limitRefusal(error);
     throw error;
   }
   if (parsed.stats.countedChars < SCAN_MIN_CHARS) return refuse(422, "Dokument neobsahuje žádný text.");
-  const sparse = sparsePageShare(parsed);
+  const sparse = cpu.run(() => sparsePageShare(parsed));
   // One blank page in a two-page print is not a scan: at least two near-empty pages are required.
   if (sparse >= SCAN_SHARE && Math.round(sparse * parsed.pages.length) >= 2) {
     return refuse(
@@ -386,38 +437,49 @@ async function upload(request: Request, userId: string): Promise<UploadOutcome> 
     );
   }
   const pages = billablePages(parsed.stats.countedChars);
-  const injectionFlag = looksLikeInjection(text);
+  const injectionFlag = cpu.run(() => looksLikeInjection(text));
+  // Dedupe and takedown compare what is stored: invisible characters the
+  // normalization drops, or a BOM the decoder drops, must not make the same
+  // text a different document — always the hash of the normalized text.
+  const contentSha256 = cpu.run(() => createHash("sha256").update(text, "utf8").digest("hex"));
 
   // 6. One transaction: all or nothing.
   try {
     return await withScope([libraryId], async (db) => {
-      if (await isBlocked(db, meta.content.sha256)) {
+      if (
+        (await isBlocked(db, contentSha256)) ||
+        (contentSha256 !== meta.content.sha256 && (await isBlocked(db, meta.content.sha256)))
+      ) {
         return refuse(422, "Tento obsah byl na základě oznámení odstraněn a nelze ho nahrát znovu.");
       }
       await ensureLibrary(db, libraryId, library.name);
+      let credit = 0;
       if (meta.replaces) {
         const old = await getDocument(db, meta.replaces, [libraryId]);
         if (!old || !canEditDocument(library, old.uploaded_by, userId)) {
           return refuse(403, "Nahrazovaný dokument v této knihovně není, nebo ho nemůžete upravovat.");
         }
+        // A better conversion of the same document: only the difference has to fit.
+        credit = await replacementCredit(db, old.id, libraryId);
       }
-      const reserved = await reservePages(db, libraryId, pages, library.quotaPages, LIMITS.globalPages);
+      const reserved = await reservePages(db, libraryId, pages, library.quotaPages + credit, LIMITS.globalPages);
       if (reserved === "global") {
         return refuse(403, "Úložiště Vlastních zdrojů je teď plné. Zkuste to prosím později.");
       }
       if (reserved === "library") {
         const [row] = await getLibraries(db, [libraryId]);
-        const left = Math.max(0, library.quotaPages - (row ? row.page_count + row.pages_reserved : 0));
+        const left = Math.max(0, library.quotaPages + credit - (row ? row.page_count + row.pages_reserved : 0));
         return refuse(
           403,
           `Dokument má ${pages} normostran, v knihovně zbývá ${left} z ${library.quotaPages}. Smažte některý dokument nebo vyberte menší rozsah.`,
         );
       }
+      const revived = await reviveLibrary(db, libraryId);
       const inserted = await insertUploadedDocument(db, {
         libraryId,
         uploadedBy: userId,
         meta,
-        contentSha256: meta.content.sha256,
+        contentSha256,
         charCount: text.length,
         billablePages: pages,
         physicalPages: parsed.paged ? parsed.stats.physicalPages : null,
@@ -427,8 +489,18 @@ async function upload(request: Request, userId: string): Promise<UploadOutcome> 
         injectionFlag,
       });
       if ("duplicate" in inserted) throw new Rollback({ status: 409, duplicate: inserted.duplicate });
-      await bumpUsage(db, libraryId, { uploads: 1, pages });
-      await bumpUsage(db, "global", { uploads: 1, pages });
+      // Bump, then read: the upsert holds the counter row until commit, so a
+      // concurrent upload waits here and then sees this one.
+      const cpuMs = cpu.ms;
+      await bumpUsage(db, libraryId, { uploads: 1, pages, cpu_ms: cpuMs });
+      if ((await usageSum(db, libraryId, "uploads", 1)) > LIMITS.uploadsPerLibraryPerDay) {
+        throw new Rollback(refuse(429, LIBRARY_DAY_FULL));
+      }
+      await bumpUsage(db, "global", { uploads: 1, pages, cpu_ms: cpuMs });
+      if ((await usageSum(db, "global", "uploads", 1)) > UPLOAD_GUARDS.globalUploadsPerDay) {
+        throw new Rollback(refuse(429, GLOBAL_DAY_FULL));
+      }
+      if (revived) await audit(db, { libraryId, actor: userId, action: "library.revived" });
       await audit(db, {
         libraryId,
         actor: userId,

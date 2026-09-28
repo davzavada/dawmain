@@ -5,9 +5,10 @@
  * (including tool registration, which must stay I/O-free) may import it.
  */
 
-/** Bump when the stemmer, tokenizer, chunker or tsvector layout changes:
- * stored indexes carry the version they were built with and get re-derived. */
-export const ANALYZER_VERSION = 1;
+/** Bump when the stemmer, tokenizer, chunker, identifier keys or tsvector
+ * layout changes: stored indexes carry the version they were built with and
+ * get re-derived. 2: chunks carry the EU acts they cite (eu:<CELEX> keys). */
+export const ANALYZER_VERSION = 2;
 
 /** Version of the Vlastní zdroje content rules a user accepts before uploading. */
 export const TERMS_VERSION = "2026-10";
@@ -71,6 +72,22 @@ export const LIMITS = {
   /** Estimated Neon compute hours per month (Free: 100 CU-h at 0.25 CU). */
   computeHoursPerMonth: 100,
   computeUnits: 0.25,
+  /**
+   * Global daily volume of uploads and the CPU allowance uploads, ingests
+   * and re-derivations share (usage_daily.cpu_ms; see UPLOAD_GUARDS in
+   * upload.ts): 200 uploads a day, 10 min of CPU a day and 60 min per
+   * 30 days (a quarter of Hobby's 4 h of Active CPU, plan §8). Tunable
+   * after comparing cpu_ms with the Vercel usage page.
+   */
+  get globalUploadsPerDay() {
+    return intEnv("FILES_GLOBAL_UPLOADS_PER_DAY", 200);
+  },
+  get globalCpuMsPerDay() {
+    return intEnv("FILES_CPU_MS_DAY", 10 * 60_000);
+  },
+  get globalCpuMs30Days() {
+    return intEnv("FILES_CPU_MS_30D", 60 * 60_000);
+  },
   /** Rolling AI budget in USD per 30 days (Gateway free credit is $5). */
   get aiBudgetUsd() {
     return intEnv("FILES_AI_BUDGET_USD", 4);

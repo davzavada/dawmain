@@ -110,9 +110,23 @@ export async function getAccess(userId: string, opts: { fresh?: boolean; joined?
   return load;
 }
 
-/** Member edits own documents; owner / org:admin edit all. Uploading rights (Pro) are required either way. */
+/**
+ * May modify a document — save or confirm its metadata, switch it on/off,
+ * replace it (anything that re-derives the index): member their own,
+ * owner / org:admin all, and only in a Pro library either way.
+ */
 export function canEditDocument(lib: LibraryAccess, uploadedBy: string, userId: string): boolean {
-  return lib.canManageAll || (lib.canUpload && uploadedBy === userId);
+  return lib.pro && (lib.canManageAll || (lib.canUpload && uploadedBy === userId));
+}
+
+/**
+ * May delete or export a document — ownership only, Pro not required (a
+ * user who lost Pro keeps control over what they stored): the uploader,
+ * or the owner / org:admin of the library. The library must come from
+ * ownedScope (the caller belongs to it).
+ */
+export function canDeleteDocument(lib: LibraryAccess, uploadedBy: string, userId: string): boolean {
+  return lib.canManageAll || uploadedBy === userId;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
@@ -85,7 +85,18 @@ describe("plan", () => {
   });
 });
 
-describe("migrate", () => {
+describe("runbook", () => {
+  it("docs/development.md names every migration file, so a deploy note never misses one", () => {
+    const runbook = readFileSync(path.resolve(__dirname, "..", "docs", "development.md"), "utf8");
+    const names = m.readMigrations().map((x) => x.filename);
+    expect(names).toEqual(expect.arrayContaining(["0003_ops.sql", "0004_search.sql"]));
+    for (const name of names) expect(runbook).toContain(`\`${name}\``);
+  });
+});
+
+// Each test boots its own PGlite and applies every migration (~2–3 s alone): the 5 s default
+// is too tight when the whole suite runs in parallel on a loaded machine.
+describe("migrate", { timeout: 30_000 }, () => {
   it("applies every file once, records checksums, and is a no-op the second time", async () => {
     const { db, client } = await freshClient();
     const log: string[] = [];
@@ -142,6 +153,15 @@ describe("migrate", () => {
     // The advisory lock was released: a fixed run proceeds.
     writeFileSync(path.join(dir, "0098_bad.sql"), "CREATE TABLE half_done (x int);");
     expect((await m.migrate(client, { dir, log: () => undefined })).applied).toEqual(["0098_bad.sql", "0099_after.sql"]);
+  });
+
+  it("refuses a role that does not bypass row-level security, before changing anything", async () => {
+    const { db, client } = await freshClient();
+    await db.exec("CREATE ROLE plain_role NOLOGIN NOBYPASSRLS; GRANT ALL ON SCHEMA public TO plain_role; SET ROLE plain_role");
+    await expect(m.migrate(client, { dir: copyMigrations(), log: () => undefined })).rejects.toThrow(/does not bypass row-level security/);
+    await db.exec("RESET ROLE");
+    const { rows } = await db.query<{ present: boolean }>("SELECT to_regclass('public.schema_migrations') IS NOT NULL AS present");
+    expect(rows[0].present).toBe(false);
   });
 
   it("warns about applied files that are missing locally", async () => {

@@ -564,7 +564,7 @@ website, alone or as a team. `files_search` searches them next to the official s
 | Chci | Volání |
 |---|---|
 | co k tomu mají moje knihy a komentáře | `files_search` + `query` / `queries` — Czech stems, so inflected forms and words typed without háčky match |
-| komentář k jednomu § | `files_search {section: "§ 2913", act: "OZ"}` — only passages inside that §; `act` alone keeps commentaries on the act and passages citing its § |
+| komentář k jednomu § | `files_search {section: "§ 2913", act: "OZ"}` — only passages inside that §; `act` alone keeps commentaries on the act and passages citing it (a § asked without its act comes grouped by act) |
 | kde moje zdroje cituje rozhodnutí | `case_number: "25 Cdo 1234/19"` (short years and ECLI too) |
 | jen poznámky pod čarou / bez nich | `in_footnotes: true` / `in_footnotes: false` |
 | další místa v jedné knize | `files_search {doc: "<id>", query: "…"}` — its passages ranked, each with a pinpoint |
@@ -573,10 +573,14 @@ website, alone or as a team. `files_search` searches them next to the official s
 | jeden § / okrajové číslo / stranu / poznámku | `section: "§ 2913"`, then `mn: "14"`, `at: "245"`, `footnote: "123"` |
 | pasáž uvnitř oddílu | `section` + `find: "liberační důvod"` |
 
-**Answered "no library" or "personal sign-in"? Stop.** The first `files_*` call tells
-whether this user has Vlastní zdroje at all. If it says the account has no library, or
-that the connection has no personal sign-in, never call `files_*` again in the
-conversation — say nothing more about it unless the user asked for their documents.
+**Only when the user's own documents are in play.** Call `files_*` when the user
+refers to their own documents, or when `files_*` already returned their documents
+earlier in this conversation — never as a probe in an ordinary research question.
+
+**Answered "no library" or "personal sign-in"? Stop.** If a `files_*` answer says the
+account has no library, or that the connection has no personal sign-in, never call
+`files_*` again in the conversation — say nothing more about it unless the user asked
+for their documents.
 
 **Every hit carries its pinpoint and its way on.** The pinpoint is computed from where
 the words matched — the page, the m. č. of the paragraph, the footnote — and each hit
@@ -696,10 +700,11 @@ Stopping the search never shortens the reading: what you cite, you have read who
    and doctrine is where the argument lives, or when the topic is international law
    — the Central Discovery Index carries the international journals and series too.
    Add `files_search` to the same turn when the user mentions their own books,
-   commentaries or templates, or once per conversation to find out whether they have
-   Vlastní zdroje (their commentaries often hold the doctrine the catalogue only
-   lists); an answer that the account has no library ends `files_*` for the
-   conversation.
+   commentaries or templates (moje knihy, naše komentáře, vlastní zdroje), or when
+   their own documents already answered earlier in this conversation — their
+   commentaries often hold the doctrine the catalogue only lists. Never call it just
+   to find out whether they have Vlastní zdroje: most connections have none. An
+   answer that the account has no library ends `files_*` for the conversation.
 3. **Screen and aim.** From the hit lines and previews pick the decisions that may
    decide the issue; `find` in the doubtful ones; a court-specific search where the
    fan-out was too coarse.

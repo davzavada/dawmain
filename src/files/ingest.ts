@@ -59,7 +59,8 @@ import { DOC_TYPES, type BibMeta, type DocType, type ProposedMeta } from "./type
  * admin, same library) starts from the confirmed metadata instead of a new
  * proposal, but still goes back to 'review' (plan §7): the new conversion
  * may have moved pages, sections or the commented range, so a person looks
- * once more. Never throws. Records the run's CPU time in usage_daily.
+ * once more. Never throws. Records the run's CPU time in usage_daily
+ * (CpuMeter: the synchronous work only).
  */
 
 export type IngestResult = "done" | "lost" | "failed";
@@ -88,12 +89,57 @@ class LeaseLost extends Error {
   }
 }
 
+/**
+ * CPU time of the feature's own work, for usage_daily.cpu_ms (which gates
+ * uploads, see UPLOAD_GUARDS). process.cpuUsage() counts the whole process:
+ * measured across an await it would also book whatever ran meanwhile on the
+ * same instance — MCP calls, other uploads and ingests, during the Gemini
+ * or database wait — so only synchronous sections are measured (`run`),
+ * plus CPU-bound awaits without network I/O (`runAsync`, e.g. gunzip). The
+ * driver's encoding of the writes is not in it: the figure is the parse,
+ * derive and hash work, not the instance's Active CPU.
+ */
+export class CpuMeter {
+  private us = 0;
+
+  run<T>(fn: () => T): T {
+    const start = process.cpuUsage();
+    try {
+      return fn();
+    } finally {
+      this.add(start);
+    }
+  }
+
+  async runAsync<T>(fn: () => Promise<T>): Promise<T> {
+    const start = process.cpuUsage();
+    try {
+      return await fn();
+    } finally {
+      this.add(start);
+    }
+  }
+
+  /** Whole milliseconds, rounded up (any measured work books ≥ 1 ms). */
+  get ms(): number {
+    return Math.ceil(this.us / 1_000);
+  }
+
+  private add(start: NodeJS.CpuUsage): void {
+    const used = process.cpuUsage(start);
+    this.us += used.user + used.system;
+  }
+}
+
 const CORRUPT = "Uložený text dokumentu je poškozený. Nahrajte dokument prosím znovu.";
 
 /**
  * pending_gz → the uploaded DMD text: gunzip capped at LIMITS.maxTextBytes,
- * strict UTF-8, and the SHA-256 of the bytes must equal `contentSha256` when
- * given. Throws IngestFailure (not retryable) on anything else. Pure.
+ * strict UTF-8, and when `contentSha256` is given it must be the SHA-256 of
+ * the normalized text (what the upload stores since the hash covers what is
+ * kept) or of the bytes as sent (rows uploaded before that; the browser
+ * sends normalized text, so for it the two agree). Throws IngestFailure
+ * (not retryable) on anything else. Pure.
  */
 export function inflatePending(gz: Uint8Array, contentSha256?: string | null): string {
   let raw: Buffer;
@@ -102,14 +148,22 @@ export function inflatePending(gz: Uint8Array, contentSha256?: string | null): s
   } catch {
     throw new IngestFailure(false, CORRUPT);
   }
-  if (contentSha256 && createHash("sha256").update(raw).digest("hex") !== contentSha256.toLowerCase()) {
-    throw new IngestFailure(false, CORRUPT);
-  }
+  let text: string;
   try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(raw);
+    text = new TextDecoder("utf-8", { fatal: true }).decode(raw);
   } catch {
     throw new IngestFailure(false, CORRUPT);
   }
+  if (contentSha256) {
+    const want = contentSha256.toLowerCase();
+    if (
+      createHash("sha256").update(raw).digest("hex") !== want &&
+      createHash("sha256").update(normalizeDmd(text).text, "utf8").digest("hex") !== want
+    ) {
+      throw new IngestFailure(false, CORRUPT);
+    }
+  }
+  return text;
 }
 
 /** Opaque per-user id for the AI Gateway's usage attribution — never the Clerk id itself. */
@@ -137,8 +191,9 @@ export function aiBudget(libraryId: string): { allow: () => Promise<boolean>; re
     record: (usd: number) =>
       withScope([], async (db) => {
         const micro = Number.isFinite(usd) && usd > 0 ? Math.max(1, Math.round(usd * 1_000_000)) : 0;
-        await bumpUsage(db, "global", { ai_calls: 1, ai_microusd: micro });
+        // Library row first, then 'global' — the order every writer of usage_daily keeps (no deadlock).
         await bumpUsage(db, libraryId, { ai_calls: 1, ai_microusd: micro });
+        await bumpUsage(db, "global", { ai_calls: 1, ai_microusd: micro });
       }),
   };
 }
@@ -173,13 +228,15 @@ interface Prepared {
 const REPLACED_DETAIL = "Nový převod dokumentu: metadata jsou převzata z původní verze, zkontrolujte je a potvrďte.";
 
 /** Parse the text and settle the metadata (see the header). */
-async function prepare(claim: Claimed): Promise<Prepared> {
+async function prepare(claim: Claimed, cpu: CpuMeter): Promise<Prepared> {
   const { row, replaced, settings } = claim;
-  const text = normalizeDmd(inflatePending(claim.pendingGz, row.content_sha256)).text;
   const confirmedOld = replaced && replaced.status === "ready" && replaced.confirmed_at ? replaced : null;
-  const parsed = parseDmd(text, { anchorLabel: confirmedOld?.meta.anchor_label ?? undefined });
-  const input = buildMetaInput(parsed, row.hints ?? {}, row.file_name, docTypeHint(row));
-  const heuristic = heuristicMeta(input);
+  const { text, parsed, input, heuristic } = cpu.run(() => {
+    const text = normalizeDmd(inflatePending(claim.pendingGz, row.content_sha256)).text;
+    const parsed = parseDmd(text, { anchorLabel: confirmedOld?.meta.anchor_label ?? undefined });
+    const input = buildMetaInput(parsed, row.hints ?? {}, row.file_name, docTypeHint(row));
+    return { text, parsed, input, heuristic: heuristicMeta(input) };
+  });
 
   if (confirmedOld) {
     // A better conversion of a confirmed document: keep what the user confirmed.
@@ -213,14 +270,19 @@ async function prepare(claim: Claimed): Promise<Prepared> {
 }
 
 /** Write the index and finish, atomically; delete the replaced document. */
-async function commit(claim: Claimed, p: Prepared): Promise<void> {
+async function commit(claim: Claimed, p: Prepared, cpu: CpuMeter): Promise<void> {
   const { row, runToken } = claim;
   const id = row.id;
   const libraryId = row.library_id;
-  const derived = deriveIndex(p.parsed, { docType: p.meta.doc_type, commentedAct: p.meta.commented_act ?? null });
-  const blocks = splitStorageBlocks(p.text);
-  const metaTsv = buildMetaTsv(p.meta, p.parsed.sections);
-  const identKeys = [...new Set([...metaIdentKeys(p.meta), ...derived.docIdentKeys])];
+  const { derived, blocks, metaTsv, identKeys } = cpu.run(() => {
+    const derived = deriveIndex(p.parsed, { docType: p.meta.doc_type, commentedAct: p.meta.commented_act ?? null });
+    return {
+      derived,
+      blocks: splitStorageBlocks(p.text),
+      metaTsv: buildMetaTsv(p.meta, p.parsed.sections),
+      identKeys: [...new Set([...metaIdentKeys(p.meta), ...derived.docIdentKeys])],
+    };
+  });
 
   await withScope(
     [libraryId],
@@ -300,10 +362,9 @@ async function recordFailure(claim: Claimed, failure: IngestFailure): Promise<In
   }
 }
 
-async function recordCpu(libraryId: string, start: NodeJS.CpuUsage): Promise<void> {
+async function recordCpu(libraryId: string, cpu: CpuMeter): Promise<void> {
   try {
-    const used = process.cpuUsage(start);
-    const ms = Math.round((used.user + used.system) / 1_000);
+    const ms = cpu.ms;
     if (ms <= 0) return;
     await withScope([], async (db) => {
       await bumpUsage(db, libraryId, { cpu_ms: ms });
@@ -320,7 +381,7 @@ export async function ingestDocument(docId: string, libraryId: string): Promise<
   }
   const env = envOnlyMode();
   if (env === "off" || env === "unconfigured") return "failed";
-  const cpuStart = process.cpuUsage();
+  const cpu = new CpuMeter();
   let claim: Claimed | null = null;
   try {
     claim = await withScope([libraryId], async (db) => {
@@ -342,7 +403,7 @@ export async function ingestDocument(docId: string, libraryId: string): Promise<
       throw new IngestFailure(false, "Dokument se nepodařilo zpracovat ani na několikátý pokus. Nahrajte ho prosím znovu.");
     }
     if (claim.purging) throw new IngestFailure(false, "Knihovna je určena ke smazání.");
-    await commit(claim, await prepare(claim));
+    await commit(claim, await prepare(claim, cpu), cpu);
     return "done";
   } catch (error) {
     if (error instanceof LeaseLost) return "lost";
@@ -352,7 +413,7 @@ export async function ingestDocument(docId: string, libraryId: string): Promise<
     }
     return recordFailure(claim, classify(error));
   } finally {
-    if (claim) await recordCpu(libraryId, cpuStart);
+    if (claim) await recordCpu(libraryId, cpu);
   }
 }
 

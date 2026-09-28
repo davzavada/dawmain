@@ -23,6 +23,7 @@ interface Seed {
   year?: number | null;
   act?: string | null;
   metaTsv?: string | null;
+  docKeys?: string[];
   chunks: Array<{ tsv: string; keys?: string[] }>;
 }
 
@@ -31,10 +32,10 @@ async function seed(s: Seed): Promise<string> {
   const sha = (++seq).toString(16).padStart(64, "0");
   const { rows } = await t.owner.query<{ id: string }>(
     `INSERT INTO documents (library_id, status, uploaded_by, file_kind, file_name, file_sha256, content_sha256, converter,
-       rights, billable_pages, char_count, page_label_source, enabled, doc_type, year, commented_act, meta_tsv, title)
-     VALUES ($1, $2, 'user_u1', 'pdf', 'f.pdf', $3, $3, 'pdf@1', 'vlastni', 1, 100, 'physical', $4, $5, $6, $7, $8::tsvector, 'T')
+       rights, billable_pages, char_count, page_label_source, enabled, doc_type, year, commented_act, meta_tsv, title, ident_keys)
+     VALUES ($1, $2, 'user_u1', 'pdf', 'f.pdf', $3, $3, 'pdf@1', 'vlastni', 1, 100, 'physical', $4, $5, $6, $7, $8::tsvector, 'T', $9::text[])
      RETURNING id`,
-    [lib, s.status ?? "ready", sha, s.enabled ?? true, s.docType ?? "kniha", s.year ?? 2020, s.act ?? null, s.metaTsv ?? null],
+    [lib, s.status ?? "ready", sha, s.enabled ?? true, s.docType ?? "kniha", s.year ?? 2020, s.act ?? null, s.metaTsv ?? null, s.docKeys ?? []],
   );
   const id = rows[0].id;
   for (let i = 0; i < s.chunks.length; i++) {
@@ -174,8 +175,9 @@ describe("searchChannels — identifiers and act", () => {
       searchChannels(db, params({ identKeys: ["par:2913", "parz:89/2012/2913"], act: "zak:89/2012" })),
     );
     expect(docsOf(withParz).sort()).toEqual([commentary, citing].sort());
+    // Without a § in the query, a chunk citing the act (any § of it) passes too.
     const actOnly = await scoped([A], (db) => searchChannels(db, params({ tsOr: "'porusen':* | 'nahrad':*", act: "zak:89/2012" })));
-    expect(docsOf(actOnly)).toEqual([commentary]);
+    expect(docsOf(actOnly).sort()).toEqual([commentary, citing].sort());
     const otherAct = await scoped([A], (db) => searchChannels(db, params({ identKeys: ["par:2913"], act: "zak:99/1963" })));
     expect(otherAct).toEqual([]);
     expect(await scoped([A], (db) => searchChannels(db, params({ identKeys: ["par:2913"], act: "zak:89/2012' OR '1'='1" })))).toEqual([]);
@@ -184,6 +186,64 @@ describe("searchChannels — identifiers and act", () => {
   it("malformed docId or empty library list → no hits, no error", async () => {
     expect(await scoped([A], (db) => searchChannels(db, params({ tsAnd: "'nahrad':*", docId: "nope" })))).toEqual([]);
     expect(await scoped([A], (db) => searchChannels(db, params({ tsAnd: "'nahrad':*", libraryIds: [] })))).toEqual([]);
+  });
+});
+
+describe("searchChannels — act filter without a § (files_search: \"commentaries on it or passages citing its §\")", () => {
+  // Seeded in their own library, so the counts above stay as they are.
+  const L = "user_act";
+  let onAct: string;
+  let cites2913: string;
+  let cites2910: string;
+  let byNumber: string;
+  let otherAct: string;
+  let metaCiting: string;
+  let metaOther: string;
+  const run = (p: Partial<SearchParams>) => scoped([L], (db) => searchChannels(db, params({ libraryIds: [L], ...p })));
+
+  beforeAll(async () => {
+    await t.owner.query("INSERT INTO libraries (id) VALUES ($1)", [L]);
+    onAct = await seed({ lib: L, docType: "komentar", act: "zak:89/2012", chunks: [{ tsv: "'porusen':1C 'povinnost':2C", keys: ["sec:par:2913"] }] });
+    // "Náhrada škody podle § 2913 o. z. vyžaduje porušení povinnosti." in a book.
+    cites2913 = await seed({ lib: L, chunks: [{ tsv: "'porusen':1C 'povinnost':2C", keys: ["par:2913", "parz:89/2012/2913"] }] });
+    cites2910 = await seed({ lib: L, docType: "clanek", chunks: [{ tsv: "'porusen':1C 'povinnost':2C", keys: ["par:2910", "parz:89/2012/2910"] }] });
+    // "… podle zákona č. 89/2012 Sb." — the act by number.
+    byNumber = await seed({ lib: L, chunks: [{ tsv: "'porusen':1C 'povinnost':2C", keys: ["zak:89/2012"] }] });
+    // § 100 of the civil procedure code, and an act whose number merely starts alike.
+    otherAct = await seed({ lib: L, chunks: [{ tsv: "'porusen':1C 'povinnost':2C", keys: ["par:100", "parz:99/1963/100", "parz:89/20121/5"] }] });
+    metaCiting = await seed({ lib: L, metaTsv: "'porusen':1A", docKeys: ["parz:89/2012/2913"], chunks: [] });
+    metaOther = await seed({ lib: L, metaTsv: "'porusen':1A", docKeys: ["parz:99/1963/100"], chunks: [] });
+  });
+
+  it("keeps commentaries on the act AND passages citing any § of it or the act by number", async () => {
+    const hits = await run({ tsAnd: "'porusen':* & 'povinnost':*", act: "zak:89/2012" });
+    expect(docsOf(hits, "and").sort()).toEqual([onAct, cites2913, cites2910, byNumber].sort());
+    expect(docsOf(hits)).not.toContain(otherAct);
+    // Without the act filter every passage matches.
+    const all = await run({ tsAnd: "'porusen':* & 'povinnost':*" });
+    expect(docsOf(all, "and")).toContain(otherAct);
+  });
+
+  it("the identifier channel obeys the same filter", async () => {
+    const hits = await run({ identKeys: ["par:2913", "par:2910", "par:100"], act: "zak:89/2012" });
+    // The commentary through its sec:par:2913 key; the § 100 of another act is dropped.
+    expect(docsOf(hits, "idn").sort()).toEqual([onAct, cites2913, cites2910].sort());
+  });
+
+  it("with a § of the act in the query, only commentaries and passages citing THAT §", async () => {
+    const hits = await run({ tsOr: "'porusen':*", identKeys: ["par:2913", "parz:89/2012/2913"], act: "zak:89/2012" });
+    expect(docsOf(hits, "or").sort()).toEqual([onAct, cites2913].sort());
+  });
+
+  it("the meta channel keeps documents citing the act by their document keys", async () => {
+    const hits = await run({ tsAnd: "'porusen':*", act: "zak:89/2012" });
+    expect(docsOf(hits, "meta")).toEqual([metaCiting]);
+    expect(docsOf(hits)).not.toContain(metaOther);
+  });
+
+  it("another act keeps only its own citations; an EU act matches commentaries (and chunks keyed with it)", async () => {
+    expect(docsOf(await run({ tsAnd: "'porusen':*", act: "zak:99/1963" })).sort()).toEqual([otherAct, metaOther].sort());
+    expect(await run({ tsAnd: "'porusen':*", act: "eu:32016R0679" })).toEqual([]);
   });
 });
 

@@ -146,8 +146,10 @@ export type LoadedFootnote = RenderFootnote & { page: number | null; sectionOrd:
  * the reference's page, section and anchor. `range` keeps those whose
  * definition overlaps [from, to) or whose reference lies inside it (so a
  * window can append definitions printed after its end); `labels` keeps only
- * those labels. pageLabel is the printed label of the page the DEFINITION
- * sits on.
+ * those labels. pageLabel is the printed label of the page the note is
+ * printed on: its reference's page (page_ord — a definition follows the
+ * paragraph citing it, which may run onto the next page), the definition's
+ * own page for an endnote or a note without a paged reference.
  */
 export async function loadFootnotes(
   db: Queryable,
@@ -168,13 +170,17 @@ export async function loadFootnotes(
     where.push(`f.label = ANY($${params.length}::text[])`);
   }
   const { rows } = await db.query(
-    `SELECT f.seq, f.label, f.kind, f.ref_at, f.def_start, f.def_end, f.page_ord, f.section_ord, f.anchor, p.label AS page_label
+    `SELECT f.seq, f.label, f.kind, f.ref_at, f.def_start, f.def_end, f.page_ord, f.section_ord, f.anchor,
+            coalesce(pr.label, pd.label) AS page_label
        FROM doc_footnotes f
+       LEFT JOIN doc_pages pr
+         ON pr.doc_id = f.doc_id AND pr.library_id = f.library_id AND pr.ord = f.page_ord AND f.kind <> 'e'
        LEFT JOIN LATERAL (
          SELECT label FROM doc_pages p
-          WHERE p.doc_id = f.doc_id AND p.library_id = f.library_id AND p.char_start <= f.def_start
+          WHERE (f.kind = 'e' OR f.page_ord IS NULL)
+            AND p.doc_id = f.doc_id AND p.library_id = f.library_id AND p.char_start <= f.def_start
           ORDER BY p.char_start DESC LIMIT 1
-       ) p ON true
+       ) pd ON true
       WHERE ${where.join(" AND ")}
       ORDER BY f.seq`,
     params,
@@ -244,6 +250,28 @@ export async function librariesOf(db: Queryable, ids: string[], libraryIds: stri
     [valid, libraryIds],
   );
   return new Map(rows.map((r) => [String(r.id), String(r.library_id)]));
+}
+
+/** What a hint needs to address a read window: the stored text length and whether there are pages / an outline. */
+export interface DocumentShape {
+  textLength: number;
+  paged: boolean;
+  outlined: boolean;
+}
+
+/** DocumentShape of each document id, only those in `libraryIds`. */
+export async function documentShapes(db: Queryable, ids: string[], libraryIds: string[]): Promise<Map<string, DocumentShape>> {
+  const valid = ids.filter(isUuid);
+  if (!valid.length || !libraryIds.length) return new Map();
+  const { rows } = await db.query(
+    `SELECT d.id,
+            (SELECT coalesce(max(b.char_end), 0) FROM doc_blocks b WHERE b.doc_id = d.id AND b.library_id = d.library_id) AS text_length,
+            EXISTS (SELECT 1 FROM doc_pages p WHERE p.doc_id = d.id AND p.library_id = d.library_id) AS paged,
+            EXISTS (SELECT 1 FROM doc_sections s WHERE s.doc_id = d.id AND s.library_id = d.library_id) AS outlined
+       FROM documents d WHERE d.id = ANY($1::uuid[]) AND d.library_id = ANY($2::text[])`,
+    [valid, libraryIds],
+  );
+  return new Map(rows.map((r) => [String(r.id), { textLength: num(r.text_length), paged: r.paged === true, outlined: r.outlined === true }]));
 }
 
 /** Root-to-leaf section chains of the given section ords of one document. */

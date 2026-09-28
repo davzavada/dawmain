@@ -21,6 +21,12 @@
  *   parz:89/2012/2913    § with its act (an act within 40 chars after the
  *                        reference, or the commented act of a commentary)
  *   zak:89/2012          "zákon č. 89/2012 Sb.", "89/2012 Sb."
+ *   eu:32016R0679        an EU act the chunk cites: by number ("nařízení
+ *                        (EU) 2016/679", "směrnice 93/13/EHS") or by a
+ *                        name the act table knows ("GDPR", "Brusel I bis")
+ *                        — stored keys only (extractIdentKeys), so the act
+ *                        filter keeps passages citing an EU act; a query
+ *                        never carries them (euActKeys)
  *   isbn:9788074001234   ISBN-13 (ISBN-10 converted; checksums validated)
  *   doi:10.1000/xyz
  *
@@ -322,6 +328,61 @@ export function findIdentSpans(text: string, ctx?: { commentedAct?: string | nul
   return spans.sort((a, b) => a.start - b.start || b.end - a.end);
 }
 
+/**
+ * An EU act by number: "nařízení (EU) 2016/679", "nařízení Evropského
+ * parlamentu a Rady (EU) č. 1215/2012", "směrnice Rady (EHS) 93/13",
+ * "směrnice 93/13/EHS". The kind word (any case ending) decides the CELEX
+ * type; up to ~60 characters of issuer between it and the number.
+ */
+const EU_ACT_RE =
+  /(?<![\p{L}])(nařízení\p{L}*|směrnic\p{L}*|rozhodnutí\p{L}*)(?:\s+[\p{L}]+){0,6}?\s*(?:\((EU|ES|EHS|Euratom)\)\s*(?:č\.\s*)?(\d{1,4})\s*\/\s*(\d{1,4})(?![\p{N}\/])|(\d{1,4})\s*\/\s*(\d{1,4})\s*\/\s*(EU|ES|EHS|Euratom)(?![\p{L}]))/giu;
+
+/** CELEX sector-3 type letter of an EU act's kind word, in any case ending ("nařízením" → R), or null. */
+function euKind(kindWord: string): string | null {
+  const w = kindWord.toLowerCase();
+  if (w.startsWith("nařízení")) return "R";
+  if (w.startsWith("směrnic")) return "L";
+  if (w.startsWith("rozhodnutí")) return "D";
+  return null;
+}
+
+/** CELEX id of an EU act from its kind word and the two numbers of its citation, or null. Pure. */
+export function euActId(kindWord: string, a: string, b: string): string | null {
+  const kind = euKind(kindWord);
+  if (!kind) return null;
+  const x = Number(a);
+  const y = Number(b);
+  // Before 2015: number/year ("1215/2012", "93/13" = 1993); from 2015: year/number ("2016/679").
+  let year: number;
+  let number: number;
+  if (a.length === 4 && x >= 2015 && x <= 2100) [year, number] = [x, y];
+  else if (b.length === 4 && y >= 1952 && y <= 2014) [year, number] = [y, x];
+  else if (a.length === 2 && b.length <= 4) [year, number] = [x >= 52 ? 1900 + x : 2000 + x, y];
+  else if (b.length === 2 && a.length <= 4) [year, number] = [y >= 52 ? 1900 + y : 2000 + y, x];
+  else return null;
+  if (year < 1952 || year > 2100 || number < 1 || number > 9999) return null;
+  return `eu:3${year}${kind}${String(number).padStart(4, "0")}`;
+}
+
+/**
+ * The EU acts `text` cites, as act ids: by number (EU_ACT_RE) or by a name
+ * or abbreviation of the act table. Stored keys only — the act filter
+ * matches a passage by them; the query side never emits them, so an EU act
+ * named in a query does not pull every passage citing it. Pure.
+ */
+export function euActKeys(text: string): string[] {
+  const t = text.replace(ODD_SPACES, " ");
+  const keys: string[] = [];
+  for (const m of t.matchAll(EU_ACT_RE)) {
+    const id = m[3] !== undefined ? euActId(m[1], m[3], m[4]) : euActId(m[1], m[5], m[6]);
+    if (id) keys.push(id);
+  }
+  for (const entry of ACT_ABBREVIATIONS) {
+    if (entry.act.startsWith("eu:") && entry.pattern.test(t)) keys.push(entry.act);
+  }
+  return keys;
+}
+
 function dedupe(keys: string[], cap: number): string[] {
   return [...new Set(keys)].slice(0, cap);
 }
@@ -332,10 +393,7 @@ function dedupe(keys: string[], cap: number): string[] {
  * turns a bare § of a commentary into parz:89/2012/<n>. Pure.
  */
 export function extractIdentKeys(text: string, ctx?: { commentedAct?: string | null }): string[] {
-  return dedupe(
-    findIdentSpans(text, ctx).flatMap((s) => s.keys),
-    MAX_IDENT_KEYS,
-  );
+  return dedupe([...findIdentSpans(text, ctx).flatMap((s) => s.keys), ...euActKeys(text)], MAX_IDENT_KEYS);
 }
 
 /**

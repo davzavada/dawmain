@@ -30,6 +30,20 @@ export const DEFAULT_CONVERT_OPTIONS: ConvertOptions = {
   labelOffset: null,
 };
 
+/**
+ * A region the PDF layout recognised on one page, in the page's viewport
+ * space at scale 1 (PDF points, y down from the top) — drawn over the page
+ * in the preview so a wrong zone shows at a glance.
+ */
+export interface PageZone {
+  /** header/footer: running heads and page numbers left out; footnotes: the note zone; heading: a heading line. */
+  kind: "header" | "footer" | "footnotes" | "heading";
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
 export interface ConvertResult {
   kind: FileKind;
   /** Converter id + version, e.g. "pdf@1" — stored with the document. */
@@ -44,6 +58,8 @@ export interface ConvertResult {
   pageFlags: number[];
   /** Per physical page: printed label — for the preview and the range picker. */
   pageLabels: string[];
+  /** PDF only, per physical page (index = ord − 1): the regions the layout recognised — preview overlays. */
+  pageZones?: PageZone[][];
   /** Czech, user-facing consequences ("na 12 stranách budou poznámky jako běžný text"). */
   warnings: string[];
 }

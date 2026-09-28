@@ -28,6 +28,9 @@ export interface ScopeOptions {
   statementTimeoutMs?: number;
 }
 
+/** statement_timeout of every scope that does not ask for more (plan §8: 10 s, ingest 60 s). */
+export const DEFAULT_STATEMENT_TIMEOUT_MS = 10_000;
+
 export type ScopeRunner = <T>(
   libraryIds: readonly string[],
   fn: (db: Queryable) => Promise<T>,
@@ -62,12 +65,14 @@ function getPool(): Pool {
   if (!connectionString) {
     throw new FilesUnavailableError("FILES_DATABASE_URL is not set", "unconfigured");
   }
+  // No statement_timeout (or `options`) here: pg sends those as startup
+  // parameters, and the Neon pooler (PgBouncer, transaction mode) refuses
+  // every connection that carries one. withScope sets it per transaction.
   pool = new Pool({
     connectionString,
     max: 5,
     idleTimeoutMillis: 5_000,
     connectionTimeoutMillis: 4_000,
-    statement_timeout: 10_000,
   });
   // On Fluid compute, closes idle clients before the instance is suspended.
   attachDatabasePool(pool);
@@ -97,6 +102,25 @@ async function verifyRole(client: PoolClient): Promise<void> {
   if (!row || row.rolsuper || row.rolbypassrls || row.neon_superuser || row.read_all) {
     console.error("files: FILES_DATABASE_URL uses a role that bypasses row-level security — refusing all file queries");
     throw new FilesUnavailableError("database role bypasses row-level security", "unsafe_role");
+  }
+}
+
+/**
+ * One row per minute in which the DB was awake: the in-app estimate of Neon
+ * compute hours (the consumption API is paid-plan only). Its own autocommit
+ * statement before BEGIN, so a transaction that rolls back (a 404, a
+ * duplicate upload, a timeout) still counts the minute; the per-instance
+ * mark is set only once the row is written. Bookkeeping: a failure here
+ * never fails the caller's work.
+ */
+async function markActivity(client: PoolClient): Promise<void> {
+  const now = Date.now();
+  if (now - lastActivityMark <= 60_000) return;
+  try {
+    await client.query("INSERT INTO db_activity (minute) VALUES (date_trunc('minute', now())) ON CONFLICT DO NOTHING");
+    lastActivityMark = now;
+  } catch {
+    // Retried on the next scope.
   }
 }
 
@@ -137,20 +161,13 @@ export async function withScope<T>(
       if (!(error instanceof FilesUnavailableError && error.reason === "unsafe_role")) roleCheck = null;
       throw error;
     }
+    await markActivity(client);
     await client.query("BEGIN");
     await client.query("SELECT set_config('app.library_ids', $1, true)", [libraryIds.join(",")]);
-    if (options.statementTimeoutMs) {
-      await client.query("SELECT set_config('statement_timeout', $1, true)", [String(options.statementTimeoutMs)]);
-    }
-    const now = Date.now();
-    if (now - lastActivityMark > 60_000) {
-      lastActivityMark = now;
-      // One row per minute in which the DB was awake: the in-app estimate of
-      // Neon compute hours (the consumption API is paid-plan only).
-      await client.query(
-        "INSERT INTO db_activity (minute) VALUES (date_trunc('minute', now())) ON CONFLICT DO NOTHING",
-      );
-    }
+    // Transaction-local, hence pooler-safe (a session SET would stick to the server connection).
+    await client.query("SELECT set_config('statement_timeout', $1, true)", [
+      String(options.statementTimeoutMs ?? DEFAULT_STATEMENT_TIMEOUT_MS),
+    ]);
     const result = await fn(client as unknown as Queryable);
     await client.query("COMMIT");
     return result;

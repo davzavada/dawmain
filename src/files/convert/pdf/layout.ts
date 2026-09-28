@@ -31,14 +31,14 @@
 import { sanitizeLine, normalizeDmd } from "../../dmd/normalize";
 import { DMD_LIMITS, PAGE_FLAGS } from "../../dmd/types";
 import type { ConversionQuality, UploadHints } from "../../types";
-import { ConvertError, type ConvertOptions, type ConvertResult } from "../types";
+import { ConvertError, type ConvertOptions, type ConvertResult, type PageZone } from "../types";
 import { emitDmd } from "./emit";
 import { collectRefs, footnoteSize, resolvePageNotes, zoneCandidates } from "./footnotes";
 import { bodyStats, buildRows, buildSegments, hyphenDictionary, splitColumns, takeMarginNumbers, textEdges } from "./geometry";
 import { detectHeadings } from "./headings";
 import { computeLabels } from "./labels";
 import type { Line, Note, PageModel, Part, Row } from "./model";
-import { foldText, labelList, pagesLoc, plural, privateUseCount, stopwordRatio } from "./text";
+import { endsTerminal, foldText, labelList, pagesLoc, plural, privateUseCount, stopwordRatio } from "./text";
 import type { PdfDocInput } from "./types";
 import { detectFurniture, detectWatermarks, type PrintedNumber } from "./zones";
 
@@ -104,6 +104,16 @@ export function layoutToDmd(doc: PdfDocInput, opts: ConvertOptions): ConvertResu
     const label = labels.labels[row.page - 1];
     if ((num.value !== null && String(num.value) === label) || (num.roman !== null && num.roman === label)) drop.add(row);
   }
+  // Preview overlays: what the layout recognised, per physical page.
+  const zones: PageZone[][] = pageRows.map(() => []);
+  const addZone = (page: number, zone: PageZone) => {
+    const list = zones[page - 1];
+    if (list && list.length < MAX_ZONES_PER_PAGE) list.push(zone);
+  };
+  for (const row of drop) {
+    const height = pageRows[row.page - 1]?.height ?? 0;
+    addZone(row.page, { kind: row.y < height / 2 ? "header" : "footer", ...rowBox(row) });
+  }
   for (const p of pageRows) p.rows = p.rows.filter((r) => !drop.has(r));
   const watermarkRows = detectWatermarks(pageRows, new Set());
   for (const p of pageRows) p.rows = p.rows.filter((r) => !watermarkRows.has(r));
@@ -143,18 +153,30 @@ export function layoutToDmd(doc: PdfDocInput, opts: ConvertOptions): ConvertResu
   let bound = 0;
   let monotonic = true;
   let prev: Note | null = null;
+  let prevNoteOnly = false;
   const unboundRefs: Array<Extract<Part, { t: "ref" }>> = [];
   for (const page of pages) {
     if (!page.kept || plain || !opts.footnotes) {
       prev = null;
+      prevNoteOnly = false;
       continue;
     }
-    const cands = fnSize ? zoneCandidates(page.segments, fnSize, stats.lineGap) : [];
+    // Only a note left open by a real zone may continue on a page of nothing but small type, and only
+    // in the page's lower half: never chained, so small-type body pages are not swallowed into a note.
+    const lastOfPrev = prev?.lines[prev.lines.length - 1];
+    const open = Boolean(lastOfPrev && !endsTerminal(lastOfPrev.plain)) && !prevNoteOnly;
+    const cands = fnSize ? zoneCandidates(page.segments, fnSize, stats.lineGap, open ? 0.5 * page.height : null) : [];
     const zoneSet = new Set<Line>(cands.flatMap(([si, k]) => page.segments[si].lines.slice(k)));
     const zone = page.segments.flatMap((s) => s.lines).filter((l) => zoneSet.has(l));
     const body = page.segments.flatMap((s) => s.lines).filter((l) => !zoneSet.has(l));
     const refs = collectRefs(body);
     const res = resolvePageNotes({ page: page.ord, zone, body, refs, prev });
+    if (res.zone && zone.length) addZone(page.ord, { kind: "footnotes", ...boundsOf(zone) });
+    // A page of nothing but small type taken for a note's continuation: a guess worth a look.
+    if (res.zone && zone.length && !body.length && !res.notes.length && !res.endText.length) {
+      page.noteOnly = true;
+      page.flags |= PAGE_FLAGS.FN_UNSURE;
+    }
     if (res.zone) {
       for (const seg of page.segments) seg.lines = seg.lines.filter((l) => !zoneSet.has(l));
       page.segments = page.segments.filter((s) => s.lines.length);
@@ -167,12 +189,17 @@ export function layoutToDmd(doc: PdfDocInput, opts: ConvertOptions): ConvertResu
     if (!res.consecutive) monotonic = false;
     unboundRefs.push(...refs.filter((r) => r.note === null));
     prev = res.notes.length ? res.notes[res.notes.length - 1] : res.zone && !res.unsure ? prev : null;
+    prevNoteOnly = Boolean(page.noteOnly);
   }
 
   // ── headings
   const headings = plain
     ? { from: "none" as const, count: 0, rejectedPar: 0, tocPages: new Set<number>() }
     : detectHeadings(pages, doc.outline.filter((e) => kept(e.page)), stats);
+
+  for (const page of pages) {
+    for (const seg of page.segments) for (const l of seg.lines) if (l.heading || l.headingCont) addZone(page.ord, { kind: "heading", ...rowBox(l) });
+  }
 
   // ── emit
   const keptPages = pages.filter((p) => p.kept);
@@ -185,7 +212,7 @@ export function layoutToDmd(doc: PdfDocInput, opts: ConvertOptions): ConvertResu
     marginalNumbers: opts.marginalNumbers && !plain,
   });
   for (const page of keptPages) {
-    if (!page.segments.length && !page.endText.length && !page.notes.length) page.flags |= PAGE_FLAGS.BLANK;
+    if (!page.segments.length && !page.endText.length && !page.notes.length && !page.noteOnly) page.flags |= PAGE_FLAGS.BLANK;
     if (page.flags & (PAGE_FLAGS.FN_UNSURE | PAGE_FLAGS.HEADING_UNSURE)) unsurePages.add(page.ord);
   }
 
@@ -206,7 +233,8 @@ export function layoutToDmd(doc: PdfDocInput, opts: ConvertOptions): ConvertResu
     ocr,
     plain: opts.plain,
     keptPages,
-    fnUnsure: keptPages.filter((p) => p.flags & PAGE_FLAGS.FN_UNSURE),
+    fnUnsure: keptPages.filter((p) => (p.flags & PAGE_FLAGS.FN_UNSURE) && !p.noteOnly),
+    noteOnly: keptPages.filter((p) => p.noteOnly),
     unboundRefs: unboundRefs.length,
     columnsUnsure,
     labelSource: labels.source,
@@ -229,7 +257,27 @@ export function layoutToDmd(doc: PdfDocInput, opts: ConvertOptions): ConvertResu
     physicalPages: count,
     pageFlags: pages.map((p) => p.flags),
     pageLabels: pages.map((p) => p.label),
+    pageZones: zones,
     warnings,
+  };
+}
+
+/** Overlay rectangles per page (a page of many headings stays bounded). */
+const MAX_ZONES_PER_PAGE = 80;
+
+/** The box of one row or line: from about the cap height above the baseline to the descenders. */
+function rowBox(r: { x0: number; x1: number; y: number; size: number }): Omit<PageZone, "kind"> {
+  return { x0: r.x0, y0: r.y - r.size, x1: Math.max(r.x1, r.x0 + 1), y1: r.y + 0.3 * r.size };
+}
+
+/** The box around several lines. */
+function boundsOf(lines: ReadonlyArray<{ x0: number; x1: number; y: number; size: number }>): Omit<PageZone, "kind"> {
+  const boxes = lines.map(rowBox);
+  return {
+    x0: Math.min(...boxes.map((b) => b.x0)),
+    y0: Math.min(...boxes.map((b) => b.y0)),
+    x1: Math.max(...boxes.map((b) => b.x1)),
+    y1: Math.max(...boxes.map((b) => b.y1)),
   };
 }
 
@@ -343,6 +391,7 @@ function buildWarnings(w: {
   plain: boolean;
   keptPages: PageModel[];
   fnUnsure: PageModel[];
+  noteOnly: PageModel[];
   unboundRefs: number;
   columnsUnsure: number;
   labelSource: string;
@@ -363,6 +412,12 @@ function buildWarnings(w: {
   if (w.fnUnsure.length) {
     out.push(
       `Na ${pagesLoc(w.fnUnsure.length)} nebyly poznámky pod čarou spolehlivě rozpoznány (s. ${labelList(w.fnUnsure.map((p) => p.label))}) — jejich text zůstane na konci strany nebo jako poznámka bez odkazu.`,
+    );
+  }
+  if (w.noteOnly.length) {
+    const labels = labelList(w.noteOnly.map((p) => p.label));
+    out.push(
+      `${w.noteOnly.length === 1 ? `Strana ${labels} obsahovala` : `Strany ${labels} obsahovaly`} jen drobné písmo v dolní části — text byl připojen k poznámce pod čarou z předchozí strany. Zkontrolujte ho v náhledu.`,
     );
   }
   if (w.footnotes === "unsure" && !w.fnUnsure.length) out.push("Poznámky pod čarou se podařilo spárovat s odkazy jen zčásti — zkontrolujte je v náhledu.");

@@ -56,10 +56,31 @@ export function matchesLibrary(lib: LibraryAccess, filter: string): boolean {
   return lib.kind === "user" && PERSONAL_ALIASES.has(f);
 }
 
-/** How a library is named in "available libraries" hints: name + the filter value to use. */
+/** The `library` filter value that selects this library (a slug only when it is a plain one). Pure. */
+export function libraryHandle(lib: LibraryAccess): string {
+  if (lib.kind === "user") return "osobni";
+  return lib.slug && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(lib.slug) ? lib.slug : lib.id;
+}
+
+/** A plain library name: letters, digits and light punctuation, short. */
+const SAFE_LIBRARY_NAME = /^[\p{L}\p{N}][\p{L}\p{N} .,&'()\-–]{0,39}$/u;
+/** Words a team name has no business carrying — it is printed outside the fence. */
+const INSTRUCTION_WORDS = /\b(?:ignore|ignoruj|instructions?|pokyn|pokyny|system|assistant|asistent|prompt|tool|call|zavolej)\b/i;
+
+/**
+ * A library's name as tool-authored lines print it (outside the fence): a
+ * team name is set by the team's admin, so a name that is not plainly a
+ * name — too long, unusual characters, instruction-like words — gives way
+ * to the library's handle. Pure.
+ */
+export function safeLibraryName(lib: LibraryAccess): string {
+  const name = sanitizeLine(lib.name ?? "", 60).trim();
+  return SAFE_LIBRARY_NAME.test(name) && !INSTRUCTION_WORDS.test(name) ? name : libraryHandle(lib);
+}
+
+/** How a library is named in "available libraries" hints: safe name + the filter value to use. */
 function describe(lib: LibraryAccess): string {
-  const handle = lib.kind === "user" ? "osobni" : (lib.slug ?? lib.id);
-  return `${lib.name} (library: "${handle}")`;
+  return `${safeLibraryName(lib)} (library: "${libraryHandle(lib)}")`;
 }
 
 /**

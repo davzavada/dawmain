@@ -2,11 +2,30 @@ import { libraryOwnerState } from "@/src/files/access";
 import { cronSecret, envMode } from "@/src/files/config";
 import { withScope } from "@/src/files/db/client";
 import { clearStalePending, ingestCandidates, MAX_INGEST_ATTEMPTS } from "@/src/files/db/documents";
-import { listAllLibraries, markLibraryForPurge, purgeLibraryContent, setProRevoked, type LibraryRow } from "@/src/files/db/libraries";
-import { audit, setSystemState } from "@/src/files/db/usage";
+import {
+  listAllLibraries,
+  lockDuePurge,
+  markLibraryForPurge,
+  purgeLibraryContent,
+  reviveLibrary,
+  setProRevoked,
+  type LibraryRow,
+} from "@/src/files/db/libraries";
+import {
+  audit,
+  forgetLibraryUsage,
+  forgetPurgedAudit,
+  forgetTermsAcceptance,
+  forgetUserUsage,
+  pendingReindexRequests,
+  pruneUsage,
+  recountLibraries,
+  setSystemState,
+} from "@/src/files/db/usage";
 import { errorCode, filesJson } from "@/src/files/errors";
 import { effectiveMode, GUARDS_STATE_KEY, measureGuards } from "@/src/files/guards";
 import { ingestDocument } from "@/src/files/ingest";
+import { reindexRequested } from "@/src/files/reindex";
 import { tokenMatches } from "@/src/mcp/config";
 
 export const runtime = "nodejs";
@@ -25,6 +44,8 @@ const PENDING_KEEP_DAYS = 7;
 const SWEEP_PER_RUN = 200;
 /** Ingests this run may start in mode "on" (plus any number of over-attempt fast fails). */
 const INGESTS_PER_RUN = 3;
+/** Deferred re-derivations (metadata saves over a library's daily budget) this run may catch up on. */
+const REINDEXES_PER_RUN = 30;
 /** Stop starting new work after this long, to finish inside maxDuration. */
 const SOFT_DEADLINE_MS = 240_000;
 const DAY_MS = 86_400_000;
@@ -39,13 +60,23 @@ const DAY_MS = 86_400_000;
  *      the snapshot (system_state "guards") — the automatic read-only mode
  *      itself is applied live by effectiveMode();
  *   2. purge libraries whose purge date passed (Clerk deletion + 7 days,
- *      or Pro revoked for 90 days);
+ *      or Pro revoked for 90 days) — with their counters and their audit
+ *      rows but the purge record;
  *   3. owners and Pro: ≤ 50 Clerk lookups, rotating through the libraries —
- *      a deleted owner (missed webhook) schedules a purge, a lost Pro sets
- *      pro_revoked_at (restored Pro clears it), 90 days revoked → purge;
+ *      a deleted owner (missed webhook) schedules a purge and, for a user,
+ *      drops their terms acceptance and read counters as the webhook would;
+ *      a lost Pro sets pro_revoked_at (restored Pro clears it), 90 days
+ *      revoked → purge; Pro restored before that purge ran revives the
+ *      library (the mark is cleared);
  *   4. ingest queue: documents over their attempts are failed (reservation
  *      released) in any mode; waiting ones are ingested when the mode is "on";
- *   5. drop the stored text of uploads that failed more than 7 days ago.
+ *   5. re-derivations deferred by the libraries' daily budget (mode "on");
+ *   6. drop the stored text of uploads that failed more than 7 days ago;
+ *   7. recount every library's page and document counters from its
+ *      documents (a takedown or a crash never leaves them drifting);
+ *   8. retention (/soukromi): usage counters after 12 months (per-document
+ *      read counters after 2 days), compute-activity minutes after 62 days,
+ *      audit rows of purged libraries.
  *
  * Returns a JSON summary of counts (no ids, no content).
  */
@@ -76,6 +107,10 @@ interface Summary {
   ingestsFailed: number;
   ingestsRun: number;
   pendingCleared: number;
+  reindexed: number;
+  countersFixed: number;
+  usagePruned: number;
+  auditForgotten: number;
   errors: string[];
 }
 
@@ -93,6 +128,10 @@ async function runMaintenance(started: number): Promise<Summary> {
     ingestsFailed: 0,
     ingestsRun: 0,
     pendingCleared: 0,
+    reindexed: 0,
+    countersFixed: 0,
+    usagePruned: 0,
+    auditForgotten: 0,
     errors: [],
   };
   const late = () => Date.now() - started > SOFT_DEADLINE_MS;
@@ -122,6 +161,8 @@ async function runMaintenance(started: number): Promise<Summary> {
   });
 
   let libraries: Array<LibraryRow & { created_at: string }> = [];
+  /** Purged by this run: the owners task leaves them alone. */
+  const purgedNow = new Set<string>();
   await task("libraries", async () => {
     libraries = await withScope([], (db) => listAllLibraries(db));
   });
@@ -133,20 +174,32 @@ async function runMaintenance(started: number): Promise<Summary> {
       const deleted = await withScope(
         [lib.id],
         async (db) => {
+          // Re-checked under the row lock: an upload may have revived the
+          // library since it was listed (reviveLibrary), or the database's
+          // clock may not have reached the date yet. Then nothing is wiped,
+          // audited or counted.
+          if (!(await lockDuePurge(db, lib.id))) return null;
           const n = await purgeLibraryContent(db, lib.id);
+          await forgetLibraryUsage(db, lib.id);
           await audit(db, { libraryId: lib.id, actor: "cron", action: "library.purged", detail: { documents: n } });
+          summary.auditForgotten += await forgetPurgedAudit(db);
           return n;
         },
         { statementTimeoutMs: 60_000 },
       );
+      if (deleted === null) continue;
+      purgedNow.add(lib.id);
       summary.purged += 1;
       summary.purgedDocuments += deleted;
     }
   });
 
   await task("owners", async () => {
-    const live = libraries.filter((l) => !l.purge_after);
-    for (const lib of rotate(live, OWNER_CHECKS_PER_RUN, Math.floor(started / DAY_MS))) {
+    // Unmarked libraries, plus those marked because Pro stayed revoked for
+    // 90 days: restored Pro before the purge runs revives them. (A library
+    // marked because its owner was deleted cannot get Pro back.)
+    const checked = libraries.filter((l) => !purgedNow.has(l.id) && (!l.purge_after || l.pro_revoked_at));
+    for (const lib of rotate(checked, OWNER_CHECKS_PER_RUN, Math.floor(started / DAY_MS))) {
       if (late()) break;
       let state: Awaited<ReturnType<typeof libraryOwnerState>>;
       try {
@@ -157,8 +210,21 @@ async function runMaintenance(started: number): Promise<Summary> {
       }
       summary.ownersChecked += 1;
       await withScope([lib.id], async (db) => {
+        if (lib.purge_after) {
+          // Marked for purge (revoked_expired): only restored Pro changes anything.
+          if (state === "pro" && (await reviveLibrary(db, lib.id))) {
+            await audit(db, { libraryId: lib.id, actor: "cron", action: "library.revived" });
+            summary.proRestored += 1;
+          }
+          return;
+        }
         if (state === "gone") {
           await markLibraryForPurge(db, lib.id, new Date(Date.now() + 7 * DAY_MS));
+          if (lib.id.startsWith("user_")) {
+            // The user.deleted webhook was missed: what goes with the account goes now.
+            await forgetTermsAcceptance(db, lib.id);
+            await forgetUserUsage(db, lib.id);
+          }
           await audit(db, { libraryId: lib.id, actor: "cron", action: "library.owner_gone" });
           summary.scheduledPurges += 1;
           return;
@@ -202,11 +268,33 @@ async function runMaintenance(started: number): Promise<Summary> {
     }
   });
 
+  await task("reindex", async () => {
+    if (summary.mode !== "on") return;
+    const candidates = await withScope([], (db) => pendingReindexRequests(db, REINDEXES_PER_RUN));
+    summary.reindexed = (await reindexRequested(candidates, late)).done;
+  });
+
   await task("pending", async () => {
     for (const lib of libraries.slice(0, SWEEP_PER_RUN)) {
       if (late()) break;
       summary.pendingCleared += await withScope([lib.id], (db) => clearStalePending(db, lib.id, PENDING_KEEP_DAYS));
     }
+  });
+
+  await task("recount", async () => {
+    summary.countersFixed = await withScope([], (db) => recountLibraries(db));
+  });
+
+  await task("retention", async () => {
+    await withScope(
+      [],
+      async (db) => {
+        const pruned = await pruneUsage(db);
+        summary.usagePruned = pruned.usage + pruned.activity;
+        summary.auditForgotten += await forgetPurgedAudit(db);
+      },
+      { statementTimeoutMs: 60_000 },
+    );
   });
 
   return summary;

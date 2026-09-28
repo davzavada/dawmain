@@ -30,9 +30,9 @@ export interface LibrarySummary {
   canUpload: boolean;
   canManageAll: boolean;
   quotaPages: number;
-  /** Stored + reserved (in flight) pages; null when not loaded (library without Pro). */
+  /** Stored + reserved (in flight) pages; null when not loaded (library without Pro, or the feature is off — no database wake). */
   pagesUsed: number | null;
-  /** Null when not loaded (library without Pro — its list loads when opened). */
+  /** Null when not loaded (library without Pro, or the feature is off — its list loads when opened). */
   counts: LibraryDocCounts | null;
   /** Team size (Clerk), null for a personal library or when unknown. */
   memberCount: number | null;
@@ -67,8 +67,10 @@ export interface DocumentListItem {
   uploaderName: string | null;
   mine: boolean;
   enabled: boolean;
-  /** May edit metadata, toggle and delete (uploader with upload rights, or owner/admin). */
+  /** May edit metadata, toggle and re-upload: Pro library, and the uploader or owner/admin. */
   canEdit: boolean;
+  /** May delete and export the text: the uploader or owner/admin — Pro not required. */
+  canDelete: boolean;
   docType: DocType;
   billablePages: number;
   /** Conversion flags worth a badge: footnotes unsure, OCR/plain, lost numbering, instruction-like text. */

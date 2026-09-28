@@ -13,7 +13,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 const propose = vi.hoisted(() => ({ fn: vi.fn() }));
 vi.mock("@/src/files/meta/propose", () => ({ proposeMetadata: propose.fn }));
 
-import { LIMITS } from "@/src/files/config";
+import { ANALYZER_VERSION, LIMITS } from "@/src/files/config";
 import { setScopeRunner } from "@/src/files/db/client";
 import { insertUploadedDocument } from "@/src/files/db/documents";
 import { ensureLibrary, reservePages } from "@/src/files/db/libraries";
@@ -162,7 +162,7 @@ describe("ingestDocument — success", () => {
     expect(await ingestDocument(id, LIB)).toBe("done");
 
     const d = await doc(id);
-    expect(d).toMatchObject({ status: "review", pending_cleared: true, attempts: 1, analyzer_version: 1, run_token: null, lease_until: null });
+    expect(d).toMatchObject({ status: "review", pending_cleared: true, attempts: 1, analyzer_version: ANALYZER_VERSION, run_token: null, lease_until: null });
     expect(d.title).toBeTruthy();
     expect(d.ident_keys as string[]).toContain("sz:25cdo1000-2019");
     expect(await count("SELECT count(*) AS n FROM chunks WHERE doc_id = $1", [id])).toBeGreaterThan(0);

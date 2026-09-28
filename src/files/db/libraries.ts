@@ -14,6 +14,9 @@ import { capString, isoOrNull, iso, num } from "./codec";
  *   ingest   settlePages(n, actual)     pages_reserved −= n, page_count += actual, doc_count + 1
  *   failure  releasePages(n)            pages_reserved −= n
  *   delete   forgetPages(actual)        page_count −= actual, doc_count − 1
+ * A re-upload (`replaces`) reserves in full too; only the check credits the
+ * replaced document's pages (documents.ts replacementCredit), which leave
+ * with forgetPages when the new document settles.
  * Every decrement floors at 0 (the CHECK constraints would otherwise turn a
  * double release into a failed transaction).
  */
@@ -178,12 +181,36 @@ export async function markLibraryForPurge(db: Queryable, libraryId: string, afte
 }
 
 /**
+ * The owner uses the library again with Pro confirmed fresh from Clerk (an
+ * upload): clear the revocation, a pending purge mark and a finished purge,
+ * so the library is counted, checked and ingested like any other again.
+ * Nothing comes back — a purge deleted the documents and zeroed the
+ * counters for good. Takes the row lock, so a purge that has not started
+ * yet sees the mark gone (purgeLibraryContent). True when a purge mark or
+ * a purge was cleared (worth an audit row).
+ */
+export async function reviveLibrary(db: Queryable, libraryId: string): Promise<boolean> {
+  const { rows } = await db.query<{ marked: boolean }>(
+    `UPDATE libraries l SET purge_after = NULL, purged_at = NULL, pro_revoked_at = NULL
+       FROM (SELECT id, (purge_after IS NOT NULL OR purged_at IS NOT NULL) AS marked FROM libraries WHERE id = $1 FOR UPDATE) o
+      WHERE l.id = o.id AND (l.purge_after IS NOT NULL OR l.purged_at IS NOT NULL OR l.pro_revoked_at IS NOT NULL)
+      RETURNING o.marked`,
+    [libraryId],
+  );
+  return rows[0]?.marked === true;
+}
+
+/**
  * Delete every document of the library (children cascade), in small batches
  * so no single statement runs into the statement timeout, then zero the
  * counters, drop the display name (personal data) and set purged_at.
- * Returns the number of documents deleted.
+ * Only a library whose purge date has passed: the row is locked and the
+ * mark re-read first, so a library revived since the caller listed it
+ * (reviveLibrary) is left alone. Returns the number of documents deleted
+ * (0 as well when there was nothing to purge).
  */
 export async function purgeLibraryContent(db: Queryable, libraryId: string): Promise<number> {
+  if (!(await lockDuePurge(db, libraryId))) return 0;
   let deleted = 0;
   for (;;) {
     const { rows } = await db.query(
@@ -202,4 +229,17 @@ export async function purgeLibraryContent(db: Queryable, libraryId: string): Pro
     [libraryId],
   );
   return deleted;
+}
+
+/**
+ * Lock the library row and tell whether its purge is due (marked, date
+ * passed, not purged yet). A caller that does more than purgeLibraryContent
+ * in the same transaction (audit, forgetting counters) checks this first.
+ */
+export async function lockDuePurge(db: Queryable, libraryId: string): Promise<boolean> {
+  const { rows } = await db.query(
+    `SELECT 1 FROM libraries WHERE id = $1 AND purged_at IS NULL AND purge_after IS NOT NULL AND purge_after <= now() FOR UPDATE`,
+    [libraryId],
+  );
+  return rows.length > 0;
 }

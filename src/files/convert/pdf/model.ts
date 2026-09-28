@@ -112,6 +112,8 @@ export interface PageModel {
   notes: Note[];
   /** Footnote-zone text kept as body text at the page end (unsure zone, orphan continuation). */
   endText: Line[];
+  /** The page held nothing but the continuation of the previous page's note (moved into it). */
+  noteOnly?: boolean;
   /** Running heads (header/footer text without the page number). */
   heads: string[];
   /** In the selected page range (emitted). */

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ACT_ABBREVIATIONS, actName, resolveAct } from "@/src/files/index/acts";
 import {
   canonicalCaseNumber,
+  euActKeys,
   extractIdentKeys,
   findIdentSpans,
   fullYear,
@@ -185,8 +186,8 @@ describe("extractIdentKeys — §, acts, ISBN, DOI", () => {
     // Too far, or another § in between: no compound key.
     expect(extractIdentKeys("§ 2913 a to i v případech, které jsou upraveny jinde, OZ")).toEqual(["par:2913"]);
     expect(extractIdentKeys("§ 5 a § 2913 OZ")).toEqual(["par:5", "par:2913", "parz:89/2012/2913"]);
-    // EU acts have no §.
-    expect(extractIdentKeys("§ 5 GDPR")).toEqual(["par:5"]);
+    // EU acts have no § (the act itself is keyed: eu:).
+    expect(extractIdentKeys("§ 5 GDPR")).toEqual(["par:5", "eu:32016R0679"]);
   });
   it("parz from the commented act of a commentary, explicit act wins", () => {
     expect(extractIdentKeys("viz § 2910", { commentedAct: "zak:89/2012" })).toEqual(["par:2910", "parz:89/2012/2910"]);
@@ -198,6 +199,29 @@ describe("extractIdentKeys — §, acts, ISBN, DOI", () => {
     expect(extractIdentKeys("zákon č. 89/2012 Sb., občanský zákoník")).toEqual(["zak:89/2012"]);
     expect(extractIdentKeys("ve znění zákona č. 303/2013 Sb. a 460/2016 Sb")).toEqual(["zak:303/2013", "zak:460/2016"]);
     expect(extractIdentKeys("č. 12/2001 Sb. m. s.")).toEqual([]);
+  });
+  it("eu: the EU acts a passage cites, by number or by a known name (MCP-6)", () => {
+    expect(extractIdentKeys("čl. 6 odst. 1 písm. f) GDPR")).toEqual(["eu:32016R0679"]);
+    expect(extractIdentKeys("nařízení Evropského parlamentu a Rady (EU) 2016/679 ze dne 27. dubna 2016")).toEqual(["eu:32016R0679"]);
+    expect(extractIdentKeys("čl. 7 odst. 1 nařízení (EU) č. 1215/2012")).toEqual(["eu:32012R1215"]);
+    expect(extractIdentKeys("podle nařízení Brusel I bis")).toEqual(["eu:32012R1215"]);
+    expect(extractIdentKeys("nařízení Rady (ES) č. 44/2001")).toEqual(["eu:32001R0044"]);
+    expect(extractIdentKeys("směrnice Rady 93/13/EHS o nepřiměřených podmínkách")).toEqual(["eu:31993L0013"]);
+    expect(extractIdentKeys("směrnicí (EU) 2019/770")).toEqual(["eu:32019L0770"]);
+    // Every kind word in any case ending (final review: only "směrnic…" was inflected).
+    expect(euActKeys("v souladu s nařízením (EU) 2016/680")).toEqual(["eu:32016R0680"]);
+    expect(euActKeys("v obou nařízeních (EU) 2016/680")).toEqual(["eu:32016R0680"]);
+    expect(euActKeys("Nařízením Rady (ES) č. 44/2001")).toEqual(["eu:32001R0044"]);
+    expect(euActKeys("rozhodnutím Komise (EU) 2019/1234")).toEqual(["eu:32019D1234"]);
+    expect(euActKeys("v rozhodnutích Rady 2008/615/SVV")).toEqual([]);
+    expect(euActKeys("podle nařízení (EU) 2016/680")).toEqual(["eu:32016R0680"]);
+    // A word merely starting like one is no kind word; a Czech decision is still no EU act.
+    expect(euActKeys("nařízeného jednání (EU) 2016/680")).toEqual([]);
+    expect(extractIdentKeys("rozhodnutím Nejvyššího soudu 25 Cdo 1234/2019")).toEqual(["sz:25cdo1234-2019"]);
+    // Not an EU act: a decision of a Czech court, a Sbírka number, the word alone.
+    expect(extractIdentKeys("rozhodnutí Nejvyššího soudu 25 Cdo 1234/2019")).toEqual(["sz:25cdo1234-2019"]);
+    expect(extractIdentKeys("nařízení vlády č. 361/2007 Sb.")).toEqual(["zak:361/2007"]);
+    expect(extractIdentKeys("nařízení o ochraně")).toEqual([]);
   });
   it("ISBN-13 and ISBN-10 with checksum", () => {
     expect(extractIdentKeys("ISBN 978-80-7400-587-9")).toEqual(["isbn:9788074005879"]);

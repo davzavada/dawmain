@@ -32,6 +32,7 @@ vi.mock("next/server", async (importOriginal) => ({
 }));
 vi.mock("@/src/files/meta/propose", () => ({ proposeMetadata: mocks.propose }));
 
+import { GET as exportGET } from "@/app/api/files/documents/[id]/export/route";
 import { DELETE as docDELETE, GET as docGET, PATCH as docPATCH } from "@/app/api/files/documents/[id]/route";
 import { GET as listGET, POST as uploadPOST } from "@/app/api/files/documents/route";
 import { GET as summaryGET } from "@/app/api/files/summary/route";
@@ -41,15 +42,17 @@ import { DELETE as invitationDELETE } from "@/app/api/files/team/invitations/[id
 import { POST as invitePOST } from "@/app/api/files/team/invitations/route";
 import { DELETE as memberDELETE } from "@/app/api/files/team/members/[userId]/route";
 import { POST as termsPOST } from "@/app/api/files/terms/route";
-import { __setAccessLoaderForTests, buildAccess, type Access } from "@/src/files/access";
-import { TERMS_VERSION } from "@/src/files/config";
+import { __setAccessLoaderForTests, buildAccess, invalidateAccess, type Access } from "@/src/files/access";
+import { PAGE_CHARS, TERMS_VERSION } from "@/src/files/config";
 import { setScopeRunner } from "@/src/files/db/client";
 import { searchChannels } from "@/src/files/db/search";
 import { acceptTerms, hasAcceptedTerms, setSystemState } from "@/src/files/db/usage";
 import { __resetGuardsForTests, MODE_OVERRIDE_KEY } from "@/src/files/guards";
 import { __setTeamClientForTests, type ClerkInvitationLike, type ClerkMembershipLike, type TeamClerk } from "@/src/files/team";
+import { normalizeDmd } from "@/src/files/dmd/normalize";
 import { buildTsQuery } from "@/src/files/text/analyze";
 import type { ConversionQuality, UploadMeta } from "@/src/files/types";
+import { EXPORTS_PER_DOC_PER_DAY, exportDisposition, exportFileNames, exportFor, exportHeader } from "@/src/files/web";
 import type { DocumentDetail, DocumentListResponse, SummaryResponse, TeamView } from "@/src/files/web-types";
 import { createTestDb, type TestDb } from "./helpers/pglite";
 
@@ -326,10 +329,12 @@ describe("GET /api/files/documents?lib=", () => {
   it("a user who lost Pro still lists (and deletes) what they stored", async () => {
     const id = await uploaded("user_x", "user_x", "x");
     access.user_x = buildAccess({ id: "user_x", publicMetadata: {} }, []);
+    invalidateAccess("user_x");
     signedIn("user_x");
     const body = (await (await listGET(get("/api/files/documents?lib=user_x"))).json()) as DocumentListResponse;
     expect(body.documents.map((d) => d.id)).toEqual([id]);
-    expect(body.documents[0].canEdit).toBe(true);
+    // Editing needs Pro; deleting (and exporting) only ownership.
+    expect(body.documents[0]).toMatchObject({ canEdit: false, canDelete: true });
     expect((await del("user_x", id)).status).toBe(200);
   });
 });
@@ -505,6 +510,268 @@ describe("DELETE /api/files/documents/[id]", () => {
     process.env.FILES_MODE = "off";
     const res = await del("user_admin", "00000000-0000-4000-8000-000000000000");
     expect(res.status).toBe(503);
+  });
+});
+
+describe("rights after Pro is revoked (edit needs Pro, delete and export only ownership)", () => {
+  const TEAM_NO_PRO = { ...TEAM, publicMetadata: {} };
+
+  it("an owner who lost Pro cannot save, confirm or switch — no re-derivation is scheduled", async () => {
+    const id = await uploaded("user_x", "user_x", "x");
+    access.user_x = buildAccess({ id: "user_x", publicMetadata: {} }, []);
+    invalidateAccess("user_x");
+    const v = (await row(id)).meta_version;
+    mocks.after.length = 0;
+    for (const body of [
+      { action: "save", version: v, meta: META({ doc_type: "komentar" }) },
+      { action: "confirm", version: v, meta: META() },
+      { action: "enable", enabled: false },
+    ]) {
+      const res = await patch("user_x", id, body);
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { error: string }).error).toContain("Pro");
+    }
+    expect(mocks.after).toHaveLength(0);
+    expect(await row(id)).toMatchObject({ meta_version: v, enabled: true, status: "review" });
+    const audit = await t.owner.query("SELECT 1 FROM audit_log WHERE action IN ('document.meta', 'document.confirm', 'document.disable')");
+    expect(audit.rows).toHaveLength(0);
+  });
+
+  it("a team admin of a team that lost Pro cannot edit either", async () => {
+    const id = await uploaded("user_mem", "org_t", "m");
+    access.user_admin = buildAccess({ id: "user_admin", publicMetadata: { pro: true } }, [{ role: "org:admin", organization: TEAM_NO_PRO }]);
+    invalidateAccess("user_admin");
+    const res = await patch("user_admin", id, { action: "save", version: (await row(id)).meta_version, meta: META() });
+    expect(res.status).toBe(403);
+  });
+
+  it("a member without Pro editing a colleague's upload hears about ownership, not about Pro", async () => {
+    const other = await uploaded("user_mem2", "org_t", "n");
+    access.user_mem = buildAccess({ id: "user_mem", publicMetadata: {} }, [{ role: "org:member", organization: TEAM_NO_PRO }]);
+    invalidateAccess("user_mem");
+    const res = await patch("user_mem", other, { action: "enable", enabled: false });
+    expect(res.status).toBe(403);
+    const { error } = (await res.json()) as { error: string };
+    expect(error).toContain("jen ten, kdo ho nahrál");
+    expect(error).not.toContain("Pro");
+    expect(await row(other)).toMatchObject({ enabled: true });
+  });
+
+  it("a member deletes their own upload after the team lost Pro, but not a colleague's", async () => {
+    const own = await uploaded("user_mem", "org_t", "m");
+    const other = await uploaded("user_mem2", "org_t", "n");
+    access.user_mem = buildAccess({ id: "user_mem", publicMetadata: {} }, [{ role: "org:member", organization: TEAM_NO_PRO }]);
+    invalidateAccess("user_mem");
+    signedIn("user_mem");
+    const list = (await (await listGET(get("/api/files/documents?lib=org_t"))).json()) as DocumentListResponse;
+    const mine = list.documents.find((d) => d.id === own)!;
+    const theirs = list.documents.find((d) => d.id === other)!;
+    expect(mine).toMatchObject({ canEdit: false, canDelete: true });
+    expect(theirs).toMatchObject({ canEdit: false, canDelete: false });
+    expect((await del("user_mem", other)).status).toBe(403);
+    expect((await del("user_mem", own)).status).toBe(200);
+    expect(await row(own)).toBeUndefined();
+    expect(await row(other)).toBeDefined();
+  });
+
+  it("with Pro, canEdit and canDelete agree with the rights", async () => {
+    const id = await uploaded("user_mem", "org_t", "m");
+    signedIn("user_mem2");
+    const other = ((await (await listGET(get("/api/files/documents?lib=org_t"))).json()) as DocumentListResponse).documents[0];
+    expect(other).toMatchObject({ id, canEdit: false, canDelete: false });
+    signedIn("user_admin");
+    const admin = ((await (await listGET(get("/api/files/documents?lib=org_t"))).json()) as DocumentListResponse).documents[0];
+    expect(admin).toMatchObject({ id, canEdit: true, canDelete: true });
+  });
+});
+
+describe("GET /api/files/documents/[id]/export?lib=", () => {
+  const TEAM_NO_PRO = { ...TEAM, publicMetadata: {} };
+  const exportOf = (user: string, id: string, lib: string | null, headers: Record<string, string> = { "sec-fetch-site": "same-origin" }) => {
+    signedIn(user);
+    const q = lib === null ? "" : `?lib=${lib}`;
+    return exportGET(new Request(`https://dawmain.cz/api/files/documents/${id}/export${q}`, { headers }), ctx("id", id));
+  };
+  /** Pages an export of dmd(pages, …) spends from the user's daily budget. */
+  const exportPages = (pages: number) => Math.max(1, Math.ceil(normalizeDmd(dmd(pages, "a")).text.length / PAGE_CHARS));
+  const splitExport = (body: string) => {
+    const end = body.indexOf("\n---\n\n");
+    expect(body.startsWith("---\n")).toBe(true);
+    expect(end).toBeGreaterThan(0);
+    return { header: body.slice(0, end + 5), text: body.slice(end + 6) };
+  };
+
+  it("the uploader downloads the stored text with a metadata header, as an audited attachment", async () => {
+    const id = await uploaded("user_admin", "user_admin", "a");
+    await patch("user_admin", id, { action: "confirm", version: (await row(id)).meta_version, meta: META({ year: "2019", authors: ["Jan Petrov", "Eva Dvořáková"] }) });
+    const res = await exportOf("user_admin", id, "user_admin");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("text/markdown; charset=utf-8");
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(res.headers.get("content-disposition")).toBe(
+      "attachment; filename=\"Obcansky-zakonik.-Komentar.md\"; filename*=UTF-8''Ob%C4%8Dansk%C3%BD%20z%C3%A1kon%C3%ADk.%20Koment%C3%A1%C5%99.md",
+    );
+    const { header, text } = splitExport(await res.text());
+    expect(header).toContain('title: "Občanský zákoník. Komentář"');
+    expect(header).toContain('authors: ["Jan Petrov", "Eva Dvořáková"]');
+    expect(header).toContain("year: 2019");
+    expect(header).toMatch(/\nuploaded: \d{4}-\d{2}-\d{2}\n/);
+    expect(text).toBe(normalizeDmd(dmd(3, "a")).text);
+    const audit = await t.owner.query<{ actor: string; detail: Record<string, unknown> }>("SELECT actor, detail FROM audit_log WHERE action = 'document.export'");
+    expect(audit.rows).toEqual([{ actor: "user_admin", detail: { chars: text.length, byAdmin: false } }]);
+  });
+
+  it("ownership only: a member exports their own upload after the team lost Pro, the admin any, nobody else", async () => {
+    const own = await uploaded("user_mem", "org_t", "m");
+    const other = await uploaded("user_mem2", "org_t", "n");
+    access.user_mem = buildAccess({ id: "user_mem", publicMetadata: {} }, [{ role: "org:member", organization: TEAM_NO_PRO }]);
+    invalidateAccess("user_mem");
+    access.user_admin = buildAccess({ id: "user_admin", publicMetadata: {} }, [{ role: "org:admin", organization: TEAM_NO_PRO }]);
+    invalidateAccess("user_admin");
+    expect((await exportOf("user_mem", own, "org_t")).status).toBe(200);
+    const refused = await exportOf("user_mem", other, "org_t");
+    expect(refused.status).toBe(403);
+    expect(((await refused.json()) as { error: string }).error).toContain("jen ten, kdo ho nahrál");
+    expect((await exportOf("user_admin", other, "org_t")).status).toBe(200);
+    // A stranger, the wrong library, no library and a malformed id: the same 404 family.
+    for (const [user, id, lib, error] of [
+      ["user_x", own, "org_t", "Knihovna nenalezena."],
+      ["user_mem", own, "user_mem", "Dokument nenalezen."],
+      ["user_mem", own, null, "Knihovna nenalezena."],
+      ["user_mem", "../../etc", "org_t", "Dokument nenalezen."],
+    ] as const) {
+      const res = await exportOf(user, id, lib);
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({ error });
+    }
+    const audit = await t.owner.query<{ actor: string; byAdmin: boolean }>(
+      "SELECT actor, (detail->>'byAdmin')::boolean AS \"byAdmin\" FROM audit_log WHERE action = 'document.export' ORDER BY id",
+    );
+    expect(audit.rows).toEqual([
+      { actor: "user_mem", byAdmin: false },
+      { actor: "user_admin", byAdmin: true },
+    ]);
+  });
+
+  it("works in read-only mode; a document still processing is 409", async () => {
+    signedIn("user_admin");
+    const res = await uploadPOST(uploadRequest("user_admin", dmd(3, "q")));
+    const { id } = (await res.json()) as { id: string };
+    mocks.after.length = 0;
+    const busy = await exportOf("user_admin", id, "user_admin");
+    expect(busy.status).toBe(409);
+    expect(((await busy.json()) as { error: string }).error).toContain("zpracovává");
+    const done = await uploaded("user_admin", "user_admin", "r");
+    await t.runner([], (db) => setSystemState(db, MODE_OVERRIDE_KEY, { mode: "readonly" }));
+    __resetGuardsForTests();
+    expect((await exportOf("user_admin", done, "user_admin")).status).toBe(200);
+  });
+
+  it("cross-site, signed out and env off are refused; a link without Sec-Fetch-Site works", async () => {
+    const id = await uploaded("user_admin", "user_admin", "a");
+    for (const site of ["cross-site", "same-site"]) {
+      mocks.auth.mockClear();
+      const res = await exportOf("user_admin", id, "user_admin", { "sec-fetch-site": site });
+      expect(res.status).toBe(403);
+      expect(mocks.auth).not.toHaveBeenCalled();
+    }
+    expect((await exportOf("user_admin", id, "user_admin", {})).status).toBe(200);
+    expect((await exportOf("user_admin", id, "user_admin", { "sec-fetch-site": "none" })).status).toBe(200);
+    expect((await exportOf(null as never, id, "user_admin")).status).toBe(401);
+    process.env.FILES_MODE = "off";
+    expect((await exportOf("user_admin", id, "user_admin")).status).toBe(503);
+  });
+
+  it("a daily cap per document, separate from the MCP read cap", async () => {
+    const id = await uploaded("user_admin", "user_admin", "a");
+    for (let i = 0; i < EXPORTS_PER_DOC_PER_DAY; i++) expect((await exportOf("user_admin", id, "user_admin")).status).toBe(200);
+    const capped = await exportOf("user_admin", id, "user_admin");
+    expect(capped.status).toBe(429);
+    expect(((await capped.json()) as { error: string }).error).toContain("zítra");
+    const counters = await t.owner.query<{ scope: string; reads: number; pages: number }>(
+      "SELECT scope, reads, pages FROM usage_daily WHERE starts_with(scope, 'read:') ORDER BY scope",
+    );
+    // Compared as a set: the document id is random, so ORDER BY scope puts it before or after "export".
+    expect(counters.rows).toHaveLength(2);
+    expect(counters.rows).toEqual(
+      expect.arrayContaining([
+        { scope: `read:user_admin:${id}:export`, reads: EXPORTS_PER_DOC_PER_DAY, pages: 0 },
+        { scope: "read:user_admin:export", reads: 0, pages: EXPORTS_PER_DOC_PER_DAY * exportPages(3) },
+      ]),
+    );
+  });
+
+  it("a daily budget per user across documents: a second full library in one day is refused", async () => {
+    const ids = [await uploaded("user_admin", "user_admin", "a"), await uploaded("user_admin", "user_admin", "b")];
+    const team = await uploaded("user_mem", "org_t", "m");
+    // The budget is one largest library's quota; shrink it to these two documents.
+    process.env.FILES_PERSONAL_PAGES = String(2 * exportPages(3));
+    process.env.FILES_TEAM_PAGES = String(2 * exportPages(3));
+    for (const id of ids) expect((await exportOf("user_admin", id, "user_admin")).status).toBe(200);
+    for (const id of ids) {
+      const capped = await exportOf("user_admin", id, "user_admin");
+      expect(capped.status).toBe(429);
+      expect(((await capped.json()) as { error: string }).error).toContain("zítra");
+    }
+    // A refusal spends nothing: neither the document's count nor the budget grew.
+    const counters = await t.owner.query<{ scope: string; reads: number; pages: number }>(
+      "SELECT scope, reads, pages FROM usage_daily WHERE starts_with(scope, 'read:') ORDER BY scope",
+    );
+    expect(counters.rows.find((r) => r.scope === "read:user_admin:export")).toMatchObject({ pages: 2 * exportPages(3) });
+    expect(counters.rows.filter((r) => r.scope.endsWith(":export") && r.scope !== "read:user_admin:export").map((r) => r.reads)).toEqual([1, 1]);
+    const audit = await t.owner.query("SELECT 1 FROM audit_log WHERE action = 'document.export'");
+    expect(audit.rows).toHaveLength(2);
+    // Another user has a budget of their own.
+    access.user_x = buildAccess({ id: "user_x", publicMetadata: { pro: true } }, [{ role: "org:admin", organization: TEAM }]);
+    invalidateAccess("user_x");
+    expect((await exportOf("user_x", team, "org_t")).status).toBe(200);
+  });
+
+  it("streams in batches and reassembles the exact text; a document deleted mid-download errors the stream", async () => {
+    // Long enough for several ~12k-char storage blocks: each batch is at least one block.
+    signedIn("user_admin");
+    const res = await uploadPOST(uploadRequest("user_admin", dmd(150, "ž")));
+    expect(res.status).toBe(201);
+    const { id } = (await res.json()) as { id: string };
+    await runAfter();
+    const blocks = await t.owner.query<{ n: number }>("SELECT count(*)::int AS n FROM doc_blocks WHERE doc_id = $1", [id]);
+    expect(blocks.rows[0].n).toBeGreaterThanOrEqual(3);
+    const want = normalizeDmd(dmd(150, "ž")).text;
+    const out = await exportFor("user_admin", id, "user_admin", { batchChars: 7 });
+    expect(out.disposition).toMatch(/^attachment; filename="[A-Za-z0-9._-]+\.md"; filename\*=UTF-8''/);
+    expect(splitExport(await new Response(out.body).text()).text).toBe(want);
+
+    const cut = await exportFor("user_admin", id, "user_admin", { batchChars: 7 });
+    const reader = cut.body.getReader();
+    await reader.read();
+    await t.owner.query("DELETE FROM documents WHERE id = $1", [id]);
+    await expect(
+      (async () => {
+        for (;;) if ((await reader.read()).done) return "ended";
+      })(),
+    ).rejects.toThrow(/changed during the export/);
+  });
+
+  it("file names and the header are safe whatever the metadata says", () => {
+    expect(exportFileNames("Smlouva o dílo: vzor / 2024 \"final\"")).toEqual({ ascii: "Smlouva-o-dilo-vzor-2024-final.md", utf8: "Smlouva o dílo vzor 2024 final.md" });
+    expect(exportFileNames("...")).toEqual({ ascii: "dokument.md", utf8: "dokument.md" });
+    expect(exportFileNames("Příliš žluťoučký kůň").ascii).toBe("Prilis-zlutoucky-kun.md");
+    // RFC 5987 leaves ' ( ) * ! unescaped in encodeURIComponent: they are escaped here (and * is dropped as unsafe in a file name).
+    expect(exportDisposition("Ať (zkouška)'s *!")).toBe("attachment; filename=\"At-zkouska-s.md\"; filename*=UTF-8''A%C5%A5%20%28zkou%C5%A1ka%29%27s%20%21.md");
+    const header = exportHeader(
+      {
+        meta: { title: "Název\n---\n# vložené", authors: ["A\nB"], year: 2020, doc_type: "clanek" },
+        file_name: "a.pdf",
+        uploaded_at: "2026-09-01T10:00:00.000Z",
+      } as never,
+      "Osobní",
+      new Date("2026-09-27T12:00:00Z"),
+    );
+    expect(header.split("\n").filter((l) => l === "---")).toHaveLength(2);
+    expect(header).toContain('title: "Název --- # vložené"');
+    expect(header).toContain('authors: ["A B"]');
+    expect(header).toContain("uploaded: 2026-09-01\nexported: 2026-09-27\n");
   });
 });
 

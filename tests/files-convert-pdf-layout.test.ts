@@ -757,3 +757,41 @@ describe("hygiene", () => {
     expect(BODY).toBe(10);
   });
 });
+
+describe("page zones for the preview overlays (completeness:PC-9)", () => {
+  it("marks running heads and page numbers, the footnote zone and headings, in viewport points per physical page", () => {
+    const pages = [
+      synPage(1, [
+        head("Díl 2 · Následky porušení"),
+        { y: 100, text: "§ 2913", bold: true, x: 280 },
+        { y: 114, text: "[Porušení smluvní povinnosti]", bold: true, x: 225 },
+        ...para(140, ["Ustanovení upravuje odpovědnost za porušení smluvní povinnosti.{1} Jde o odpovědnost", "objektivní a úplnou."]),
+        ...filler(180, 4),
+        note(740, "{1} Srov. rozsudek NS ze dne 12. 3. 2019, sp. zn. 25 Cdo 1234/2019."),
+        pageNo(245),
+      ]),
+      synPage(2, [head("§ 2913 · Porušení povinnosti"), ...filler(100, 8, 1), pageNo(246)]),
+      synPage(3, [head("Díl 3 · Odpovědnost za jiného"), ...filler(100, 8, 2), pageNo(247)]),
+      synPage(4, [head("§ 2914 · Odpovědnost za jiného"), ...filler(100, 8, 3), pageNo(248)]),
+    ];
+    const { result, dmd } = run(pages);
+    expect(dmd).not.toContain("Díl 2 ·");
+    const zones = result.pageZones!;
+    expect(zones).toHaveLength(4);
+    const kinds = (i: number) => [...new Set(zones[i].map((z) => z.kind))].sort();
+    expect(kinds(0)).toEqual(["footer", "footnotes", "header", "heading"]);
+    expect(kinds(1)).toEqual(["footer", "header"]);
+    const fn = zones[0].find((z) => z.kind === "footnotes")!;
+    expect(fn.y0).toBeLessThan(740);
+    expect(fn.y1).toBeGreaterThan(740);
+    const top = zones[0].find((z) => z.kind === "header")!;
+    expect(top.y1).toBeLessThan(100);
+    const heading = zones[0].find((z) => z.kind === "heading")!;
+    expect(heading.y0).toBeGreaterThan(80);
+    expect(heading.y1).toBeLessThan(130);
+    for (const z of zones.flat()) {
+      expect(z.x1).toBeGreaterThan(z.x0);
+      expect(z.y1).toBeGreaterThan(z.y0);
+    }
+  });
+});

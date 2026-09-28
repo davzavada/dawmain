@@ -3,9 +3,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { LIMITS } from "@/src/files/config";
-import { isOperator, operatorSnapshot, type OperatorSnapshot } from "@/src/files/operator";
+import { NEON_STORAGE_BYTES } from "@/src/files/guards";
+import { isOperator, operatorSnapshot, vacuumPlan, type OperatorSnapshot } from "@/src/files/operator";
+import { batchAllowance } from "@/src/files/reindex";
 import { formatCount } from "@/app/_zdroje/format";
-import { reindexBatchAction, setModeOverride } from "./actions";
+import { reindexBatchAction, setModeOverride, takedownAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 // "Přeindexovat dávku" runs up to 200 documents in one Server Function call.
@@ -15,8 +17,8 @@ export const metadata: Metadata = { title: "Provoz · Vlastní zdroje", robots: 
 
 /**
  * The operator page: the free-tier guards against their limits, the
- * libraries, documents stuck in the pipeline, the mode override and the
- * batch re-derivation. Operators only (FILES_OPERATOR_IDS) — anyone else,
+ * libraries, documents stuck in the pipeline, the mode override, the
+ * batch re-derivation and notice-and-takedown. Operators only (FILES_OPERATOR_IDS) — anyone else,
  * signed in or not, gets the same 404 as a page that does not exist.
  * Counters, ids and statuses only: no titles, file names or text.
  */
@@ -34,6 +36,11 @@ function percent(share: number): string {
 
 function mb(bytes: number): string {
   return `${formatCount(Math.round(bytes / (1024 * 1024)))} MB`;
+}
+
+/** CPU milliseconds as minutes, one decimal ("3,4 min"). */
+function minutes(ms: number): string {
+  return `${(ms / 60_000).toFixed(1).replace(".", ",")} min`;
 }
 
 function when(iso: string | null): string {
@@ -93,9 +100,15 @@ export default async function OperatorPage() {
   );
 }
 
+/** Free space inside the files worth a VACUUM FULL: a fifth of the cap. */
+const VACUUM_HINT_SHARE = 0.2;
+
 function Snapshot({ data }: { data: OperatorSnapshot }) {
   const g = data.guards;
   const aiShare = data.aiBudgetUsd > 0 ? data.aiSpentUsd / data.aiBudgetUsd : 0;
+  const reindex = batchAllowance(data.mode, g.dbShare);
+  const reclaimable = g.dbBytes - g.liveBytes;
+  const vacuum = reclaimable >= LIMITS.dbBytesCap * VACUUM_HINT_SHARE ? vacuumPlan(data.tables, g.dbBytes, NEON_STORAGE_BYTES) : null;
   return (
     <>
       <section className="zd-ops-section">
@@ -118,13 +131,43 @@ function Snapshot({ data }: { data: OperatorSnapshot }) {
       <section className="zd-ops-section">
         <h2>Pojistky a limity</h2>
         <ul className="zd-meters">
-          <Meter label="Databáze" value={mb(g.dbBytes)} limit={mb(LIMITS.dbBytesCap)} share={g.dbShare} />
+          <Meter label="Databáze (živá data, odhad)" value={mb(g.liveBytes)} limit={mb(LIMITS.dbBytesCap)} share={g.dbShare} />
           <Meter label="Strany (uložené + rezervované)" value={formatCount(g.totalPages + g.reservedPages)} limit={formatCount(LIMITS.globalPages)} share={g.pagesShare} />
           <Meter label="Výpočetní hodiny (odhad, měsíc)" value={g.computeHours.toFixed(1).replace(".", ",")} limit={String(LIMITS.computeHoursPerMonth)} share={g.computeShare} />
           <Meter label="Rozpočet AI (30 dní)" value={`$${data.aiSpentUsd.toFixed(2)}`} limit={`$${data.aiBudgetUsd}`} share={aiShare} />
+          <Meter label="CPU zpracování (dnes)" value={minutes(data.cpuMsToday)} limit={minutes(LIMITS.globalCpuMsPerDay)} share={data.cpuMsToday / LIMITS.globalCpuMsPerDay} />
+          <Meter label="CPU zpracování (30 dní)" value={minutes(data.cpuMs30Days)} limit={minutes(LIMITS.globalCpuMs30Days)} share={data.cpuMs30Days / LIMITS.globalCpuMs30Days} />
         </ul>
         <p className="zd-muted zd-small">
           Tento měsíc: {formatCount(data.uploadsThisMonth)} nahrání, {formatCount(data.pagesThisMonth)} stran · poslední běh cronu: {when(data.cronAt)}
+        </p>
+        <p className="zd-muted zd-small">
+          Soubory databáze fyzicky zabírají {mb(g.dbBytes)}; živá data odhadem {mb(g.liveBytes)}. Místo po smazaných dokumentech
+          Postgres použije pro nová data, soubory se ale samy nezmenší.
+          {vacuum
+            ? ` Uvolnit ${mb(reclaimable)} jde jen příkazem VACUUM FULL pod vlastnickou rolí, v klidném okně (tabulka je po dobu běhu zamčená).
+              Příkaz nejdřív zapíše novou kopii tabulky i s indexy a starou smaže až na konci, takže potřebuje volné místo pod limitem
+              Neonu 0,5 GB zhruba ve velikosti živých dat tabulky. Spouštějte ho po jedné tabulce, v tomto pořadí:`
+            : ""}
+        </p>
+        {vacuum && vacuum.steps.length > 0 ? (
+          <ol className="zd-muted zd-small">
+            {vacuum.steps.map((step) => (
+              <li key={step.table}>
+                <code>VACUUM FULL {step.table};</code> uvolní asi {mb(step.reclaimBytes)}, za běhu potřebuje asi {mb(step.needBytes)} volného místa
+              </li>
+            ))}
+          </ol>
+        ) : null}
+        {vacuum && vacuum.blocked.length > 0 ? (
+          <p className="zd-muted zd-small">
+            Pro VACUUM FULL tabulek {vacuum.blocked.map((step) => `${step.table} (asi ${mb(step.needBytes)})`).join(", ")} teď místo
+            nezbývá ani po předchozích krocích. Nejdřív z nich smažte dokumenty, aby se jejich živá data zmenšila.
+          </p>
+        ) : null}
+        <p className="zd-muted zd-small">
+          Když pojistky vypnou Vlastní zdroje kvůli výpočetním hodinám, každá instance si to pamatuje do konce měsíce. Databázi
+          úplně přestane budit až FILES_MODE=off a nové nasazení.
         </p>
       </section>
 
@@ -135,11 +178,46 @@ function Snapshot({ data }: { data: OperatorSnapshot }) {
           {data.lastReindex
             ? ` Poslední dávka (${when(data.lastReindex.at)}): hotovo ${data.lastReindex.done}, přeskočeno ${data.lastReindex.skipped}, chyba ${data.lastReindex.failed}, zbývá ${data.lastReindex.remaining}.`
             : ""}
+          {data.lastReindex?.limited ? ` ${data.lastReindex.limited}` : ""}
         </p>
+        {reindex.reason ? <p className="zd-muted zd-small">{reindex.reason}</p> : null}
         <form action={reindexBatchAction}>
-          <button type="submit" className="zd-btn zd-btn-secondary" disabled={data.reindexBacklog === 0}>
-            Přeindexovat dávku (≤ 200)
+          <button type="submit" className="zd-btn zd-btn-secondary" disabled={data.reindexBacklog === 0 || reindex.max === 0}>
+            Přeindexovat dávku (≤ {reindex.max || 200})
           </button>
+        </form>
+      </section>
+
+      <section className="zd-ops-section">
+        <h2>Oznámení a odstranění obsahu</h2>
+        <p>
+          Zablokuje otisk obsahu (SHA-256 převedeného textu) proti dalšímu nahrání a smaže všechny jeho kopie ve všech knihovnách,
+          včetně vrácení stran do kvót. Blokace platí jen pro přesně stejný text: jiný převod téhož díla má jiný otisk.
+        </p>
+        {data.lastTakedown ? (
+          <p className="zd-muted zd-small">
+            Poslední zásah ({when(data.lastTakedown.at)}): otisk <code>{data.lastTakedown.sha256.slice(0, 12)}…</code>, smazáno{" "}
+            {formatCount(data.lastTakedown.documents)} dokumentů v {formatCount(data.lastTakedown.libraries)} knihovnách.
+          </p>
+        ) : null}
+        <form action={takedownAction} className="zd-form-grid" style={{ maxWidth: 720 }}>
+          <label className="zd-field">
+            <span>Dokument (id) nebo otisk obsahu</span>
+            <input type="text" name="target" required pattern="[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}|[0-9a-fA-F]{64}" autoComplete="off" spellCheck={false} />
+          </label>
+          <label className="zd-field">
+            <span>Důvod (číslo oznámení)</span>
+            <input type="text" name="reason" required maxLength={500} autoComplete="off" />
+          </label>
+          <label className="zd-check">
+            <input type="checkbox" name="confirm" value="yes" required />
+            <span>Rozumím, že se kopie smažou nevratně.</span>
+          </label>
+          <div>
+            <button type="submit" className="zd-btn zd-btn-secondary">
+              Zablokovat a smazat kopie
+            </button>
+          </div>
         </form>
       </section>
 

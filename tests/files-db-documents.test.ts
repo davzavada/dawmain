@@ -779,7 +779,7 @@ describe("reading", () => {
     await expect(scoped([A], (db) => loadText(db, victim, A, 0, 60))).rejects.toThrow(/incomplete/);
   });
 
-  it("loadFootnotes: by range (def or ref inside), by label, with the page label of the definition", async () => {
+  it("loadFootnotes: by range (def or ref inside), by label, with the page label of the reference (the note's page)", async () => {
     const all = await scoped([A], (db) => loadFootnotes(db, id, A, null));
     expect(all).toEqual([
       {
@@ -789,7 +789,7 @@ describe("reading", () => {
         refAt: at("[^1]"),
         defStart: at(DEF) + 6,
         defEnd: TEXT.length - 1,
-        pageLabel: "246",
+        pageLabel: "245",
         page: 1,
         sectionOrd: 0,
         anchor: null,

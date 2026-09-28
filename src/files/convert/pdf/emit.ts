@@ -107,7 +107,15 @@ export function emitDmd(pages: PageModel[], ctx: EmitContext): EmitResult {
       first = false;
     } else marker = page.label;
 
-    for (const line of page.segments.flatMap((s) => s.lines)) {
+    const lines = page.segments.flatMap((s) => s.lines);
+    const running = para as Para | null;
+    if (page.noteOnly && !lines.length && running && marker !== null && !endsTerminal(running.last.plain)) {
+      // The page held only the continuation of a note and the paragraph is
+      // visibly unfinished: it runs on past the page, whose marker goes inline.
+      running.atoms.push({ t: "page", label: marker });
+      marker = null;
+    }
+    for (const line of lines) {
       if (line.headingCont) continue;
       if (line.heading) {
         closePara();

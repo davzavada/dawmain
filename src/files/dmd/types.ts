@@ -205,6 +205,6 @@ export interface RenderFootnote {
   refAt: number | null;
   defStart: number;
   defEnd: number;
-  /** Printed label of the page the definition sits on (for "(s. 245)" tags). */
+  /** Printed label of the page the note is printed on (its reference's page; the definition's own page for an endnote) — for "(s. 245)" tags. */
   pageLabel: string | null;
 }

@@ -106,6 +106,17 @@ describe("SKILL.md is pinned to the registered tool surface", () => {
     expect(quoted.filter((code) => !known.has(code))).toEqual([]);
   });
 
+  it("calls files_* only when the user's own documents are in play, never as a probe", () => {
+    // Most connections have no Vlastní zdroje (no Pro, the shared access code,
+    // the feature off): a probe would put a failed call into every rešerše.
+    expect(SKILL).not.toMatch(/once per conversation/i);
+    expect(SKILL).toContain("Never call it just\n   to find out whether they have Vlastní zdroje");
+    expect(SKILL).toContain("never as a probe in an ordinary research question");
+    // Not "when they already answered": that reads as any earlier answer of the user.
+    expect(SKILL).not.toContain("they already answered");
+    expect(SKILL).toContain("when `files_*` already returned their documents\nearlier in this conversation");
+  });
+
   it("reads the affects vocabulary the API actually returns", () => {
     const section = SKILL.slice(SKILL.indexOf("## Obecné soudy"), SKILL.indexOf("## SDEU"));
     for (const value of AFFECTED_TYPES) expect(section).toContain(value);

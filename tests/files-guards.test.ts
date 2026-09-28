@@ -11,7 +11,10 @@ import {
   envOnlyMode,
   MODE_OVERRIDE_KEY,
   monthStartUtc,
+  nextMonthStartUtc,
   parseOverride,
+  NEON_STORAGE_BYTES,
+  PHYSICAL_BACKSTOP,
   sameOrigin,
   stricter,
 } from "@/src/files/guards";
@@ -94,6 +97,23 @@ describe("autoMode", () => {
     expect(autoMode({ ...base, dbBytes: LIMITS.dbBytesCap * 0.79 }).mode).toBe("on");
     expect(autoMode({ ...base, dbBytes: LIMITS.dbBytesCap * 0.8 }).mode).toBe("readonly");
   });
+  it("the DB guard reads the live data: deleting documents lifts it though the files keep their size", () => {
+    const tripped = autoMode({ ...base, dbBytes: LIMITS.dbBytesCap * 0.85, liveBytes: LIMITS.dbBytesCap * 0.85 });
+    expect(tripped.mode).toBe("readonly");
+    const freed = autoMode({ ...base, dbBytes: LIMITS.dbBytesCap * 0.85, liveBytes: LIMITS.dbBytesCap * 0.5 });
+    expect(freed).toMatchObject({ mode: "on", dbShare: 0.5, physicalShare: 0.85, reasons: [] });
+    // The estimate never exceeds the physical size.
+    expect(autoMode({ ...base, dbBytes: 100, liveBytes: 200 }).liveBytes).toBe(100);
+  });
+  it("…but past the physical backstop the files themselves turn it read-only (VACUUM FULL frees them)", () => {
+    const full = autoMode({ ...base, dbBytes: LIMITS.dbBytesCap * PHYSICAL_BACKSTOP, liveBytes: LIMITS.dbBytesCap * 0.3 });
+    expect(full.mode).toBe("readonly");
+    expect(full.reasons.join()).toContain("VACUUM FULL");
+    // The backstop is the owner's cap itself (plan: "Globálně DB ≤ 400 MB"), not a margin above it.
+    expect(PHYSICAL_BACKSTOP * LIMITS.dbBytesCap).toBeLessThanOrEqual(LIMITS.dbBytesCap);
+    expect(PHYSICAL_BACKSTOP * LIMITS.dbBytesCap).toBeLessThan(NEON_STORAGE_BYTES * 0.85);
+    expect(autoMode({ ...base, dbBytes: LIMITS.dbBytesCap * 0.99, liveBytes: LIMITS.dbBytesCap * 0.3 }).mode).toBe("on");
+  });
   it("stored + reserved pages ≥ 80 % of the global cap → readonly", () => {
     expect(autoMode({ ...base, totalPages: LIMITS.globalPages * 0.7, reservedPages: LIMITS.globalPages * 0.1 }).mode).toBe("readonly");
     expect(autoMode({ ...base, totalPages: LIMITS.globalPages * 0.7 }).mode).toBe("on");
@@ -167,6 +187,38 @@ describe("effectiveMode", () => {
     expect(await effectiveMode()).toBe("on");
     vi.setSystemTime(new Date("2026-09-27T10:00:31Z"));
     expect(await effectiveMode()).toBe("off");
+  });
+
+  it("off for compute hours is kept until the month rolls over — no DB wake to learn it again", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const now = new Date("2026-09-27T10:00:00Z");
+    vi.setSystemTime(now);
+    expect(nextMonthStartUtc(now).toISOString()).toBe("2026-10-01T00:00:00.000Z");
+    await t.owner.query(
+      `INSERT INTO db_activity (minute) SELECT $1::timestamptz + make_interval(mins => g * 5)
+         FROM generate_series(0, $2::int) g ON CONFLICT DO NOTHING`,
+      [monthStartUtc(now), Math.floor(((LIMITS.computeHoursPerMonth / LIMITS.computeUnits) * 0.92 * 60) / 5) - 1],
+    );
+    expect(await effectiveMode()).toBe("off");
+    const runner = vi.fn(t.runner);
+    setScopeRunner(runner as never);
+    await t.owner.query("DELETE FROM db_activity");
+    vi.setSystemTime(new Date("2026-09-30T23:59:00Z"));
+    expect(await effectiveMode()).toBe("off");
+    expect(runner).not.toHaveBeenCalled();
+    vi.setSystemTime(new Date("2026-10-01T00:00:01Z"));
+    expect(await effectiveMode()).toBe("on");
+    expect(runner).toHaveBeenCalledTimes(1);
+  });
+
+  it("an operator's off (not compute hours) is still re-read every 30 s", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-27T10:00:00Z"));
+    await t.owner.query("INSERT INTO system_state (key, value) VALUES ($1, $2::jsonb)", [MODE_OVERRIDE_KEY, JSON.stringify("off")]);
+    expect(await effectiveMode()).toBe("off");
+    await t.owner.query("DELETE FROM system_state");
+    vi.setSystemTime(new Date("2026-09-27T10:00:31Z"));
+    expect(await effectiveMode()).toBe("on");
   });
 
   it("a failing measurement falls back to the env mode, uncached", async () => {

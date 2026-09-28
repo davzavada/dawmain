@@ -226,6 +226,9 @@ describe("operatorSnapshot", () => {
     expect(snap.libraries.map((l) => l.id).sort()).toEqual(["user_a", "user_b"]);
     expect(snap.stuck.map((s) => s.id)).toEqual([id]);
     expect(snap.reindexBacklog).toBe(0);
+    // The shared CPU allowance (uploads book their own parse/hash work).
+    expect(snap.cpuMs30Days).toBeGreaterThanOrEqual(snap.cpuMsToday);
+    expect(snap.cpuMsToday).toBeGreaterThan(0);
     expect(JSON.stringify(snap)).not.toContain("a.pdf");
   });
 });

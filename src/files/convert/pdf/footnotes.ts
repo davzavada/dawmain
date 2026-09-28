@@ -16,7 +16,11 @@
  *   the page. A page binding < 50 % with labels that do not run
  *   consecutively is unsure: nothing is split, the zone stays text at the
  *   page end (flag FN_UNSURE). A small-type block with no label-like line
- *   start is not a zone at all (no flag) unless it continues an open note.
+ *   start is not a zone at all (no flag) unless it continues an open note;
+ *   a page of nothing but small type in its lower half continues a note
+ *   left open by a real zone of the previous page (flag FN_UNSURE, never
+ *   chained; small type from the top of the page is body text — a petit
+ *   excursus, a bibliography).
  * Pure — unit-tested through layoutToDmd (tests/files-convert-pdf-layout.test.ts).
  */
 
@@ -61,13 +65,18 @@ export function isNoteSized(line: Line, fnSize: number): boolean {
  * trailing lines set in the footnote size, when nothing but note-size text
  * lies below them in their column's x-range anywhere on the page (notes
  * under two columns, or per column), and the nearest body line above them
- * is ≥ 0.98 × lineGap higher. Returns [segment index, first zone line
- * index] pairs; nothing is removed. Pure.
+ * is ≥ 0.98 × lineGap higher. With `continueBelow` (the previous page's
+ * last note is still open), a segment of note-size lines with no body line
+ * above it anywhere on the page is a zone too when its top lies at or
+ * below that y: the page holds nothing but the continuation of that note
+ * at its foot. Returns [segment index, first zone line index] pairs;
+ * nothing is removed. Pure.
  */
 export function zoneCandidates(
   segments: Array<{ left: number; right: number; lines: Line[] }>,
   fnSize: number,
   lineGap: number,
+  continueBelow: number | null = null,
 ): Array<[number, number]> {
   const all = segments.flatMap((s) => s.lines);
   const out: Array<[number, number]> = [];
@@ -83,7 +92,11 @@ export function zoneCandidates(
     if (!above) {
       for (const l of all) if (l.y < top && !isNoteSized(l, fnSize) && (!above || l.y > above.y)) above = l;
     }
-    if (!above || top - above.y < 0.98 * lineGap) continue;
+    if (!above) {
+      if (continueBelow !== null && k === 0 && top >= continueBelow) out.push([si, 0]);
+      continue;
+    }
+    if (top - above.y < 0.98 * lineGap) continue;
     out.push([si, k]);
   }
   return out;
