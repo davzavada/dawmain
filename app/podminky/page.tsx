@@ -45,8 +45,8 @@ export default function Podminky() {
           ručně, jednotlivcům i týmům; stačí mi napsat na <Mail />. Můžu ho kdykoli odebrat. Pokud
           nejde o porušení těchto pravidel, zůstane vám knihovna ještě 90 dní k prohlížení, mazání a
           stažení textu (podrobnosti v{" "}
-          <Link href="/soukromi">Zásadách ochrany osobních údajů</Link>). Před prvním nahráním vás
-          web požádá, abyste pravidla v tomto oddílu potvrdili.
+          <Link href="/soukromi">Zásadách ochrany osobních údajů</Link>). Nahráním dokumentu
+          potvrzujete, že pravidla v tomto oddílu dodržíte - web na ně upozorňuje přímo u nahrávání.
         </p>
         <p>
           <strong>Kvóty.</strong> Místo se počítá ve stranách: jedna strana je 3 600 znaků
@@ -83,8 +83,8 @@ export default function Podminky() {
         </p>
         <p>
           <strong>AI a citace.</strong> Název, autory a další metadata navrhne jazykový model podle
-          začátku dokumentu. Je to jen návrh: zkontrolujete ho a potvrdíte a teprve pak v dokumentu
-          asistent hledá. Převod na text i čísla stran, poznámek a marginálních čísel dělá automat
+          začátku dokumentu a asistent v dokumentu hledá hned po zpracování. Návrh se může
+          splést: v detailu dokumentu ho kdykoli opravíte. Převod na text i čísla stran, poznámek a marginálních čísel dělá automat
           a může se splést. Vlastní dokument není oficiální zdroj - citace z něj si před použitím
           ověřte v tištěném vydání nebo v oficiálním textu.
         </p>

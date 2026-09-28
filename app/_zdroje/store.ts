@@ -1,7 +1,8 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
+import { createContext, createElement, useContext, useSyncExternalStore, type ReactNode } from "react";
 import type { SummaryResponse } from "@/src/files/web-types";
+import { hintCookie, type Hint } from "./hint";
 
 /**
  * Client state shared by every Vlastní zdroje surface — the header's
@@ -14,6 +15,11 @@ import type { SummaryResponse } from "@/src/files/web-types";
  *             after anything that changes counts (upload, delete, accept…)
  *   clerk     actions registered by the bridge (sign in, profile, sign out),
  *             so components outside ClerkProvider's hooks can call them
+ *
+ * Until Clerk has loaded, the sign-in hint (./hint.ts — a cookie the
+ * layout reads and passes down through HintProvider) stands in for the
+ * account state and the summary, so the server renders what the page will
+ * look like and nothing jumps; the store keeps that cookie up to date.
  *
  * The modals are driven by the URL (?zdroje=moje|tym, ?tym=1): links work,
  * the back button closes them. history.pushState integrates with Next's
@@ -37,8 +43,46 @@ let state: State = { auth: "loading", summary: null, failed: false, sourcesOpen:
 const listeners = new Set<() => void>();
 
 function set(patch: Partial<State>): void {
+  const before = state;
   state = { ...state, ...patch };
+  if (state.auth !== before.auth || state.summary !== before.summary) writeHint();
   for (const l of listeners) l();
+}
+
+// ---------------------------------------------------------------------------
+// The sign-in hint (see ./hint.ts)
+
+const HintContext = createContext<Hint | null>(null);
+
+/** Wraps the page (root layout) with the hint the server read from the cookie. */
+export function HintProvider({ hint, children }: { hint: Hint | null; children: ReactNode }) {
+  return createElement(HintContext.Provider, { value: hint }, children);
+}
+
+let hintInitials: string | null = null;
+
+/** The account menu reports the signed-in user's initials for the next page load. */
+export function rememberInitials(initials: string): void {
+  if (initials === hintInitials) return;
+  hintInitials = initials;
+  writeHint();
+}
+
+function writeHint(): void {
+  if (typeof document === "undefined" || state.auth === "loading") return;
+  try {
+    const secure = window.location.protocol === "https:";
+    if (state.auth !== "signed_in") {
+      document.cookie = hintCookie(null, secure);
+      return;
+    }
+    const summary = state.summary?.state === "ok" || state.summary?.state === "unavailable" ? state.summary : null;
+    // Before the initials and the summary are known there is nothing new to keep.
+    if (hintInitials === null && summary === null) return;
+    document.cookie = hintCookie({ initials: hintInitials ?? "?", summary }, secure);
+  } catch {
+    // Cookies blocked: the page just loads the way it did before the hint.
+  }
 }
 
 function subscribe(listener: () => void): () => void {
@@ -48,13 +92,28 @@ function subscribe(listener: () => void): () => void {
 
 const SERVER_STATE: State = { auth: "loading", summary: null, failed: false, sourcesOpen: false };
 
-/** The shared state (server render: loading). */
+/**
+ * The shared state (server render: loading), with the sign-in hint filling
+ * in until Clerk and the summary answer: "loading" reads as signed in with
+ * the remembered summary, and a signed-in state still loading its summary
+ * shows the remembered one.
+ */
 export function useZdroje(): State {
-  return useSyncExternalStore(
+  const real = useSyncExternalStore(
     subscribe,
     () => state,
     () => SERVER_STATE,
   );
+  const hint = useContext(HintContext);
+  if (!hint) return real;
+  if (real.auth === "loading") return { ...real, auth: "signed_in", summary: hint.summary };
+  if (real.auth === "signed_in" && real.summary === null && !real.failed) return { ...real, summary: hint.summary };
+  return real;
+}
+
+/** The remembered initials while Clerk's user is not loaded yet. */
+export function useHintInitials(): string | null {
+  return useContext(HintContext)?.initials ?? null;
 }
 
 let inflight: Promise<void> | null = null;
