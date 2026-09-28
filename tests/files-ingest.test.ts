@@ -154,7 +154,7 @@ const count = async (sql: string, params: unknown[]) => Number((await t.owner.qu
 // ---------------------------------------------------------------------------
 
 describe("ingestDocument — success", () => {
-  it("indexes a queued upload, proposes metadata, lands in review and settles the pages", async () => {
+  it("indexes a queued upload, proposes metadata, is ready at once and settles the pages", async () => {
     const text = commentaryDmd(6);
     const { id, pages } = await seed(LIB, text);
     expect(await lib(LIB)).toEqual({ page_count: 0, pages_reserved: pages, doc_count: 0 });
@@ -162,7 +162,7 @@ describe("ingestDocument — success", () => {
     expect(await ingestDocument(id, LIB)).toBe("done");
 
     const d = await doc(id);
-    expect(d).toMatchObject({ status: "review", pending_cleared: true, attempts: 1, analyzer_version: ANALYZER_VERSION, run_token: null, lease_until: null });
+    expect(d).toMatchObject({ status: "ready", pending_cleared: true, attempts: 1, analyzer_version: ANALYZER_VERSION, run_token: null, lease_until: null });
     expect(d.title).toBeTruthy();
     expect(d.ident_keys as string[]).toContain("sz:25cdo1000-2019");
     expect(await count("SELECT count(*) AS n FROM chunks WHERE doc_id = $1", [id])).toBeGreaterThan(0);
@@ -183,7 +183,7 @@ describe("ingestDocument — success", () => {
     expect((d.proposed_meta as Record<string, { source: string }>).doc_type.source).toBe("user");
   });
 
-  it("merges the AI proposal and stores its Czech note in status_detail", async () => {
+  it("merges the AI proposal; with the review step on, its Czech note goes to status_detail", async () => {
     propose.fn.mockResolvedValue({
       meta: { title: { value: "Občanský zákoník. Komentář", source: "ai", confidence: 0.8 } },
       ai: "failed",
@@ -192,8 +192,14 @@ describe("ingestDocument — success", () => {
     const { id } = await seed(LIB, commentaryDmd(4));
     expect(await ingestDocument(id, LIB)).toBe("done");
     const d = await doc(id);
-    expect(d.title).toBe("Občanský zákoník. Komentář");
-    expect(d.status_detail).toMatch(/^Návrh metadat/);
+    expect(d).toMatchObject({ status: "ready", title: "Občanský zákoník. Komentář", status_detail: null });
+
+    await t.owner.query(`UPDATE libraries SET settings = '{"autoConfirm": false}'::jsonb WHERE id = $1`, [LIB]);
+    const second = await seed(LIB, commentaryDmd(4, "druhý"));
+    expect(await ingestDocument(second.id, LIB)).toBe("done");
+    const r = await doc(second.id);
+    expect(r).toMatchObject({ status: "review", confirmed_at: null });
+    expect(r.status_detail).toMatch(/^Návrh metadat/);
   });
 
   it("passes an opaque user hash and the budget callbacks to the model call", async () => {
@@ -223,7 +229,7 @@ describe("ingestDocument — success", () => {
     expect(await count("SELECT count(*) AS n FROM usage_daily WHERE scope = 'global' AND cpu_ms > 0", [])).toBe(1);
   });
 
-  it("autoConfirm → ready; aiProposals false → no model call", async () => {
+  it("autoConfirm (the default) → ready; aiProposals false → no model call", async () => {
     const { id } = await seed(ORG, commentaryDmd(4));
     await t.owner.query(`UPDATE libraries SET settings = '{"autoConfirm": true, "aiProposals": false}' WHERE id = $1`, [ORG]);
     expect(await ingestDocument(id, ORG)).toBe("done");
@@ -235,8 +241,9 @@ describe("ingestDocument — success", () => {
 });
 
 describe("ingestDocument — replaces", () => {
-  it("a re-upload of a confirmed document keeps the confirmed metadata, goes back to review and deletes the old one", async () => {
+  it("with the review step on, a re-upload of a confirmed document keeps the confirmed metadata, goes back to review and deletes the old one", async () => {
     const old = await seed(LIB, commentaryDmd(6, "stará verze"));
+    await t.owner.query(`UPDATE libraries SET settings = '{"autoConfirm": false}'::jsonb WHERE id = $1`, [LIB]);
     expect(await ingestDocument(old.id, LIB)).toBe("done");
     await t.owner.query(
       `UPDATE documents SET status = 'ready', confirmed_at = now(), confirmed_by = 'user_owner', doc_type = 'komentar',
@@ -261,9 +268,8 @@ describe("ingestDocument — replaces", () => {
     expect(audit.rows).toEqual([expect.objectContaining({ action: "document.replaced", detail: expect.objectContaining({ replaced: old.id }) })]);
   });
 
-  it("a re-upload of a confirmed document in an auto-confirming library is ready at once", async () => {
+  it("a re-upload of a confirmed document is ready at once (default settings)", async () => {
     const old = await seed(LIB, commentaryDmd(4, "a"));
-    await t.owner.query(`UPDATE libraries SET settings = '{"autoConfirm": true}'::jsonb WHERE id = $1`, [LIB]);
     await ingestDocument(old.id, LIB);
     await t.owner.query("UPDATE documents SET status = 'ready', confirmed_at = now(), title = 'Potvrzený' WHERE id = $1", [old.id]);
     const fresh = await seed(LIB, commentaryDmd(4, "b"), { replaces: old.id });
@@ -273,6 +279,7 @@ describe("ingestDocument — replaces", () => {
 
   it("replacing a document still in review: the new one goes to review, the old one is deleted", async () => {
     const old = await seed(LIB, commentaryDmd(4, "a"));
+    await t.owner.query(`UPDATE libraries SET settings = '{"autoConfirm": false}'::jsonb WHERE id = $1`, [LIB]);
     await ingestDocument(old.id, LIB);
     const fresh = await seed(LIB, commentaryDmd(4, "b"), { replaces: old.id });
     expect(await ingestDocument(fresh.id, LIB)).toBe("done");
@@ -408,8 +415,8 @@ describe("kickPendingIngests", () => {
     const a = await seed(LIB, commentaryDmd(4, "a"));
     const b = await seed(ORG, commentaryDmd(4, "b"));
     expect(await kickPendingIngests(5)).toBe(2);
-    expect((await doc(a.id)).status).toBe("review");
-    expect((await doc(b.id)).status).toBe("review");
+    expect((await doc(a.id)).status).toBe("ready");
+    expect((await doc(b.id)).status).toBe("ready");
     expect(await kickPendingIngests(5)).toBe(0);
   });
 

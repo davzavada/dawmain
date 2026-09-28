@@ -155,7 +155,7 @@ describe("a purged or purge-marked library used again (core:F2, completeness:PC-
     const id = idOf(await upload("user_back", "user_back", paged(3, "nová")));
     expect(await libRow("user_back")).toMatchObject({ purge_after: null, purged_at: null, pro_revoked_at: null });
     expect(await ingestDocument(id, "user_back")).toBe("done");
-    expect((await docStatus(id)).status).toBe("review");
+    expect((await docStatus(id)).status).toBe("ready");
     // Purged content and counters stay gone: only the new document counts.
     expect(await libRow("user_back")).toMatchObject({ doc_count: 1, page_count: pagesOf(paged(3, "nová")), pages_reserved: 0 });
     const usage = await t.runner([], (db) => globalUsage(db));
@@ -174,7 +174,7 @@ describe("a purged or purge-marked library used again (core:F2, completeness:PC-
     expect(await libRow("user_back")).toMatchObject({ purge_after: null, pro_revoked_at: null, doc_count: 2 });
     // A cron run working from a list read before the revival purges nothing.
     expect(await t.runner(["user_back"], (db) => purgeLibraryContent(db, "user_back"))).toBe(0);
-    expect(await docStatus(kept)).toMatchObject({ status: "review" });
+    expect(await docStatus(kept)).toMatchObject({ status: "ready" });
     expect(await libRow("user_back")).toMatchObject({ purged_at: null, doc_count: 2 });
   });
 });

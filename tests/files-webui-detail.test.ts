@@ -163,4 +163,31 @@ describe("document detail", () => {
     expect(line).toContain("3 účtované strany");
     expect(line).toContain("2 sporné strany");
   });
+
+  it("metadata show read-only; the pencil opens the form, Zrušit closes it", async () => {
+    const doc = detail({ canEdit: true, meta: { doc_type: "kniha", title: "Komentář k OZ", authors: ["Jan Novák"], editors: [], year: 2024, isbn: ["978-80-7400-000-0"] } });
+    stubFetch(doc, () => new Response("", { status: 500 }));
+    await render(doc);
+    expect(host.querySelector("form.zd-meta-form")).toBeNull();
+    const list = host.querySelector(".zd-meta-list")?.textContent ?? "";
+    expect(list).toContain("Jan Novák");
+    expect(list).toContain("2024");
+    expect(host.textContent).not.toContain("Práva:");
+    await act(async () => (host.querySelector('button[aria-label="Upravit metadata"]') as HTMLButtonElement).click());
+    expect(host.querySelector("form.zd-meta-form")).not.toBeNull();
+    // ISBN waits under "Další údaje".
+    const extra = host.querySelector("details.zd-meta-extra");
+    expect(extra?.textContent).toContain("ISBN");
+    expect(extra?.hasAttribute("open")).toBe(false);
+    await act(async () => button("Zrušit")!.click());
+    expect(host.querySelector("form.zd-meta-form")).toBeNull();
+  });
+
+  it("no pencil for who may not edit", async () => {
+    const doc = detail();
+    stubFetch(doc, () => new Response("", { status: 500 }));
+    await render(doc);
+    expect(host.querySelector(".zd-meta-list")).not.toBeNull();
+    expect(host.querySelector('button[aria-label="Upravit metadata"]')).toBeNull();
+  });
 });

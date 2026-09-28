@@ -330,12 +330,11 @@ function parseCall(line: string): { tool: string; args: Record<string, unknown> 
 
 // ---------------------------------------------------------------------------
 
-describe("no probing (MCP-4)", () => {
-  it("the server instructions call files_* only when the user's own documents are in play", () => {
-    expect(INSTRUCTIONS).toMatch(/^- Vlastní zdroje .*Call them when the user refers to their own documents .*never as a probe\./m);
-    // "they already answered" read as "the user answered anything" and re-opened the probe.
-    expect(INSTRUCTIONS).not.toContain("they already answered");
-    expect(INSTRUCTIONS).toContain("or when files_* already returned their documents earlier in this conversation");
+describe("own documents first (MCP-4)", () => {
+  it("the server instructions search files_* in every rešerše and stop after a 'no library' answer", () => {
+    expect(INSTRUCTIONS).toMatch(/^- Vlastní zdroje .*In legal research call files_search in the first round of every question/m);
+    expect(INSTRUCTIONS).toContain("do not call files_* again in this conversation");
+    expect(INSTRUCTIONS).toMatch(/^- Literature: .*close the answer with the most relevant works as further sources/m);
   });
 });
 

@@ -570,7 +570,6 @@ main > footer a {
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
 }
 
-
 .steps {
   list-style: none;
   margin: 0;
@@ -669,7 +668,6 @@ main > footer a {
   background: var(--ok-bg);
   color: var(--green);
 }
-
 
 .help-title {
   font-size: 16px;
@@ -861,14 +859,6 @@ main > footer a {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.zd-sr {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-}
 .zd-error {
   margin: 0;
   font-size: 13.5px;
@@ -919,9 +909,6 @@ main > footer a {
 .zd-row > select {
   flex: 1;
   min-width: 0;
-}
-.zd-row-wrap {
-  flex-wrap: wrap;
 }
 .zd-link {
   color: var(--link);
@@ -1011,8 +998,7 @@ main > footer a {
 .zd-row-button:focus-visible,
 .zd-dropzone-button:focus-visible,
 .zd-avatar-button:focus-visible,
-.zd-segmented button:focus-visible,
-.zd-segment-button:focus-visible {
+.zd-segmented button:focus-visible {
   outline: 2px solid var(--link);
   outline-offset: 2px;
 }
@@ -1619,6 +1605,10 @@ main > footer a {
   font-weight: 500;
   color: var(--text);
 }
+.zd-upload-rules a {
+  color: inherit;
+  text-decoration: underline;
+}
 .zd-dropzone-sub {
   font-size: 13px;
   color: var(--muted);
@@ -1848,71 +1838,11 @@ main > footer a {
 
 /* Upload: cards, preview, fields */
 
-.zd-card {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 16px 18px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--panel);
-}
-.zd-card-head {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  min-width: 0;
-  font-size: 14px;
-}
-.zd-card-head strong {
-  font-weight: 600;
-}
 .zd-card-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
-}
-.zd-stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-  gap: 8px 12px;
-  margin: 0;
-}
-.zd-stat dt {
-  font-size: 12px;
-  color: var(--muted);
-}
-.zd-stat dd {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-}
-.zd-warnings {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: 0;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: var(--busy-bg);
-  color: var(--busy);
-  font-size: 13px;
-  line-height: 1.45;
-  list-style: none;
-}
-.zd-warnings .icon {
-  vertical-align: -2px;
-}
-.zd-toggles {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 18px;
-  margin: 0;
-  padding: 0;
-  border: 0;
 }
 .zd-check {
   display: inline-flex;
@@ -1927,94 +1857,6 @@ main > footer a {
   height: 16px;
   margin: 0;
   accent-color: var(--primary-bg);
-}
-.zd-pages {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.zd-pages-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
-  font-size: 13px;
-}
-.zd-inline-field {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--body);
-}
-.zd-inline-field input {
-  width: 84px;
-}
-.zd-strip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  max-height: 64px;
-  overflow-y: auto;
-  cursor: pointer;
-}
-.zd-strip span {
-  width: 6px;
-  height: 16px;
-  border-radius: 2px;
-  background: var(--idle);
-}
-.zd-strip span[data-tone="warn"] {
-  background: var(--warn-mark);
-}
-.zd-strip span[data-tone="blank"] {
-  background: var(--line);
-}
-.zd-strip span[data-current] {
-  background: var(--text);
-}
-.zd-side-by-side {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 12px;
-  align-items: start;
-}
-.zd-canvas-wrap {
-  min-height: 160px;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #ffffff;
-}
-.zd-canvas-wrap .zd-muted {
-  padding: 12px;
-  font-size: 13px;
-}
-.zd-canvas {
-  display: block;
-  max-width: 100%;
-}
-.zd-zone-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-  margin: 0;
-  padding: 6px 10px;
-  border-top: 1px solid var(--line);
-  background: var(--panel);
-  color: var(--muted);
-  font-size: 12px;
-}
-.zd-zone-key {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-.zd-zone-swatch {
-  width: 12px;
-  height: 10px;
-  border: 1px solid;
-  border-radius: 2px;
 }
 .zd-page-text {
   max-height: 520px;
@@ -2034,11 +1876,7 @@ main > footer a {
 .zd-page-text-solo {
   max-height: 360px;
 }
-@media (max-width: 640px) {
-  .zd-side-by-side {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
+
 .zd-form-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -2080,9 +1918,6 @@ main > footer a {
   resize: vertical;
   line-height: 1.45;
 }
-.zd-layer .zd-inline-field input {
-  width: 84px;
-}
 .zd-layer input:focus,
 .zd-layer select:focus,
 .zd-layer textarea:focus,
@@ -2121,45 +1956,6 @@ main > footer a {
 .zd-source[data-low] {
   background: var(--busy-bg);
   color: var(--busy);
-}
-.zd-segment {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-self: flex-start;
-  gap: 2px;
-  padding: 3px;
-  border-radius: 9px;
-  background: var(--surface);
-}
-.zd-segment-button {
-  padding: 5px 12px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-}
-.zd-segment-button[aria-checked="true"] {
-  background: var(--panel);
-  color: var(--text);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
-}
-.zd-cost {
-  margin: 0;
-  font-size: 14px;
-  color: var(--body);
-}
-.zd-terms ul {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 0;
-  padding-left: 1.2rem;
-  font-size: 13.5px;
-  line-height: 1.5;
-  color: var(--body);
 }
 .zd-team-picker {
   max-width: 320px;
@@ -2212,6 +2008,49 @@ main > footer a {
 }
 .zd-detail-actions {
   justify-content: flex-start;
+}
+.zd-meta-view {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.zd-meta-view-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.zd-meta-list {
+  display: grid;
+  grid-template-columns: minmax(110px, max-content) 1fr;
+  gap: 6px 16px;
+  margin: 0;
+  font-size: 14px;
+}
+.zd-meta-list > div {
+  display: contents;
+}
+.zd-meta-list dt {
+  color: var(--soft);
+}
+.zd-meta-list dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.zd-meta-extra {
+  grid-column: 1 / -1;
+}
+.zd-meta-extra > summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--soft);
+}
+.zd-meta-extra-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+  margin-top: 12px;
 }
 .zd-detail-more {
   display: flex;

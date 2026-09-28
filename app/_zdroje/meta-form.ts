@@ -91,6 +91,31 @@ const BY_TYPE: Record<DocType, FieldDef[]> = {
 
 const TAIL: FieldDef[] = [F.keywords, F.summary, F.language];
 
+/**
+ * The fields the edit form shows up front: title, type, authors and year —
+ * plus what the search itself runs on (the act of a commentary, which turns
+ * a bare "§ 2913" into that act's section; the case number of a decision).
+ * The rest waits under "Další údaje". Required fields are always among them.
+ */
+const ESSENTIAL: Record<DocType, Set<MetaField>> = {
+  kniha: new Set(["authors", "year"]),
+  kapitola: new Set(["authors", "year"]),
+  clanek: new Set(["authors", "year"]),
+  komentar: new Set(["commented_act", "authors", "year"]),
+  vzor: new Set(["authors", "year"]),
+  rozhodnuti: new Set(["case_number", "decided_on"]),
+  jine: new Set(["authors", "year"]),
+};
+
+/** fieldsFor split into the fields shown up front and the rest ("Další údaje"). */
+export function splitFields(docType: DocType): { essential: FieldDef[]; extra: FieldDef[] } {
+  const keep = ESSENTIAL[docType] ?? ESSENTIAL.jine;
+  const essential: FieldDef[] = [];
+  const extra: FieldDef[] = [];
+  for (const f of fieldsFor(docType)) (f.key === "title" || f.required || keep.has(f.key) ? essential : extra).push(f);
+  return { essential, extra };
+}
+
 export const DOC_TYPE_OPTIONS: Array<[DocType, string]> = DOC_TYPES.map((t) => [t, DOC_TYPE_LABELS[t]]);
 
 /** The editable fields of a type: title, the type's own fields, then keywords, summary, language. */

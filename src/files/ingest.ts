@@ -53,13 +53,12 @@ import { DOC_TYPES, type BibMeta, type DocType, type ProposedMeta } from "./type
  *              MAX_INGEST_ATTEMPTS, then 'error' and the reservation is
  *              released; a document over its attempts is failed on claim.
  *
- * Status after a successful run: 'ready' when the library auto-confirms;
- * otherwise 'review', searchable only after the user confirms. A document
+ * Status after a successful run: 'ready' — the default, the upload is done
+ * and the metadata can be edited later; 'review' (searchable only after the
+ * user confirms) only in a library with autoConfirm: false. A document
  * that replaces an already confirmed one (authorized at upload: uploader or
  * admin, same library) starts from the confirmed metadata instead of a new
- * proposal, but still goes back to 'review' (plan §7): the new conversion
- * may have moved pages, sections or the commented range, so a person looks
- * once more. Never throws. Records the run's CPU time in usage_daily
+ * proposal (the same status rule applies). Never throws. Records the run's CPU time in usage_daily
  * (CpuMeter: the synchronous work only).
  */
 
@@ -225,6 +224,15 @@ interface Prepared {
   status: "review" | "ready";
 }
 
+/**
+ * Documents are ready (searchable) straight after ingest: the metadata is
+ * proposed and stored, and the user corrects it later in the detail view
+ * if needed. A library opts back into the review step with autoConfirm: false.
+ */
+export function autoConfirms(settings: Record<string, unknown>): boolean {
+  return settings.autoConfirm !== false;
+}
+
 const REPLACED_DETAIL = "Nový převod dokumentu: metadata jsou převzata z původní verze, zkontrolujte je a potvrďte.";
 
 /** Parse the text and settle the metadata (see the header). */
@@ -246,7 +254,7 @@ async function prepare(claim: Claimed, cpu: CpuMeter): Promise<Prepared> {
       section_range: old.doc_type === "komentar" ? (sectionRangeOf(parsed.sections) ?? old.section_range ?? null) : (old.section_range ?? null),
       anchor_label: old.anchor_label ?? parsed.anchorLabel,
     };
-    const status = settings.autoConfirm === true ? "ready" : "review";
+    const status = autoConfirms(settings) ? "ready" : "review";
     return {
       text,
       parsed,
@@ -265,7 +273,7 @@ async function prepare(claim: Claimed, cpu: CpuMeter): Promise<Prepared> {
   const meta = proposalToBibMeta(proposed, row.file_name);
   if (meta.doc_type === "komentar") meta.section_range = sectionRangeOf(parsed.sections);
   if (!meta.anchor_label) meta.anchor_label = parsed.anchorLabel;
-  const status = settings.autoConfirm === true ? "ready" : "review";
+  const status = autoConfirms(settings) ? "ready" : "review";
   return { text, parsed, meta, proposed, statusDetail: status === "review" ? ai.detail : null, status };
 }
 

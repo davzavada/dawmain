@@ -6,7 +6,7 @@ import { LIBRARY_ID_RE, LIMITS, TERMS_VERSION, USER_ID_RE } from "./config";
 import { withScope, type Queryable } from "./db/client";
 import { getDocument, insertUploadedDocument, isBlocked, replacementCredit } from "./db/documents";
 import { ensureLibrary, getLibraries, reservePages, reviveLibrary } from "./db/libraries";
-import { audit, bumpUsage, hasAcceptedTerms, usageSum } from "./db/usage";
+import { acceptTerms, audit, bumpUsage, hasAcceptedTerms, usageSum } from "./db/usage";
 import { billablePages } from "./dmd/billing";
 import { normalizeDmd, sanitizeLine } from "./dmd/normalize";
 import { parseDmd } from "./dmd/parse";
@@ -40,7 +40,8 @@ import {
  *      a proxy may truncate silently); multipart + meta schema;
  *   2. access from Clerk (fresh): Pro library, canUpload, not banned;
  *      effective mode (guards) — readonly/off → 503;
- *   3. terms accepted; the daily volume (usage_daily): uploads per library
+ *   3. terms (an upload accepts them, see the note at the upload field);
+ *      the daily volume (usage_daily): uploads per library
  *      and in all, CPU time of uploads and ingests today and over 30 days
  *      (UPLOAD_GUARDS) — a quick refusal before the costly steps;
  *   4. streaming gunzip with a byte cap and a ratio cap (zip bomb), strict
@@ -399,9 +400,8 @@ async function upload(request: Request, userId: string): Promise<UploadOutcome> 
 
   // 3. Terms and the daily volume (re-checked atomically in step 6).
   const pre = await withScope([libraryId], async (db) => {
-    if (!(await hasAcceptedTerms(db, userId, TERMS_VERSION))) {
-      return refuse(403, "Před prvním nahráním je třeba přijmout pravidla Vlastních zdrojů.");
-    }
+    // The rules are stated next to the upload field: uploading accepts them (recorded once per version).
+    if (!(await hasAcceptedTerms(db, userId, TERMS_VERSION))) await acceptTerms(db, userId, TERMS_VERSION);
     return volumeRefusal(db, libraryId);
   });
   if (pre) return pre;

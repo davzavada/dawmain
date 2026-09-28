@@ -1,11 +1,9 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { CONTACT } from "@/app/_legal";
-import { TERMS_VERSION } from "@/src/files/config";
 import type { LibrarySummary } from "@/src/files/web-types";
-import { api } from "./api";
 import { DocumentPanel } from "./detail";
 import { Dialog } from "./dialog";
 import { countDocuments, countMembers, quotaLine, quotaShare } from "./format";
@@ -99,7 +97,6 @@ export function SourcesModal({ tab, documentId }: { tab: SourcesTab; documentId:
             key={personal.id}
             lib={personal}
             mode={mode}
-            termsAccepted={summary.termsAccepted}
             documentId={documentId}
             replace={replace?.libraryId === personal.id ? replace : null}
             setReplace={setReplace}
@@ -113,7 +110,6 @@ export function SourcesModal({ tab, documentId }: { tab: SourcesTab; documentId:
           key={team.id}
           lib={team}
           mode={mode}
-          termsAccepted={summary.termsAccepted}
           documentId={documentId}
           replace={replace?.libraryId === team.id ? replace : null}
           setReplace={setReplace}
@@ -228,7 +224,6 @@ function TeamLocked() {
 function LibraryPanel({
   lib,
   mode,
-  termsAccepted,
   documentId,
   replace,
   setReplace,
@@ -239,7 +234,6 @@ function LibraryPanel({
 }: {
   lib: LibrarySummary;
   mode: string;
-  termsAccepted: boolean;
   documentId: string | null;
   replace: { id: string; title: string; libraryId: string; creditPages: number } | null;
   setReplace: (r: { id: string; title: string; libraryId: string; creditPages: number } | null) => void;
@@ -342,20 +336,16 @@ function LibraryPanel({
         <p className="zd-banner">Vlastní zdroje jsou teď dočasně vypnuté. Mazat dokumenty jde dál.</p>
       ) : null}
       {lib.pro && lib.canUpload && mode === "on" ? (
-        termsAccepted ? (
-          <Uploader
-            library={lib}
-            replace={replace}
-            onCancelReplace={() => setReplace(null)}
-            onUploaded={() => {
-              setReplace(null);
-              reload();
-              void refreshSummary();
-            }}
-          />
-        ) : (
-          <TermsGate />
-        )
+        <Uploader
+          library={lib}
+          replace={replace}
+          onCancelReplace={() => setReplace(null)}
+          onUploaded={() => {
+            setReplace(null);
+            reload();
+            void refreshSummary();
+          }}
+        />
       ) : null}
       {error ? (
         <p className="zd-error" role="alert">
@@ -378,56 +368,5 @@ function LibraryPanel({
         </p>
       )}
     </div>
-  );
-}
-
-/** Before the first upload: the content rules in short, and consent. */
-function TermsGate() {
-  const [checked, setChecked] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => setError(null), [checked]);
-
-  async function accept() {
-    setBusy(true);
-    const res = await api("/api/files/terms", { method: "POST", json: { accept: true, version: TERMS_VERSION } });
-    setBusy(false);
-    if (!res.ok) {
-      setError(res.error);
-      return;
-    }
-    await refreshSummary();
-  }
-
-  return (
-    <section className="zd-card zd-terms" aria-label="Pravidla Vlastních zdrojů">
-      <strong>Než nahrajete první dokument</strong>
-      <ul>
-        <li>Nahrávejte jen texty, které máte právo si takto uložit — a v týmu sdílet. Licencované databáze (beck-online, ASPI, Codexis) budování vlastní databáze obvykle zakazují.</li>
-        <li>Nepatří sem spisy a dokumenty klientů, neveřejné osobní údaje, zvláštní kategorie osobních údajů ani cizí obchodní tajemství. Vzory nejdřív anonymizujte.</li>
-        <li>Na server jde jen převedený text, originál zůstává u vás. Záloha není.</li>
-        <li>Metadata navrhne AI — zkontrolujete je a potvrdíte. Vlastní dokument není oficiální zdroj: citace ověřte v tištěném vydání.</li>
-      </ul>
-      <label className="zd-check">
-        <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} />
-        <span>
-          Souhlasím s pravidly Vlastních zdrojů v{" "}
-          <a href="/podminky" target="_blank" rel="noopener">
-            Podmínkách užití
-          </a>
-          .
-        </span>
-      </label>
-      {error ? (
-        <p className="zd-error" role="alert">
-          {error}
-        </p>
-      ) : null}
-      <div className="zd-card-actions">
-        <button type="button" className="zd-btn zd-btn-primary" disabled={!checked || busy} onClick={() => void accept()}>
-          {busy ? "Ukládám…" : "Pokračovat"}
-        </button>
-      </div>
-    </section>
   );
 }

@@ -106,15 +106,15 @@ describe("SKILL.md is pinned to the registered tool surface", () => {
     expect(quoted.filter((code) => !known.has(code))).toEqual([]);
   });
 
-  it("calls files_* only when the user's own documents are in play, never as a probe", () => {
-    // Most connections have no Vlastní zdroje (no Pro, the shared access code,
-    // the feature off): a probe would put a failed call into every rešerše.
+  it("every rešerše searches the user's own documents first and closes with UKAŽ works to go through", () => {
     expect(SKILL).not.toMatch(/once per conversation/i);
-    expect(SKILL).toContain("Never call it just\n   to find out whether they have Vlastní zdroje");
-    expect(SKILL).toContain("never as a probe in an ordinary research question");
-    // Not "when they already answered": that reads as any earlier answer of the user.
-    expect(SKILL).not.toContain("they already answered");
-    expect(SKILL).toContain("when `files_*` already returned their documents\nearlier in this conversation");
+    expect(SKILL).toContain("Every research question starts in the user's own documents.");
+    expect(SKILL).toContain("Always add `files_search` to the same turn");
+    // A connection without a library answers once and is left alone.
+    expect(SKILL).toContain("the account has no library ends `files_*` for the conversation");
+    expect(SKILL).toContain("add `doctrine_search` too");
+    expect(SKILL).toMatch(/\*\*Další zdroje\*\* — "Bylo by dobré projít i tyto zdroje:"/);
+    expect(SKILL).toContain("never summarise what they say from an abstract");
   });
 
   it("reads the affects vocabulary the API actually returns", () => {
