@@ -105,7 +105,8 @@ describe("uploader", () => {
     const text = await new Response(posted[0].gz.stream().pipeThrough(new DecompressionStream("gzip"))).text();
     expect(text).toContain("První paragraf o pokusech");
     await until(() => host.querySelector(".zd-ok-line") !== null, "the log line");
-    expect(host.querySelector(".zd-ok-line")?.textContent).toBe("zakon.md: nahráno, zpracovává se — metadata se doplní sama.");
+    expect(host.querySelector(".zd-ok-line")?.textContent).toBe("zakon.md: nahráno.");
+    expect(host.textContent).not.toContain("zpracovává se");
     expect(host.querySelector(".zd-dropzone")).not.toBeNull();
     expect(host.textContent).toContain("Nahráním potvrzujete");
   });

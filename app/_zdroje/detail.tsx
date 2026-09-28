@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { DOC_TYPE_LABELS, type DocType } from "@/src/files/types";
 import type { DocumentDetail } from "@/src/files/web-types";
 import { api, NETWORK_ERROR } from "./api";
 import { Confirm } from "./dialog";
 import { countPages, downloadFileName, formatCount, plural, statusBadge } from "./format";
 import { ZIcon } from "./icons";
-import { metaLine } from "./list";
+import { metaLine, nextPollDelay, POLL_START_MS } from "./list";
 import { DOC_TYPE_OPTIONS, formFromMeta, payloadFromForm, proposalBadge, splitFields, type FieldDef, type FormValues } from "./meta-form";
 import { refreshSummary } from "./store";
 
@@ -82,6 +82,32 @@ export function DocumentPanel({
     })();
     return () => ctrl.abort();
   }, [id, reload]);
+
+  // Still being processed: reload until it is done (backing off; a hidden tab waits until it is visible again).
+  const pending = doc?.status === "queued" || doc?.status === "processing";
+  const delay = useRef(POLL_START_MS);
+  useEffect(() => {
+    if (!pending) {
+      delay.current = POLL_START_MS;
+      return;
+    }
+    const again = () => {
+      setReload((r) => r + 1);
+      void refreshSummary();
+    };
+    function onVisibility() {
+      if (document.visibilityState === "visible") again();
+    }
+    const timer = window.setTimeout(() => {
+      delay.current = nextPollDelay(delay.current);
+      if (document.visibilityState === "visible") again();
+      else document.addEventListener("visibilitychange", onVisibility);
+    }, delay.current);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [pending, reload]);
 
   if (loadError) {
     return (

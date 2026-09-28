@@ -190,4 +190,39 @@ describe("document detail", () => {
     expect(host.querySelector(".zd-meta-list")).not.toBeNull();
     expect(host.querySelector('button[aria-label="Upravit metadata"]')).toBeNull();
   });
+
+  it("a document still processing reloads by itself until it is ready", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let status = "processing";
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string) => {
+          calls.push(url);
+          return new Response(JSON.stringify(detail({ status })), { status: 200, headers: { "content-type": "application/json" } });
+        }),
+      );
+      await render(detail({ status: "processing" }));
+      expect(host.textContent).toContain("Dokument se zpracovává");
+      status = "ready";
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4_100);
+      });
+      for (let i = 0; i < 50 && host.textContent?.includes("Dokument se zpracovává"); i++) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(10);
+        });
+      }
+      expect(host.textContent).not.toContain("Dokument se zpracovává");
+      expect(host.textContent).toContain("Připraveno");
+      // Ready: no more reloads.
+      const n = calls.filter((c) => c.startsWith("/api/files/documents/")).length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+      expect(calls.filter((c) => c.startsWith("/api/files/documents/")).length).toBe(n);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

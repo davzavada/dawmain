@@ -20,7 +20,7 @@ import { refreshSummary } from "./store";
  */
 
 const PENDING: ReadonlySet<DocStatus> = new Set(["queued", "processing"]);
-const POLL_START_MS = 4_000;
+export const POLL_START_MS = 4_000;
 const POLL_MAX_MS = 15_000;
 
 /** Next polling delay: ×1.5 per poll, capped. Pure (exported for tests). */
