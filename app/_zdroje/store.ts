@@ -131,8 +131,10 @@ export function refreshSummary(opts: { fresh?: boolean } = {}): Promise<void> {
       const url = opts.fresh ? "/api/files/summary?fresh=1" : "/api/files/summary";
       const res = await fetch(url, { cache: "no-store", credentials: "same-origin" });
       const body = (await res.json().catch(() => null)) as SummaryResponse | null;
-      if (body && typeof body === "object" && "state" in body) set({ summary: body, failed: false });
-      else set({ failed: true });
+      if (body && typeof body === "object" && "state" in body) {
+        set({ summary: body, failed: false });
+        followProcessing(body);
+      } else set({ failed: true });
     } catch {
       set({ failed: true });
     } finally {
@@ -145,6 +147,30 @@ export function refreshSummary(opts: { fresh?: boolean } = {}): Promise<void> {
     }
   })();
   return inflight;
+}
+
+// While a library has documents in processing, refresh the summary until they settle, so the
+// home page badge and the counts do not stay on "zpracovává se" when the modal is closed
+// (the modal's list polls on its own). Backs off 5 s → 60 s; a hidden tab waits until visible.
+const FOLLOW_START_MS = 5_000;
+const FOLLOW_MAX_MS = 60_000;
+let followTimer: ReturnType<typeof setTimeout> | null = null;
+let followDelay = FOLLOW_START_MS;
+
+function followProcessing(summary: SummaryResponse): void {
+  if (followTimer !== null) clearTimeout(followTimer);
+  followTimer = null;
+  const processing = summary.state === "ok" && summary.libraries.some((l) => (l.counts?.processing ?? 0) > 0);
+  if (!processing || typeof window === "undefined") {
+    followDelay = FOLLOW_START_MS;
+    return;
+  }
+  followTimer = setTimeout(() => {
+    followTimer = null;
+    followDelay = Math.min(FOLLOW_MAX_MS, Math.round(followDelay * 1.5));
+    if (document.visibilityState === "visible") void refreshSummary();
+    else document.addEventListener("visibilitychange", () => void refreshSummary(), { once: true });
+  }, followDelay);
 }
 
 /** The bridge reports Clerk's session state. */

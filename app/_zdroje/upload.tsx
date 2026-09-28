@@ -177,7 +177,8 @@ export function Uploader({
       let entry: LogEntry;
       try {
         const id = await processFile(file, lib, rep, update);
-        entry = { name: file.name, ok: true, message: "nahráno, zpracovává se — metadata se doplní sama." };
+        // Only the upload: its processing shows (and updates) in the list below.
+        entry = { name: file.name, ok: true, message: "nahráno." };
         props.current.onUploaded(id);
       } catch (error) {
         entry = { name: file.name, ok: false, message: error instanceof UploadStop ? error.message : "Nahrávání se nepodařilo. Zkuste to prosím znovu." };
