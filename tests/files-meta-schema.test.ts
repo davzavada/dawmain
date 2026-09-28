@@ -66,7 +66,6 @@ function answer(overrides: Partial<AiProposal> = {}): AiProposal {
     ecli: null,
     decided_on: null,
     keywords: ["soukromé právo"],
-    summary: "Komentář k občanskému zákoníku.",
     language: "cs",
     ...overrides,
   };
@@ -170,7 +169,6 @@ describe("validateAiProposal", () => {
         subtitle: "unknown",
         publisher: "neuvedeno",
         place: "   ",
-        summary: "y".repeat(1_000),
         keywords: ["a", "A", " právo ", "", ...Array.from({ length: 20 }, (_, i) => `slovo${i}`)],
         language: "CS",
       }),
@@ -181,7 +179,8 @@ describe("validateAiProposal", () => {
     expect(m.subtitle).toBeUndefined();
     expect(m.publisher).toBeUndefined();
     expect(m.place).toBeUndefined();
-    expect((m.summary?.value as string).length).toBeLessThanOrEqual(600);
+    // The AI no longer proposes a summary.
+    expect(m.summary).toBeUndefined();
     expect(m.keywords?.value).toHaveLength(8);
     expect((m.keywords?.value as string[]).slice(0, 2)).toEqual(["a", "právo"]);
     expect(m.language?.value).toBe("cs");
@@ -317,6 +316,7 @@ describe("proposalToBibMeta", () => {
       summary: null,
       language: "cs",
     });
+    expect(proposalToBibMeta({ summary: { value: "Shrnutí z abstraktu.", source: "heuristic", confidence: 0.6 } }, "a.pdf").summary).toBeNull();
     expect(proposalToBibMeta({}, "").title).toBe("Bez názvu");
     expect(proposalToBibMeta({}, ".pdf").title).toBe("Bez názvu");
   });

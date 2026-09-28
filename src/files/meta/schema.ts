@@ -115,7 +115,6 @@ export const aiProposalSchema = z
     ecli: nullableText("Decision only: its ECLI exactly as printed."),
     decided_on: nullableText("Decision only: date of the decision as YYYY-MM-DD."),
     keywords: z.array(z.string()).describe('Up to 8 Czech keywords ("Klíčová slova" when printed).'),
-    summary: nullableText("One to three Czech sentences (at most 600 characters) on what the document covers."),
     language: nullableText("ISO 639-1 code of the main language, e.g. cs."),
   })
   .describe("Bibliographic metadata of one uploaded legal document.");
@@ -406,9 +405,6 @@ export function validateAiProposal(raw: unknown, sourceText: string): ProposedMe
         put("keywords", kws.slice(0, META_CAPS.keywords), 0.6);
         break;
       }
-      case "summary":
-        put("summary", text(get("summary"), META_CAPS.summary), 0.6);
-        break;
       case "language": {
         const l = text(get("language"), 10)?.toLowerCase() ?? null;
         put("language", l && LANGUAGE_RE.test(l) ? l : null, 0.7);
@@ -567,7 +563,8 @@ export function proposalToBibMeta(p: ProposedMeta, fallbackTitle: string): BibMe
     ecli,
     decided_on: decided,
     keywords: capList(v("keywords"), META_CAPS.keywords, META_CAPS.keyword),
-    summary: str("summary", META_CAPS.summary),
+    // No summary: the metadata stay what a citation and the search need.
+    summary: null,
     language: language && LANGUAGE_RE.test(language) ? language : "cs",
   };
 }

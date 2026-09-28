@@ -61,7 +61,7 @@ export const META_INSTRUCTIONS = [
   "- edition: the number with a dot (\"2.\" for \"2. vydání\"). year: year of this edition, or of the decision.",
   "- commented_act: commentary only — the act it comments, as named in the title. decided_on: YYYY-MM-DD.",
   "- container_title, volume, issue, pages_range: journal (or host book), ročník, číslo and printed page range of an article or chapter.",
-  "- keywords: up to 8 Czech keywords (use \"Klíčová slova\" when printed). summary: 1–3 factual Czech sentences, at most 600 characters, on what the document covers.",
+  "- keywords: up to 8 Czech keywords (use \"Klíčová slova\" when printed).",
   "- language: the ISO 639-1 code of the document's main language.",
 ].join("\n");
 
