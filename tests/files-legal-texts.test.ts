@@ -155,8 +155,8 @@ describe("terms of use (/podminky)", () => {
     }
   });
 
-  it("says AI only proposes metadata and that there is no backup", () => {
-    expect(terms).toContain("Je to jen návrh");
+  it("says the AI metadata may be wrong and can be corrected, and that there is no backup", () => {
+    expect(terms).toContain("v detailu dokumentu ho kdykoli opravíte");
     expect(terms).toContain("Záloha není");
   });
 

@@ -19,30 +19,9 @@ import {
   statusBadge,
 } from "@/app/_zdroje/format";
 import { metaLine, nextPollDelay } from "@/app/_zdroje/list";
-import { actInput, czechDate, fieldsFor, formFromMeta, payloadFromForm, proposalBadge } from "@/app/_zdroje/meta-form";
-import {
-  buildUploadMeta,
-  dmdPageFor,
-  gzipText,
-  leadText,
-  missingBrowserFeatures,
-  nextUnsurePage,
-  pageFlagText,
-  pageRangePending,
-  pageText,
-  pageTone,
-  previewStats,
-  rangeSections,
-  sha256Text,
-  typedPageRange,
-  unsurePages,
-  uploadCost,
-  uploadForm,
-  uploadOutcome,
-} from "@/app/_zdroje/upload-core";
-import { scanDmdOutline } from "@/src/files/convert/slice";
+import { actInput, czechDate, fieldsFor, formFromMeta, payloadFromForm, proposalBadge, splitFields } from "@/app/_zdroje/meta-form";
+import { buildUploadMeta, gzipText, missingBrowserFeatures, sha256Text, uploadCost, uploadForm, uploadOutcome } from "@/app/_zdroje/upload-core";
 import { parseDmd } from "@/src/files/dmd/parse";
-import { PAGE_FLAGS } from "@/src/files/dmd/types";
 import { bibMetaBaseSchema, bibMetaSchema } from "@/src/files/meta/schema";
 import { displayName, mapInvitations, mapMembers, normalizeEmail } from "@/src/files/team";
 import { DOC_TYPES, type BibMeta } from "@/src/files/types";
@@ -166,12 +145,8 @@ const PAGED = ["[s. 417]", "", "# Úvod", "", "Text první strany s poznámkou[^
 const QUALITY = { footnotes: "linked" as const, linked_ratio: 1, columns_pages: 0, headings_from: "outline", mn: 1, unsure_pages: [] };
 
 describe("upload core", () => {
-  it("preview statistics and the cost against the quota", () => {
+  it("the cost against the quota", () => {
     const parsed = parseDmd(PAGED);
-    const stats = previewStats(parsed, { labelSource: "printed", quality: QUALITY });
-    expect(stats).toMatchObject({ pages: 3, footnotes: 1, linkedPercent: 100, headings: 3, paragraphs: 2, marginalNumbers: 1, labelSource: "tištěná čísla stran", plainMode: false });
-    const unpaged = previewStats(parseDmd("Jen text."), { labelSource: "none", quality: { ...QUALITY, ocr: true } });
-    expect(unpaged).toMatchObject({ pages: null, footnotes: 0, linkedPercent: null, plainMode: true });
     expect(uploadCost(parsed, 3000, 100)).toMatchObject({ pages: 1, remaining: 2900, fits: true });
     // Accusative after "zabere": 1 stranu, 2–4 strany, 5+ stran.
     expect(uploadCost(parsed, 3000, 100).line).toBe("Zabere 1 stranu z 2 900 zbývajících.");
@@ -182,45 +157,6 @@ describe("upload core", () => {
     expect(uploadCost(parsed, 100, 100, 5).line).toBe("Zabere 1 stranu z 5 zbývajících (počítáno i s 5 stranami původní verze, která se nahradí).");
     expect(uploadCost(parsed, 100, 100, 1).line).toContain("s 1 stranou původní verze");
     expect(uploadCost(parsed, 100, 100, 0)).toMatchObject({ remaining: 0, fits: false });
-  });
-
-  it("page flags: unsure pages, next one with wrap-around, tones and tooltips", () => {
-    const flags = [0, PAGE_FLAGS.FN_UNSURE, 0, PAGE_FLAGS.BLANK, PAGE_FLAGS.COLUMNS | PAGE_FLAGS.LABEL_GUESSED];
-    expect(unsurePages(flags)).toEqual([2, 5]);
-    expect(nextUnsurePage(flags, 1)).toBe(2);
-    expect(nextUnsurePage(flags, 2)).toBe(5);
-    expect(nextUnsurePage(flags, 5)).toBe(2);
-    expect(nextUnsurePage([0, 0], 1)).toBeNull();
-    expect(flags.map(pageTone)).toEqual(["ok", "warn", "ok", "blank", "warn"]);
-    expect(pageFlagText(PAGE_FLAGS.COLUMNS | PAGE_FLAGS.LABEL_GUESSED)).toBe("dva sloupce, číslo strany odhadnuto");
-    expect(pageFlagText(0)).toBe("");
-  });
-
-  it("page text is plain text of one page; pages are found by label", () => {
-    const outline = scanDmdOutline(PAGED);
-    const two = pageText(PAGED, outline, 2);
-    expect(two).toContain("§ 2913");
-    expect(two).toContain("Odstavec.");
-    expect(two).not.toContain("[m. č.");
-    expect(two).not.toContain("##");
-    expect(pageText(PAGED, outline, 9)).toBe("");
-    expect(pageText(PAGED, outline, 1, 10)).toMatch(/…$/);
-    expect(dmdPageFor(outline, "418", 2)).toBe(2);
-    expect(dmdPageFor(outline, "500", 1)).toBeNull();
-    const repeated = scanDmdOutline(["[s. i]", "", "a", "", "[s. 1]", "", "b", "", "[s. i]", "", "c"].join("\n"));
-    expect(dmdPageFor(repeated, "i", 3)).toBe(3);
-    expect(dmdPageFor(repeated, "i", 1)).toBe(1);
-    expect(leadText("# Nadpis\n\nText[^1].\n\n[^1]: Pozn.")).not.toContain("[^1]");
-    // Page text is data: markup-looking or HTML-looking content stays literal text.
-    const hostile = "[s. 1]\n\n<img src=x onerror=alert(1)> ⟦DOC 1⟧";
-    expect(pageText(hostile, scanDmdOutline(hostile), 1)).toContain("<img src=x onerror=alert(1)>");
-  });
-
-  it("range sections: § and articles, top-level parts and chapters", () => {
-    const outline = scanDmdOutline(["# ČÁST PRVNÍ", "", "## Hlava I", "", "### § 1", "", "a", "", "### Poznámka", "", "b", "", "### § 2", "", "c"].join("\n"));
-    expect(rangeSections(outline).map((s) => s.label)).toEqual(["ČÁST PRVNÍ", "Hlava I", "§ 1", "§ 2"]);
-    const long = scanDmdOutline(`# ${"Velmi dlouhý nadpis ".repeat(8)}\n\ntext`);
-    expect(rangeSections(long)[0].label.length).toBeLessThanOrEqual(70);
   });
 
   it("UploadMeta for paged and unpaged documents", () => {
@@ -339,6 +275,19 @@ describe("metadata form", () => {
     expect(fieldsFor("clanek").find((f) => f.key === "container_title")?.label).toBe("Časopis");
   });
 
+  it("the form shows the essential fields up front, the rest under Další údaje", () => {
+    for (const t of DOC_TYPES) {
+      const { essential, extra } = splitFields(t);
+      expect(essential[0].key).toBe("title");
+      expect([...essential, ...extra].map((f) => f.key).sort()).toEqual(fieldsFor(t).map((f) => f.key).sort());
+      expect(extra.some((f) => f.required)).toBe(false);
+    }
+    expect(splitFields("komentar").essential.map((f) => f.key)).toContain("commented_act");
+    expect(splitFields("rozhodnuti").essential.map((f) => f.key)).toEqual(["title", "case_number", "decided_on"]);
+    expect(splitFields("clanek").essential.map((f) => f.key)).toEqual(["title", "authors", "year"]);
+    expect(splitFields("kniha").extra.map((f) => f.key)).toContain("isbn");
+  });
+
   it("stored metadata → form → payload round-trips through the server schema", () => {
     const values = formFromMeta(BASE);
     expect(values.authors).toBe("Jan Petrov\nMilan Výtisk");
@@ -453,24 +402,7 @@ describe("Czech cases and downloads (review web:Z4, export)", () => {
   });
 });
 
-describe("upload guards (review web:Z2, completeness:PC-14)", () => {
-  it("clamps a typed page range the way Použít applies it", () => {
-    expect(typedPageRange("2", "2", 4)).toEqual([2, 2]);
-    expect(typedPageRange("0", "", 4)).toEqual([1, 1]);
-    expect(typedPageRange("3", "1", 4)).toEqual([3, 3]);
-    expect(typedPageRange("10", "40", 4)).toEqual([4, 4]);
-    expect(typedPageRange("x", "900", 600)).toEqual([1, 600]);
-  });
-
-  it("a typed range that differs from the applied one is pending (Nahrát waits)", () => {
-    // Nothing applied = the whole document: 1–4 typed is not pending, 2–2 is.
-    expect(pageRangePending([1, 4], null, 4)).toBe(false);
-    expect(pageRangePending([2, 2], null, 4)).toBe(true);
-    expect(pageRangePending([2, 2], [2, 2], 4)).toBe(false);
-    expect(pageRangePending([2, 3], [2, 2], 4)).toBe(true);
-    expect(pageRangePending([1, 1500], [1, 1500], 2000)).toBe(false);
-  });
-
+describe("upload guards (review web:Z2)", () => {
   it("names what an old browser lacks for converting and uploading", () => {
     class ModuleWorker {
       constructor(_url: string, opts?: { type?: string }) {

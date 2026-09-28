@@ -319,7 +319,9 @@ přihlašovací okno. Diskovery kontroluje i `npm run smoke` (krok
 Uživatel s Pro si na webu nahraje vlastní dokumenty; prohlížeč je převede na
 text (DMD), server ho uloží do Neon Postgresu ve Frankfurtu, zaindexuje
 (český stemmer běží v aplikaci), navrhne metadata (heuristiky + Gemini přes
-AI Gateway) a po potvrzení v nich hledají nástroje `files_*`. Originály se
+AI Gateway) a hned po zpracování v nich hledají nástroje `files_*` (metadata
+uživatel opraví v detailu dokumentu; krok kontroly před hledáním zapne knihovně
+`settings.autoConfirm = false`). Originály se
 nikam neukládají. Všechno běží zdarma: Vercel Hobby, Clerk, Neon Free a
 měsíční kredit AI Gateway. **Překročení limitů Hobby pozastaví celý tým
 včetně `/api/mcp`**, Neon při vyčerpání zablokuje zápisy nebo uspí databázi do

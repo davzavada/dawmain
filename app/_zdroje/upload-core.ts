@@ -1,53 +1,8 @@
 import { billablePages } from "@/src/files/dmd/billing";
-import { stripMarkup } from "@/src/files/dmd/parse";
-import { PAGE_FLAGS, type ParsedDoc } from "@/src/files/dmd/types";
+import type { ParsedDoc } from "@/src/files/dmd/types";
 import type { ConvertResult } from "@/src/files/convert/types";
-import type { DmdOutline } from "@/src/files/convert/slice";
 import type { DocType, Rights, UploadMeta } from "@/src/files/types";
 import { countPagesAcc, formatCount, plural } from "./format";
-
-/**
- * The browser side of an upload, minus the React: what the preview shows
- * about a conversion, what one upload costs, the UploadMeta JSON, the gzip
- * and hash of the text, and the Czech answer to every refusal the upload
- * route can give. Pure except gzipText / sha256Text (Web APIs present in
- * browsers and in Node ≥ 18) — unit-tested in tests/files-web-format.test.ts.
- */
-
-/** Conversion statistics for the "Náhled převodu" card. */
-export interface PreviewStats {
-  pages: number | null;
-  footnotes: number;
-  /** Share of footnote definitions bound to a reference, 0–100 (null without footnotes). */
-  linkedPercent: number | null;
-  headings: number;
-  paragraphs: number;
-  marginalNumbers: number;
-  labelSource: string;
-  plainMode: boolean;
-}
-
-const LABEL_SOURCES: Record<string, string> = {
-  pdf_labels: "čísla stran z PDF",
-  printed: "tištěná čísla stran",
-  physical: "pořadí stran v PDF",
-  none: "bez stran (citace podle oddílů)",
-};
-
-export function previewStats(parsed: ParsedDoc, result: Pick<ConvertResult, "labelSource" | "quality">): PreviewStats {
-  const defs = parsed.footnotes.length;
-  const bound = parsed.footnotes.filter((f) => f.refAt !== null).length;
-  return {
-    pages: parsed.paged ? parsed.stats.physicalPages : null,
-    footnotes: defs,
-    linkedPercent: defs > 0 ? Math.round((bound / defs) * 100) : null,
-    headings: parsed.stats.headings,
-    paragraphs: parsed.sections.filter((s) => s.kind === "par").length,
-    marginalNumbers: parsed.stats.marginalNumbers,
-    labelSource: LABEL_SOURCES[result.labelSource] ?? result.labelSource,
-    plainMode: result.quality.ocr === true,
-  };
-}
 
 /** What the upload will cost, and whether it fits. */
 export function uploadCost(
@@ -68,23 +23,6 @@ export function uploadCost(
   const base = `Zabere ${countPagesAcc(pages)} z ${formatCount(remaining)} ${plural(remaining, "zbývající", "zbývajících", "zbývajících")}`;
   const line = credit > 0 ? `${base} (počítáno i s ${formatCount(credit)} ${plural(credit, "stranou", "stranami", "stranami")} původní verze, která se nahradí).` : `${base}.`;
   return { pages, remaining, fits, line };
-}
-
-/** The page range the two inputs describe, clamped the way "Použít" applies it. */
-export function typedPageRange(from: string, to: string, pageCount: number): [number, number] {
-  const last = Math.max(1, pageCount);
-  const a = Math.min(last, Math.max(1, Math.floor(Number(from) || 1)));
-  const b = Math.min(last, Math.max(a, Math.floor(Number(to) || a)));
-  return [a, b];
-}
-
-/**
- * The inputs name another page range than the conversion uses — typed, but
- * "Použít" not pressed yet. The upload waits: it would send the other range.
- */
-export function pageRangePending(typed: [number, number], applied: [number, number] | null, pageCount: number): boolean {
-  const [a, b] = applied ?? [1, Math.max(1, pageCount)];
-  return typed[0] !== a || typed[1] !== b;
 }
 
 /**
@@ -125,83 +63,6 @@ function supportsModuleWorkers(g: typeof globalThis): boolean {
 
 export const UNSUPPORTED_BROWSER =
   "Váš prohlížeč nahrávání nepodporuje: převod probíhá přímo v prohlížeči a potřebuje novější funkce. Použijte aktuální Chrome, Edge, Firefox nebo Safari 16.4 a novější.";
-
-/** Pages (1-based physical ords) with a problem flag, for "další sporná strana". */
-export function unsurePages(pageFlags: number[]): number[] {
-  const mask = PAGE_FLAGS.FN_UNSURE | PAGE_FLAGS.COLUMNS | PAGE_FLAGS.LABEL_GUESSED | PAGE_FLAGS.HEADING_UNSURE;
-  const out: number[] = [];
-  pageFlags.forEach((f, i) => {
-    if ((f & mask) !== 0) out.push(i + 1);
-  });
-  return out;
-}
-
-/** The next unsure page after `current`, wrapping around; null when there is none. */
-export function nextUnsurePage(pageFlags: number[], current: number): number | null {
-  const list = unsurePages(pageFlags);
-  if (list.length === 0) return null;
-  return list.find((p) => p > current) ?? list[0];
-}
-
-/** Strip colour of one page by its flags. */
-export function pageTone(flags: number): "ok" | "warn" | "blank" {
-  if ((flags & PAGE_FLAGS.BLANK) !== 0) return "blank";
-  if ((flags & (PAGE_FLAGS.FN_UNSURE | PAGE_FLAGS.COLUMNS | PAGE_FLAGS.LABEL_GUESSED | PAGE_FLAGS.HEADING_UNSURE)) !== 0) return "warn";
-  return "ok";
-}
-
-/** Czech tooltip of a page's flags. */
-export function pageFlagText(flags: number): string {
-  const parts: string[] = [];
-  if (flags & PAGE_FLAGS.FN_UNSURE) parts.push("poznámky nerozpoznány");
-  if (flags & PAGE_FLAGS.COLUMNS) parts.push("dva sloupce");
-  if (flags & PAGE_FLAGS.LABEL_GUESSED) parts.push("číslo strany odhadnuto");
-  if (flags & PAGE_FLAGS.HEADING_UNSURE) parts.push("nejisté nadpisy");
-  if (flags & PAGE_FLAGS.BLANK) parts.push("prázdná strana");
-  return parts.join(", ");
-}
-
-/**
- * The plain text of one physical page of a DMD document (markup stripped),
- * at most `max` characters — shown as TEXT in the preview, never as HTML.
- * Pages come from scanDmdOutline (their ords are physical page numbers).
- */
-export function pageText(dmd: string, outline: DmdOutline, ord: number, max = 12_000): string {
-  const page = outline.pages.find((p) => p.ord === ord);
-  if (!page) return "";
-  const raw = dmd.slice(page.start, Math.min(page.end, page.start + max + 200));
-  const text = stripMarkup(raw).text.replace(/\n{3,}/g, "\n\n").trim();
-  return text.length > max ? `${text.slice(0, max)}…` : text;
-}
-
-/**
- * The page of a (possibly cut) DMD document showing a given PDF page: the
- * one with the PDF page's printed label; when several pages share it
- * (roman front matter restarting), the one nearest `expectedOrd`. Null when
- * the page is not in the text (outside the selected range).
- */
-export function dmdPageFor(outline: DmdOutline, label: string, expectedOrd: number): number | null {
-  let best: number | null = null;
-  for (const p of outline.pages) {
-    if (p.label !== label) continue;
-    if (best === null || Math.abs(p.ord - expectedOrd) < Math.abs(best - expectedOrd)) best = p.ord;
-  }
-  return best;
-}
-
-/** The beginning of an unpaged document (DOCX, TXT) as plain text. */
-export function leadText(dmd: string, max = 6_000): string {
-  const text = stripMarkup(dmd.slice(0, max + 500)).text.replace(/\n{3,}/g, "\n\n").trim();
-  return text.length > max ? `${text.slice(0, max)}…` : text;
-}
-
-/** Section ranges the picker offers: § and článek sections, and top-level parts/chapters. */
-export function rangeSections(outline: DmdOutline): Array<{ ord: number; label: string }> {
-  const minLevel = Math.min(...outline.sections.map((s) => s.level), 6);
-  return outline.sections
-    .filter((s) => s.kind === "par" || s.kind === "cl" || ((s.kind === "part" || s.kind === "chapter") && s.level <= minLevel + 1))
-    .map((s) => ({ ord: s.ord, label: s.heading.length > 70 ? `${s.heading.slice(0, 69)}…` : s.heading }));
-}
 
 /** The JSON part of the upload (src/files/types.ts UploadMeta); the server re-checks all of it. */
 export function buildUploadMeta(args: {

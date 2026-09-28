@@ -132,6 +132,8 @@ async function uploaded(user: string, salt: string): Promise<string> {
   const res = await uploadPOST(uploadRequest(user, dmd(salt)));
   expect(res.status).toBe(201);
   const { id } = (await res.json()) as { id: string };
+  // The review step (a library with autoConfirm: false) — what these tests exercise.
+  await t.owner.query(`UPDATE libraries SET settings = settings || '{"autoConfirm": false}'::jsonb WHERE id = $1`, [user]);
   for (const fn of mocks.after.splice(0)) await fn();
   return id;
 }

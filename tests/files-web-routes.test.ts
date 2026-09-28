@@ -214,6 +214,8 @@ async function uploaded(user: string, lib: string, salt: string): Promise<string
   const res = await uploadPOST(uploadRequest(lib, dmd(3, salt)));
   expect(res.status).toBe(201);
   const { id } = (await res.json()) as { id: string };
+  // The review step (a library with autoConfirm: false) — what these tests exercise.
+  await t.owner.query(`UPDATE libraries SET settings = settings || '{"autoConfirm": false}'::jsonb WHERE id = $1`, [lib]);
   await runAfter();
   expect((await row(id)).status).toBe("review");
   return id;

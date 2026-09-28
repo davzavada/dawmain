@@ -155,7 +155,7 @@ describe("POST /api/files/documents", () => {
     expect(mocks.after).toHaveLength(1);
     expect(await statusOf(body.id)).toBe("queued");
     await runAfter();
-    expect(await statusOf(body.id)).toBe("review");
+    expect(await statusOf(body.id)).toBe("ready");
   });
 
   it("a cross-site request is refused before authentication", async () => {
@@ -208,10 +208,10 @@ describe("GET /api/files/status", () => {
     expect(body.documents.map((d) => [d.id, d.status])).toEqual([[mine, "queued"]]);
     expect(mocks.after).toHaveLength(1);
     await runAfter();
-    expect(await statusOf(mine)).toBe("review");
+    expect(await statusOf(mine)).toBe("ready");
 
     const again = (await (await statusGET(statusReq(`lib=org_b&ids=${mine}`))).json()) as { documents: Array<{ status: string }> };
-    expect(again.documents[0].status).toBe("review");
+    expect(again.documents[0].status).toBe("ready");
     expect(mocks.after).toHaveLength(0);
   });
 
@@ -406,7 +406,7 @@ describe("GET /api/cron/files", () => {
     expect((await lib("org_lost")).pro_revoked_at).toBeInstanceOf(Date);
     expect((await lib("org_old")).purge_after!.getTime()).toBeLessThanOrEqual(Date.now());
     expect((await lib("org_back")).pro_revoked_at).toBeNull();
-    expect(await statusOf(doomed)).toBe("review");
+    expect(await statusOf(doomed)).toBe("ready");
     expect(await statusOf(crashed)).toBe("error");
     const pending = await t.owner.query<{ cleared: boolean }>("SELECT pending_gz IS NULL AS cleared FROM documents WHERE id = $1", [failed]);
     expect(pending.rows[0].cleared).toBe(true);

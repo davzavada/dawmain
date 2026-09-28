@@ -1,21 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { DOC_TYPE_LABELS, RIGHTS_LABELS, type DocType } from "@/src/files/types";
+import { DOC_TYPE_LABELS, type DocType } from "@/src/files/types";
 import type { DocumentDetail } from "@/src/files/web-types";
 import { api, NETWORK_ERROR } from "./api";
 import { Confirm } from "./dialog";
 import { countPages, downloadFileName, formatCount, plural, statusBadge } from "./format";
 import { ZIcon } from "./icons";
 import { metaLine } from "./list";
-import { DOC_TYPE_OPTIONS, fieldsFor, formFromMeta, payloadFromForm, proposalBadge, type FieldDef, type FormValues } from "./meta-form";
+import { DOC_TYPE_OPTIONS, formFromMeta, payloadFromForm, proposalBadge, splitFields, type FieldDef, type FormValues } from "./meta-form";
 import { refreshSummary } from "./store";
 
 /**
- * The detail / review panel of one document inside the modal: status and
- * conversion quality, the metadata form for its type (controlled inputs
- * from the stored — proposed or confirmed — metadata, a source badge per
- * proposed field, low-confidence fields highlighted), Potvrdit / Uložit /
+ * The detail panel of one document inside the modal: status and conversion
+ * quality, the metadata read-only with a pencil to edit them (the form for
+ * the document's type: the essential fields up front, the rest under
+ * "Další údaje"; a source badge per proposed field, low-confidence fields
+ * highlighted), Potvrdit (a library with the review step) / Uložit /
  * Nahrát znovu / Smazat, Exportovat text (the stored text as a Markdown
  * download — also after Pro was withdrawn), and the first ~1,500
  * characters of the text as plain text. Saves send the meta_version the form was loaded with; a
@@ -57,6 +58,7 @@ export function DocumentPanel({
   const [exportError, setExportError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [reload, setReload] = useState(0);
+  const [editing, setEditing] = useState(false);
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -72,6 +74,8 @@ export function DocumentPanel({
         setValues(formFromMeta(res.data.meta));
         setFieldErrors({});
         setConflict(false);
+        // A document waiting for review opens straight in the form.
+        setEditing(res.data.status === "review");
       } catch {
         // aborted
       }
@@ -104,6 +108,7 @@ export function DocumentPanel({
   const badge = statusBadge(doc.status, doc.statusDetail);
   const editable = doc.canEdit && !readonly && (doc.status === "review" || doc.status === "ready");
   const docType = (values.doc_type as DocType) || doc.meta.doc_type;
+  const fields = splitFields(docType);
 
   async function save(action: "confirm" | "save") {
     if (!doc) return;
@@ -120,6 +125,7 @@ export function DocumentPanel({
       setValues(formFromMeta(res.data.meta));
       const confirmedNow = action === "confirm" && doc.status === "review";
       setMessage({ ok: true, text: confirmedNow ? "Potvrzeno — asistent v dokumentu teď hledá." : "Uloženo." });
+      if (res.data.status === "ready") setEditing(false);
       void refreshSummary();
       return;
     }
@@ -202,7 +208,7 @@ export function DocumentPanel({
         {doc.status === "queued" || doc.status === "processing" ? (
           <p className="zd-progress" role="status">
             <span className="zd-spinner" aria-hidden="true" />
-            Dokument se zpracovává. Metadata půjde zkontrolovat, až bude hotový.
+            Dokument se zpracovává, metadata se doplní sama.
             <button type="button" className="zd-link-button" onClick={() => setReload((r) => r + 1)}>
               Obnovit
             </button>
@@ -210,11 +216,43 @@ export function DocumentPanel({
         ) : null}
         <p className="zd-quality">{qualityItems.join(" · ")}</p>
         <p className="zd-muted zd-small">
-          Práva: {RIGHTS_LABELS[doc.rights]} · převodník {doc.converter} · knihovna {doc.libraryName}
+          Převodník {doc.converter} · knihovna {doc.libraryName}
         </p>
       </div>
 
-      {doc.status === "review" || doc.status === "ready" ? (
+      {(doc.status === "review" || doc.status === "ready") && !editing ? (
+        <section className="zd-meta-view" aria-label="Metadata">
+          <div className="zd-meta-view-head">
+            <span className="zd-section-name">Metadata</span>
+            {editable ? (
+              <button type="button" className="zd-icon-button" onClick={() => setEditing(true)} aria-label="Upravit metadata" title="Upravit metadata">
+                <ZIcon name="edit" size={16} />
+              </button>
+            ) : null}
+          </div>
+          <dl className="zd-meta-list">
+            <div>
+              <dt>Typ</dt>
+              <dd>{DOC_TYPE_LABELS[doc.meta.doc_type]}</dd>
+            </div>
+            {[...fields.essential, ...fields.extra]
+              .filter((f) => (values[f.key] ?? "").trim() !== "" && !(f.key === "language" && values[f.key] === "cs"))
+              .map((f) => (
+                <div key={f.key + f.label}>
+                  <dt>{f.label}</dt>
+                  <dd>{f.kind === "select" ? (f.options?.find(([v]) => v === values[f.key])?.[1] ?? values[f.key]) : (values[f.key] ?? "").split("\n").join(", ")}</dd>
+                </div>
+              ))}
+          </dl>
+          {message ? (
+            <p className={message.ok ? "zd-ok-line" : "zd-error"} role={message.ok ? "status" : "alert"}>
+              {message.text}
+            </p>
+          ) : null}
+        </section>
+      ) : null}
+
+      {(doc.status === "review" || doc.status === "ready") && editing ? (
         <form
           className="zd-meta-form"
           onSubmit={(e) => {
@@ -244,7 +282,7 @@ export function DocumentPanel({
               </select>
               <SourceBadge doc={doc} field={{ key: "doc_type", label: DOC_TYPE_LABELS[docType], kind: "select" }} />
             </label>
-            {fieldsFor(docType).map((field) => (
+            {fields.essential.map((field) => (
               <MetaField
                 key={field.key + field.label}
                 field={field}
@@ -254,6 +292,23 @@ export function DocumentPanel({
                 onChange={(value) => setValues((v) => ({ ...v, [field.key]: value }))}
               />
             ))}
+            {fields.extra.length > 0 ? (
+              <details className="zd-meta-extra" open={fields.extra.some((f) => fieldErrors[f.key]) || undefined}>
+                <summary>Další údaje</summary>
+                <div className="zd-meta-extra-grid">
+                  {fields.extra.map((field) => (
+                    <MetaField
+                      key={field.key + field.label}
+                      field={field}
+                      doc={doc}
+                      value={values[field.key] ?? ""}
+                      error={fieldErrors[field.key] ?? null}
+                      onChange={(value) => setValues((v) => ({ ...v, [field.key]: value }))}
+                    />
+                  ))}
+                </div>
+              </details>
+            ) : null}
             {doc.meta.section_range ? (
               <p className="zd-muted zd-small">Rozsah komentáře podle textu: {doc.meta.section_range}</p>
             ) : null}
@@ -283,9 +338,24 @@ export function DocumentPanel({
                   </button>
                 </>
               ) : (
-                <button type="submit" className="zd-btn zd-btn-primary" disabled={saving !== null}>
-                  {saving === "confirm" ? "Ukládám…" : "Uložit"}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="zd-btn zd-btn-quiet"
+                    disabled={saving !== null}
+                    onClick={() => {
+                      setValues(formFromMeta(doc.meta));
+                      setFieldErrors({});
+                      setMessage(null);
+                      setEditing(false);
+                    }}
+                  >
+                    Zrušit
+                  </button>
+                  <button type="submit" className="zd-btn zd-btn-primary" disabled={saving !== null}>
+                    {saving === "confirm" ? "Ukládám…" : "Uložit"}
+                  </button>
+                </>
               )}
             </div>
           ) : null}

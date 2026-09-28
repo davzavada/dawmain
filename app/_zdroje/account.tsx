@@ -5,12 +5,13 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboard
 import { countMembers, initials } from "./format";
 import { ZIcon } from "./icons";
 import { InvitationActions, InvitationText, useInvitations } from "./invitations";
-import { manageAccount, openSources, openTeam, requestSignIn, signOut, useZdroje } from "./store";
+import { manageAccount, openSources, openTeam, rememberInitials, requestSignIn, signOut, useHintInitials, useZdroje } from "./store";
 
 /**
  * The account control at the right end of the header (design 1a, 2a, 3a,
  * 3c, 2f, 3e). Signed out: a small "Přihlásit se" text button. Signed in:
- * the avatar with initials (a blue dot when a team invitation waits),
+ * the avatar with initials (a crown badge with Pro, a blue dot when a
+ * team invitation waits),
  * opening a menu — name and e-mail, pending invitations with Přijmout /
  * Odmítnout, Vlastní zdroje, Tým · N členů (admins of a Pro team),
  * Spravovat účet, Odhlásit se. A menu button in the WAI-ARIA sense: arrow
@@ -20,8 +21,8 @@ import { manageAccount, openSources, openTeam, requestSignIn, signOut, useZdroje
 export function AccountControl() {
   const { auth } = useZdroje();
   if (auth === "none") return null;
-  if (auth === "loading") return <span className="zd-account-slot" aria-hidden="true" />;
-  if (auth === "signed_out") {
+  // Still loading without a sign-in hint: most likely a visitor — show what they will see (nothing jumps).
+  if (auth === "signed_out" || auth === "loading") {
     return (
       <button type="button" className="zd-signin" onClick={requestSignIn}>
         Přihlásit se
@@ -41,9 +42,17 @@ function AccountMenu() {
   const menu = useRef<HTMLDivElement>(null);
   const menuId = useId();
 
+  const hinted = useHintInitials();
   const name = user?.fullName?.trim() || user?.username || user?.primaryEmailAddress?.emailAddress || "Účet";
   const email = user?.primaryEmailAddress?.emailAddress ?? "";
+  // Before Clerk's user loads, the initials remembered from the last visit (no jump from "Ú" to "DZ").
+  const shown = user ? initials(name) : (hinted ?? initials(name));
   const pending = invites.invitations.length > 0;
+  const pro = summary?.state === "ok" && summary.libraries.some((l) => l.pro);
+
+  useEffect(() => {
+    if (user) rememberInitials(initials(name));
+  }, [user, name]);
   const adminTeams = summary?.state === "ok" ? summary.libraries.filter((l) => l.kind === "org" && l.pro && l.role === "org:admin") : [];
 
   useEffect(() => {
@@ -95,21 +104,34 @@ function AccountMenu() {
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
-        aria-label={pending ? "Účet — máte pozvánku do týmu" : "Účet"}
-        title="Účet"
+        aria-label={`Účet${pro ? " (Pro)" : ""}${pending ? " — máte pozvánku do týmu" : ""}`}
+        title={pro ? "Účet · Pro" : "Účet"}
         onClick={() => setOpen((o) => !o)}
       >
-        {initials(name)}
+        {shown}
+        {pro ? (
+          <span className="zd-pro-badge" aria-hidden="true">
+            <ZIcon name="crown" size={10} />
+          </span>
+        ) : null}
         {pending ? <span className="zd-dot" aria-hidden="true" /> : null}
       </button>
       {open ? (
         <div ref={menu} id={menuId} className="zd-menu" role="menu" aria-label="Účet" onKeyDown={onMenuKey}>
           <div className="zd-menu-user">
             <span className="zd-avatar zd-avatar-lg" aria-hidden="true">
-              {initials(name)}
+              {shown}
+              {pro ? (
+                <span className="zd-pro-badge" aria-hidden="true">
+                  <ZIcon name="crown" size={11} />
+                </span>
+              ) : null}
             </span>
             <span className="zd-menu-who">
-              <strong>{name}</strong>
+              <strong>
+                {name}
+                {pro ? <span className="zd-pro-tag">Pro</span> : null}
+              </strong>
               {email ? <span>{email}</span> : null}
             </span>
           </div>

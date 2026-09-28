@@ -204,9 +204,11 @@ describe("handleDocumentUpload — who may upload where", () => {
     expectRefusal(await upload("org_b", "org_b", paged(3)), 403);
   });
 
-  it("requires the accepted content rules", async () => {
+  it("the first upload accepts the content rules stated at the upload field", async () => {
     await t.owner.query("DELETE FROM terms_acceptance WHERE user_id = 'user_a'");
-    expectRefusal(await upload("user_a", "user_a", paged(3)), 403, /pravidla/);
+    expect((await upload("user_a", "user_a", paged(3))).status).toBe(201);
+    const { rows } = await t.owner.query<{ version: string }>("SELECT version FROM terms_acceptance WHERE user_id = 'user_a'");
+    expect(rows.map((r) => r.version)).toEqual([TERMS_VERSION]);
   });
 
   it("per-library daily upload rate → 429", async () => {

@@ -79,7 +79,6 @@ describe("first-load JS of every page (review web:Z8, ops:FT-8)", () => {
     for (const lazy of [
       "app/_zdroje/upload.tsx",
       "app/_zdroje/upload-core.ts",
-      "app/_zdroje/pdf-canvas.tsx",
       "src/files/dmd/parse.ts",
       "src/files/dmd/billing.ts",
       "src/files/convert/slice.ts",
