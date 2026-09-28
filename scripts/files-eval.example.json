@@ -1,0 +1,100 @@
+{
+  "corpus": [
+    {
+      "key": "oz6",
+      "file_name": "OZ-VI-komentar.pdf",
+      "text": "[s. 1245]\n\n# ČÁST ČTVRTÁ Relativní majetková práva\n\n## HLAVA III Závazky z deliktů\n\n### § 2913 [Porušení smluvní povinnosti]\n\n> (1) Poruší-li strana povinnost ze smlouvy, nahradí škodu z toho vzniklou druhé straně nebo i osobě, jejímuž zájmu mělo splnění ujednané povinnosti zřejmě sloužit.\n>\n> (2) Povinnosti k náhradě se škůdce zprostí, prokáže-li, že mu ve splnění povinnosti ze smlouvy dočasně nebo trvale zabránila mimořádná nepředvídatelná a nepřekonatelná překážka vzniklá nezávisle na jeho vůli.\n\n#### I. Obecně\n\n[m. č. 1] Komentované ustanovení upravuje odpovědnost za škodu způsobenou porušením smluvní povinnosti. Jde o objektivní odpovědnost, u níž se zavinění škůdce nevyžaduje.[^1] Škůdce se může zprostit jen prokázáním liberačního důvodu podle odstavce druhého.\n\n[^1]: Srov. rozsudek Nejvyššího soudu ze dne 12. 3. 2020, sp. zn. 25 Cdo 1234/2019.\n\n[m. č. 2] Předpokladem vzniku povinnosti k náhradě je porušení povinnosti ze smlouvy, vznik škody a příčinná souvislost mezi nimi. Věřitel nemusí [s. 1246] prokazovat zavinění dlužníka; stačí, že povinnost nebyla splněna řádně a včas.\n\n#### II. Liberace\n\n[m. č. 3] Liberační důvod musí být mimořádný, nepředvídatelný a nepřekonatelný a musí vzniknout nezávisle na vůli škůdce. Za takovou překážku se nepovažuje okolnost, která vznikla teprve v době prodlení.\n\n[s. 1247]\n\n### § 2914 [Odpovědnost za jiného]\n\n[m. č. 1] Kdo ve své činnosti použije zmocněnce, zaměstnance nebo jiného pomocníka, nahradí škodu jím způsobenou stejně, jako by ji způsobil sám. Na rozdíl od § 2913 nejde o porušení vlastní povinnosti.\n",
+      "meta": {
+        "doc_type": "komentar",
+        "title": "Občanský zákoník VI. Komentář",
+        "editors": [
+          "Melzer, Filip",
+          "Tégl, Petr"
+        ],
+        "year": 2018,
+        "commented_act": "zak:89/2012",
+        "commented_act_name": "občanský zákoník"
+      }
+    },
+    {
+      "key": "smluvni",
+      "file_name": "smluvni-pravo.pdf",
+      "text": "[s. 45]\n\n# Kapitola 3 Kupní smlouva\n\nKupní smlouvou se prodávající zavazuje odevzdat kupujícímu věc a umožnit mu nabýt k ní vlastnické právo. Odpovědnost prodávajícího za vady se řídí zvláštními ustanoveními; náhrada škody přichází v úvahu vedle práv z vadného plnění.\n\n[s. 46]\n\n# Kapitola 4 Nájem\n\nNájemce platí pronajímateli nájemné. Výpověď nájmu bytu musí mít písemnou formu a dojít druhé straně.\n",
+      "meta": {
+        "doc_type": "kniha",
+        "title": "Smluvní právo",
+        "authors": [
+          "Novák, Jan"
+        ],
+        "year": 2021
+      }
+    }
+  ],
+  "queries": [
+    {
+      "id": "q01",
+      "query": "odpovednost za skodu zpusobenou porusenim smluvnich povinnosti",
+      "relevant": [
+        {
+          "doc": "oz6",
+          "section": "§ 2913"
+        }
+      ]
+    },
+    {
+      "id": "q02",
+      "query": "liberační důvod nepředvídatelná překážka",
+      "relevant": [
+        {
+          "doc": "oz6",
+          "contains": "liberační důvod musí být"
+        }
+      ]
+    },
+    {
+      "id": "q03",
+      "query": "§ 2914 OZ",
+      "relevant": [
+        {
+          "doc": "oz6",
+          "section": "§ 2914"
+        }
+      ]
+    },
+    {
+      "id": "q04",
+      "case_number": "25 Cdo 1234/2019",
+      "relevant": [
+        {
+          "doc": "oz6",
+          "page": "1245"
+        }
+      ]
+    },
+    {
+      "id": "q05",
+      "query": "výpověď z nájmu bytu",
+      "queries": [
+        "vypoved najmu",
+        "nájemné"
+      ],
+      "relevant": [
+        {
+          "doc": "smluvni",
+          "page": "46"
+        }
+      ]
+    },
+    {
+      "id": "q06",
+      "query": "náhrada škody",
+      "relevant": [
+        "oz6",
+        {
+          "doc": "smluvni",
+          "contains": "vadného plnění"
+        }
+      ]
+    }
+  ]
+}

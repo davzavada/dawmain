@@ -66,9 +66,13 @@ export default function Soukromi() {
             identifikátory (spisové značky, paragrafy), ve kterých asistent hledá,
           </li>
           <li>
-            <strong>kdo co udělal</strong> - kdo a kdy dokument nahrál, potvrdil nebo smazal, název
-            knihovny (vaše jméno, nebo název týmu) a záznam, že jste přijali pravidla Vlastních
-            zdrojů,
+            <strong>kdo co udělal</strong> - kdo a kdy dokument nahrál, nahradil novou verzí,
+            potvrdil, stáhl nebo smazal, kdo koho do týmu pozval nebo z něj odebral, název knihovny
+            (vaše jméno, nebo název týmu) a záznam, že jste přijali pravidla Vlastních zdrojů,
+          </li>
+          <li>
+            <strong>denní počítadla</strong> - kolik jste za den v dokumentech četli a kolik jste
+            si z nich stáhli; hlídají limity, díky kterým může služba běžet zdarma,
           </li>
           <li>
             <strong>členství v týmu</strong> - název týmu, vaše role a pozvánky; vede je Clerk a já
@@ -118,9 +122,10 @@ export default function Soukromi() {
           nemění.
         </p>
         <p>
-          Údaje o používání služby, provozní záznamy hostingu a zprávy, které mi napíšete,
-          zpracovávám na základě oprávněného zájmu (čl. 6 odst. 1 písm. f) GDPR) na tom, aby služba
-          dobře fungovala, byla bezpečná a abych vyřídil, s čím se na mě obracíte.
+          Údaje o používání služby, provozní záznamy hostingu, zprávy, které mi napíšete, a záznam o
+          tom, že jsem knihovnu vymazal, zpracovávám na základě oprávněného zájmu (čl. 6 odst. 1
+          písm. f) GDPR) na tom, aby služba dobře fungovala, byla bezpečná, abych vyřídil, s čím se
+          na mě obracíte, a abych mohl doložit, že jsem výmaz provedl.
         </p>
         <p>
           Na osobní údaje v nahraných dokumentech se tento bod nevztahuje. Právní základ k nim musí
@@ -145,20 +150,31 @@ export default function Soukromi() {
             havárii, vydrží nejdéle 6 hodin,
           </li>
           <li>
+            text dokumentu, který se nepodařilo zpracovat - 7 dní, abych ho mohl zkusit zpracovat
+            znovu. Pak ho smažu; v seznamu zůstane jen záznam o chybě, dokud ho nesmažete,
+          </li>
+          <li>
             po zrušení účtu nebo týmu - knihovnu i s dokumenty smažu automaticky, nejpozději do 8
             dnů. Co jste nahráli do týmu, patří týmu a zůstává v něm i po vašem odchodu; smazat to
             může správce týmu,
           </li>
           <li>
             po odebrání režimu Pro - asistent v knihovně přestane hledat, ale ještě 90 dní ji
-            uvidíte na webu, můžete dokumenty mazat a na požádání vám pošlu jejich text a metadata.
-            Pak knihovnu smažu; předem vám o tom napíšu,
+            uvidíte na webu, můžete dokumenty mazat a jejich text s metadaty si stáhnout (tlačítko
+            „Exportovat text“ v detailu dokumentu; kdyby to nešlo, napište mi a pomůžu vám). Pak
+            knihovnu smažu; předem vám o tom napíšu,
           </li>
           <li>
             text poslaný k návrhu metadat (bod 6) - Vercel ho smaže hned po vyřízení požadavku,
           </li>
           <li>
-            záznamy o tom, kdo co v knihovně nahrál, potvrdil nebo smazal - dokud knihovna trvá,
+            záznamy o tom, kdo co v knihovně nahrál, potvrdil, stáhl nebo smazal - dokud knihovna
+            trvá. Po jejím výmazu zůstane jen její interní označení a záznam, kdy a kolik dokumentů
+            jsem vymazal, bez jména a bez obsahu,
+          </li>
+          <li>
+            denní počítadla čtení a stažení - 2 dny; ostatní počítadla knihovny (nahrání, strany,
+            spotřeba) nejdéle 12 měsíců,
           </li>
           <li>záznam o přijetí pravidel Vlastních zdrojů - dokud trvá účet.</li>
         </ul>
@@ -196,7 +212,9 @@ export default function Soukromi() {
           strany, tiráž, osnovu nadpisů a záhlaví stran (dohromady nejvýš asi 16 000 znaků) a
           název souboru, u PDF i s údaji z jeho vlastností, jazykovému modelu Gemini. Model z toho
           jen navrhne název, autory, rok a podobné údaje, které pak sami zkontrolujete. Vercel ani
-          Google text nepoužijí k trénování modelů a Vercel ho po vyřízení požadavku smaže.
+          Google text nepoužijí k trénování modelů a Vercel ho po vyřízení požadavku smaže. Kdo
+          dokument nahrál, s požadavkem neposílám: AI Gateway kvůli rozpočtu spotřeby dostane jen
+          pseudonym, ze kterého se váš účet vyčíst nedá.
         </p>
         <p>
           Dokumenty v osobní knihovně vidíte jen vy. Dokumenty v týmové knihovně vidí všichni
@@ -318,7 +336,9 @@ export default function Soukromi() {
           <li>
             <strong>Právo na přenositelnost údajů.</strong> Údaje, které o vás zpracovávám
             automatizovaně pro plnění smlouvy, vám vydám ve strojově čitelném formátu, případně je
-            na vaši žádost pošlu přímo jinému správci, je-li to technicky proveditelné.
+            na vaši žádost pošlu přímo jinému správci, je-li to technicky proveditelné. Text a
+            metadata svých dokumentů si z Vlastních zdrojů můžete stáhnout i sami tlačítkem
+            „Exportovat text“ v detailu dokumentu.
           </li>
           <li>
             <strong>Právo vznést námitku.</strong> Proti zpracování, které stojí na oprávněném

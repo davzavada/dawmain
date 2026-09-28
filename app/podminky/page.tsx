@@ -43,9 +43,10 @@ export default function Podminky() {
           V režimu Pro si na webu nahrajete vlastní dokumenty - knihy, články, komentáře nebo vzory
           - a váš asistent v nich pak hledá vedle oficiálních databází. Pro je zdarma a přiděluji ho
           ručně, jednotlivcům i týmům; stačí mi napsat na <Mail />. Můžu ho kdykoli odebrat. Pokud
-          nejde o porušení těchto pravidel, zůstane vám knihovna ještě 90 dní k prohlížení a mazání
-          (podrobnosti v <Link href="/soukromi">Zásadách ochrany osobních údajů</Link>). Před
-          prvním nahráním vás web požádá, abyste pravidla v tomto oddílu potvrdili.
+          nejde o porušení těchto pravidel, zůstane vám knihovna ještě 90 dní k prohlížení, mazání a
+          stažení textu (podrobnosti v{" "}
+          <Link href="/soukromi">Zásadách ochrany osobních údajů</Link>). Před prvním nahráním vás
+          web požádá, abyste pravidla v tomto oddílu potvrdili.
         </p>
         <p>
           <strong>Kvóty.</strong> Místo se počítá ve stranách: jedna strana je 3 600 znaků
@@ -90,13 +91,16 @@ export default function Podminky() {
         <p>
           <strong>Záloha není.</strong> Originály si nechte u sebe: server je nikdy nedostane, takže
           vám je ani nemůže vrátit. Uložený text a metadata mimo krátkou historii změn databáze
-          nezálohuji a za jejich ztrátu, třeba při výpadku nebo ukončení služby, neručím.
+          nezálohuji a za jejich ztrátu, třeba při výpadku nebo ukončení služby, neručím. Text
+          svých dokumentů si ale můžete stáhnout tlačítkem „Exportovat text“ v detailu
+          dokumentu (s denním limitem).
         </p>
         <p>
           <strong>Týmy.</strong> Tým založím na požádání a jeho správce si pak sám zve a odebírá
-          členy. Nahrávat smějí všichni členové; každý upravuje a maže své dokumenty, správce
-          všechny. Co kdo do týmu nahraje, vidí celý tým a zůstává to v týmu i po jeho odchodu. Za
-          to, kdo v týmu je a co se v něm sdílí, odpovídá správce týmu a tým, za který vystupuje.
+          členy. Nahrávat smějí všichni členové; každý upravuje, maže a stahuje své dokumenty,
+          správce všechny. Co kdo do týmu nahraje, vidí celý tým a zůstává to v týmu i po jeho
+          odchodu. Za to, kdo v týmu je a co se v něm sdílí, odpovídá správce týmu a tým, za který
+          vystupuje.
         </p>
         <p>
           <strong>Osobní údaje v dokumentech.</strong> U osobních údajů v tom, co nahrajete, jste
@@ -117,6 +121,12 @@ export default function Podminky() {
           odkladu. Nezákonný obsah nebo obsah v rozporu s těmito pravidly můžu odstranit, zabránit
           jeho opětovnému nahrání a přístup k Vlastním zdrojům omezit nebo zrušit. Tomu, koho se
           to týká, napíšu, co jsem udělal a proč, a může se proti tomu ohradit.
+        </p>
+        <p>
+          <strong>Kontaktní místo.</strong> Jednotným kontaktním místem pro orgány členských států,
+          Evropskou komisi a Evropský sbor pro digitální služby (čl. 11 nařízení (EU) 2022/2065, akt
+          o digitálních službách) i pro vás jako uživatele (čl. 12) je e-mail <Mail />. Psát na něj
+          můžete česky nebo anglicky; odpovídám osobně, ne automat.
         </p>
         <p>
           <strong>Žádosti úřadů.</strong> Požádá-li o údaje nebo dokumenty soud, policie či jiný

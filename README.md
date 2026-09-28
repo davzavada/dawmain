@@ -37,8 +37,10 @@ na webu nahraje vlastní knihy, články, komentáře a vzory - pro sebe, nebo p
 celý tým. Dokument se převede na text přímo v prohlížeči, takže originál
 počítač neopustí; na server jde jen text. Asistent v dokumentech pak hledá a
 čte vedle oficiálních databází. Funguje to jen s přihlášením vlastním účtem,
-ne se starším přístupovým kódem. Pravidla jsou v
-[podmínkách užití](https://dawmain.davidzavada.cz/podminky).
+ne se starším přístupovým kódem. Záloha to není, text svých dokumentů si ale
+můžete stáhnout. Pravidla jsou v
+[podmínkách užití](https://dawmain.davidzavada.cz/podminky), o datech v
+[zásadách ochrany osobních údajů](https://dawmain.davidzavada.cz/soukromi).
 
 ## Endpoint
 

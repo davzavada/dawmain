@@ -174,11 +174,20 @@ Vlastní zdroje se zapínají zvlášť — viz [Vlastní zdroje — provoz](#vl
    + `CLERK_SECRET_KEY` a/nebo `MCP_BEARER_TOKEN`, `ESBIRKA_API_KEY` (viz
    `.env.example`); *Functions → Region*: `fra1`. Po změně env je potřeba
    Redeploy.
-2. Spusť smoke proti nasazení (viz výše), pak `SMOKE_LIVE=1`.
-3. Zavolej `dawmain_probe_sources` — ověří všechny upstreamy z nasazení.
-4. `dawmain_probe_sources {discover: true}` vypíše skutečná pole formuláře
+2. *Project Settings → Functions → Fluid compute*: musí být **zapnuté** (u
+   projektů založených od roku 2025 výchozí; `vercel.json` ho navíc žádá
+   pro každé nasazení přes `"fluid": true`, ale ověř to). Pět cest Vlastních
+   zdrojů má `maxDuration = 300` (`/api/files/documents`,
+   `/api/files/documents/[id]`, `/api/files/status`, `/api/cron/files`,
+   `/vlastni-zdroje/provoz`); bez Fluid dovolí Hobby nejvýš 60 s — nasazení
+   takovou hodnotu odmítne, nebo zpracování dlouhého dokumentu uřízne. Na Fluid
+   počítá i `attachDatabasePool` v `src/files/db/client.ts` (zavře nečinná
+   spojení do Neonu, než se instance uspí).
+3. Spusť smoke proti nasazení (viz výše), pak `SMOKE_LIVE=1`.
+4. Zavolej `dawmain_probe_sources` — ověří všechny upstreamy z nasazení.
+5. `dawmain_probe_sources {discover: true}` vypíše skutečná pole formuláře
    NSS — slouží k doladění mapování v `src/sources/nss.ts`.
-5. `dawmain_probe_sources {include_raw: true, sources: ["ns"]}` zachytí syrové
+6. `dawmain_probe_sources {include_raw: true, sources: ["ns"]}` zachytí syrové
    tělo odpovědi jako podklad pro fixture (po jednom zdroji — všechny naráz se
    nevejdou do rozpočtu odpovědi).
 
@@ -345,6 +354,22 @@ DATABASE_URL_UNPOOLED='postgresql://neondb_owner:…@ep-….eu-central-1.aws.neo
   node scripts/db-migrate.mjs
 ```
 
+Skript aplikuje čekající soubory podle jména, každý ve vlastní transakci, a
+zapíše je do `schema_migrations` s kontrolním součtem; `--dry-run` jen vypíše,
+co čeká. Už aplikovaný soubor se nemění — oprava = nový soubor.
+
+| Soubor | Co přináší |
+| --- | --- |
+| `0001_init.sql` | tabulky knihoven, dokumentů, textu, stran, oddílů, poznámek, chunků, počítadel, aktivity DB, stavu, souhlasů, auditu a blokací (`blocked_content`) |
+| `0002_rls.sql` | role `dawmain_app`, row-level security, systémové funkce (rezervace stran, součty, seznam knihoven, fronta zpracování) |
+| `0003_ops.sql` | rozpočet přeindexování (`usage_daily.reindexes`, `documents.reindex_requested_at`), `files_db_usage()` a `files_table_usage()` (živá data, plán `VACUUM FULL`), úklid auditu vymazaných knihoven, oznámení a odstranění napříč knihovnami, noční přepočet počítadel |
+| `0004_search.sql` | kanály hledání jako funkce `SECURITY DEFINER` (`files_search_chunks`, `files_search_meta`), aby dotazy role aplikace šly přes GIN indexy |
+
+**Tahle verze potřebuje `0003` a `0004`** — pusť `--dry-run`, pak migraci,
+a teprve potom nasazuj. Všechny přidávají jen sloupce `IF NOT EXISTS`, indexy
+a funkce, na data nesahají. Po nasazení je navíc potřeba přeindexovat starší
+dokumenty (`ANALYZER_VERSION` 2, viz Kapacita).
+
 Migrace `0002` založí roli `dawmain_app` SQL příkazem — jen taková role na
 Neonu nepatří do `neon_superuser` a neobchází RLS (roli proto nezakládej ani
 neupravuj v konzoli Neonu). Heslo jí dej jednou v SQL editoru Neonu jako
@@ -371,13 +396,18 @@ dalšího). Po změně Redeploy.
 | `FILES_DATABASE_URL` | pooled URL role `dawmain_app`; bez ní `unconfigured` | — |
 | `DATABASE_URL_UNPOOLED` | vlastnické přímé připojení, jen pro `scripts/db-migrate.mjs` z terminálu; aplikace ho nečte | — |
 | `FILES_META_MODEL` | model pro návrh metadat přes AI Gateway | `google/gemini-2.5-flash-lite` |
+| `FILES_USER_HASH_SECRET` | klíč HMAC pro pseudonym nahrávajícího, který dostává AI Gateway k rozpočítání spotřeby (`gateway.user`, čte `src/files/ingest.ts`); dlouhý náhodný řetězec. Změna klíče = nové pseudonymy v přehledu Gateway | `CLERK_SECRET_KEY` |
 | `FILES_GLOBAL_MAX_PAGES` | strop stran pro celou instalaci | 30 000 |
 | `FILES_PERSONAL_PAGES` | kvóta osobní knihovny (stran) | 3 000 |
 | `FILES_TEAM_PAGES` | kvóta týmové knihovny (stran) | 10 000 |
 | `FILES_OPERATOR_IDS` | Clerk `user_…` oddělená čárkou — přístup na `/vlastni-zdroje/provoz` | — |
 | `FILES_AI_BUDGET_USD` | klouzavý 30denní rozpočet AI v celých USD; nad ním jen heuristiky | 4 |
+| `FILES_GLOBAL_UPLOADS_PER_DAY` | nahrání za den ve všech knihovnách dohromady | 200 |
+| `FILES_CPU_MS_DAY` | CPU zpracování (nahrání, zpracování, přeindexování) za den v ms | 600 000 (10 min) |
+| `FILES_CPU_MS_30D` | totéž za klouzavých 30 dní — čtvrtina 4 h Active CPU Hobby | 3 600 000 (60 min) |
 | `CLERK_WEBHOOK_SIGNING_SECRET` | podpisový klíč webhooku Clerku (`whsec_…`) | — |
 | `CRON_SECRET` | Vercel ho posílá cronu jako `Authorization: Bearer …`; bez něj cron odmítne všechno | — |
+| `AI_GATEWAY_API_KEY` | jen lokálně (`.env.local`); na Vercelu se Gateway ověřuje přes OIDC a klíč by ho přebil | — |
 
 Strana = 3 600 znaků převedeného textu včetně poznámek (`PAGE_CHARS`); cenu
 ve stranách vidí uživatel před nahráním. Kvóta jednoho uživatele nebo týmu jde
@@ -409,8 +439,10 @@ přepsat v Clerku (níže).
    Projeví se do minuty (přístup se cachuje 60 s). Členové týmu s Pro nahrávat
    smějí všichni; správce (`org:admin`) upravuje a maže všechno, člen jen své.
 4. **Odebrání Pro**: smaž `pro`. Denní cron to zaznamená (`pro_revoked_at`);
-   asistent v knihovně přestane hledat, uživatel ji 90 dní vidí a může mazat,
-   pak se smaže. **Před smazáním mu napiš** (slibují to zásady ochrany
+   asistent v knihovně přestane hledat, uživatel ji 90 dní vidí, může mazat
+   a stahovat text svých dokumentů („Exportovat text“), pak se smaže. Vrátí-li
+   se Pro dřív, než výmaz proběhne, cron označení zruší (nahrání do knihovny
+   ji oživí hned). **Před smazáním mu napiš** (slibují to zásady ochrany
    osobních údajů); knihovny s odebraným Pro ukazuje stránka provozu.
 5. **Webhook**: *Configure → Webhooks → Add endpoint*
    `https://<doména>/api/webhooks/clerk`, události `user.deleted`,
@@ -439,21 +471,62 @@ nejdřív uprav `/soukromi` a dej uživatelům vědět (viz Právní texty níž
 
 ### Pojistky bezplatných limitů
 
-- **Automaticky** (`src/files/guards.ts`, cache 30 s): velikost DB ≥ 80 %
+- **Automaticky** (`src/files/guards.ts`, cache 30 s): živá data DB ≥ 80 %
   z 400 MB nebo součet stran ≥ 80 % z `FILES_GLOBAL_MAX_PAGES` → jen pro
   čtení; odhad CU-h ≥ 70 % ze 100 → jen pro čtení, ≥ 90 % → vypnuto. Jen pro
   čtení = hledání, čtení a mazání jdou, nahrávání ne.
+- **Živá data vs. soubory**: pojistka DB čte odhad živých dat
+  (`files_db_usage()`: fyzická velikost minus volné místo, které po sobě
+  nechávají smazané řádky — z katalogových statistik). Smazání dokumentů
+  proto režim jen pro čtení zruší, jakmile doběhne autovacuum. Soubory samy se
+  mazáním nezmenší: fyzická velikost ≥ 400 MiB (strop vlastníka, 100 %)
+  vypne nahrávání vždy — Neon počítá všechny databáze projektu a pojistka se
+  měří jen po 30 s.
+- **Zmenšení souborů** (`VACUUM FULL`): stránka provozu ukáže plán, jakmile
+  jde uvolnit aspoň 20 % stropu — pořadí tabulek, které se vejdou, a ty, které
+  se nevejdou, dokud z nich nesmažeš dokumenty. Pouštěj jako vlastník, v
+  klidném okně, **tabulky po jedné** (každá je po dobu přepisu zamčená).
+  Přepis zapíše novou kopii tabulky i indexů, než smaže starou — potřebuje
+  volné místo pod 0,5 GB Neonu zhruba ve velikosti živých dat té tabulky.
+- **CPU zpracování**: nahrání, zpracování a přeindexování si zapisují vlastní
+  čas CPU (`usage_daily.cpu_ms`, jen synchronní práce — ne čekání na síť ani
+  cizí požadavky na téže instanci). Nad 10 min za den nebo 60 min za 30 dní
+  (čtvrtina 4 h Active CPU Hobby; `FILES_CPU_MS_DAY`, `FILES_CPU_MS_30D`)
+  se nové nahrání odmítne (429) a přeindexování počká; nad 200 nahrání za den
+  ve všech knihovnách také (`FILES_GLOBAL_UPLOADS_PER_DAY`). Číslo je spodní
+  odhad účtovaného Active CPU — porovnej ho se stránkou Usage na Vercelu.
 - **Odhad CU-h**: Neon Free nemá API spotřeby, aplikace si proto zapisuje
   každou minutu, kdy sáhla do DB (`db_activity`), a počítá sjednocení
   intervalů [minuta, minuta + 5 min] × 0,25 CU. Každé probuzení stojí aspoň
   5 minut — i proto nástroje nesahají do DB kvůli volajícím bez Pro.
 - **Vypínač**: přepínač režimu na stránce provozu (`system_state`, bez
-  redeploye, projeví se do 30 s), nebo `FILES_MODE=off` + Redeploy.
-- Pool: `connectionTimeoutMillis` 4 s, `statement_timeout` 10 s (ingest 60 s)
-  — uspaný Neon dá rychlou odpověď „dočasně nedostupné“, ne 60 s čekání.
+  redeploye, projeví se do 30 s), nebo `FILES_MODE=off` + Redeploy. Když
+  pojistky vypnou funkci kvůli CU-h (90 %), každá instance si to pamatuje do
+  začátku dalšího měsíce UTC a DB kvůli tomu nebudí; přepínač „off“ se ale
+  čte každých 30 s. **Probouzení DB úplně zastaví jen `FILES_MODE=off` +
+  Redeploy.**
+- Pool nenastavuje žádné startovní parametry (pooler Neonu
+  `statement_timeout` při startu spojení odmítne); `withScope` nastavuje
+  `statement_timeout` pro každou transakci (`set_config(…, true)`): 10 s,
+  60 s pro zpracování, přeindexování a výmaz. `connectionTimeoutMillis` 4 s —
+  uspaný Neon dá rychlou odpověď „dočasně nedostupné“, ne 60 s čekání.
+- **Přeindexování po uložení metadat** (změna typu dokumentu nebo
+  komentovaného předpisu): nejvýš 20 za den na knihovnu; žádné, dokud je
+  vyčerpaná společná rezerva CPU (výše). Opakované uložení během běžícího
+  přeindexování se k němu připojí. Odmítnuté zůstanou označené a dožene je
+  denní cron.
 - Denní cron (`/api/cron/files`, 03:00 UTC; Hobby smí jednou denně s
-  přesností na hodinu): výmaz knihoven po lhůtě, kontrola Pro, restart
-  zaseknutých zpracování, pojistky, velikost DB.
+  přesností na hodinu): pojistky a velikost DB; výmaz knihoven po lhůtě
+  (knihovnu, kterou mezitím nahrání oživilo, nechá být); kontrola Pro (≤ 50
+  dotazů do Clerku; obnovené Pro u knihovny označené k výmazu po 90 dnech
+  označení zruší; u smazaného účtu, který minul webhook, zahodí i souhlas s
+  podmínkami a počítadla čtení); restart zaseknutých zpracování; dohnání
+  odložených přeindexování (≤ 30 za běh, jen v režimu „on“ a jen s volnou
+  rezervou CPU); úklid textu neúspěšných nahrání po 7 dnech; noční přepočet
+  `page_count`/`doc_count`/`pages_reserved` všech knihoven z jejich dokumentů;
+  retence — `usage_daily` 12 měsíců, počítadla čtení dokumentů 2 dny,
+  `db_activity` 62 dní, auditní záznamy vymazaných knihoven kromě
+  `library.purged`.
 
 ### Kapacita
 
@@ -478,8 +551,13 @@ SELECT (SELECT sum(pg_total_relation_size(t::regclass))
 
 `FILES_GLOBAL_MAX_PAGES` pak nastav zhruba na 300 MB ÷ `bytes_per_page` a
 podle toho kvóty. Přeindexování (po zvýšení `ANALYZER_VERSION`) jen po
-dávkách tlačítkem „Přeindexovat dávku“ na stránce provozu, nikdy celý korpus
-při DB nad 60 %.
+dávkách tlačítkem „Přeindexovat dávku“ na stránce provozu: odmítne se mimo
+režim „on“ a nad 60 % DB má dávka nejvýš 10 dokumentů.
+
+`ANALYZER_VERSION` 2 přidal k úsekům klíče předpisů EU, které cituje
+(`eu:<CELEX>`: „GDPR“, „nařízení (EU) 2016/679“, „směrnice 93/13/EHS“) —
+filtr `act` u předpisu EU pak vrací i pasáže, které ho citují, nejen
+komentáře k němu. Dokumenty nahrané dřív to umí až po přeindexování.
 
 **Zálohy nejsou.** Neon Free drží 6 h historie změn a nabízí jeden ruční
 snapshot — **snapshot nedělej a obsah nedumpuj**: smazané dokumenty by
@@ -494,37 +572,101 @@ objemu řádově 5–15 USD měsíčně). Pak zvedni `LIMITS.dbBytesCap`
 ### Stránka provozu
 
 `/vlastni-zdroje/provoz` (jen `FILES_OPERATOR_IDS`): pojistky proti limitům
-(velikost DB, strany, odhad CU-h, rozpočet AI, nahrání za měsíc), knihovny,
-zaseknuté dokumenty, přepínač režimu a „Přeindexovat dávku“ (≤ 200 dokumentů
-z uloženého textu na kliknutí).
+(živá data i fyzická velikost DB, strany, odhad CU-h, rozpočet AI, CPU
+zpracování za den a 30 dní, nahrání za měsíc), plán `VACUUM FULL`, knihovny,
+zaseknuté dokumenty, přepínač režimu, „Přeindexovat dávku“ (≤ 200 dokumentů
+z uloženého textu na kliknutí; mimo režim „on“ odmítnuto, nad 60 % DB nejvýš
+10) a oznámení a odstranění obsahu (níže).
+
+### Export textu
+
+Kdo dokument nahrál, a správce týmu u všech týmových, si v detailu stáhne jeho
+uložený text („Exportovat text“, `GET /api/files/documents/[id]/export?lib=`):
+DMD s hlavičkou metadat (název, autoři, rok, typ, původní soubor, knihovna,
+data). Pro není potřeba — tak se plní slib `/soukromi` na 90 dní po odebrání
+Pro i právo na přenositelnost; nejde jen při `FILES_MODE=off`. Stropy: jeden
+dokument nejvýš 10× za den (`EXPORTS_PER_DOC_PER_DAY`) a jeden uživatel za den
+tolik stran, kolik má největší kvóta knihovny (`max(FILES_PERSONAL_PAGES,
+FILES_TEAM_PAGES)`) — jinak 429. Počítadla `read:<uživatel>:…` maže cron po 2
+dnech, každé stažení zapíše audit `document.export` (délka, ne text). Když
+export nejde a uživatel napíše (zásady slibují pomoc), zapni funkci aspoň
+v režimu `readonly` — export v něm běží — a dej mu vědět.
 
 ### Nezákonný obsah
 
-Podmínky slibují postup pro oznámení (DSA čl. 16): ověř oznámení, dokument
-smaž a jeho obsah zablokuj, aby nešel nahrát znovu, a nahrávajícímu pošli
-odůvodnění (DSA čl. 17). Blokace podle hashe textu (SQL jako vlastník):
+Kontaktní místo podle DSA čl. 11 a 12 (úřady, Komise i uživatelé) je e-mail
+`CONTACT` z `app/_legal.tsx`, česky a anglicky; podmínky slibují, že odpovídáš
+osobně. Když se adresa změní, změní se v obou textech najednou.
 
-```sql
-INSERT INTO blocked_content (content_sha256, reason)
-SELECT content_sha256, 'oznámení z <datum>' FROM documents WHERE id = '<uuid>'
-ON CONFLICT DO NOTHING;
-```
-
-Smaže-li dokument vlastník SQL příkazem (`DELETE FROM documents …`), počítadla
-stran knihovny se nesníží — uprav `libraries.page_count` a `doc_count` ručně.
+Podmínky slibují postup pro oznámení (DSA čl. 16): ověř oznámení, obsah
+odstraň a zablokuj, aby nešel nahrát znovu, a nahrávajícímu pošli odůvodnění
+(DSA čl. 17). Na stránce provozu v oddílu **„Oznámení a odstranění obsahu“**
+zadej ID dokumentu nebo SHA-256 jeho textu a odkaz na oznámení a potvrď.
+Hash se zablokuje, smažou se všechny kopie ve všech knihovnách (se správně
+vrácenými stranami) a zapíšou se auditní záznamy (`content.takedown`,
+`document.takedown`); výsledek zůstane na stránce. Blokace platí jen pro
+přesně tentýž převedený text (normalizovaný) — jiný převod téhož díla má jiný
+hash. Počítadla stran knihoven ručně neupravuj: odchylky opraví noční
+přepočet v cronu.
 
 ### Právní texty
 
 Sliby v `/soukromi` a `/podminky` visí na konkrétních hodnotách — když se
 změní, změň i text, zvedni `EFFECTIVE` v `app/_legal.tsx` a napiš uživatelům
-měsíc předem (podmínky to slibují):
+měsíc předem (podmínky to slibují). `tests/files-legal-texts.test.ts` hlídá
+ty, které jdou přečíst z kódu.
 
 - zpracovatelé: Clerk, Vercel (+ Google přes AI Gateway), Neon — jiný model
-  nebo nová služba = nový subdodavatel;
+  nebo nová služba = nový subdodavatel; Gateway dostává jen pseudonym
+  nahrávajícího (`FILES_USER_HASH_SECRET`);
 - výmaz knihovny 7 dní po smazání účtu/týmu (+ nejvýš den do cronu → text
-  říká „do 8 dnů“), 90 dní po odebrání Pro, 6 h historie Neonu;
+  říká „do 8 dnů“), 90 dní po odebrání Pro, 6 h historie Neonu; po výmazu
+  zůstane řádek knihovny bez jména a auditní záznam `library.purged`;
+- retence v cronu: text neúspěšného nahrání 7 dní, počítadla čtení a stažení
+  2 dny, ostatní počítadla 12 měsíců, audit do výmazu knihovny;
+- export textu („Exportovat text“) — i po odebrání Pro;
+- kontaktní místo DSA (čl. 11 a 12): `CONTACT`, česky a anglicky;
 - region Frankfurt u Vercelu i Neonu, rozsah textu k návrhu metadat
   (~16 000 znaků), cookies Clerku.
+
+Znění s Vlastními zdroji má `EFFECTIVE` 1. 11. 2026 a na `main` ještě není
+(tam platí 1. 9. 2026). Dokud se nenasadí, dá se upravovat bez posunu data.
+E-mail uživatelům ale musí odejít nejpozději měsíc před účinností, tedy do
+1. 10. 2026 — když se to nestihne, posuň `EFFECTIVE` tak, aby měsíc zbyl.
+
+### Evaluace vyhledávání
+
+`scripts/files-eval.mjs` pustí sadu dotazů stejnou cestou jako `files_search`
+(identifikátory, `buildTsQuery`, filtr předpisu, kanály, RRF, sloučení
+variant, 2 pasáže na dokument) a vypíše **recall@5** a **MRR** po pasážích i
+po dokumentech. Podle plánu rozhoduje o vektorech: 30–50 českých dotazů nad
+~10 dlouhými skutečnými dokumenty.
+
+```bash
+node scripts/files-eval.mjs --queries scripts/files-eval.example.json            # PGlite, bez sítě
+node scripts/files-eval.mjs --queries sada.json --verbose                        # + prvních 5 pasáží dotazu
+FILES_DATABASE_URL=… node scripts/files-eval.mjs --queries sada.json --db --library user_…
+```
+
+Bez `--db` si skript založí PGlite s produkčními migracemi a zaindexuje
+`corpus` ze sady (DMD, vložené nebo v souborech vedle JSON; metadata z
+heuristik, přepsaná polem `meta`). S `--db` hledá v dokumentech, které už v
+databázi jsou (role `dawmain_app`, RLS), jen v knihovnách z `--library` —
+raději lokální Postgres s kopií textů než Neon, každý běh ho probudí.
+
+Sada je JSON `{ corpus: […], queries: […] }`. Dotaz bere `query` (nebo až 3
+`queries`) a volitelně `act`, `doc_type`, `case_number`, `in_footnotes`,
+`year_from`, `year_to` jako nástroj; `relevant` je seznam toho, co má dobrá
+odpověď ukázat: `"klíč"` (kterákoli pasáž dokumentu), `{doc, section: "§ 2913"}`,
+`{doc, page: "1245"}`, `{doc, contains: "liberační důvod"}` (podmínky se
+sčítají). Úplný popis je v hlavičce skriptu, malý příklad v
+`scripts/files-eval.example.json`. Recall@5 = podíl položek `relevant`, které
+se objeví mezi prvními pěti pasážemi; MRR = 1 / pořadí první relevantní
+pasáže. Nehodnotí se `section`, `doc` a vyřazení pasáží se shodou jen v
+poznámce (`in_footnotes: false`) — ty běží až v `files.ts`.
+
+Naměřeno: zatím nic — výsledek (datum, počet dotazů a dokumentů, obě čísla)
+zapiš sem.
 
 ### Lokální vývoj
 
@@ -533,6 +675,7 @@ bez sítě a bez Neonu. Pro ruční zkoušení webu stačí lokální Postgres:
 migrace přes `DATABASE_URL_UNPOOLED`, heslo pro `dawmain_app`,
 `FILES_DATABASE_URL` + `FILES_MODE=on` v `.env.local`, pro návrh metadat
 `AI_GATEWAY_API_KEY`. Neon dev větev nepoužívej — bere stejné CU-h i místo.
+Evaluace vyhledávání (výše) běží bez databáze, na PGlite.
 
 ## Přidání zdroje
 

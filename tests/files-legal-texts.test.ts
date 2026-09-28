@@ -24,6 +24,7 @@ const { default: Podminky } = await import("@/app/podminky/page");
 const { SiteNav } = await import("@/app/_nav");
 const { CONTACT, EFFECTIVE } = await import("@/app/_legal");
 const { PAGE_CHARS, metaModel } = await import("@/src/files/config");
+const { READ_COUNTER_KEEP_DAYS, USAGE_KEEP_DAYS } = await import("@/src/files/db/usage");
 
 /** Rendered page as plain text, whitespace collapsed (JSX line breaks vary). */
 function text(element: ReturnType<typeof createElement>): string {
@@ -86,6 +87,29 @@ describe("privacy policy (/soukromi)", () => {
     expect(privacy).toContain("nejdéle 6 hodin");
     expect(privacy).toContain("nejpozději do 8 dnů");
     expect(privacy).toContain("90 dní");
+    // The daily cron drops the text of a failed upload after 7 days (PENDING_KEEP_DAYS).
+    expect(privacy).toContain("text dokumentu, který se nepodařilo zpracovat - 7 dní");
+  });
+
+  it("states the retention the daily cron applies to counters and audit rows", () => {
+    // pruneUsage: per-user read/export counters (read:<user>:…) and the rest of usage_daily.
+    // Today's and yesterday's rows (day >= today - 1): two UTC days, as the notice says.
+    expect(READ_COUNTER_KEEP_DAYS).toBe(1);
+    expect(privacy).toContain("denní počítadla čtení a stažení - 2 dny");
+    expect(USAGE_KEEP_DAYS).toBe(365);
+    expect(privacy).toContain("nejdéle 12 měsíců");
+    // files_forget_purged_audit keeps only the purge record (library id, date, count).
+    expect(privacy).toContain("zůstane jen její interní označení a záznam, kdy a kolik dokumentů");
+  });
+
+  it("points to the self-service text export (web: GET /api/files/documents/[id]/export)", () => {
+    expect(privacy).toContain("„Exportovat text“ v detailu dokumentu");
+    expect(privacy).toMatch(/90 dní ji uvidíte na webu, můžete dokumenty mazat a jejich text s metadaty si stáhnout/);
+    expect(privacy).not.toContain("na požádání vám pošlu jejich text");
+  });
+
+  it("says the AI Gateway gets a pseudonym, not the account (userHash)", () => {
+    expect(privacy).toContain("dostane jen pseudonym");
   });
 
   it("describes the sign-in cookies as strictly necessary", () => {
@@ -140,6 +164,21 @@ describe("terms of use (/podminky)", () => {
     expect(terms).toContain("Nezákonný obsah");
     expect(terms).toContain(CONTACT);
     expect(terms).toContain("pokud mi to zákon nezakazuje");
+  });
+
+  it("designates the DSA single point of contact and its languages (arts. 11 and 12)", () => {
+    const at = terms.indexOf("Kontaktní místo.");
+    expect(at).toBeGreaterThan(-1);
+    const paragraph = terms.slice(at, at + 500);
+    expect(paragraph).toContain("čl. 11 nařízení (EU) 2022/2065");
+    expect(paragraph).toContain("(čl. 12)");
+    expect(paragraph).toContain(CONTACT);
+    expect(paragraph).toContain("česky nebo anglicky");
+  });
+
+  it("keeps the text export open after Pro is revoked and names it next to the no-backup rule", () => {
+    expect(terms).toContain("90 dní k prohlížení, mazání a stažení textu");
+    expect(terms).toContain("„Exportovat text“");
   });
 });
 
