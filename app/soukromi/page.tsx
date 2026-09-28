@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { LegalHeader, Mail, Section } from "../_legal";
 
 export const metadata = {
@@ -17,6 +18,13 @@ export default function Soukromi() {
         </p>
         <p>
           E-mail: <Mail />
+        </p>
+        <p>
+          Výjimkou jsou osobní údaje v dokumentech, které nahrajete do Vlastních zdrojů - třeba
+          jména účastníků v rozhodnutí nebo autorů článku. Jejich správcem jste vy (u týmové
+          knihovny zpravidla kancelář nebo firma, za kterou tým vystupuje): vy rozhodujete, co
+          nahrajete a komu to v týmu zpřístupníte. Já je zpracovávám jen jako zpracovatel, podle
+          vašich pokynů a <Link href="/podminky">Podmínek užití</Link>.
         </p>
       </Section>
 
@@ -42,14 +50,46 @@ export default function Soukromi() {
             hlášení.
           </li>
         </ul>
+        <p>Máte-li Vlastní zdroje (režim Pro), přibývá k tomu:</p>
+        <ul>
+          <li>
+            <strong>text nahraných dokumentů</strong> - dokumenty se na text převádějí přímo ve
+            vašem prohlížeči; původní soubor vaše zařízení neopustí a na server jde jen převedený
+            text,
+          </li>
+          <li>
+            <strong>metadata dokumentů</strong> - název, autoři, rok, typ dokumentu a podobně, a
+            také název a velikost původního souboru,
+          </li>
+          <li>
+            <strong>vyhledávací index</strong> - z textu odvozená slova, strany, oddíly, poznámky a
+            identifikátory (spisové značky, paragrafy), ve kterých asistent hledá,
+          </li>
+          <li>
+            <strong>kdo co udělal</strong> - kdo a kdy dokument nahrál, nahradil novou verzí,
+            potvrdil, stáhl nebo smazal, kdo koho do týmu pozval nebo z něj odebral, název knihovny
+            (vaše jméno, nebo název týmu) a záznam, že jste přijali pravidla Vlastních zdrojů,
+          </li>
+          <li>
+            <strong>denní počítadla</strong> - kolik jste za den v dokumentech četli a kolik jste
+            si z nich stáhli; hlídají limity, díky kterým může služba běžet zdarma,
+          </li>
+          <li>
+            <strong>členství v týmu</strong> - název týmu, vaše role a pozvánky; vede je Clerk a já
+            z něj jen zjišťuji, ke kterým knihovnám máte přístup.
+          </li>
+        </ul>
         <p>
-          Účty vede poskytovatel přihlášení Clerk; drží e-mailovou adresu a identifikátor účtu.
-          Přihlásíte-li se přes účet jiné služby (např. Google), předá do Clerku zpravidla totéž.
-          Žádné další údaje z vašeho účtu nezpracovávám a hesla u sebe neuchovávám.
+          Účty a týmy vede poskytovatel přihlášení Clerk; drží e-mailovou adresu, identifikátor
+          účtu, jméno, pokud ho vyplníte, a u týmů jejich členy, role a pozvánky. Přihlásíte-li se
+          přes účet jiné služby (např. Google), předá do Clerku zpravidla totéž. Pozve-li vás do
+          týmu jeho správce, zadá vaši e-mailovou adresu on a Clerk vám pošle pozvánku. Žádné další
+          údaje z vašeho účtu nezpracovávám a hesla u sebe neuchovávám.
         </p>
         <p>
           Vaši konverzaci s AI asistentem server nevidí - nedostává ji. Dostane jen strojové
-          volání, které asistent provede. Vlastní databázi nevedu a nic si trvale neukládám.
+          volání, které asistent provede. Obsah rešerší v oficiálních zdrojích - dotazy a odpovědi
+          - si trvale neukládám; trvale ukládám jen to, co sami nahrajete do Vlastních zdrojů.
           Reklamu nemám, údaje neprodávám a nepředávám je pro marketing. Nic o vás automaticky
           nevyhodnocuji ani neprofiluji.
         </p>
@@ -60,21 +100,36 @@ export default function Soukromi() {
           <li>umožnění přihlášení a přístupu ke službě,</li>
           <li>udržení přihlašovací relace,</li>
           <li>vyřízení rešerše; krátká mezipaměť šetří zdroje, ze kterých se čerpá,</li>
+          <li>
+            u Vlastních zdrojů uložení vašich dokumentů, jejich zpracování do vyhledávacího indexu,
+            návrh metadat, hledání a čtení v nich vaším asistentem a v týmu jejich sdílení s
+            ostatními členy,
+          </li>
           <li>přehled o tom, jak se služba používá, a její další zlepšování,</li>
-          <li>provoz a bezpečnost služby a prevence jejího zneužití.</li>
+          <li>
+            provoz a bezpečnost služby, hlídání limitů, díky kterým může běžet zdarma, a prevence
+            jejího zneužití.
+          </li>
         </ul>
       </Section>
 
       <Section heading="4. Právní základ zpracování">
         <p>
           Účet, přihlašovací relaci a vyřízení rešerše včetně krátké dočasné paměti zpracovávám pro
-          plnění smlouvy (čl. 6 odst. 1 písm. b) GDPR). Skutečnost, že je služba bezúplatná, na tom
-          nic nemění.
+          plnění smlouvy (čl. 6 odst. 1 písm. b) GDPR). Stejně tak Vlastní zdroje: uložení a
+          zpracování dokumentů, jejich zpřístupnění vám a vašemu týmu, návrh metadat, členství v
+          týmu a záznamy o tom, kdo co nahrál. Skutečnost, že je služba bezúplatná, na tom nic
+          nemění.
         </p>
         <p>
-          Údaje o používání služby, provozní záznamy hostingu a zprávy, které mi napíšete,
-          zpracovávám na základě oprávněného zájmu (čl. 6 odst. 1 písm. f) GDPR) na tom, aby služba
-          dobře fungovala, byla bezpečná a abych vyřídil, s čím se na mě obracíte.
+          Údaje o používání služby, provozní záznamy hostingu, zprávy, které mi napíšete, a záznam o
+          tom, že jsem knihovnu vymazal, zpracovávám na základě oprávněného zájmu (čl. 6 odst. 1
+          písm. f) GDPR) na tom, aby služba dobře fungovala, byla bezpečná, abych vyřídil, s čím se
+          na mě obracíte, a abych mohl doložit, že jsem výmaz provedl.
+        </p>
+        <p>
+          Na osobní údaje v nahraných dokumentech se tento bod nevztahuje. Právní základ k nim musí
+          mít ten, kdo je nahrál, protože je jejich správcem (bod 1).
         </p>
       </Section>
 
@@ -87,6 +142,42 @@ export default function Soukromi() {
           <li>provozní záznamy hostingu - krátkodobě, v řádu dnů až týdnů,</li>
           <li>e-mailová korespondence - po dobu potřebnou k vyřízení věci, nejdéle rok.</li>
         </ul>
+        <p>U Vlastních zdrojů platí:</p>
+        <ul>
+          <li>
+            dokumenty (text, index a metadata) - dokud je nesmažete vy nebo správce týmu. Smazaný
+            dokument zmizí hned; jen v historii změn, kterou Neon drží pro obnovu databáze po
+            havárii, vydrží nejdéle 6 hodin,
+          </li>
+          <li>
+            text dokumentu, který se nepodařilo zpracovat - 7 dní, abych ho mohl zkusit zpracovat
+            znovu. Pak ho smažu; v seznamu zůstane jen záznam o chybě, dokud ho nesmažete,
+          </li>
+          <li>
+            po zrušení účtu nebo týmu - knihovnu i s dokumenty smažu automaticky, nejpozději do 8
+            dnů. Co jste nahráli do týmu, patří týmu a zůstává v něm i po vašem odchodu; smazat to
+            může správce týmu,
+          </li>
+          <li>
+            po odebrání režimu Pro - asistent v knihovně přestane hledat, ale ještě 90 dní ji
+            uvidíte na webu, můžete dokumenty mazat a jejich text s metadaty si stáhnout (tlačítko
+            „Exportovat text“ v detailu dokumentu; kdyby to nešlo, napište mi a pomůžu vám). Pak
+            knihovnu smažu; předem vám o tom napíšu,
+          </li>
+          <li>
+            text poslaný k návrhu metadat (bod 6) - Vercel ho smaže hned po vyřízení požadavku,
+          </li>
+          <li>
+            záznamy o tom, kdo co v knihovně nahrál, potvrdil, stáhl nebo smazal - dokud knihovna
+            trvá. Po jejím výmazu zůstane jen její interní označení a záznam, kdy a kolik dokumentů
+            jsem vymazal, bez jména a bez obsahu,
+          </li>
+          <li>
+            denní počítadla čtení a stažení - 2 dny; ostatní počítadla knihovny (nahrání, strany,
+            spotřeba) nejdéle 12 měsíců,
+          </li>
+          <li>záznam o přijetí pravidel Vlastních zdrojů - dokud trvá účet.</li>
+        </ul>
         <p>
           O smazání účtu a všech souvisejících údajů můžete požádat na <Mail />. Provedu je bez
           zbytečného odkladu.
@@ -96,22 +187,41 @@ export default function Soukromi() {
       <Section heading="6. Sdílení údajů s třetími stranami">
         <p>
           Vaše osobní údaje nepředávám nikomu k jeho vlastním účelům a neprodávám je. Na provozu se
-          podílejí dva zpracovatelé, se kterými mám uzavřenou smlouvu o zpracování osobních údajů:
+          podílejí tři zpracovatelé, se kterými mám uzavřenou smlouvu o zpracování osobních údajů:
         </p>
         <ul>
           <li>
-            <strong>Clerk, Inc.</strong> - přihlašování a správa účtů; společnost sídlí v USA a
-            účty vede tam,
+            <strong>Clerk, Inc.</strong> - přihlašování a správa účtů a týmů; společnost sídlí v
+            USA a účty vede tam,
           </li>
           <li>
             <strong>Vercel, Inc.</strong> - hosting serveru; server běží v evropském regionu
-            (Frankfurt), platforma americké společnosti je ale přístupná z USA.
+            (Frankfurt), platforma americké společnosti je ale přístupná z USA. Přes svou službu AI
+            Gateway mi Vercel také zprostředkuje jazykový model pro návrh metadat (viz níže),
+          </li>
+          <li>
+            <strong>Neon, Inc.</strong> (skupina Databricks) - databáze Vlastních zdrojů; data leží
+            v evropském regionu (Frankfurt), společnost je ale americká.
           </li>
         </ul>
         <p>
-          Oba si k plnění své role přibírají vlastní dodavatele (infrastruktura datových center,
-          služba pro odesílání ověřovacích e-mailů), které váže stejná povinnost mlčenlivosti a
-          stejná pravidla.
+          Všichni tři si k plnění své role přibírají vlastní dodavatele (infrastruktura datových
+          center, služba pro odesílání ověřovacích e-mailů), které váže stejná povinnost
+          mlčenlivosti a stejná pravidla. U návrhu metadat je takovým dodavatelem Vercelu{" "}
+          <strong>Google</strong>: když nahrajete dokument, pošlu přes AI Gateway jeho úvodní
+          strany, tiráž, osnovu nadpisů a záhlaví stran (dohromady nejvýš asi 16 000 znaků) a
+          název souboru, u PDF i s údaji z jeho vlastností, jazykovému modelu Gemini. Model z toho
+          jen navrhne název, autory, rok a podobné údaje, které pak sami zkontrolujete. Vercel ani
+          Google text nepoužijí k trénování modelů a Vercel ho po vyřízení požadavku smaže. Kdo
+          dokument nahrál, s požadavkem neposílám: AI Gateway kvůli rozpočtu spotřeby dostane jen
+          pseudonym, ze kterého se váš účet vyčíst nedá.
+        </p>
+        <p>
+          Dokumenty v osobní knihovně vidíte jen vy. Dokumenty v týmové knihovně vidí všichni
+          členové týmu, a to i s tím, kdo je nahrál; správce týmu navíc vidí seznam členů s jejich
+          e-maily. Co si z vašich dokumentů přečte váš AI asistent, dostane i jeho poskytovatel
+          (např. Anthropic nebo OpenAI) podle smlouvy, kterou s ním máte vy - to je vaše volba, ne
+          předání z mé strany.
         </p>
         <p>
           Poskytovatel přihlášení účtem jiné služby (např. Google) je samostatný správce - ověří
@@ -128,37 +238,69 @@ export default function Soukromi() {
 
       <Section heading="7. Předávání do třetích zemí">
         <p>
-          Vaše rešerše Evropskou unii neopouští. Server běží v evropském regionu (Frankfurt) a
-          databáze, do kterých se dotazuje, jsou české a unijní.
+          Rešerše v oficiálních zdrojích Evropskou unii neopouští. Server běží v evropském regionu
+          (Frankfurt) a databáze, do kterých se dotazuje, jsou české a unijní. Totéž platí pro
+          Vlastní zdroje: text dokumentů, index i hledání v nich zůstávají v databázi ve
+          Frankfurtu.
         </p>
+        <p>Mimo Evropskou unii jde z mé strany jen tohle:</p>
+        <ul>
+          <li>údaje o vašem účtu a týmech, které Clerk vede ve Spojených státech,</li>
+          <li>přístup k platformám Vercel a Neon, spravovaným rovněž odtamtud,</li>
+          <li>
+            část textu dokumentu k návrhu metadat (bod 6), kterou může Google zpracovat v USA.
+          </li>
+        </ul>
         <p>
-          Mimo Evropskou unii jde jediná věc - údaje o vašem účtu, které Clerk vede ve Spojených
-          státech, a přístup k platformě Vercel, spravované rovněž odtamtud. Obojí se opírá o
-          rozhodnutí Evropské komise o odpovídající ochraně pro EU-US Data Privacy Framework; obě
-          společnosti jsou v tomto rámci zapsány.
+          Předávání se opírá o rozhodnutí Evropské komise o odpovídající ochraně pro EU-US Data
+          Privacy Framework, případně o standardní smluvní doložky ve smlouvách o zpracování.
+          Clerk, Vercel i Google jsou v rámci Data Privacy Framework zapsány.
         </p>
       </Section>
 
       <Section heading="8. Cookies">
         <p>
-          Tyto stránky nenastavují žádné cookies. Cookies nutné k udržení přihlášení nastavuje na
-          své vlastní adrese Clerk.
+          Kvůli přihlášení nastavuje na všech stránkách tohoto webu (v záhlaví je vidět, kdo je
+          přihlášen) poskytovatel přihlášení Clerk cookies{" "}
+          <code>__session</code>, <code>__client_uat</code> a několik souvisejících (jejich
+          varianty s příponou a krátkodobé cookies pro obnovení relace). Bez nich by přihlášení
+          nefungovalo, jsou tedy nezbytné a souhlas k nim nepotřebuji. Další cookies nutné k
+          udržení přihlášení nastavuje Clerk na své vlastní adrese.
         </p>
+        <p>Analytické, reklamní ani jiné sledovací cookies nepoužívám.</p>
       </Section>
 
       <Section heading="9. Zabezpečení a umístění dat">
         <p>
-          Server běží v evropském regionu (Frankfurt). Komunikace probíhá výhradně přes šifrované
-          spojení (HTTPS) a server odmítá neověřené požadavky.
+          Server i databáze Vlastních zdrojů běží v evropském regionu (Frankfurt). Komunikace
+          probíhá výhradně přes šifrované spojení (HTTPS) a server odmítá neověřené požadavky.
         </p>
         <p>
-          Nejvíc ale chrání to, co tu vůbec není. Vlastní databázi nevedu, takže neexistuje
-          úložiště, ze kterého by šlo vaše dotazy zpětně vytáhnout. Co projde dočasnou pamětí, po
-          minutách mizí a s vaším účtem to spojené není.
+          U rešerší v oficiálních zdrojích chrání nejvíc to, co tu není: jejich obsah neukládám. Co
+          projde dočasnou pamětí, po minutách mizí a s vaším účtem to spojené není.
         </p>
+        <p>Vlastní zdroje chrání tři věci:</p>
+        <ul>
+          <li>
+            <strong>originály sem vůbec nepřijdou</strong> - převádějí se na text ve vašem
+            prohlížeči a server dostane jen ten text,
+          </li>
+          <li>
+            <strong>každá knihovna je oddělená</strong> - osobní i týmová. Oddělení hlídá sama
+            databáze pravidly zabezpečení na úrovni řádků (row-level security): každý dotaz vidí
+            jen řádky knihoven, ke kterým má přihlášený uživatel přístup,
+          </li>
+          <li>
+            <strong>přístup jen přes vaše přihlášení</strong> - k dokumentům se dostanete jen se
+            svým účtem, ne přes starší sdílený přístupový kód, a to, ke kterým knihovnám máte
+            přístup, průběžně ověřuji u Clerku.
+          </li>
+        </ul>
         <p>
           Kromě mě mají k údajům přístup jen poskytovatelé uvedení výše a jejich dodavatelé, a to v
-          rozsahu nutném k tomu, aby služba běžela.
+          rozsahu nutném k tomu, aby služba běžela; k týmovým dokumentům navíc členové týmu. Do
+          obsahu vašich dokumentů se nedívám, ledaže mě o to požádáte (třeba kvůli chybě převodu)
+          nebo to vyžaduje oznámení nezákonného obsahu či zákon.
         </p>
       </Section>
 
@@ -194,7 +336,9 @@ export default function Soukromi() {
           <li>
             <strong>Právo na přenositelnost údajů.</strong> Údaje, které o vás zpracovávám
             automatizovaně pro plnění smlouvy, vám vydám ve strojově čitelném formátu, případně je
-            na vaši žádost pošlu přímo jinému správci, je-li to technicky proveditelné.
+            na vaši žádost pošlu přímo jinému správci, je-li to technicky proveditelné. Text a
+            metadata svých dokumentů si z Vlastních zdrojů můžete stáhnout i sami tlačítkem
+            „Exportovat text“ v detailu dokumentu.
           </li>
           <li>
             <strong>Právo vznést námitku.</strong> Proti zpracování, které stojí na oprávněném
@@ -219,6 +363,10 @@ export default function Soukromi() {
         <p>
           Vznesete-li námitku, údaje dál zpracovávat nebudu, ledaže prokážu závažné oprávněné
           důvody, které převažují nad vašimi zájmy, právy a svobodami.
+        </p>
+        <p>
+          Týká-li se vás dokument, který sem nahrál někdo jiný, je správcem on (bod 1). Napíšete-li
+          mi, žádost mu předám a pomohu mu ji vyřídit.
         </p>
       </Section>
 

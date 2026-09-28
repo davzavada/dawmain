@@ -10,6 +10,7 @@ import { getStatuses } from "./_status";
 import { Guide } from "./_guide";
 import { Icon, type IconName } from "./_icons";
 import { Mail } from "./_legal";
+import { OwnSourcesGroup } from "./_zdroje/own-sources";
 
 export const dynamic = "force-dynamic";
 
@@ -115,27 +116,6 @@ function SourceListFallback() {
   );
 }
 
-/** Uploading one's own documents - shown locked, not offered yet. */
-function OwnSources() {
-  return (
-    <div className="source-group locked">
-      <div className="source-group-head">
-        <span className="source-group-name">Vlastní zdroje</span>
-        <Icon name="lock" size={13} label="zamčeno" />
-      </div>
-      <div className="source" aria-disabled="true" title="Dostupné v placené verzi">
-        <Icon name="upload" />
-        <div className="source-name">
-          <span className="source-title">Nahrát vlastní zdroje</span>
-          <span className="source-desc">
-            Vlastní dokumenty, ve kterých bude asistent hledat vedle oficiálních databází.
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default async function Home() {
   const headerList = await headers();
   const host = headerList.get("x-forwarded-host") ?? headerList.get("host") ?? "localhost:3000";
@@ -153,8 +133,8 @@ export default async function Home() {
           zásadě zdarma. Proto jsem vytvořil nekomerční alternativu. Budu rád, když ji vyzkoušíte :)
         </p>
         <p className="lead">
-          Server nemá vlastní databázi – funguje jako nachytřený Google: vyhledává živě přímo v
-          oficiálních databázích.
+          V oficiálních databázích server hledá živě – funguje jako nachytřený Google a nic si z
+          nich nekopíruje. Kdo má režim Pro, může si k nim přidat vlastní dokumenty.
         </p>
         <a href={OWL_URL} className="project-card">
           <img src="/owl.svg" alt="" width={36} height={36} />
@@ -173,7 +153,8 @@ export default async function Home() {
 
       <section id="zdroje" className="sources">
         <h2>Zdroje</h2>
-        <OwnSources />
+        {/* Client island: counts from GET /api/files/summary; the page stays server-rendered. */}
+        <OwnSourcesGroup />
         <Suspense fallback={<SourceListFallback />}>
           <SourceList />
         </Suspense>

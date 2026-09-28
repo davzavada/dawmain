@@ -57,7 +57,7 @@ describe("SKILL.md is pinned to the registered tool surface", () => {
     const named = [
       // Retired prefixes (nalus_, curia_, cz_) stay in the pattern, so a
       // pre-rename name left in the skill fails here instead of mid-rešerše.
-      ...SKILL.matchAll(/\b((?:dawmain|esbirka|ns|nss|us|nalus|caselaw|cz|justice|sdeu|curia|eurlex|doctrine)_[a-z_]+)\b/g),
+      ...SKILL.matchAll(/\b((?:dawmain|esbirka|ns|nss|us|nalus|caselaw|cz|justice|sdeu|curia|eurlex|doctrine|files)_[a-z_]+)\b/g),
     ].map((match) => match[1]);
     expect(named.length).toBeGreaterThan(20);
     expect([...new Set(named)].filter((name) => !(name in tools))).toEqual([]);
@@ -104,6 +104,17 @@ describe("SKILL.md is pinned to the registered tool surface", () => {
       .filter((token) => !AFFECTED_TYPES.includes(token));
     expect(quoted.length).toBeGreaterThan(10);
     expect(quoted.filter((code) => !known.has(code))).toEqual([]);
+  });
+
+  it("calls files_* only when the user's own documents are in play, never as a probe", () => {
+    // Most connections have no Vlastní zdroje (no Pro, the shared access code,
+    // the feature off): a probe would put a failed call into every rešerše.
+    expect(SKILL).not.toMatch(/once per conversation/i);
+    expect(SKILL).toContain("Never call it just\n   to find out whether they have Vlastní zdroje");
+    expect(SKILL).toContain("never as a probe in an ordinary research question");
+    // Not "when they already answered": that reads as any earlier answer of the user.
+    expect(SKILL).not.toContain("they already answered");
+    expect(SKILL).toContain("when `files_*` already returned their documents\nearlier in this conversation");
   });
 
   it("reads the affects vocabulary the API actually returns", () => {

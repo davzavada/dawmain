@@ -10,6 +10,7 @@ import { registerCuria } from "./curia";
 import { registerEurlex } from "./eurlex";
 import { registerJustice } from "./justice";
 import { registerDoctrine } from "./doctrine";
+import { registerFiles } from "./files";
 
 /**
  * Every tool the server exposes. To add one: create `./<name>.ts` exporting a
@@ -37,6 +38,8 @@ const registrars: Array<(server: McpServer) => void> = [
   registerCuria,
   registerEurlex,
   registerDoctrine,
+  // Vlastní zdroje — the user's own uploads; gated per call (registration does no I/O).
+  registerFiles,
 ];
 
 type ToolConfig = Record<string, unknown> & { outputSchema?: unknown };

@@ -142,6 +142,10 @@ const EXPECTED_TOOLS = [
   "eurlex_get_history",
   "doctrine_search",
   "doctrine_get_record",
+  // Vlastní zdroje — registered everywhere, gated per call (see checkFilesGate).
+  "files_search",
+  "files_get_document",
+  "files_list",
   // EUIPO and ÚPV are deliberately not covered — see src/mcp/tools/index.ts.
 ];
 
@@ -179,6 +183,31 @@ async function checkTools(client) {
   }
   if (!validationRejected) throw new Error("esbirka_search accepted limit=9999 — schema validation is off");
   ok("input validation", "esbirka_search rejected limit=9999");
+
+  await checkFilesGate(client);
+}
+
+/**
+ * The files_* tools read private libraries: without a personal OAuth
+ * sign-in (this script sends the shared access code or nothing) they must
+ * refuse with the gating text — and never answer with documents. On a
+ * deployment where Vlastní zdroje are off the first gate ("not available")
+ * answers before the sign-in check; that is a pass too.
+ */
+const FILES_GATE_TEXTS = [
+  "Vlastní zdroje need a personal sign-in (OAuth login, not the shared access code): this connection uses the shared access code",
+  "Vlastní zdroje need a personal sign-in (OAuth login, not the shared access code): this call carries no signed-in user",
+  "Vlastní zdroje are not available on this deployment",
+];
+
+async function checkFilesGate(client) {
+  const result = await client.request("tools/call", { name: "files_search", arguments: { query: "náhrada škody" } });
+  const text = textOf(result, "files_search");
+  const gate = FILES_GATE_TEXTS.find((expected) => text.includes(expected));
+  if (result.isError !== true || !gate) {
+    throw new Error(`files_search without a personal sign-in did not return the gating text:\n${text.slice(0, 300)}`);
+  }
+  ok("files_search gate", gate.includes("not available") ? "Vlastní zdroje off on this deployment" : token ? "shared access code refused" : "anonymous caller refused");
 }
 
 /** SMOKE_LIVE=1: exercise real upstreams — meaningful only against a deployment. */

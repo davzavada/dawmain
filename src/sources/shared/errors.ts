@@ -11,7 +11,8 @@ export type SourceErrorKind =
   | "NO_RESULTS" // search succeeded but matched nothing (not an error result)
   | "PARSE_DRIFT" // expected marker/selector missing — upstream changed layout
   | "SESSION_EXPIRED" // multi-step flow lost its session and re-handshake failed
-  | "INPUT_INVALID"; // input that schema validation cannot catch (e.g. bad sp. zn.)
+  | "INPUT_INVALID" // input that schema validation cannot catch (e.g. bad sp. zn.)
+  | "NOT_ENTITLED"; // the caller may not use this (files_*: no personal sign-in, no Pro library)
 
 export class SourceError extends Error {
   constructor(

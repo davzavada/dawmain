@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState, type MouseEvent } from "react";
 import { Icon, type IconName } from "./_icons";
 import { setPlatform, usePlatform, type PlatformId } from "./_platform";
+import { OWN_SOURCES_HREF, OwnSourcesNavItem } from "./_zdroje/own-sources";
 
 /**
  * Site navigation: a sticky sidebar on wide screens, a sticky tab strip on
@@ -77,6 +78,8 @@ export function SiteNav({ sourceCount }: { sourceCount: number }) {
   }
 
   const current = (on: boolean) => (on ? { "aria-current": "location" as const } : {});
+  const ownSources =
+    pathname === OWN_SOURCES_HREF || pathname.startsWith(`${OWN_SOURCES_HREF}/`);
 
   return (
     <>
@@ -89,11 +92,8 @@ export function SiteNav({ sourceCount }: { sourceCount: number }) {
               {id === "zdroje" && <span className="nav-count">{sourceCount}</span>}
             </Link>
           ))}
-          <span className="nav-item locked" aria-disabled="true" title="Dostupné v placené verzi">
-            <Icon name="upload" />
-            <span className="nav-ellipsis">Nahrát vlastní zdroje</span>
-            <Icon name="lock" size={13} label="zamčeno" className="nav-lock" />
-          </span>
+          {/* Opens the Vlastní zdroje modal (or sign-in); the count once signed in. */}
+          <OwnSourcesNavItem variant="sidebar" current={ownSources} />
         </div>
 
         <div className="nav-group">
@@ -129,14 +129,7 @@ export function SiteNav({ sourceCount }: { sourceCount: number }) {
               {short}
             </Link>
           ))}
-          <span
-            className="tab-item locked"
-            aria-disabled="true"
-            title="Nahrát vlastní zdroje – v placené verzi"
-          >
-            <span>Vlastní zdroje</span>
-            <Icon name="lock" size={13} label="zamčeno" />
-          </span>
+          <OwnSourcesNavItem variant="tab" current={ownSources} />
         </nav>
       </div>
     </>
