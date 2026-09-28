@@ -9,7 +9,7 @@ import { DATABASES } from "@/src/mcp/status";
 import { SiteHeader } from "./_header";
 import { SiteNav } from "./_nav";
 import { ClerkBridge, NoClerk } from "./_zdroje/clerk-bridge";
-import { ZdrojeModals } from "./_zdroje/sources-modal";
+import { ZdrojeModals } from "./_zdroje/modals";
 import "./globals.css";
 
 // Self-hosted by next/font at build time: the browser never asks Google.

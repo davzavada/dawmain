@@ -12,6 +12,36 @@ import { useEffect, useRef, useState } from "react";
 
 type PdfJs = typeof import("pdfjs-dist/legacy/build/pdf.mjs");
 type PdfDoc = import("pdfjs-dist").PDFDocumentProxy;
+type PageZone = import("@/src/files/convert/types").PageZone;
+
+/** Overlay colours per recognised region (fill, outline) — the legend under the page names them. */
+const ZONE_STYLE: Record<PageZone["kind"], { fill: string; stroke: string; label: string }> = {
+  header: { fill: "rgba(120, 120, 120, 0.18)", stroke: "rgba(90, 90, 90, 0.7)", label: "záhlaví a zápatí (vynecháno)" },
+  footer: { fill: "rgba(120, 120, 120, 0.18)", stroke: "rgba(90, 90, 90, 0.7)", label: "záhlaví a zápatí (vynecháno)" },
+  footnotes: { fill: "rgba(230, 140, 20, 0.16)", stroke: "rgba(200, 110, 0, 0.8)", label: "poznámky pod čarou" },
+  heading: { fill: "rgba(40, 110, 220, 0.14)", stroke: "rgba(30, 90, 200, 0.75)", label: "nadpisy" },
+};
+
+/** Draw the recognised regions over a rendered page (`scale`: canvas pixels per PDF point). */
+function drawZones(el: HTMLCanvasElement, zones: readonly PageZone[], scale: number): void {
+  const ctx = el.getContext("2d");
+  if (!ctx) return;
+  ctx.save();
+  ctx.lineWidth = Math.max(1, scale * 0.6);
+  for (const z of zones) {
+    const style = ZONE_STYLE[z.kind];
+    if (!style) continue;
+    const x = z.x0 * scale;
+    const y = z.y0 * scale;
+    const w = Math.max(1, (z.x1 - z.x0) * scale);
+    const h = Math.max(1, (z.y1 - z.y0) * scale);
+    ctx.fillStyle = style.fill;
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = style.stroke;
+    ctx.strokeRect(x, y, w, h);
+  }
+  ctx.restore();
+}
 
 let pdfjs: Promise<PdfJs> | null = null;
 
@@ -60,7 +90,7 @@ export function usePdfDocument(file: File | null): PdfDoc | null {
   return doc;
 }
 
-export function PdfPageCanvas({ doc, page, label }: { doc: PdfDoc | null; page: number; label: string }) {
+export function PdfPageCanvas({ doc, page, label, zones }: { doc: PdfDoc | null; page: number; label: string; zones?: readonly PageZone[] }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const [failed, setFailed] = useState(false);
 
@@ -84,6 +114,7 @@ export function PdfPageCanvas({ doc, page, label }: { doc: PdfDoc | null; page: 
         el.style.height = `${Math.floor(viewport.height / ratio)}px`;
         task = p.render({ canvas: el, viewport });
         await task.promise;
+        if (!cancelled && zones?.length) drawZones(el, zones, viewport.scale);
         p.cleanup();
       } catch (error) {
         if ((error as { name?: string })?.name !== "RenderingCancelledException" && !cancelled) setFailed(true);
@@ -93,13 +124,26 @@ export function PdfPageCanvas({ doc, page, label }: { doc: PdfDoc | null; page: 
       cancelled = true;
       task?.cancel();
     };
-  }, [doc, page]);
+  }, [doc, page, zones]);
 
   if (failed) return <p className="zd-muted">Stranu se nepodařilo vykreslit.</p>;
   return (
     <div className="zd-canvas-wrap">
       {!doc ? <p className="zd-muted">Načítám stranu…</p> : null}
       <canvas ref={canvas} className="zd-canvas" role="img" aria-label={`Strana ${label} v PDF`} />
+      {doc && zones?.length ? (
+        <p className="zd-zone-legend">
+          {[...new Set(zones.map((z) => ZONE_STYLE[z.kind]?.label).filter(Boolean))].map((text) => {
+            const kind = (Object.keys(ZONE_STYLE) as Array<PageZone["kind"]>).find((k) => ZONE_STYLE[k].label === text)!;
+            return (
+              <span key={text} className="zd-zone-key">
+                <span className="zd-zone-swatch" style={{ background: ZONE_STYLE[kind].fill, borderColor: ZONE_STYLE[kind].stroke }} aria-hidden="true" />
+                {text}
+              </span>
+            );
+          })}
+        </p>
+      ) : null}
     </div>
   );
 }

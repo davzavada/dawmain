@@ -4,7 +4,7 @@ import { PAGE_FLAGS, type ParsedDoc } from "@/src/files/dmd/types";
 import type { ConvertResult } from "@/src/files/convert/types";
 import type { DmdOutline } from "@/src/files/convert/slice";
 import type { DocType, Rights, UploadMeta } from "@/src/files/types";
-import { countPages, formatCount, plural } from "./format";
+import { countPagesAcc, formatCount, plural } from "./format";
 
 /**
  * The browser side of an upload, minus the React: what the preview shows
@@ -50,13 +50,81 @@ export function previewStats(parsed: ParsedDoc, result: Pick<ConvertResult, "lab
 }
 
 /** What the upload will cost, and whether it fits. */
-export function uploadCost(parsed: ParsedDoc, quotaPages: number, usedPages: number): { pages: number; remaining: number; fits: boolean; line: string } {
+export function uploadCost(
+  parsed: ParsedDoc,
+  quotaPages: number,
+  usedPages: number,
+  /**
+   * A new version of a document replaces it: the old version's billable
+   * pages, which the server credits against the quota (the document is in
+   * review or ready — src/files/upload.ts replacementCredit). 0 otherwise.
+   */
+  creditPages = 0,
+): { pages: number; remaining: number; fits: boolean; line: string } {
   const pages = billablePages(parsed.stats.countedChars);
-  const remaining = Math.max(0, quotaPages - usedPages);
+  const credit = Math.max(0, Math.floor(creditPages));
+  const remaining = Math.max(0, quotaPages - Math.max(0, usedPages - credit));
   const fits = pages <= remaining;
-  const line = `Zabere ${countPages(pages)} z ${formatCount(remaining)} ${plural(remaining, "zbývající", "zbývajících", "zbývajících")}.`;
+  const base = `Zabere ${countPagesAcc(pages)} z ${formatCount(remaining)} ${plural(remaining, "zbývající", "zbývajících", "zbývajících")}`;
+  const line = credit > 0 ? `${base} (počítáno i s ${formatCount(credit)} ${plural(credit, "stranou", "stranami", "stranami")} původní verze, která se nahradí).` : `${base}.`;
   return { pages, remaining, fits, line };
 }
+
+/** The page range the two inputs describe, clamped the way "Použít" applies it. */
+export function typedPageRange(from: string, to: string, pageCount: number): [number, number] {
+  const last = Math.max(1, pageCount);
+  const a = Math.min(last, Math.max(1, Math.floor(Number(from) || 1)));
+  const b = Math.min(last, Math.max(a, Math.floor(Number(to) || a)));
+  return [a, b];
+}
+
+/**
+ * The inputs name another page range than the conversion uses — typed, but
+ * "Použít" not pressed yet. The upload waits: it would send the other range.
+ */
+export function pageRangePending(typed: [number, number], applied: [number, number] | null, pageCount: number): boolean {
+  const [a, b] = applied ?? [1, Math.max(1, pageCount)];
+  return typed[0] !== a || typed[1] !== b;
+}
+
+/**
+ * What a browser lacks for converting and uploading here: gzip
+ * (CompressionStream — Safari before 16.4), SHA-256 (crypto.subtle, a secure
+ * context) and module Workers (pdf.js). Empty when everything is there.
+ */
+export function missingBrowserFeatures(g: typeof globalThis = globalThis): string[] {
+  const missing: string[] = [];
+  if (typeof g.CompressionStream !== "function") missing.push("CompressionStream");
+  if (!g.crypto?.subtle) missing.push("crypto.subtle");
+  if (!supportsModuleWorkers(g)) missing.push("module Worker");
+  return missing;
+}
+
+function supportsModuleWorkers(g: typeof globalThis): boolean {
+  if (typeof g.Worker !== "function") return false;
+  // A browser that knows module workers reads the `type` option; creating the worker from an
+  // empty script is harmless, and it is terminated at once.
+  let read = false;
+  const options = {
+    get type(): "module" {
+      read = true;
+      return "module";
+    },
+  };
+  let url: string | null = null;
+  try {
+    url = URL.createObjectURL(new Blob([""], { type: "text/javascript" }));
+    new g.Worker(url, options).terminate();
+  } catch {
+    // Unsupported options or a blocked blob: URL — the getter tells which.
+  } finally {
+    if (url) URL.revokeObjectURL(url);
+  }
+  return read;
+}
+
+export const UNSUPPORTED_BROWSER =
+  "Váš prohlížeč nahrávání nepodporuje: převod probíhá přímo v prohlížeči a potřebuje novější funkce. Použijte aktuální Chrome, Edge, Firefox nebo Safari 16.4 a novější.";
 
 /** Pages (1-based physical ords) with a problem flag, for "další sporná strana". */
 export function unsurePages(pageFlags: number[]): number[] {

@@ -35,6 +35,11 @@ export function countPages(n: number): string {
   return `${formatCount(n)} ${plural(n, "strana", "strany", "stran")}`;
 }
 
+/** The accusative after "zabere", "má": "1 stranu", "3 strany", "1 240 stran". */
+export function countPagesAcc(n: number): string {
+  return `${formatCount(n)} ${plural(n, "stranu", "strany", "stran")}`;
+}
+
 /** "2 zapnuté dokumenty z 4" (the home page's Moje zdroje row). */
 export function enabledOf(enabled: number, total: number): string {
   return `${formatCount(enabled)} ${plural(enabled, "zapnutý dokument", "zapnuté dokumenty", "zapnutých dokumentů")} z ${formatCount(total)}`;
@@ -129,6 +134,26 @@ export function avatarColor(id: string): string {
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
   return AVATAR_COLORS[h % AVATAR_COLORS.length];
+}
+
+/**
+ * The file name a download response names (Content-Disposition: the UTF-8
+ * `filename*` first, then `filename`), without any path; `fallback` when
+ * it names none.
+ */
+export function downloadFileName(disposition: string | null, fallback: string): string {
+  let name: string | null = null;
+  const star = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(disposition ?? "");
+  if (star) {
+    try {
+      name = decodeURIComponent(star[1].trim().replace(/^"|"$/g, ""));
+    } catch {
+      name = null;
+    }
+  }
+  if (!name) name = /filename\s*=\s*"([^"]*)"/i.exec(disposition ?? "")?.[1] ?? /filename\s*=\s*([^;\s]+)/i.exec(disposition ?? "")?.[1] ?? null;
+  const clean = (name ?? "").replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "_").replace(/^[\s.]+|\s+$/g, "").slice(0, 150);
+  return clean || fallback;
 }
 
 /** Footer line of the modal: "4 dokumenty · 1 240 z 3 000 stran". */

@@ -3,9 +3,9 @@
 import { useEffect, useState } from "react";
 import { DOC_TYPE_LABELS, RIGHTS_LABELS, type DocType } from "@/src/files/types";
 import type { DocumentDetail } from "@/src/files/web-types";
-import { api } from "./api";
+import { api, NETWORK_ERROR } from "./api";
 import { Confirm } from "./dialog";
-import { countPages, formatCount, statusBadge } from "./format";
+import { countPages, downloadFileName, formatCount, plural, statusBadge } from "./format";
 import { ZIcon } from "./icons";
 import { metaLine } from "./list";
 import { DOC_TYPE_OPTIONS, fieldsFor, formFromMeta, payloadFromForm, proposalBadge, type FieldDef, type FormValues } from "./meta-form";
@@ -16,8 +16,9 @@ import { refreshSummary } from "./store";
  * conversion quality, the metadata form for its type (controlled inputs
  * from the stored — proposed or confirmed — metadata, a source badge per
  * proposed field, low-confidence fields highlighted), Potvrdit / Uložit /
- * Nahrát znovu / Smazat, and the first ~1,500 characters of the text as
- * plain text. Saves send the meta_version the form was loaded with; a
+ * Nahrát znovu / Smazat, Exportovat text (the stored text as a Markdown
+ * download — also after Pro was withdrawn), and the first ~1,500
+ * characters of the text as plain text. Saves send the meta_version the form was loaded with; a
  * concurrent change answers 409 and the form offers to reload.
  */
 
@@ -41,7 +42,8 @@ export function DocumentPanel({
   readonly: boolean;
   team: boolean;
   onBack: () => void;
-  onReupload: (doc: { id: string; title: string; libraryId: string }) => void;
+  /** creditPages: the pages the server credits when the new version replaces this one (review or ready). */
+  onReupload: (doc: { id: string; title: string; libraryId: string; creditPages: number }) => void;
   onDeleted: () => void;
 }) {
   const [doc, setDoc] = useState<DocumentDetail | null>(null);
@@ -51,6 +53,8 @@ export function DocumentPanel({
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [conflict, setConflict] = useState(false);
   const [saving, setSaving] = useState<"confirm" | "save" | "delete" | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [reload, setReload] = useState(0);
 
@@ -138,14 +142,45 @@ export function DocumentPanel({
     onDeleted();
   }
 
+  /** Download the stored text (GET …/export): fetched first, so a refusal shows its Czech message here. */
+  async function exportText() {
+    if (!doc) return;
+    setExporting(true);
+    setExportError(null);
+    try {
+      const res = await fetch(`/api/files/documents/${encodeURIComponent(doc.id)}/export?lib=${encodeURIComponent(doc.libraryId)}`, {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: unknown } | null;
+        setExportError(typeof body?.error === "string" ? body.error : "Text se nepodařilo stáhnout. Zkuste to prosím znovu.");
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = downloadFileName(res.headers.get("content-disposition"), "dokument.md");
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    } catch {
+      setExportError(NETWORK_ERROR);
+    } finally {
+      setExporting(false);
+    }
+  }
+
   const q = doc.quality;
   const qualityItems = [
     doc.physicalPages ? `${countPages(doc.physicalPages)} v PDF` : null,
-    `${formatCount(doc.billablePages)} ${doc.billablePages === 1 ? "účtovaná strana" : "účtovaných stran"}`,
+    `${formatCount(doc.billablePages)} ${plural(doc.billablePages, "účtovaná strana", "účtované strany", "účtovaných stran")}`,
     LABEL_SOURCES[doc.pageLabelSource] ?? null,
     q.footnotes === "none" ? "bez poznámek" : `poznámky: svázáno ${Math.round((q.linked_ratio ?? 0) * 100)} %`,
     q.mn > 0 ? `${formatCount(q.mn)} m. č.` : null,
-    q.unsure_pages?.length ? `${formatCount(q.unsure_pages.length)} sporných stran` : null,
+    q.unsure_pages?.length ? `${formatCount(q.unsure_pages.length)} ${plural(q.unsure_pages.length, "sporná strana", "sporné strany", "sporných stran")}` : null,
     ...doc.flags,
   ].filter((x): x is string => Boolean(x));
 
@@ -190,7 +225,13 @@ export function DocumentPanel({
         >
           <fieldset disabled={!editable || saving !== null}>
             <legend className="zd-section-name">Metadata</legend>
-            {!doc.canEdit ? <p className="zd-muted zd-small">Upravit je může ten, kdo dokument nahrál, nebo správce týmu.</p> : null}
+            {!doc.canEdit ? (
+              <p className="zd-muted zd-small">
+                {doc.canDelete
+                  ? "Režim Pro tu už není aktivní: metadata upravit nejde. Text můžete exportovat a dokument smazat."
+                  : "Upravit je může ten, kdo dokument nahrál, nebo správce týmu."}
+              </p>
+            ) : null}
             {readonly ? <p className="zd-muted zd-small">Vlastní zdroje jsou teď jen pro čtení — metadata upravit nejde.</p> : null}
             <label className="zd-field">
               <span>Typ dokumentu</span>
@@ -251,16 +292,37 @@ export function DocumentPanel({
         </form>
       ) : null}
 
-      {doc.canEdit ? (
+      {doc.canEdit || doc.canDelete ? (
         <div className="zd-detail-more">
-          {!readonly ? (
-            <button type="button" className="zd-btn zd-btn-secondary" onClick={() => onReupload({ id: doc.id, title: doc.title, libraryId: doc.libraryId })}>
+          {doc.canDelete && (doc.status === "review" || doc.status === "ready") ? (
+            // Who may download is who may delete (uploader, owner/admin) — Pro not required, as the export route checks.
+            <button type="button" className="zd-btn zd-btn-secondary" onClick={() => void exportText()} disabled={exporting}>
+              <ZIcon name="download" size={14} /> {exporting ? "Stahuji…" : "Exportovat text"}
+            </button>
+          ) : null}
+          {doc.canEdit && !readonly ? (
+            <button type="button" className="zd-btn zd-btn-secondary" onClick={() =>
+                onReupload({
+                  id: doc.id,
+                  title: doc.title,
+                  libraryId: doc.libraryId,
+                  creditPages: doc.status === "review" || doc.status === "ready" ? doc.billablePages : 0,
+                })
+              }>
               Nahrát znovu
             </button>
           ) : null}
-          <button type="button" className="zd-btn zd-btn-danger-quiet" onClick={() => setConfirmDelete(true)} disabled={saving !== null}>
-            <ZIcon name="trash" size={14} /> Smazat
-          </button>
+          {doc.canDelete ? (
+            // Pro not required: whoever owns the text may delete it, also after Pro was withdrawn.
+            <button type="button" className="zd-btn zd-btn-danger-quiet" onClick={() => setConfirmDelete(true)} disabled={saving !== null}>
+              <ZIcon name="trash" size={14} /> Smazat
+            </button>
+          ) : null}
+          {exportError ? (
+            <p className="zd-error zd-detail-note" role="alert">
+              {exportError}
+            </p>
+          ) : null}
           {confirmDelete ? (
             <Confirm
               question={<>Smazat „{doc.title}“? Text i index se odstraní natrvalo.</>}

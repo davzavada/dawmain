@@ -208,7 +208,7 @@ export function DocumentList({
                     <span className="zd-switch-track" aria-hidden="true" />
                   </label>
                 ) : null}
-                {doc.canEdit ? (
+                {doc.canDelete ? (
                   <button
                     type="button"
                     className="zd-icon-button"

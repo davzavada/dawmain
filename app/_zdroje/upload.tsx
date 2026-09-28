@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from "react";
 import { LIMITS } from "@/src/files/config";
 import type { ConvertOptions, ConvertResult } from "@/src/files/convert/types";
 import { scanDmdOutline, sliceDmd, type DmdOutline } from "@/src/files/convert/slice";
@@ -8,21 +8,26 @@ import { parseDmd } from "@/src/files/dmd/parse";
 import { DmdLimitError, type ParsedDoc } from "@/src/files/dmd/types";
 import { DOC_TYPE_LABELS, DOC_TYPES, RIGHTS, RIGHTS_LABELS, type DocType, type Rights } from "@/src/files/types";
 import type { LibrarySummary } from "@/src/files/web-types";
-import { countPages, formatBytes, formatCount, plural } from "./format";
+import { countPages, countPagesAcc, formatBytes, formatCount, plural } from "./format";
 import { ZIcon } from "./icons";
 import { PdfPageCanvas, usePdfDocument } from "./pdf-canvas";
+import { registerUnsavedWork } from "./store";
 import {
   buildUploadMeta,
   dmdPageFor,
   gzipText,
   leadText,
+  missingBrowserFeatures,
   nextUnsurePage,
   pageFlagText,
+  pageRangePending,
   pageText,
   pageTone,
   previewStats,
   rangeSections,
   sha256Text,
+  typedPageRange,
+  UNSUPPORTED_BROWSER,
   unsurePages,
   uploadCost,
   uploadForm,
@@ -39,7 +44,12 @@ import {
  * nerozpoznávat m. č., prostý text), page-label calibration, the range
  * (pages, or § / chapters), rights, a type hint and the cost in pages
  * against the remaining quota. "Nahrát" gzips the text and posts it;
- * the original file never leaves the browser.
+ * the original file never leaves the browser. After a part (a page or §
+ * range) is uploaded the conversion stays open, so one journal issue
+ * splits into its articles without converting it again.
+ *
+ * A conversion lives only here: closing the modal, switching the tab or
+ * leaving the page while one is open (or files wait) asks first.
  *
  * Converters are loaded on demand (pdf.js, mammoth) — nothing of them is in
  * the page bundle until someone drops a file.
@@ -122,7 +132,7 @@ export function Uploader({
   onUploaded,
 }: {
   library: LibrarySummary;
-  replace: { id: string; title: string } | null;
+  replace: { id: string; title: string; creditPages?: number } | null;
   onCancelReplace: () => void;
   onUploaded: (id: string) => void;
 }) {
@@ -131,6 +141,23 @@ export function Uploader({
   const [log, setLog] = useState<Array<{ name: string; ok: boolean; message: string }>>([]);
   const [dragging, setDragging] = useState(false);
   const picker = useRef<HTMLInputElement>(null);
+  // Uploader is loaded only in the browser (next/dynamic, ssr: false): the check can run here.
+  const [unsupported] = useState(() => missingBrowserFeatures().length > 0);
+
+  // Work that closing would throw away: a conversion (running or done) or files waiting.
+  const hasWork = queue.length > 0 || (session !== null && session.error === null);
+  const work = useRef(hasWork);
+  work.current = hasWork;
+  useEffect(() => {
+    registerUnsavedWork(() => work.current);
+    return () => registerUnsavedWork(null);
+  }, []);
+  useEffect(() => {
+    if (!hasWork) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [hasWork]);
 
   // Take the next file from the queue whenever nothing is in progress.
   // The ref keeps a re-run of the effect (React's dev double-invoke) from converting a file twice.
@@ -172,6 +199,16 @@ export function Uploader({
   }
 
   const maxMb = 100;
+
+  if (unsupported) {
+    return (
+      <div className="zd-upload">
+        <p className="zd-banner" role="alert">
+          {UNSUPPORTED_BROWSER}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="zd-upload">
@@ -238,6 +275,10 @@ export function Uploader({
               finish(entry);
               if (id) onUploaded(id);
             }}
+            onPartDone={(entry, id) => {
+              setLog((l) => [entry, ...l].slice(0, 6));
+              onUploaded(id);
+            }}
           />
         ) : (
           <div className="zd-card">
@@ -281,18 +322,22 @@ function Preview({
   replace,
   onCancel,
   onDone,
+  onPartDone,
 }: {
   session: Session & { result: Converted };
   library: LibrarySummary;
-  replace: { id: string; title: string } | null;
+  replace: { id: string; title: string; creditPages?: number } | null;
   onCancel: () => void;
   onDone: (entry: { name: string; ok: boolean; message: string }, id: string | null) => void;
+  /** A range was uploaded and the conversion stays open for the next one. */
+  onPartDone: (entry: { name: string; ok: boolean; message: string }, id: string) => void;
 }) {
   const base = session.result;
   const isPdf = base.kind === "pdf" && session.relayout !== null;
   const [opts, setOpts] = useState<ConvertOptions>(() => ({ ...DEFAULT_OPTS, pageRange: base.warnings.some((w) => w.includes("1 500 stran")) ? [1, 1_500] : null }));
   const [result, setResult] = useState<ConvertResult>(base);
-  const [relayoutError, setRelayoutError] = useState<string | null>(null);
+  /** The last relayout that failed, and the page range it was asked for. */
+  const [relayoutError, setRelayoutError] = useState<{ message: string; pageRange: [number, number] | null } | null>(null);
   const [working, setWorking] = useState(false);
   const [rangeMode, setRangeMode] = useState<RangeMode>(opts.pageRange ? "pages" : "all");
   const [pageFrom, setPageFrom] = useState(String(opts.pageRange?.[0] ?? 1));
@@ -305,10 +350,15 @@ function Preview({
   const [docType, setDocType] = useState<DocType | "">("");
   const [uploading, setUploading] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  /** Ranges of this conversion already uploaded (see selectionKey). */
+  const [uploadedParts, setUploadedParts] = useState<string[]>([]);
   const pdfDoc = usePdfDocument(isPdf ? session.file : null);
 
   // Re-run the PDF layout when an option changes (pure, in this tab; big books take a few seconds).
-  function applyOptions(next: ConvertOptions) {
+  // A failed relayout (a range of scanned pages, over 1 500 pages) keeps the conversion as it was, and
+  // the options go back to the ones it was made with — the upload must send what the options say.
+  function applyOptions(next: ConvertOptions, onFail?: () => void) {
+    const prev = opts;
     setOpts(next);
     if (!session.relayout) return;
     setWorking(true);
@@ -317,7 +367,9 @@ function Preview({
       try {
         setResult(session.relayout!(next));
       } catch (error) {
-        setRelayoutError(convertErrorMessage(error));
+        setOpts(prev);
+        onFail?.();
+        setRelayoutError({ message: convertErrorMessage(error), pageRange: next.pageRange ?? null });
       } finally {
         setWorking(false);
       }
@@ -358,7 +410,7 @@ function Preview({
   }, [selected]);
 
   const stats = parsed.doc ? previewStats(parsed.doc, result) : null;
-  const cost = parsed.doc ? uploadCost(parsed.doc, library.quotaPages, library.pagesUsed ?? 0) : null;
+  const cost = parsed.doc ? uploadCost(parsed.doc, library.quotaPages, library.pagesUsed ?? 0, replace?.creditPages ?? 0) : null;
   const selectedOutline = useMemo(() => (selected.dmd ? scanDmdOutline(selected.dmd) : null), [selected.dmd]);
   const flags = result.pageFlags;
   const labels = result.pageLabels;
@@ -370,18 +422,32 @@ function Preview({
   const inSelection = !selectedOutline?.paged || textPage !== null;
   const shownText = selectedOutline?.paged ? (textPage !== null ? pageText(selected.dmd, selectedOutline, textPage) : "") : leadText(selected.dmd);
 
+  // "strany" with numbers typed but not applied: the conversion still holds the old range.
+  const typedRange = typedPageRange(pageFrom, pageTo, pageCount);
+  const rangePending = isPdf && rangeMode === "pages" && pageRangePending(typedRange, opts.pageRange ?? null, pageCount);
+  const rangeFailed = rangePending && relayoutError?.pageRange?.[0] === typedRange[0] && relayoutError.pageRange[1] === typedRange[1];
+  // What this upload would send, to recognise a part uploaded already.
+  const partial = (rangeMode === "pages" && opts.pageRange !== null) || (rangeMode === "sections" && sectionFrom !== "");
+  const selectionKey = rangeMode === "sections" && sectionFrom !== "" ? `§${sectionFrom}-${sectionTo || sectionFrom}:${opts.pageRange?.join("-") ?? ""}` : `s${opts.pageRange?.join("-") ?? "all"}`;
+  const alreadyUploaded = uploadedParts.includes(selectionKey);
+
   // Keep the selected page inside the document after a relayout.
   useEffect(() => {
     if (pageCount > 0 && page > pageCount) setPage(1);
   }, [pageCount, page]);
 
   function applyPageRange() {
-    const a = Math.max(1, Math.floor(Number(pageFrom) || 1));
-    const b = Math.min(pageCount || a, Math.max(a, Math.floor(Number(pageTo) || a)));
+    const [a, b] = typedRange;
     setPageFrom(String(a));
     setPageTo(String(b));
     applyOptions({ ...opts, pageRange: [a, b] });
     setPage(a);
+  }
+
+  function applyOnEnter(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    if (!working) applyPageRange();
   }
 
   function applyCalibration() {
@@ -391,7 +457,7 @@ function Preview({
   }
 
   async function upload() {
-    if (!parsed.doc || !cost || !rights) return;
+    if (!parsed.doc || !cost || !rights || rangePending || alreadyUploaded) return;
     setUploadError(null);
     try {
       setUploading("Balím text…");
@@ -423,7 +489,11 @@ function Preview({
       }
       const outcome = uploadOutcome(res.status, await res.json().catch(() => null));
       setUploading(null);
-      if (outcome.ok) {
+      if (outcome.ok && partial && !replace) {
+        // A part of the file: keep the conversion for the next article or chapter.
+        setUploadedParts((p) => [...p, selectionKey]);
+        onPartDone({ name: base.fileName, ok: true, message: `nahráno: ${rangeLabel()}, zpracovává se.` }, outcome.id);
+      } else if (outcome.ok) {
         onDone({ name: base.fileName, ok: true, message: "nahráno, zpracovává se." }, outcome.id);
       } else if (res.status === 409) {
         onDone({ name: base.fileName, ok: false, message: outcome.message }, null);
@@ -436,7 +506,17 @@ function Preview({
     }
   }
 
-  const warnings = [...result.warnings, ...(relayoutError ? [relayoutError] : [])];
+  /** The uploaded part for the log line "nahráno: strany PDF 10–40, …" (nominative after the colon), "§ 1 … – § 5 …". */
+  function rangeLabel(): string {
+    if (rangeMode === "sections" && sectionFrom !== "") {
+      const label = (ord: string) => sectionChoices.find((c) => c.ord === Number(ord))?.label ?? "";
+      return sectionTo && sectionTo !== sectionFrom ? `${label(sectionFrom)} – ${label(sectionTo)}` : label(sectionFrom);
+    }
+    const [a, b] = opts.pageRange ?? [1, pageCount];
+    return a === b ? `strana PDF ${a}` : `strany PDF ${a}–${b}`;
+  }
+
+  const warnings = [...result.warnings, ...(relayoutError ? [relayoutError.message] : [])];
 
   return (
     <section className="zd-card zd-preview" aria-label={`Náhled převodu: ${base.fileName}`}>
@@ -450,7 +530,7 @@ function Preview({
       {stats ? (
         <dl className="zd-stats">
           {stats.pages !== null ? <Stat label="Strany" value={formatCount(stats.pages)} /> : null}
-          <Stat label="Poznámky" value={stats.footnotes === 0 ? "žádné" : `${formatCount(stats.footnotes)} · svázáno ${stats.linkedPercent}%`} />
+          <Stat label="Poznámky" value={stats.footnotes === 0 ? "žádné" : `${formatCount(stats.footnotes)} · svázáno ${stats.linkedPercent} %`} />
           <Stat label="Nadpisy" value={formatCount(stats.headings)} />
           {stats.paragraphs > 0 ? <Stat label="§ oddíly" value={formatCount(stats.paragraphs)} /> : null}
           {stats.marginalNumbers > 0 ? <Stat label="m. č." value={formatCount(stats.marginalNumbers)} /> : null}
@@ -513,7 +593,7 @@ function Preview({
             ))}
           </div>
           <div className="zd-side-by-side">
-            <PdfPageCanvas doc={pdfDoc} page={page} label={labels[page - 1] ?? String(page)} />
+            <PdfPageCanvas doc={pdfDoc} page={page} label={labels[page - 1] ?? String(page)} zones={result.pageZones?.[page - 1]} />
             <pre className="zd-page-text">{inSelection ? shownText || "(strana bez textu)" : "Tato strana je mimo vybraný rozsah."}</pre>
           </div>
         </div>
@@ -539,16 +619,16 @@ function Preview({
           <span className="zd-segment" role="radiogroup" aria-label="Rozsah">
             <SegmentButton on={rangeMode === "all"} onClick={() => {
               setRangeMode("all");
-              if (opts.pageRange && pageCount <= 1_500) applyOptions({ ...opts, pageRange: null });
+              if (opts.pageRange && pageCount <= 1_500) applyOptions({ ...opts, pageRange: null }, () => setRangeMode("pages"));
             }}>celý dokument</SegmentButton>
             {isPdf ? <SegmentButton on={rangeMode === "pages"} onClick={() => setRangeMode("pages")}>strany</SegmentButton> : null}
             {sectionChoices.length > 0 ? <SegmentButton on={rangeMode === "sections"} onClick={() => setRangeMode("sections")}>§ / kapitoly</SegmentButton> : null}
           </span>
           {rangeMode === "pages" && isPdf ? (
             <span className="zd-row">
-              <input aria-label="Od strany PDF" type="number" min={1} max={pageCount} value={pageFrom} onChange={(e) => setPageFrom(e.target.value)} />
+              <input aria-label="Od strany PDF" type="number" min={1} max={pageCount} value={pageFrom} onChange={(e) => setPageFrom(e.target.value)} onKeyDown={applyOnEnter} />
               <span>–</span>
-              <input aria-label="Do strany PDF" type="number" min={1} max={pageCount} value={pageTo} onChange={(e) => setPageTo(e.target.value)} />
+              <input aria-label="Do strany PDF" type="number" min={1} max={pageCount} value={pageTo} onChange={(e) => setPageTo(e.target.value)} onKeyDown={applyOnEnter} />
               <button type="button" className="zd-btn zd-btn-secondary" onClick={applyPageRange} disabled={working}>
                 Použít
               </button>
@@ -612,7 +692,19 @@ function Preview({
         <p className={cost.fits ? "zd-cost" : "zd-error"}>
           {cost.fits
             ? cost.line
-            : `Dokument má ${countPages(cost.pages)}, v knihovně ${plural(cost.remaining, "zbývá", "zbývají", "zbývá")} ${countPages(cost.remaining)}. Vyberte menší rozsah nebo smažte jiný dokument.`}
+            : `Dokument má ${countPagesAcc(cost.pages)}, v knihovně ${plural(cost.remaining, "zbývá", "zbývají", "zbývá")} ${countPages(cost.remaining)}. Vyberte menší rozsah nebo smažte jiný dokument.`}
+        </p>
+      ) : null}
+      {rangePending ? (
+        <p className="zd-error" role="alert">
+          {rangeFailed
+            ? `Rozsah stran ${typedRange[0]}–${typedRange[1]} použít nejde: ${relayoutError?.message} Zadejte jiný rozsah a potvrďte ho tlačítkem Použít, nebo zvolte celý dokument.`
+            : `Rozsah stran ${typedRange[0]}–${typedRange[1]} zatím není použitý: potvrďte ho tlačítkem Použít (nebo klávesou Enter). Nahrát půjde potom.`}
+        </p>
+      ) : null}
+      {alreadyUploaded && !rangePending && uploading === null ? (
+        <p className="zd-ok-line" role="status">
+          Tento rozsah je nahraný. Vyberte další rozsah stran nebo oddílů, nebo převod zavřete.
         </p>
       ) : null}
       {uploadError ? (
@@ -623,14 +715,14 @@ function Preview({
 
       <div className="zd-card-actions">
         <button type="button" className="zd-btn zd-btn-quiet" onClick={onCancel} disabled={uploading !== null}>
-          Zrušit
+          {uploadedParts.length > 0 ? "Zavřít převod" : "Zrušit"}
         </button>
         <button
           type="button"
           className="zd-btn zd-btn-primary"
           onClick={() => void upload()}
-          disabled={!parsed.doc || !cost?.fits || !rights || working || uploading !== null}
-          title={!rights ? "Vyberte, jaká práva k textu máte." : undefined}
+          disabled={!parsed.doc || !cost?.fits || !rights || working || uploading !== null || rangePending || alreadyUploaded}
+          title={!rights ? "Vyberte, jaká práva k textu máte." : rangePending ? "Nejdřív použijte zadaný rozsah stran." : undefined}
         >
           {uploading ?? "Nahrát"}
         </button>

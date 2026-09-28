@@ -4,6 +4,8 @@ import {
   countDocuments,
   countMembers,
   countPages,
+  countPagesAcc,
+  downloadFileName,
   enabledOf,
   formatBytes,
   formatCount,
@@ -23,13 +25,16 @@ import {
   dmdPageFor,
   gzipText,
   leadText,
+  missingBrowserFeatures,
   nextUnsurePage,
   pageFlagText,
+  pageRangePending,
   pageText,
   pageTone,
   previewStats,
   rangeSections,
   sha256Text,
+  typedPageRange,
   unsurePages,
   uploadCost,
   uploadForm,
@@ -168,9 +173,15 @@ describe("upload core", () => {
     const unpaged = previewStats(parseDmd("Jen text."), { labelSource: "none", quality: { ...QUALITY, ocr: true } });
     expect(unpaged).toMatchObject({ pages: null, footnotes: 0, linkedPercent: null, plainMode: true });
     expect(uploadCost(parsed, 3000, 100)).toMatchObject({ pages: 1, remaining: 2900, fits: true });
-    expect(uploadCost(parsed, 3000, 100).line).toBe("Zabere 1 strana z 2 900 zbývajících.");
+    // Accusative after "zabere": 1 stranu, 2–4 strany, 5+ stran.
+    expect(uploadCost(parsed, 3000, 100).line).toBe("Zabere 1 stranu z 2 900 zbývajících.");
     expect(uploadCost(parsed, 100, 100)).toMatchObject({ remaining: 0, fits: false });
     expect(uploadCost(parsed, 100, 500).remaining).toBe(0);
+    // A new version of a document: its old pages are credited, as the server does (completeness:PC-2).
+    expect(uploadCost(parsed, 100, 100, 5)).toMatchObject({ remaining: 5, fits: true });
+    expect(uploadCost(parsed, 100, 100, 5).line).toBe("Zabere 1 stranu z 5 zbývajících (počítáno i s 5 stranami původní verze, která se nahradí).");
+    expect(uploadCost(parsed, 100, 100, 1).line).toContain("s 1 stranou původní verze");
+    expect(uploadCost(parsed, 100, 100, 0)).toMatchObject({ remaining: 0, fits: false });
   });
 
   it("page flags: unsure pages, next one with wrap-around, tones and tooltips", () => {
@@ -410,6 +421,73 @@ describe("team mapping", () => {
       ["i2", "declined"],
       ["i1", "pending"],
     ]);
+  });
+});
+
+describe("Czech cases and downloads (review web:Z4, export)", () => {
+  it("counts pages in the accusative after zabere / má", () => {
+    expect([1, 2, 4, 5, 22, 0].map(countPagesAcc)).toEqual(["1 stranu", "2 strany", "4 strany", "5 stran", "22 stran", "0 stran"]);
+    expect([1, 3, 5].map(countPages)).toEqual(["1 strana", "3 strany", "5 stran"]);
+  });
+
+  it("the UI source has no fixed plural after a variable count", async () => {
+    const { readFileSync } = await import("node:fs");
+    const detail = readFileSync("app/_zdroje/detail.tsx", "utf8");
+    // "3 účtovaných stran", "1 sporných stran": the plural must follow the number.
+    expect(detail).not.toMatch(/\} (účtovaných|sporných) stran`/);
+    expect(detail).toContain('plural(doc.billablePages, "účtovaná strana", "účtované strany", "účtovaných stran")');
+    expect(detail).toContain('"sporná strana", "sporné strany", "sporných stran"');
+    const upload = readFileSync("app/_zdroje/upload.tsx", "utf8");
+    expect(upload).not.toMatch(/linkedPercent\}%/);
+    expect(upload).toContain("Dokument má ${countPagesAcc(cost.pages)}");
+  });
+
+  it("names the download after Content-Disposition (UTF-8 first), never with a path", () => {
+    const header = `attachment; filename="Komentar k OZ.md"; filename*=UTF-8''Koment%C3%A1%C5%99%20k%20OZ.md`;
+    expect(downloadFileName(header, "dokument.md")).toBe("Komentář k OZ.md");
+    expect(downloadFileName('attachment; filename="a.md"', "x.md")).toBe("a.md");
+    expect(downloadFileName("attachment; filename=plain.md", "x.md")).toBe("plain.md");
+    expect(downloadFileName("attachment; filename*=UTF-8''..%2F..%2Fetc%2Fpasswd", "x.md")).toBe("_.._etc_passwd");
+    expect(downloadFileName("attachment; filename*=UTF-8''%E0%A4%A", "x.md")).toBe("x.md");
+    expect(downloadFileName(null, "dokument.md")).toBe("dokument.md");
+  });
+});
+
+describe("upload guards (review web:Z2, completeness:PC-14)", () => {
+  it("clamps a typed page range the way Použít applies it", () => {
+    expect(typedPageRange("2", "2", 4)).toEqual([2, 2]);
+    expect(typedPageRange("0", "", 4)).toEqual([1, 1]);
+    expect(typedPageRange("3", "1", 4)).toEqual([3, 3]);
+    expect(typedPageRange("10", "40", 4)).toEqual([4, 4]);
+    expect(typedPageRange("x", "900", 600)).toEqual([1, 600]);
+  });
+
+  it("a typed range that differs from the applied one is pending (Nahrát waits)", () => {
+    // Nothing applied = the whole document: 1–4 typed is not pending, 2–2 is.
+    expect(pageRangePending([1, 4], null, 4)).toBe(false);
+    expect(pageRangePending([2, 2], null, 4)).toBe(true);
+    expect(pageRangePending([2, 2], [2, 2], 4)).toBe(false);
+    expect(pageRangePending([2, 3], [2, 2], 4)).toBe(true);
+    expect(pageRangePending([1, 1500], [1, 1500], 2000)).toBe(false);
+  });
+
+  it("names what an old browser lacks for converting and uploading", () => {
+    class ModuleWorker {
+      constructor(_url: string, opts?: { type?: string }) {
+        void opts?.type;
+      }
+      terminate() {}
+    }
+    class ClassicWorker {
+      constructor(_url: string) {}
+      terminate() {}
+    }
+    const modern = { CompressionStream: class {}, crypto: { subtle: {} }, Worker: ModuleWorker } as unknown as typeof globalThis;
+    expect(missingBrowserFeatures(modern)).toEqual([]);
+    const oldSafari = { crypto: { subtle: {} }, Worker: ClassicWorker } as unknown as typeof globalThis;
+    expect(missingBrowserFeatures(oldSafari)).toEqual(["CompressionStream", "module Worker"]);
+    const insecure = { CompressionStream: class {}, crypto: {}, Worker: ModuleWorker } as unknown as typeof globalThis;
+    expect(missingBrowserFeatures(insecure)).toEqual(["crypto.subtle"]);
   });
 });
 

@@ -1,9 +1,9 @@
 "use client";
 
-import { useSearchParams } from "next/navigation";
+import dynamic from "next/dynamic";
 import { useEffect, useState, type ReactNode } from "react";
 import { CONTACT } from "@/app/_legal";
-import { TERMS_VERSION, UUID_RE } from "@/src/files/config";
+import { TERMS_VERSION } from "@/src/files/config";
 import type { LibrarySummary } from "@/src/files/web-types";
 import { api } from "./api";
 import { DocumentPanel } from "./detail";
@@ -12,37 +12,31 @@ import { countDocuments, countMembers, quotaLine, quotaShare } from "./format";
 import { ZIcon } from "./icons";
 import { InvitationActions, InvitationText, useInvitations } from "./invitations";
 import { DocumentList, useDocumentList } from "./list";
-import { closeSources, refreshSummary, requestSignIn, showInSources, useZdroje, type SourcesTab } from "./store";
-import { TeamModal } from "./team-modal";
-import { Uploader } from "./upload";
+import { closeSources, mayDiscardWork, refreshSummary, requestSignIn, showInSources, useZdroje, type SourcesTab } from "./store";
 
 /**
- * The Vlastní zdroje modal (design 2b–2e) and the team modal (3d, 3f),
- * mounted once in the root layout and driven by the URL: ?zdroje=moje|tym
- * (+ &dokument=<id> for a document's detail), ?tym=<org id>. Deep links and
- * the old /vlastni-zdroje route (which redirects here) open them; closing
- * removes the parameter.
+ * The Vlastní zdroje modal (design 2b–2e), opened by ZdrojeModals
+ * (./modals.tsx) from the URL. The uploader — and with it the DMD parser
+ * and the preview — loads only where someone may upload.
  */
-export function ZdrojeModals() {
-  const params = useSearchParams();
-  const tab = params.get("zdroje");
-  const team = params.get("tym");
-  const doc = params.get("dokument");
-  return (
-    <>
-      {tab ? <SourcesModal tab={tab === "tym" ? "tym" : "moje"} documentId={doc && UUID_RE.test(doc) ? doc.toLowerCase() : null} /> : null}
-      {team && !tab ? <TeamModal orgParam={team} /> : null}
-    </>
-  );
-}
+
+const Uploader = dynamic(() => import("./upload").then((m) => m.Uploader), {
+  ssr: false,
+  loading: () => (
+    <p className="zd-progress" role="status">
+      <span className="zd-spinner" aria-hidden="true" />
+      Načítám nahrávání…
+    </p>
+  ),
+});
 
 const MAIL_PRO = `mailto:${CONTACT}?subject=${encodeURIComponent("Dawmain - Vlastní zdroje (Pro)")}`;
 const MAIL_TEAM = `mailto:${CONTACT}?subject=${encodeURIComponent("Dawmain - týmový přístup")}`;
 
-function SourcesModal({ tab, documentId }: { tab: SourcesTab; documentId: string | null }) {
+export function SourcesModal({ tab, documentId }: { tab: SourcesTab; documentId: string | null }) {
   const { auth, summary, failed } = useZdroje();
   const [teamId, setTeamId] = useState<string | null>(null);
-  const [replace, setReplace] = useState<{ id: string; title: string; libraryId: string } | null>(null);
+  const [replace, setReplace] = useState<{ id: string; title: string; libraryId: string; creditPages: number } | null>(null);
   const [listKey, setListKey] = useState(0);
 
   const libraries = summary?.state === "ok" ? summary.libraries : [];
@@ -126,7 +120,7 @@ function SourcesModal({ tab, documentId }: { tab: SourcesTab; documentId: string
           listKey={listKey}
           bumpList={() => setListKey((k) => k + 1)}
           tab="tym"
-          teamPicker={teams.length > 1 ? { teams, onPick: setTeamId } : null}
+          teamPicker={teams.length > 1 ? { teams, onPick: (id) => id !== team.id && mayDiscardWork() && setTeamId(id) } : null}
         />
       ) : (
         <TeamLocked />
@@ -146,8 +140,11 @@ function SourcesModal({ tab, documentId }: { tab: SourcesTab; documentId: string
                 sub={t.pro ? countDocuments(t.counts?.total ?? 0) : "Bez Pro"}
                 locked={!t.pro}
                 onClick={() => {
+                  // The team shown already: only a detail open over it changes (showInSources decides).
+                  if (tab === "tym" && team?.id === t.id) return showInSources("tym", null);
+                  if (!mayDiscardWork()) return;
                   setTeamId(t.id);
-                  showInSources("tym", null);
+                  showInSources("tym", null, true);
                 }}
               />
             ))
@@ -244,8 +241,8 @@ function LibraryPanel({
   mode: string;
   termsAccepted: boolean;
   documentId: string | null;
-  replace: { id: string; title: string; libraryId: string } | null;
-  setReplace: (r: { id: string; title: string; libraryId: string } | null) => void;
+  replace: { id: string; title: string; libraryId: string; creditPages: number } | null;
+  setReplace: (r: { id: string; title: string; libraryId: string; creditPages: number } | null) => void;
   listKey: number;
   bumpList: () => void;
   tab: SourcesTab;

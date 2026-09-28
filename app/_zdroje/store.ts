@@ -17,7 +17,9 @@ import type { SummaryResponse } from "@/src/files/web-types";
  *
  * The modals are driven by the URL (?zdroje=moje|tym, ?tym=1): links work,
  * the back button closes them. history.pushState integrates with Next's
- * router, so useSearchParams sees the change without a navigation.
+ * router, so useSearchParams sees the change without a navigation — but
+ * only when called with our own state (null): Next ignores a call whose
+ * state carries its internal marker (__NA), as window.history.state does.
  */
 
 export type AuthState = "loading" | "signed_in" | "signed_out" | "none";
@@ -27,9 +29,11 @@ interface State {
   summary: SummaryResponse | null;
   /** The last summary fetch failed (network, 503). */
   failed: boolean;
+  /** The Vlastní zdroje modal is open (the nav item shows it as current). */
+  sourcesOpen: boolean;
 }
 
-let state: State = { auth: "loading", summary: null, failed: false };
+let state: State = { auth: "loading", summary: null, failed: false, sourcesOpen: false };
 const listeners = new Set<() => void>();
 
 function set(patch: Partial<State>): void {
@@ -42,7 +46,7 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-const SERVER_STATE: State = { auth: "loading", summary: null, failed: false };
+const SERVER_STATE: State = { auth: "loading", summary: null, failed: false, sourcesOpen: false };
 
 /** The shared state (server render: loading). */
 export function useZdroje(): State {
@@ -126,19 +130,90 @@ export type SourcesTab = "moje" | "tym";
 
 /** A modal this page opened with pushState is closed with history.back(), so Back never reopens it. */
 let pushedModal = false;
-if (typeof window !== "undefined") {
+/** The URL the Vlastní zdroje modal was last shown at (null while it is closed), to restore it on a refused Back. */
+let modalHref: string | null = null;
+/** closeModal() is popping our own entry after the user already agreed: its popstate asks nothing. */
+let closingByBack = false;
+
+function hrefOf(loc: Location): string {
+  return `${loc.pathname}${loc.search}${loc.hash}`;
+}
+
+function noteLocation(): void {
+  modalHref = new URLSearchParams(window.location.search).has("zdroje") ? hrefOf(window.location) : null;
+}
+
+/**
+ * Back / Forward (the browser button, Android's back gesture) is a same-document history change:
+ * nothing but this listener sees ?zdroje disappear before ZdrojeModals unmounts the uploader, so a
+ * conversion held only in memory would be lost without the question every other exit asks.
+ * Refused: the modal's URL is pushed again, over the entry the user went back to, and stays open.
+ * Registered at module load, before Next's own listener (app-router's effect), so Next's traverse
+ * already reads the restored URL.
+ */
+function onPopState(): void {
+  const previous = modalHref;
+  const closing = closingByBack;
+  closingByBack = false;
   // The user went back (or forward) on their own: the entry we pushed is no longer ours to pop.
-  window.addEventListener("popstate", () => {
-    pushedModal = false;
-  });
+  pushedModal = false;
+  noteLocation();
+  if (closing || modalHref !== null || previous === null) return;
+  // Another page entirely: its content is already on its way, only the modal's own URL is guarded.
+  if (new URL(previous, window.location.href).pathname !== window.location.pathname) return;
+  if (!unsavedWork?.() || window.confirm(DISCARD_QUESTION)) return;
+  window.history.pushState(null, "", previous);
+  pushedModal = true;
+  modalHref = previous;
+}
+
+if (typeof window !== "undefined") window.addEventListener("popstate", onPopState);
+
+/** The URL with some search params changed (path and hash kept), as pushState takes it. */
+export function withParams(href: string, update: (p: URLSearchParams) => void): string {
+  const url = new URL(href);
+  update(url.searchParams);
+  return `${url.pathname}${url.search}${url.hash}`;
 }
 
 function pushParams(update: (p: URLSearchParams) => void, replace = false): void {
-  const url = new URL(window.location.href);
-  update(url.searchParams);
-  const next = `${url.pathname}${url.search}${url.hash}`;
-  if (replace) window.history.replaceState(window.history.state, "", next);
-  else window.history.pushState(window.history.state, "", next);
+  const next = withParams(window.location.href, update);
+  // State null, never window.history.state: that one is Next's own entry (__NA), and Next's
+  // patched pushState/replaceState skip the router for it — the URL would change, the modal not.
+  if (replace) window.history.replaceState(null, "", next);
+  else window.history.pushState(null, "", next);
+  noteLocation();
+}
+
+/** ZdrojeModals reports whether the Vlastní zdroje modal is open. */
+export function setSourcesOpen(open: boolean): void {
+  // A deep link (or the /vlastni-zdroje redirect) opened it without pushParams.
+  if (open && modalHref === null) noteLocation();
+  if (open !== state.sourcesOpen) set({ sourcesOpen: open });
+}
+
+// ---------------------------------------------------------------------------
+// Unsaved work: a finished conversion lives only in the uploader's memory.
+
+let unsavedWork: (() => boolean) | null = null;
+
+/** The uploader registers a check "is there a conversion or a queue to lose?" (null on unmount). */
+export function registerUnsavedWork(check: (() => boolean) | null): void {
+  unsavedWork = check;
+}
+
+export const DISCARD_QUESTION = "Zahodit rozpracovaný převod? Převedený text ani vybrané soubory se neuloží.";
+
+/** Before anything that unmounts the uploader: true when nothing is lost or the user agreed to lose it. */
+export function mayDiscardWork(): boolean {
+  if (!unsavedWork?.()) return true;
+  return window.confirm(DISCARD_QUESTION);
+}
+
+/** The modal already shows this tab and document: going there changes nothing, so nothing is asked. */
+function showing(tab: SourcesTab, documentId: string | null): boolean {
+  const p = new URLSearchParams(window.location.search);
+  return p.get("zdroje") === tab && !p.has("tym") && (p.get("dokument") ?? null) === documentId;
 }
 
 /** Open the Vlastní zdroje modal on a tab (and optionally a document's detail). Signed out: sign in first. */
@@ -148,6 +223,8 @@ export function openSources(tab: SourcesTab = "moje", documentId?: string): void
     return;
   }
   const already = new URLSearchParams(window.location.search).has("zdroje");
+  if (already && showing(tab, documentId ?? null)) return;
+  if (already && !mayDiscardWork()) return;
   pushParams(
     (p) => {
       p.set("zdroje", tab);
@@ -160,8 +237,13 @@ export function openSources(tab: SourcesTab = "moje", documentId?: string): void
   if (!already) pushedModal = true;
 }
 
-/** Switch tab / document inside an open modal without adding history entries. */
-export function showInSources(tab: SourcesTab, documentId: string | null): void {
+/**
+ * Switch tab / document inside an open modal without adding history entries.
+ * `confirmed`: the caller already asked mayDiscardWork().
+ */
+export function showInSources(tab: SourcesTab, documentId: string | null, confirmed = false): void {
+  if (showing(tab, documentId)) return;
+  if (!confirmed && !mayDiscardWork()) return;
   pushParams((p) => {
     p.set("zdroje", tab);
     if (documentId) p.set("dokument", documentId);
@@ -172,6 +254,7 @@ export function showInSources(tab: SourcesTab, documentId: string | null): void 
 function closeModal(keys: string[]): void {
   if (pushedModal) {
     pushedModal = false;
+    closingByBack = true;
     window.history.back();
     return;
   }
@@ -181,6 +264,7 @@ function closeModal(keys: string[]): void {
 }
 
 export function closeSources(): void {
+  if (!mayDiscardWork()) return;
   closeModal(["zdroje", "dokument"]);
 }
 
@@ -188,6 +272,7 @@ export function closeSources(): void {
 export function openTeam(orgId?: string): void {
   const params = new URLSearchParams(window.location.search);
   const replace = params.has("zdroje") || params.has("tym");
+  if (params.has("zdroje") && !mayDiscardWork()) return;
   pushParams((p) => {
     p.delete("zdroje");
     p.delete("dokument");

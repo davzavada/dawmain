@@ -39,10 +39,10 @@ function intercept(auth: string, tab: "moje" | "tym" = "moje") {
   };
 }
 
-/** The nav item: sidebar (`variant="sidebar"`) or tab strip. */
+/** The nav item: sidebar (`variant="sidebar"`) or tab strip; current while the modal is open too (design 2b). */
 export function OwnSourcesNavItem({ variant, current }: { variant: "sidebar" | "tab"; current: boolean }) {
-  const { auth, summary } = useZdroje();
-  const aria = current ? { "aria-current": "location" as const } : {};
+  const { auth, summary, sourcesOpen } = useZdroje();
+  const aria = current || sourcesOpen ? { "aria-current": "location" as const } : {};
   const className = variant === "sidebar" ? "nav-item" : "tab-item";
   const signedIn = auth === "signed_in";
   const count = signedIn && summary?.state === "ok" ? totalDocuments(summary.libraries) : null;
@@ -146,7 +146,8 @@ function LibraryRow({ lib, tab, title, icon }: { lib: LibrarySummary; tab: "moje
           {title}
           {!lib.pro ? <ZIcon name="lock" size={13} /> : null}
         </button>
-        <span className="source-desc">{sub}</span>
+        {/* The team's name may be long: that one line is cut; descriptions wrap (design 1b). */}
+        <span className={lib.pro && lib.kind === "org" ? "source-desc zd-desc-line" : "source-desc"}>{sub}</span>
       </div>
       {badge ? (
         <div className="source-state">

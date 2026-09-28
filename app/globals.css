@@ -1296,7 +1296,7 @@ main > footer a {
   flex: none;
   color: var(--body);
 }
-.zd-own .source-desc {
+.zd-own .zd-desc-line {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1994,6 +1994,28 @@ main > footer a {
   display: block;
   max-width: 100%;
 }
+.zd-zone-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0;
+  padding: 6px 10px;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+}
+.zd-zone-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.zd-zone-swatch {
+  width: 12px;
+  height: 10px;
+  border: 1px solid;
+  border-radius: 2px;
+}
 .zd-page-text {
   max-height: 520px;
   margin: 0;
@@ -2041,7 +2063,9 @@ main > footer a {
 .zd-layer input[type="email"],
 .zd-layer input[type="number"],
 .zd-layer select,
-.zd-layer textarea {
+.zd-layer textarea,
+.zd-ops input[type="text"],
+.zd-ops select {
   width: 100%;
   min-height: 36px;
   padding: 7px 10px;
@@ -2061,7 +2085,9 @@ main > footer a {
 }
 .zd-layer input:focus,
 .zd-layer select:focus,
-.zd-layer textarea:focus {
+.zd-layer textarea:focus,
+.zd-ops input[type="text"]:focus,
+.zd-ops select:focus {
   outline: none;
   border-color: var(--link);
   box-shadow: 0 0 0 3px var(--accent-bg);
@@ -2195,7 +2221,8 @@ main > footer a {
   padding-top: 14px;
   border-top: 1px solid var(--hairline);
 }
-.zd-detail-more .zd-confirm {
+.zd-detail-more .zd-confirm,
+.zd-detail-more .zd-detail-note {
   flex-basis: 100%;
 }
 .zd-text-preview {

@@ -38,7 +38,7 @@ afterEach(async () => {
 const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
 
 function listItem(id: string, status: string) {
-  return { id, libraryId: "user_a", title: id, fileName: id, fileKind: "pdf", fileBytes: 1, status, statusDetail: null, uploadedAt: "2026-09-01T00:00:00Z", uploaderName: null, mine: true, enabled: true, canEdit: true, docType: "jine", billablePages: 1, flags: [] };
+  return { id, libraryId: "user_a", title: id, fileName: id, fileKind: "pdf", fileBytes: 1, status, statusDetail: null, uploadedAt: "2026-09-01T00:00:00Z", uploaderName: null, mine: true, enabled: true, canEdit: true, canDelete: true, docType: "jine", billablePages: 1, flags: [] };
 }
 
 function Probe() {
