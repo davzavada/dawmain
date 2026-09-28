@@ -263,11 +263,12 @@ const BASE: BibMeta = {
 };
 
 describe("metadata form", () => {
-  it("every type starts with the title and ends with keywords, summary, language", () => {
+  it("every type starts with the title and ends with keywords and language (no summary)", () => {
     for (const t of DOC_TYPES) {
       const keys = fieldsFor(t).map((f) => f.key);
       expect(keys[0]).toBe("title");
-      expect(keys.slice(-3)).toEqual(["keywords", "summary", "language"]);
+      expect(keys.slice(-2)).toEqual(["keywords", "language"]);
+      expect(keys).not.toContain("summary");
       expect(new Set(keys).size).toBe(keys.length);
     }
     expect(fieldsFor("komentar").find((f) => f.key === "commented_act")?.required).toBe(true);

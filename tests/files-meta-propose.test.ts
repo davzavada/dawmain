@@ -46,7 +46,6 @@ function answer(overrides: Partial<AiProposal> = {}): AiProposal {
     ecli: null,
     decided_on: null,
     keywords: ["soukromé právo", "občanské právo"],
-    summary: "Komentář k občanskému zákoníku.",
     language: "cs",
     ...overrides,
   };

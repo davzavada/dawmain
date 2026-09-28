@@ -89,7 +89,7 @@ const BY_TYPE: Record<DocType, FieldDef[]> = {
   jine: [F.subtitle, F.authors, F.publisher, F.place, F.year],
 };
 
-const TAIL: FieldDef[] = [F.keywords, F.summary, F.language];
+const TAIL: FieldDef[] = [F.keywords, F.language];
 
 /**
  * The fields the edit form shows up front: title, type, authors and year —
