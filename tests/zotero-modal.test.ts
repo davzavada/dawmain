@@ -341,6 +341,54 @@ describe("modal states (GET /api/zotero/status)", () => {
     expect(text()).not.toContain("Připojeno jako");
   });
 
+  it("Odpojit: Zrušit returns focus to Odpojit; after success focus stays inside the modal", async () => {
+    status = { code: 200, body: CONNECTED };
+    await renderModal();
+    await act(async () => button("Odpojit")!.click());
+    await act(async () => button("Zrušit")!.click());
+    expect(host.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(document.activeElement).toBe(button("Odpojit"));
+    await act(async () => button("Odpojit")!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>(".zd-confirm .zd-btn-danger")!.click());
+    await settle();
+    expect(host.contains(document.activeElement)).toBe(true);
+  });
+
+  it("Odpojit succeeded but the status reload fails: the old connection is not shown again", async () => {
+    status = { code: 200, body: CONNECTED };
+    await renderModal();
+    await act(async () => button("Odpojit")!.click());
+    // The stub empties the status on disconnect; make the reload fail instead.
+    const fetchMock = vi.mocked(fetch);
+    const inner = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => {
+      const res = await inner(input, init);
+      if (String(input) === "/api/zotero/disconnect") status = { code: 503, body: { error: "Server teď neodpovídá." } };
+      return res;
+    });
+    await act(async () => host.querySelector<HTMLButtonElement>(".zd-confirm .zd-btn-danger")!.click());
+    await settle();
+    expect(text()).not.toContain("Připojeno jako");
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe("Server teď neodpovídá.");
+    expect(button("Zkusit znovu")).toBeDefined();
+  });
+
+  it("a failed Odpojit keeps the connection, says why, and focus returns to Odpojit", async () => {
+    status = { code: 200, body: CONNECTED };
+    await renderModal();
+    const fetchMock = vi.mocked(fetch);
+    const inner = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) =>
+      String(input) === "/api/zotero/disconnect" ? json({ error: "Odpojení se nepodařilo." }, 502) : inner(input, init),
+    );
+    await act(async () => button("Odpojit")!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>(".zd-confirm .zd-btn-danger")!.click());
+    await settle();
+    expect(text()).toContain("Připojeno jako jnovakova");
+    expect(host.querySelector(".zd-zotero-disconnect [role=alert]")?.textContent).toBe("Odpojení se nepodařilo.");
+    expect(document.activeElement).toBe(button("Odpojit"));
+  });
+
   it("connected with a narrowed key: says so and offers to connect again", async () => {
     status = { code: 200, body: { ...CONNECTED, connection: { ...CONNECTED.connection!, notes: false, groups: "none", groupNames: undefined } } };
     await renderModal();
@@ -377,7 +425,19 @@ describe("modal states (GET /api/zotero/status)", () => {
     await renderModal();
     expect(host.querySelector('[role="alert"]')?.textContent).toBe("Server teď neodpovídá.");
     status = { code: 200, body: NOT_CONNECTED };
+    // While asking again: "Načítám…", not the old error (the answer is held back until checked).
+    const fetchMock = vi.mocked(fetch);
+    const inner = fetchMock.getMockImplementation()!;
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    fetchMock.mockImplementation(async (input, init) => {
+      await held;
+      return inner(input, init);
+    });
     await act(async () => button("Zkusit znovu")!.click());
+    expect(host.querySelector(".zd-error")).toBeNull();
+    expect(host.querySelector('[role="status"]')?.textContent).toContain("Načítám");
+    release();
     await settle();
     expect(connectForm()).not.toBeNull();
   });
@@ -401,6 +461,35 @@ describe("the ?stav= banner", () => {
     }
     expect(STAV_BANNER.zapis.text).toContain("zápis");
     expect(STAV_BANNER.nedostupne.text).toBe("Připojení Zotera není na tomto webu zapnuté.");
+    // web.ts: another account than the one that started gets vyprselo, never prihlaseni.
+    expect(STAV_BANNER.prihlaseni.text).not.toContain("jiným účtem");
+    expect(STAV_BANNER.vyprselo.text).toContain("pod tímtéž účtem");
+    // web.ts answers chyba also to a key that cannot read the personal library.
+    expect(STAV_BANNER.chyba.text).toContain("čtení knihovny");
+  });
+
+  it("the modal's promises match the legal texts (app/soukromi, app/podminky)", async () => {
+    const soukromi = readFileSync(path.join(process.cwd(), "app/soukromi/page.tsx"), "utf8").replace(/\s+/g, " ");
+    const podminky = readFileSync(path.join(process.cwd(), "app/podminky/page.tsx"), "utf8").replace(/\s+/g, " ");
+    // What the modal promises, and where the legal texts say the same.
+    expect(podminky).toContain("jen ke čtení");
+    expect(podminky).toContain("kdybyste ho povolili, připojení odmítne");
+    expect(soukromi).toContain("Ukládám ho zašifrovaný");
+    expect(soukromi).toContain("převedu ji na text a soubor hned zahodím");
+    expect(soukromi).toContain("Odpojením klíč smažu a požádám Zotero, aby ho zrušilo");
+    expect(soukromi).toContain("zotero.org/settings/keys");
+    expect(soukromi).toContain("ne přes sdílený přístupový kód");
+    expect(podminky).toContain("tlačítko „Připojit Zotero“");
+    expect(podminky).toContain("tlačítkem „Odpojit“");
+
+    await renderModal();
+    const t = text();
+    for (const phrase of ["Jen čte.", "zašifrovaný", "soubor hned zahodím", "Zápis nepovolujte", "v nastavení Zotera", "ne přes sdílený přístupový kód"]) {
+      expect(t, phrase).toContain(phrase);
+    }
+    expect(connectForm()?.querySelector("button")?.textContent).toBe("Připojit Zotero");
+    // No promise the legal texts do not make: nothing about keeping files or writing.
+    expect(t).not.toMatch(/soubor (uložím|si nechám)|zapíše do/);
   });
 
   for (const stav of ZOTERO_STAV) {

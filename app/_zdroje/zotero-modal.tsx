@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { CONTACT } from "@/app/_legal";
 import { ZOTERO_STAV, type ZoteroConnectionView, type ZoteroStatus, type ZoteroStav } from "@/src/zotero/web-types";
 import { api } from "./api";
@@ -38,19 +38,28 @@ type Tone = "ok" | "info" | "bad";
 export const STAV_BANNER: Record<ZoteroStav, { tone: Tone; text: string }> = {
   pripojeno: { tone: "ok", text: "Zotero je připojené. Asistent teď může hledat a číst ve vaší knihovně." },
   zamitnuto: { tone: "info", text: "Na stránce Zotera jste připojení nepotvrdili, nic se nezměnilo." },
-  vyprselo: { tone: "bad", text: "Připojování vypršelo nebo se přerušilo (na potvrzení je 10 minut). Zkuste to prosím znovu." },
+  // web.ts: a missing or expired state cookie, one sealed for another account, or a token that does not match.
+  vyprselo: {
+    tone: "bad",
+    text: "Připojování vypršelo nebo se přerušilo. Na potvrzení je 10 minut a dokončit ho jde jen v tomtéž prohlížeči a pod tímtéž účtem. Zkuste to prosím znovu.",
+  },
   zapis: {
     tone: "bad",
     text: "Na stránce Zotera jste povolili i zápis. Takový klíč nepřijímám: neuložil jsem ho a požádal Zotero, aby ho zrušilo. Připojte Zotero znovu a zápis nepovolujte.",
   },
   prihlaseni: {
     tone: "bad",
-    text: "Připojení se nepodařilo dokončit: nejste přihlášeni, nebo jste přihlášeni jiným účtem než tím, který připojování začal. Přihlaste se a zkuste to znovu.",
+    // Only "no session": another account than the one that started gets vyprselo (its state cookie does not open).
+    text: "Připojení se nepodařilo dokončit, protože nejste přihlášeni. Přihlaste se a zkuste to znovu.",
   },
   nepro: { tone: "bad", text: "Zotero jde připojit jen v režimu Pro." },
   nedostupne: { tone: "bad", text: "Připojení Zotera není na tomto webu zapnuté." },
   limit: { tone: "bad", text: "Pokusů o připojení bylo teď příliš mnoho. Zkuste to prosím později." },
-  chyba: { tone: "bad", text: "Připojení se nepodařilo - Zotero neodpovědělo, jak má. Zkuste to prosím za chvíli." },
+  // web.ts also answers chyba to a key without read access to the personal library (the user unticked it on zotero.org).
+  chyba: {
+    tone: "bad",
+    text: "Připojení se nepodařilo dokončit - Zotero neodpovědělo, jak má, nebo klíč nesměl číst vaši knihovnu. Zkuste to prosím znovu a čtení knihovny na stránce Zotera nechte povolené.",
+  },
 };
 
 function isStav(value: string | null): value is ZoteroStav {
@@ -91,10 +100,20 @@ export function ZoteroModal({ stav }: { stav: string | null }) {
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
   const [banner, setBanner] = useState<ZoteroStav | null>(null);
-  const refresh = useCallback(() => setReload((r) => r + 1), []);
-  // After Odpojit an old outcome ("Zotero je připojené") would contradict the panel below it.
+  const panel = useRef<HTMLDivElement>(null);
+  // Zkusit znovu: back to "Načítám…", so the click visibly does something.
+  const refresh = useCallback(() => {
+    setError(null);
+    setReload((r) => r + 1);
+  }, []);
+  // After Odpojit the old status is stale: never show "Připojeno jako" again, not even when the
+  // reload fails, and an old outcome ("Zotero je připojené") would contradict the panel too.
+  // Focus goes to the panel before the confirmation that holds it unmounts, so it stays in the dialog.
   const changed = useCallback(() => {
+    panel.current?.focus();
     setBanner(null);
+    setStatus(null);
+    setError(null);
     setReload((r) => r + 1);
   }, []);
 
@@ -180,7 +199,7 @@ export function ZoteroModal({ stav }: { stav: string | null }) {
       <Notice
         icon="lock"
         title="Zotero patří k režimu Pro"
-        text="Režim Pro přiděluji ručně a zdarma, stejně jako Vlastní zdroje. S ním asistent hledá a čte i ve vaší knihovně Zotero. Napište mi, když ho chcete."
+        text="Stejně jako Vlastní zdroje je Zotero součástí režimu Pro. S ním asistent hledá a čte i ve vaší knihovně Zotero. Režim Pro přiděluji ručně a zdarma - napište mi, když ho chcete."
       >
         <a className="zd-btn zd-btn-primary" href={MAIL_ZOTERO}>
           Napsat o přístup
@@ -225,7 +244,7 @@ export function ZoteroModal({ stav }: { stav: string | null }) {
         </button>
       }
     >
-      <div className="zd-zotero">
+      <div className="zd-zotero" ref={panel} tabIndex={-1}>
         {/* Always in the DOM, so screen readers announce the banner when it appears. */}
         <div className="zd-zotero-live" aria-live="polite" aria-atomic="true">
           {shown ? (
@@ -288,8 +307,8 @@ function ConnectForm({ label = "Připojit Zotero", quiet = false }: { label?: st
 function ConsentNote() {
   return (
     <p className="zd-zotero-note">
-      Po kliknutí přejdete na zotero.org. Zotero se zeptá, jestli Dawmainu povolíte klíč ke čtení knihovny, poznámek a skupin; rozsah tam můžete
-      zúžit. Zápis nepovolujte - klíč s právem zápisu Dawmain odmítne.
+      Po kliknutí přejdete na zotero.org. Zotero se zeptá, jestli Dawmainu povolíte klíč ke čtení knihovny, poznámek a skupin. Rozsah tam můžete
+      zúžit (poznámky, skupiny), čtení vaší knihovny ale nechte povolené. Zápis nepovolujte - klíč s právem zápisu Dawmain odmítne.
     </p>
   );
 }
@@ -322,7 +341,7 @@ function NotConnected() {
         </p>
       </section>
       <section className="zd-zotero-section">
-        <h4 className="zd-section-name">Co Dawmain přečte</h4>
+        <h4 className="zd-section-name">Co Dawmain na dotaz asistenta přečte</h4>
         <ul className="zd-zotero-list">
           <li>
             <strong>záznamy</strong> - název, autoři, spisová značka a další údaje, štítky a kolekce,
@@ -331,7 +350,8 @@ function NotConnected() {
             <strong>poznámky a anotace</strong>,
           </li>
           <li>
-            <strong>text příloh</strong> - z indexu Zotera, a když tam chybí, z PDF v úložišti Zotera: to na dotaz převedu na text a soubor neuložím.
+            <strong>text příloh</strong> - z indexu Zotera, a když tam chybí nebo je neúplný, z PDF v úložišti Zotera: to převedu na text a soubor hned
+            zahodím.
           </li>
         </ul>
       </section>
@@ -344,7 +364,7 @@ function NotConnected() {
         </li>
         <li>
           <ZIcon name="check" />
-          <span>Klíč k Zoteru ukládám zašifrovaný. Odpojit ho můžete kdykoli, tady nebo v nastavení Zotera.</span>
+          <span>Klíč k Zoteru ukládám zašifrovaný. Odpojit Zotero můžete kdykoli tady, klíč smazat i sami v nastavení Zotera.</span>
         </li>
         <li>
           <ZIcon name="check" />
@@ -402,7 +422,7 @@ function Connected({ connection, warning, onChanged }: { connection: ZoteroConne
         </dl>
         {narrowed ? (
           <div className="zd-zotero-more">
-            <p className="zd-zotero-note">Rozsah změníte tak, že Zotero připojíte znovu a na jeho stránce povolíte víc. Starý klíč pak zruším.</p>
+            <p className="zd-zotero-note">Rozsah změníte tak, že Zotero připojíte znovu a na jeho stránce povolíte víc. Starý klíč pak smažu a požádám Zotero, aby ho zrušilo.</p>
             <ConnectForm label="Připojit znovu" quiet />
           </div>
         ) : null}
@@ -461,18 +481,30 @@ function Disconnect({ question, onDone, quiet = false }: { question: string; onD
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const cancel = useCallback(() => setConfirming(false), []);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const [refocus, setRefocus] = useState(false);
+  // Zrušit (or Escape, or a failed request) unmounts the confirmation that held focus: back to Odpojit.
+  const cancel = useCallback(() => {
+    setConfirming(false);
+    setRefocus(true);
+  }, []);
+  useEffect(() => {
+    if (!refocus || confirming) return;
+    setRefocus(false);
+    trigger.current?.focus();
+  }, [refocus, confirming]);
 
   async function disconnect() {
     setBusy(true);
     setError(null);
     const res = await api<{ ok: true }>(DISCONNECT_URL, { method: "POST" });
     setBusy(false);
-    setConfirming(false);
     if (!res.ok) {
       setError(res.error);
+      cancel();
       return;
     }
+    // Success: the parent moves focus into the panel and swaps this section out.
     onDone();
   }
 
@@ -481,7 +513,7 @@ function Disconnect({ question, onDone, quiet = false }: { question: string; onD
       {confirming ? (
         <Confirm question={question} confirmLabel="Odpojit" busy={busy} onConfirm={() => void disconnect()} onCancel={cancel} />
       ) : (
-        <button type="button" className={quiet ? "zd-btn zd-btn-quiet" : "zd-btn"} onClick={() => setConfirming(true)}>
+        <button ref={trigger} type="button" className={quiet ? "zd-btn zd-btn-quiet" : "zd-btn"} onClick={() => setConfirming(true)}>
           Odpojit
         </button>
       )}
