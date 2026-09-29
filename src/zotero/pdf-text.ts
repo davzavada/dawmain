@@ -65,6 +65,23 @@ const SPARSE_SHARE = 0.3;
  */
 const RUN_CONTEXT_PAGES = 10;
 
+/**
+ * In the Next.js server bundle pdf.js's fake worker would import
+ * "./pdf.worker.mjs" next to the bundled chunk (.next/server/chunks), where
+ * it is not, and every conversion would fail as "broken". Loading the worker
+ * module first sets globalThis.pdfjsWorker, which pdf.js then uses in-process.
+ * Server-only (this file), so the browser upload keeps its Web Worker.
+ */
+let workerReady: Promise<unknown> | null = null;
+function ensurePdfWorker(): Promise<unknown> {
+  // @ts-expect-error pdfjs-dist ships no types for the worker entry
+  workerReady ??= import("pdfjs-dist/legacy/build/pdf.worker.mjs").catch((error: unknown) => {
+    workerReady = null;
+    throw error;
+  });
+  return workerReady;
+}
+
 /** Sentinels thrown out of readPdf's progress callback to stop it between pages. */
 class Stop extends Error {
   constructor(readonly reason: "timeout" | "too-many-pages") {
@@ -95,6 +112,7 @@ export async function pdfText(
   const stopped = () => timedOut || opts.signal?.aborted === true;
 
   try {
+    await ensurePdfWorker();
     // readPdf takes no signal; its progress callback runs after every page,
     // and throwing there ends the read (readPdf destroys the pdf.js task in
     // its finally), so a timed-out conversion stops instead of running on.

@@ -228,14 +228,30 @@ const ZOTERO_GATE_TEXTS = [
   "Zotero is not available on this deployment",
 ];
 
+/** One valid call per zotero_* tool — valid, so the refusal comes from the gate, not from schema validation. */
+const ZOTERO_GATE_CALLS = [
+  ["zotero_search", { query: "náhrada škody" }],
+  ["zotero_get_item", { key: "ABCD2345" }],
+  ["zotero_get_text", { key: "ABCD2345" }],
+  ["zotero_list", { list: "libraries" }],
+];
+
 async function checkZoteroGate(client) {
-  const result = await client.request("tools/call", { name: "zotero_search", arguments: { query: "náhrada škody" } });
-  const text = textOf(result, "zotero_search");
-  const gate = ZOTERO_GATE_TEXTS.find((expected) => text.includes(expected));
-  if (result.isError !== true || !gate) {
-    throw new Error(`zotero_search without a personal sign-in did not return the gating text:\n${text.slice(0, 300)}`);
+  let gate;
+  for (const [name, args] of ZOTERO_GATE_CALLS) {
+    const result = await client.request("tools/call", { name, arguments: args });
+    const text = textOf(result, name);
+    const found = ZOTERO_GATE_TEXTS.find((expected) => text.includes(expected));
+    if (result.isError !== true || !found) {
+      throw new Error(`${name} without a personal sign-in did not return the gating text:\n${text.slice(0, 300)}`);
+    }
+    if (gate && found !== gate) throw new Error(`${name} refused with a different gate than zotero_search: ${found}`);
+    gate = found;
   }
-  ok("zotero_search gate", gate.includes("not available") ? "Zotero not configured on this deployment" : token ? "shared access code refused" : "anonymous caller refused");
+  ok(
+    "zotero_* gate",
+    `${ZOTERO_GATE_CALLS.length} tools — ${gate.includes("not available") ? "Zotero not configured on this deployment" : token ? "shared access code refused" : "anonymous caller refused"}`,
+  );
 }
 
 /** SMOKE_LIVE=1: exercise real upstreams — meaningful only against a deployment. */

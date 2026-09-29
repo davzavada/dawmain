@@ -4,7 +4,7 @@ import { getAccess } from "@/src/files/access";
 import { sanitizeLine } from "@/src/files/dmd/normalize";
 import { errorCode, filesError, filesJson, MESSAGES, NO_STORE_HEADERS } from "@/src/files/errors";
 import { allowToolCall, sameOrigin } from "@/src/files/guards";
-import { tokenMatches } from "@/src/mcp/config";
+import { clerkConfigured, tokenMatches } from "@/src/mcp/config";
 import { proRefusal } from "@/src/mcp/pro-caller";
 import { SourceError } from "@/src/sources/shared/errors";
 import { getKeyInfo, listGroups, revokeKey } from "./client";
@@ -391,6 +391,8 @@ export async function statusFor(userId: string): Promise<ZoteroStatus> {
  * ({ state: "signed_out" }), not an error, like /api/files/summary.
  */
 export async function statusResponse(): Promise<Response> {
+  // Without Clerk nobody can be signed in: say so instead of a 503 from auth().
+  if (!clerkConfigured()) return filesJson({ state: "signed_out" } satisfies ZoteroStatus);
   let userId: string | null;
   try {
     userId = await sessionUserId();
