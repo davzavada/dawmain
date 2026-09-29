@@ -13,6 +13,7 @@ import { getNsDecision, nsBodyMissing, searchNs, withHighlight } from "@/src/sou
 import { interleave, maxTotal, pageOrExcerpt, uniqueQueries } from "@/src/sources/shared/text";
 import { buildPreviews, renderPreviews } from "./previews";
 import { failureLines, runVariants, variantFailureSchema, variantTotalsSchema } from "./variants";
+import { withZoteroLines, zoteroCaseLinks } from "./zotero";
 
 const fail = toolFailure("Nejvyšší soud");
 
@@ -117,7 +118,7 @@ export function registerNs(server: McpServer): void {
       limit,
       offset,
       read_top,
-    }) => {
+    }, ctx: unknown) => {
       try {
         const variants = uniqueQueries(query, queries);
         const keyed: Array<string | undefined> = variants.length ? variants : [undefined];
@@ -157,13 +158,16 @@ export function registerNs(server: McpServer): void {
           empty: answered.every((r) => r.empty) && !hits.length,
           hits,
         };
-        const previews = await buildPreviews(
-          page.hits
-            .slice(0, read_top)
-            .map((hit) => ({ id: hit.unid, caseNumber: hit.caseNumbers.join("; ") })),
-          ({ id }) => getNsDecision(id).then((d) => d.text),
-          variants,
-        );
+        const [previews, zotero] = await Promise.all([
+          buildPreviews(
+            page.hits
+              .slice(0, read_top)
+              .map((hit) => ({ id: hit.unid, caseNumber: hit.caseNumbers.join("; ") })),
+            ({ id }) => getNsDecision(id).then((d) => d.text),
+            variants,
+          ),
+          zoteroCaseLinks(ctx, page.hits.map((hit) => hit.caseNumbers.join("; "))),
+        ]);
         const variantTotals = multi ? values.map((value) => (value ? (value.matched ?? value.total) : null)) : undefined;
         const output = {
           total: page.total,
@@ -185,13 +189,15 @@ export function registerNs(server: McpServer): void {
         const variantLine = variantTotals
           ? `Variants: ${keyed.map((v, i) => `"${v}" ${variantTotals[i] ?? "✗"}`).join(" · ")} (merged round-robin)`
           : null;
+        const linked = withZoteroLines(lines, zotero);
         const text = page.empty
           ? ["No NS decisions matched. Broaden the query or the date range.", ...failureLines(failures)].join("\n")
           : [
               ...failureLines(failures),
               ...(variantLine ? [variantLine] : []),
               `${page.total ?? "?"} decisions${variants.length ? ", by relevance" : ""}${page.truncated ? ` (window-capped; ${page.matchedAtLeast ? "≥ " : ""}${page.matched} match in total — narrow by date, type or category to see the rest)` : ""}:`,
-              ...lines,
+              ...linked.lines,
+              ...linked.note,
               ...renderPreviews(previews, "ns_get_decision"),
             ].join("\n");
         return { content: [{ type: "text", text }], structuredContent: output };

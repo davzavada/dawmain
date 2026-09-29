@@ -5,15 +5,20 @@ import { SourceError } from "@/src/sources/shared/errors";
 import {
   __resetZoteroClientForTests,
   buildItemsPath,
+  citeItems,
   downloadPdf,
+  exportItems,
   getChildren,
   getFulltext,
   getItem,
   getItemsByKeys,
   getKeyInfo,
+  getSearch,
   libraryPrefix,
+  listCollectionItemKeys,
   listCollections,
   listGroups,
+  listSearches,
   listTags,
   parseCollection,
   parseFulltext,
@@ -21,8 +26,10 @@ import {
   parseItem,
   parseKeyInfo,
   parsePaging,
+  parseSavedSearch,
   revokeKey,
   scanCases,
+  scanNotes,
   searchItems,
 } from "@/src/zotero/client";
 import { API_ORIGIN, LIMITS, ZOTERO_UA, isAllowedStorageHost } from "@/src/zotero/config";
@@ -612,6 +619,183 @@ describe("scanCases", () => {
     const scan = await scanCases(CREDS, ME, { maxPages: 3 });
     expect(headerOf(calls[0], "if-modified-since-version")).toBeNull();
     expect(scan.scannedPages).toBe(3);
+  });
+});
+
+describe("scanCases maxAgeMs", () => {
+  it("reuses a scan Zotero confirmed within maxAgeMs without any request, and revalidates an older one", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const answer = (call: Call) =>
+      new Headers(call.init.headers).get("if-modified-since-version")
+        ? new Response(null, { status: 304 })
+        : json([], { "Total-Results": "0", "Last-Modified-Version": "7" });
+    const calls = stubFetch(answer);
+    await scanCases(CREDS, ME, { maxPages: 1 });
+    await scanCases(CREDS, ME, { maxPages: 1, maxAgeMs: 60_000 });
+    expect(calls).toHaveLength(1);
+    vi.advanceTimersByTime(61_000);
+    await scanCases(CREDS, ME, { maxPages: 1, maxAgeMs: 60_000 });
+    expect(calls).toHaveLength(2);
+    expect(headerOf(calls[1], "if-modified-since-version")).toBe("7");
+    // The 304 counts as a confirmation: the next call within the minute asks nothing.
+    await scanCases(CREDS, ME, { maxPages: 1, maxAgeMs: 60_000 });
+    expect(calls).toHaveLength(2);
+  });
+});
+
+describe("scanNotes", () => {
+  const note = (key: string, html: string, parentItem?: string) => ({
+    key,
+    version: 3,
+    library: { type: "user", id: 475425 },
+    data: { itemType: "note", note: html, parentItem, tags: [{ tag: "k posouzení" }], dateModified: "2026-09-20T10:00:00Z" },
+  });
+  const annotation = (key: string, parentItem: string) => ({
+    key,
+    version: 4,
+    library: { type: "user", id: 475425 },
+    data: {
+      itemType: "annotation",
+      parentItem,
+      annotationType: "highlight",
+      annotationText: " Škůdce se odpovědnosti zprostí… ",
+      annotationComment: "Nesouhlasím",
+      annotationColor: "#FF6666",
+      annotationPageLabel: "12",
+      annotationSortIndex: "00011|001234|00100",
+      tags: [],
+      dateModified: "2026-09-21T10:00:00Z",
+    },
+  });
+
+  it("reads notes and annotations newest first, as plain text, and caches like the case scan", async () => {
+    const calls = stubFetch((call) =>
+      new Headers(call.init.headers).get("if-modified-since-version")
+        ? new Response(null, { status: 304 })
+        : json([annotation("ANN22222", "ATT22222"), note("NTNT2222", "<h1>Odpovědnost</h1><p>Liberační <b>důvody</b> — viz § 2913.</p>", "WRK22222")], {
+            "Total-Results": "2",
+            "Last-Modified-Version": "9",
+          }),
+    );
+    const scan = await scanNotes(CREDS, ME, { maxPages: 3 });
+    const u = new URL(calls[0].url);
+    expect(u.searchParams.get("itemType")).toBe("note || annotation");
+    expect(u.searchParams.get("sort")).toBe("dateModified");
+    expect(u.searchParams.get("direction")).toBe("desc");
+    expect(scan.total).toBe(2);
+    expect(scan.items[0]).toEqual({
+      key: "ANN22222",
+      itemType: "annotation",
+      parentItem: "ATT22222",
+      text: "Škůdce se odpovědnosti zprostí…",
+      comment: "Nesouhlasím",
+      color: "#ff6666",
+      annotationType: "highlight",
+      pageLabel: "12",
+      sortIndex: "00011|001234|00100",
+      tags: [],
+      dateModified: "2026-09-21T10:00:00Z",
+      version: 4,
+    });
+    expect(scan.items[1]).toMatchObject({ key: "NTNT2222", itemType: "note", parentItem: "WRK22222", comment: "", color: "", tags: ["k posouzení"] });
+    expect(scan.items[1].text).toBe("Odpovědnost\nLiberační důvody — viz § 2913.");
+    await scanNotes(CREDS, ME, { maxPages: 3 });
+    expect(calls).toHaveLength(2);
+    expect(headerOf(calls[1], "if-modified-since-version")).toBe("9");
+  });
+
+  it("cuts a long note at LIMITS.noteScanChars", async () => {
+    stubFetch(() => json([note("NTNT2222", `<p>${"slovo ".repeat(5_000)}</p>`)], { "Total-Results": "1", "Last-Modified-Version": "1" }));
+    const scan = await scanNotes(CREDS, ME, { maxPages: 1 });
+    expect(scan.items[0].text.length).toBe(LIMITS.noteScanChars);
+  });
+});
+
+describe("collections, citations, exports, saved searches", () => {
+  it("listCollectionItemKeys reads format=keys without a page limit and keeps only valid keys", async () => {
+    const calls = stubFetch(() => new Response("WRK22222\nNTNT2222\n\nbad key\n", { status: 200, headers: { "content-type": "text/plain" } }));
+    expect(await listCollectionItemKeys(CREDS, ME, "CLCL2222")).toEqual(["WRK22222", "NTNT2222"]);
+    const u = new URL(calls[0].url);
+    expect(u.pathname).toBe("/users/475425/collections/CLCL2222/items");
+    expect(u.searchParams.get("format")).toBe("keys");
+    expect(u.searchParams.get("limit")).toBeNull();
+    stubFetch(() => new Response("Not found", { status: 404 }));
+    expect((await rejection(listCollectionItemKeys(CREDS, ME, "CLCL2222"))).kind).toBe("NOT_FOUND");
+    expect((await rejection(listCollectionItemKeys(CREDS, ME, "../x"))).kind).toBe("INPUT_INVALID");
+  });
+
+  it("citeItems asks for citation and bib in the style and locale, and keeps the order asked", async () => {
+    const entry = (key: string) => ({
+      key,
+      version: 1,
+      library: { type: "user", id: 475425 },
+      data: { itemType: "book", title: `Kniha ${key}` },
+      citation: `<span>${key} cit</span>`,
+      bib: `<div class="csl-bib-body"><div class="csl-entry">${key} bib</div></div>`,
+    });
+    const calls = stubFetch(() => json([entry("BKBK3333"), entry("BKBK2222")]));
+    const cited = await citeItems(CREDS, ME, ["BKBK2222", "BKBK3333", "BKBK4444"], { style: "iso690-full-note-cs", locale: "cs-CZ" });
+    expect(cited.map((c) => c.item.key)).toEqual(["BKBK2222", "BKBK3333"]);
+    expect(cited[0].citation).toBe("<span>BKBK2222 cit</span>");
+    expect(cited[0].bib).toContain("BKBK2222 bib");
+    const u = new URL(calls[0].url);
+    expect(u.searchParams.get("itemKey")).toBe("BKBK2222,BKBK3333,BKBK4444");
+    expect(u.searchParams.get("include")).toBe("data,citation,bib");
+    expect(u.searchParams.get("style")).toBe("iso690-full-note-cs");
+    expect(u.searchParams.get("locale")).toBe("cs-CZ");
+    // Style and locale are validated before any request.
+    const before = calls.length;
+    expect((await rejection(citeItems(CREDS, ME, ["BKBK2222"], { style: "../evil", locale: "cs-CZ" }))).kind).toBe("INPUT_INVALID");
+    expect((await rejection(citeItems(CREDS, ME, ["BKBK2222"], { style: "apa", locale: "cs_CZ&x=1" }))).kind).toBe("INPUT_INVALID");
+    expect(calls.length).toBe(before);
+    // An unknown style: Zotero's 400 becomes INPUT_INVALID.
+    stubFetch(() => new Response("Invalid style", { status: 400 }));
+    expect((await rejection(citeItems(CREDS, ME, ["BKBK2222"], { style: "no-such-style", locale: "cs-CZ" }))).kind).toBe("INPUT_INVALID");
+  });
+
+  it("exportItems returns Zotero's export text and refuses an unknown format", async () => {
+    const calls = stubFetch(() => new Response("TY  - BOOK\nTI  - Kniha\nER  - \n", { status: 200, headers: { "content-type": "application/x-research-info-systems" } }));
+    expect(await exportItems(CREDS, GROUP, ["BKBK2222"], "ris")).toContain("TY  - BOOK");
+    const u = new URL(calls[0].url);
+    expect(u.pathname).toBe("/groups/111111/items");
+    expect(u.searchParams.get("format")).toBe("ris");
+    expect((await rejection(exportItems(CREDS, GROUP, ["BKBK2222"], "keys" as never))).kind).toBe("INPUT_INVALID");
+    expect((await rejection(exportItems(CREDS, GROUP, [], "ris"))).kind).toBe("INPUT_INVALID");
+  });
+
+  it("parses saved searches, lists them (cached) and reads one", async () => {
+    const raw = {
+      key: "SRCH2222",
+      version: 5,
+      data: {
+        key: "SRCH2222",
+        name: " Náhrada škody ",
+        conditions: [
+          { condition: "tag", operator: "is", value: "škoda" },
+          { condition: "joinMode", operator: "any", value: "all" },
+          { condition: "", operator: "is", value: "x" },
+          "junk",
+        ],
+      },
+    };
+    expect(parseSavedSearch(raw)).toEqual({
+      key: "SRCH2222",
+      name: "Náhrada škody",
+      conditions: [
+        { condition: "tag", operator: "is", value: "škoda" },
+        { condition: "joinMode", operator: "any", value: "all" },
+      ],
+    });
+    expect(() => parseSavedSearch({ data: {} })).toThrow(SourceError);
+    const calls = stubFetch(() => json([raw]));
+    expect((await listSearches(CREDS, ME)).map((x) => x.key)).toEqual(["SRCH2222"]);
+    await listSearches(CREDS, ME);
+    expect(calls).toHaveLength(1);
+    expect(new URL(calls[0].url).pathname).toBe("/users/475425/searches");
+    stubFetch(() => json(raw));
+    expect((await getSearch(CREDS, ME, "SRCH2222"))?.name).toBe("Náhrada škody");
+    stubFetch(() => new Response("Not found", { status: 404 }));
+    expect(await getSearch(CREDS, ME, "SRCH2222")).toBeNull();
   });
 });
 

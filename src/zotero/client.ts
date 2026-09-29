@@ -3,13 +3,15 @@ import { createHash } from "node:crypto";
 import { TtlCache } from "@/src/sources/shared/cache";
 import { SourceError } from "@/src/sources/shared/errors";
 import { htmlToText } from "@/src/sources/shared/html";
-import { API_ORIGIN, CACHE_TTL_MS, ITEM_KEY_RE, LIMITS, SOURCE, ZOTERO_UA, isAllowedStorageHost } from "./config";
+import { API_ORIGIN, CACHE_TTL_MS, EXPORT_FORMATS, ITEM_KEY_RE, LIMITS, LOCALE_RE, SOURCE, STYLE_RE, ZOTERO_UA, isAllowedStorageHost, type ExportFormat } from "./config";
 import { ZoteroBodyTooLargeError, ZoteroKeyInvalidError, readBody, zoteroFetch, type ZoteroResponse } from "./http";
 import type {
   Fulltext,
   KeyInfo,
   Library,
   Paging,
+  SavedSearch,
+  SavedSearchCondition,
   ZoteroCollection,
   ZoteroCreator,
   ZoteroCreds,
@@ -24,8 +26,8 @@ import type {
  * the raw objects: a broken envelope (no key, no data, not an array) is
  * PARSE_DRIFT, a missing optional field is simply absent.
  *
- * Caches (per instance, TtlCache): groups, collections and the case scan —
- * never searches. Every cache key carries the Zotero user id AND a hash of
+ * Caches (per instance, TtlCache): groups, collections, saved searches and
+ * the two scans (case items, notes and annotations) — never searches. Every cache key carries the Zotero user id AND a hash of
  * the key, because two Dawmain accounts can connect the same Zotero user
  * with keys of different reach.
  */
@@ -71,13 +73,50 @@ export interface CaseScanEntry {
   version: number;
 }
 
-export interface CaseScan {
-  items: CaseScanEntry[];
+/** The newest items of some types, newest first (a scan: Zotero cannot search the fields they are matched on). */
+export interface ItemScan<T> {
+  items: T[];
   /** Pages of 100 read (or reused). */
   scannedPages: number;
-  /** Total-Results: how many case items the library has. */
+  /** Total-Results: how many items of those types the library has. */
   total: number | null;
   libraryVersion: number | null;
+}
+
+export type CaseScan = ItemScan<CaseScanEntry>;
+
+/**
+ * A note or an annotation as zotero_notes matches it: Zotero's q reads only
+ * a note's first line (its title) and never an annotation, so their text is
+ * searched here. `text` is plain text, cut at LIMITS.noteScanChars.
+ */
+export interface NoteEntry {
+  key: string;
+  itemType: "note" | "annotation";
+  /** A child note's work; an annotation's attachment; null for a standalone note. */
+  parentItem: string | null;
+  /** The note as plain text, or the annotation's highlighted text. */
+  text: string;
+  /** The annotation's comment ("" for a note). */
+  comment: string;
+  /** "#ffd400" as Zotero stores it ("" for a note). */
+  color: string;
+  /** highlight, underline, note, text, image, ink ("" for a note). */
+  annotationType: string;
+  pageLabel: string;
+  sortIndex: string;
+  tags: string[];
+  dateModified: string;
+  version: number;
+}
+
+export type NotesScan = ItemScan<NoteEntry>;
+
+/** One item formatted by Zotero's citation server (HTML, as Zotero sends it). */
+export interface CitedItem {
+  item: ZoteroItem;
+  citation: string | null;
+  bib: string | null;
 }
 
 export type PdfUnavailable = "not-pdf" | "linked" | "webdav-or-missing" | "compressed" | "too-large" | "storage-host";
@@ -92,6 +131,9 @@ const MAX_CHILD_PAGES = 5;
 const NOTE_TITLE_CHARS = 120;
 /** Notes are HTML; the title needs only its start, not a parse of a 100 kB note. */
 const NOTE_TITLE_HTML = 4_000;
+/** The notes scan parses this much of a note's HTML (its text is then cut at LIMITS.noteScanChars). */
+const NOTE_SCAN_HTML = 60_000;
+const MAX_SEARCH_PAGES = 5;
 const TITLE_FIELDS = ["title", "caseName", "nameOfAct", "subject"] as const;
 const DATE_FIELDS = ["date", "dateDecided", "dateEnacted"] as const;
 
@@ -244,6 +286,24 @@ export function parseCollection(json: unknown): ZoteroCollection {
   };
 }
 
+/** One entry of /searches: a condition without a name or an operator is dropped, a missing value is "". */
+export function parseSavedSearch(json: unknown): SavedSearch {
+  const o = envelope(json, "a saved search");
+  const data = isObject(o.data) ? o.data : {};
+  const key = str(o.key) ?? str(data.key);
+  if (!key || !ITEM_KEY_RE.test(key)) throw drift("a saved search without a valid key");
+  const conditions: SavedSearchCondition[] = Array.isArray(data.conditions)
+    ? data.conditions.flatMap((c) => {
+        if (!isObject(c)) return [];
+        const condition = str(c.condition)?.trim();
+        const operator = str(c.operator)?.trim();
+        if (!condition || !operator) return [];
+        return [{ condition, operator, value: str(c.value) ?? (typeof c.value === "number" ? String(c.value) : "") }];
+      })
+    : [];
+  return { key, name: str(data.name)?.trim() ?? "", conditions };
+}
+
 /**
  * One item (a work, an attachment, a note, an annotation). `library` is
  * taken from the object; `fallback` (the library that was queried) covers
@@ -373,14 +433,22 @@ export async function revokeKey(creds: ZoteroCreds, io: IoOptions = {}): Promise
   }
 }
 
+/** A cached scan: how far it got, and when Zotero last confirmed it (read or answered 304). */
+type ScanState<T> = ItemScan<T> & { complete: boolean; at: number };
+
 let groupsCache = new TtlCache<ZoteroGroup[]>(CACHE_TTL_MS.groups, 200);
 let collectionsCache = new TtlCache<ZoteroCollection[]>(CACHE_TTL_MS.collections, 400);
-let scanCache = new TtlCache<CaseScan & { complete: boolean }>(CACHE_TTL_MS.caseScan, 100);
+let searchesCache = new TtlCache<SavedSearch[]>(CACHE_TTL_MS.searches, 200);
+let scanCache = new TtlCache<ScanState<CaseScanEntry>>(CACHE_TTL_MS.caseScan, 100);
+/** Note texts are bigger than case entries: fewer libraries kept. */
+let notesCache = new TtlCache<ScanState<NoteEntry>>(CACHE_TTL_MS.notesScan, 30);
 
 export function __resetZoteroClientForTests(): void {
   groupsCache = new TtlCache<ZoteroGroup[]>(CACHE_TTL_MS.groups, 200);
   collectionsCache = new TtlCache<ZoteroCollection[]>(CACHE_TTL_MS.collections, 400);
-  scanCache = new TtlCache<CaseScan & { complete: boolean }>(CACHE_TTL_MS.caseScan, 100);
+  searchesCache = new TtlCache<SavedSearch[]>(CACHE_TTL_MS.searches, 200);
+  scanCache = new TtlCache<ScanState<CaseScanEntry>>(CACHE_TTL_MS.caseScan, 100);
+  notesCache = new TtlCache<ScanState<NoteEntry>>(CACHE_TTL_MS.notesScan, 30);
 }
 
 /**
@@ -503,49 +571,91 @@ export async function listTags(
  * docket-number lookup (Zotero's q never searches docketNumber). Cached;
  * a cached scan is revalidated with If-Modified-Since-Version on every
  * call, so an unchanged library costs one empty 304 and a changed one is
- * rescanned (a case added a minute ago is found).
+ * rescanned (a case added a minute ago is found). `maxAgeMs` reuses a scan
+ * Zotero confirmed that recently without asking again (the court tools'
+ * case links, which run on every search).
  */
-export async function scanCases(creds: ZoteroCreds, lib: Library, opts: { maxPages: number }, io: IoOptions = {}): Promise<CaseScan> {
-  checkedLibrary(creds, lib);
-  const maxPages = clampInt(opts.maxPages, 1, LIMITS.scanPagesTotal);
-  const key = cacheKey(creds, lib);
-  const path = (start: number) =>
-    buildItemsPath(lib, { itemTypes: ["case"], sort: "dateModified", direction: "desc", limit: LIMITS.pageSize, start });
+export async function scanCases(
+  creds: ZoteroCreds,
+  lib: Library,
+  opts: { maxPages: number; maxAgeMs?: number },
+  io: IoOptions = {},
+): Promise<CaseScan> {
+  return scanNewest(scanCache, creds, lib, ["case"], clampInt(opts.maxPages, 1, LIMITS.scanPagesTotal), caseEntry, "scanning case items", opts.maxAgeMs, io);
+}
 
-  const cached = scanCache.get(key);
+/**
+ * The newest notes and annotations of a library (dateModified, newest
+ * first), `maxPages` pages of 100, as plain text for zotero_notes — cached
+ * and revalidated like scanCases. A key without access to notes gets the
+ * annotations only (Zotero leaves the notes out).
+ */
+export async function scanNotes(creds: ZoteroCreds, lib: Library, opts: { maxPages: number }, io: IoOptions = {}): Promise<NotesScan> {
+  return scanNewest(
+    notesCache,
+    creds,
+    lib,
+    ["note", "annotation"],
+    clampInt(opts.maxPages, 1, LIMITS.notesScanPagesTotal),
+    noteEntry,
+    "scanning notes and annotations",
+    undefined,
+    io,
+  );
+}
+
+async function scanNewest<T>(
+  cache: TtlCache<ScanState<T>>,
+  creds: ZoteroCreds,
+  lib: Library,
+  itemTypes: string[],
+  maxPages: number,
+  toEntry: (item: ZoteroItem) => T,
+  doing: string,
+  maxAgeMs: number | undefined,
+  io: IoOptions,
+): Promise<ItemScan<T>> {
+  checkedLibrary(creds, lib);
+  const key = cacheKey(creds, lib);
+  const path = (start: number) => buildItemsPath(lib, { itemTypes, sort: "dateModified", direction: "desc", limit: LIMITS.pageSize, start });
+
+  const cached = cache.get(key);
+  const covers = cached && (cached.complete || cached.scannedPages >= maxPages);
+  if (cached && covers && maxAgeMs !== undefined && Date.now() - cached.at < maxAgeMs) return scanView(cached, maxPages);
   let first: ZoteroResponse;
-  if (cached && cached.libraryVersion !== null && (cached.complete || cached.scannedPages >= maxPages)) {
+  if (cached && covers && cached.libraryVersion !== null) {
     first = await zoteroFetch(creds, path(0), { headers: { "If-Modified-Since-Version": String(cached.libraryVersion) }, signal: io.signal });
     if (first.status === 304) {
-      scanCache.set(key, cached);
+      cache.set(key, { ...cached, at: Date.now() });
       return scanView(cached, maxPages);
     }
   } else {
     first = await zoteroFetch(creds, path(0), io);
   }
 
-  const entries: CaseScanEntry[] = [];
+  const entries: T[] = [];
   const firstPaging = parsePaging(first.headers);
   let res = first;
   let paging = firstPaging;
   let pages = 0;
   for (;;) {
-    if (res.status !== 200) throw unexpected(res, "scanning case items");
+    if (res.status !== 200) throw unexpected(res, doing);
     pages++;
-    for (const raw of array(res.json(), "an item list")) entries.push(caseEntry(parseItem(raw, lib)));
+    for (const raw of array(res.json(), "an item list")) entries.push(toEntry(parseItem(raw, lib)));
     if (paging.nextStart === null || pages >= maxPages) break;
     res = await zoteroFetch(creds, path(paging.nextStart), io);
     paging = parsePaging(res.headers);
   }
-  const scan = {
+  const scan: ScanState<T> = {
     items: entries,
     scannedPages: pages,
     total: firstPaging.total,
     // Page 1's version: if the library changed mid-scan, the next revalidation sees it as changed and rescans.
     libraryVersion: firstPaging.libraryVersion,
     complete: paging.nextStart === null,
+    at: Date.now(),
   };
-  scanCache.set(key, scan);
+  cache.set(key, scan);
   return scanView(scan, maxPages);
 }
 
@@ -561,7 +671,27 @@ function caseEntry(item: ZoteroItem): CaseScanEntry {
   };
 }
 
-function scanView(scan: CaseScan & { complete: boolean }, maxPages: number): CaseScan {
+function noteEntry(item: ZoteroItem): NoteEntry {
+  const d = item.data;
+  const note = item.itemType === "note";
+  const text = note ? htmlToText((str(d.note) ?? "").slice(0, NOTE_SCAN_HTML)) : (str(d.annotationText) ?? "").trim();
+  return {
+    key: item.key,
+    itemType: note ? "note" : "annotation",
+    parentItem: item.parentItem,
+    text: text.slice(0, LIMITS.noteScanChars),
+    comment: note ? "" : (str(d.annotationComment) ?? "").trim().slice(0, LIMITS.noteScanChars),
+    color: note ? "" : (str(d.annotationColor)?.trim().toLowerCase() ?? ""),
+    annotationType: note ? "" : (str(d.annotationType)?.trim() ?? ""),
+    pageLabel: note ? "" : (str(d.annotationPageLabel)?.trim() ?? ""),
+    sortIndex: note ? "" : (str(d.annotationSortIndex) ?? ""),
+    tags: item.tags,
+    dateModified: str(d.dateModified) ?? "",
+    version: item.version,
+  };
+}
+
+function scanView<T>(scan: ScanState<T>, maxPages: number): ItemScan<T> {
   const pages = Math.min(scan.scannedPages, maxPages);
   return {
     items: pages < scan.scannedPages ? scan.items.slice(0, pages * LIMITS.pageSize) : scan.items,
@@ -569,6 +699,87 @@ function scanView(scan: CaseScan & { complete: boolean }, maxPages: number): Cas
     total: scan.total,
     libraryVersion: scan.libraryVersion,
   };
+}
+
+/**
+ * Keys of everything in a collection: its items and their child notes and
+ * attachments (Zotero includes those one level down; annotations, which hang
+ * on an attachment, are not included). One request: format=keys has no page
+ * limit.
+ */
+export async function listCollectionItemKeys(creds: ZoteroCreds, lib: Library, collection: string, io: IoOptions = {}): Promise<string[]> {
+  const path = `${libraryPrefix(checkedLibrary(creds, lib))}/collections/${objectKey(collection, "collection")}/items?format=keys`;
+  const res = await zoteroFetch(creds, path, io);
+  if (res.status === 404) {
+    throw new SourceError(SOURCE, "NOT_FOUND", `${SOURCE}: the collection was not found.`, "List the collections of the library, then use one of those keys.");
+  }
+  if (res.status !== 200) throw unexpected(res, "listing a collection's items");
+  return res
+    .text()
+    .split("\n")
+    .map((k) => k.trim())
+    .filter((k) => ITEM_KEY_RE.test(k));
+}
+
+/**
+ * Items formatted by Zotero's citation server (CSL): each item's in-text
+ * citation (for a note style: the footnote) and bibliography entry, as
+ * HTML. In the order asked; keys the library does not have are left out.
+ * A style Zotero does not know answers 400 (INPUT_INVALID).
+ */
+export async function citeItems(
+  creds: ZoteroCreds,
+  lib: Library,
+  keys: string[],
+  opts: { style: string; locale: string },
+  io: IoOptions = {},
+): Promise<CitedItem[]> {
+  if (!STYLE_RE.test(opts.style) || opts.style.length > 100) throw invalid(`"${opts.style.slice(0, 40)}" is not a citation style id (like iso690-full-note-cs)`);
+  if (!LOCALE_RE.test(opts.locale)) throw invalid(`"${opts.locale.slice(0, 20)}" is not a locale (like cs-CZ)`);
+  const unique = citeKeys(keys);
+  const qs = new URLSearchParams({ itemKey: unique.join(","), include: "data,citation,bib", style: opts.style, locale: opts.locale, limit: String(LIMITS.maxItemKeys) });
+  const res = await zoteroFetch(creds, `${libraryPrefix(checkedLibrary(creds, lib))}/items?${qs.toString()}`, io);
+  if (res.status !== 200) throw unexpected(res, "formatting citations");
+  const byKey = new Map<string, CitedItem>();
+  for (const raw of array(res.json(), "an item list")) {
+    const item = parseItem(raw, lib);
+    const o = raw as Record<string, unknown>;
+    byKey.set(item.key, { item, citation: str(o.citation), bib: str(o.bib) });
+  }
+  return unique.flatMap((k) => byKey.get(k) ?? []);
+}
+
+/** Items in one of Zotero's export formats (RIS, BibTeX, BibLaTeX, CSL JSON), as the text Zotero sends. */
+export async function exportItems(creds: ZoteroCreds, lib: Library, keys: string[], format: ExportFormat, io: IoOptions = {}): Promise<string> {
+  if (!(EXPORT_FORMATS as readonly string[]).includes(format)) throw invalid(`unknown export format "${String(format).slice(0, 20)}"`);
+  const qs = new URLSearchParams({ itemKey: citeKeys(keys).join(","), format, limit: String(LIMITS.maxItemKeys) });
+  const res = await zoteroFetch(creds, `${libraryPrefix(checkedLibrary(creds, lib))}/items?${qs.toString()}`, io);
+  if (res.status !== 200) throw unexpected(res, "exporting items");
+  return res.text();
+}
+
+function citeKeys(keys: string[]): string[] {
+  const unique = [...new Set(keys.map((k) => objectKey(k, "item")))];
+  if (!unique.length) throw invalid("no item key");
+  if (unique.length > LIMITS.maxItemKeys) throw invalid(`at most ${LIMITS.maxItemKeys} item keys per request`);
+  return unique;
+}
+
+/** The saved searches of a library (all pages; cached). */
+export async function listSearches(creds: ZoteroCreds, lib: Library, io: IoOptions = {}): Promise<SavedSearch[]> {
+  const prefix = libraryPrefix(checkedLibrary(creds, lib));
+  return searchesCache.through(cacheKey(creds, lib), async () => {
+    const { items } = await allPages(creds, (start) => `${prefix}/searches?${pageQuery(start)}`, parseSavedSearch, MAX_SEARCH_PAGES, "throw", io);
+    return items;
+  });
+}
+
+/** One saved search, or null when the library has no such key. */
+export async function getSearch(creds: ZoteroCreds, lib: Library, key: string, io: IoOptions = {}): Promise<SavedSearch | null> {
+  const res = await zoteroFetch(creds, `${libraryPrefix(checkedLibrary(creds, lib))}/searches/${objectKey(key, "saved search")}`, io);
+  if (res.status === 404) return null;
+  if (res.status !== 200) throw unexpected(res, "reading a saved search");
+  return parseSavedSearch(res.json());
 }
 
 /**

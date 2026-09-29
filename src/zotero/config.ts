@@ -73,6 +73,20 @@ export const LIMITS = Object.freeze({
   /** Docket-number scan over itemType=case. */
   scanPagesPerLibrary: 5,
   scanPagesTotal: 10,
+  /** A scan younger than this is reused without asking Zotero whether the library changed (the case links of the court tools). */
+  scanFreshMs: 60_000,
+  /** Notes-and-annotations scan (zotero_notes): Zotero's q never reads a note's body or an annotation. */
+  notesScanPagesPerLibrary: 10,
+  notesScanPagesTotal: 20,
+  /** A note is searched in its first this many characters. */
+  noteScanChars: 10_000,
+  /** Collections one call visits with include_subcollections (the named one included). */
+  maxSubcollections: 12,
+  /** zotero_cite: items per call (Zotero's itemKey cap). */
+  maxCiteItems: 50,
+  /** Case links in the court tools: lookups per user per hour (own bucket), and how long a lookup may delay an answer. */
+  linkLookupsPerHour: 200,
+  linkBudgetMs: 6_000,
   /** Libraries one search visits at most. */
   maxLibrariesPerSearch: 6,
   /** Tool calls per user per hour (own bucket, not the files_* one). */
@@ -88,6 +102,8 @@ export const CACHE_TTL_MS = Object.freeze({
   groups: 10 * 60 * 1000,
   text: 10 * 60 * 1000,
   caseScan: 10 * 60 * 1000,
+  notesScan: 10 * 60 * 1000,
+  searches: 10 * 60 * 1000,
 });
 
 /**
@@ -128,6 +144,14 @@ export function zoteroConfigured(): boolean {
 
 /** Zotero object keys: 8 characters from this alphabet (write_requests docs). */
 export const ITEM_KEY_RE = /^[23456789ABCDEFGHIJKLMNPQRSTUVWXYZ]{8}$/;
+
+/** zotero_cite's export formats (Zotero's own export formats). */
+export const EXPORT_FORMATS = ["ris", "bibtex", "biblatex", "csljson"] as const;
+export type ExportFormat = (typeof EXPORT_FORMATS)[number];
+
+/** A citation style id from zotero.org/styles ("iso690-full-note-cs") and a CSL locale ("cs-CZ"). */
+export const STYLE_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+export const LOCALE_RE = /^[a-z]{2,3}(?:-[A-Z]{2})?$/;
 
 /** Zotero API keys are 24 alphanumerics today; the range leaves room without admitting anything else. */
 export const ZOTERO_KEY_RE = /^[A-Za-z0-9]{8,64}$/;
