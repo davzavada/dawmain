@@ -234,7 +234,7 @@ export async function zoteroGate(ctx: unknown): Promise<ZoteroGate> {
   }
   let caller: ProCaller;
   try {
-    caller = await personalProCaller(ctx);
+    caller = await personalProCaller(ctx, "zotero");
   } catch (error) {
     return { ok: false, result: accessFailure(error, "access") };
   }

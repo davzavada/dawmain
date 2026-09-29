@@ -321,18 +321,27 @@ describe("proRefusal — the website and the MCP gate agree on Pro", () => {
     const lapsedTeam = buildAccess({ id: USER, publicMetadata: {} }, [
       { role: "org:member", organization: { id: "org_team", name: "Tým", slug: "tym", publicMetadata: {} } },
     ]);
+    // Clerk's feature switches (publicMetadata.features): Zotero follows its own, not Vlastní zdroje's.
+    const zoteroOff = buildAccess({ id: USER, publicMetadata: { pro: true, features: { zotero: false } } }, []);
+    const teamZoteroOff = buildAccess({ id: USER, publicMetadata: {} }, [
+      { role: "org:member", organization: { id: "org_team", name: "Tým", slug: "tym", publicMetadata: { pro: true, features: { zotero: false } } } },
+    ]);
+    const filesOff = buildAccess({ id: USER, publicMetadata: { pro: true, features: { files: false } } }, []);
     const cases: Array<[Access, ReturnType<typeof proRefusal>]> = [
       [ACCESS[USER], null],
       [team, null],
       [lapsedTeam, "no-pro"],
+      [zoteroOff, "no-pro"],
+      [teamZoteroOff, "no-pro"],
+      [filesOff, null],
       [ACCESS[NO_PRO], "no-pro"],
       [ACCESS[BANNED], "banned"],
     ];
     for (const [access, expected] of cases) {
-      expect(proRefusal(access)).toBe(expected);
+      expect(proRefusal(access, "zotero")).toBe(expected);
       __setAccessLoaderForTests(async () => access);
       const ctx = { http: { authInfo: { token: "t", clientId: "client_abc", scopes: [], extra: { userId: access.userId } } } };
-      const mcp = await personalProCaller(ctx);
+      const mcp = await personalProCaller(ctx, "zotero");
       expect(mcp.ok ? null : mcp.reason).toBe(expected);
     }
   });

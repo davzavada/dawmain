@@ -458,13 +458,39 @@ přepsat v Clerku (níže).
    boolean `true`. Vlastní kvóta: `{ "pro": true, "filesQuota": { "pages": 5000 } }`.
    Projeví se do minuty (přístup se cachuje 60 s). Členové týmu s Pro nahrávat
    smějí všichni; správce (`org:admin`) upravuje a maže všechno, člen jen své.
-4. **Odebrání Pro**: smaž `pro`. Denní cron to zaznamená (`pro_revoked_at`);
+4. **Vypnutí jednotlivých funkcí** (tamtéž, public metadata uživatele nebo
+   týmu): Pro zapíná všechno, jednotlivou funkci vypne `false` pod
+   `features`:
+
+   ```json
+   { "pro": true, "features": { "zotero": false } }
+   ```
+
+   Funkce: `files` (Vlastní zdroje — hledání, čtení a nahrávání, `files_*`)
+   a `zotero` (`zotero_*` a připojení Zotera na webu). Vypíná jen přesně
+   boolean `false`; chybějící klíč, `true` nebo cokoli jiného funkci nechá
+   zapnutou a bez Pro ji žádný přepínač nezapne. **U týmu** vypne funkci
+   v tom týmu (Zotero člen i tak má, dává-li mu ho vlastní Pro nebo jiný
+   tým); **u uživatele** mu ji vypne všude, i v jeho týmech. Projeví se do
+   minuty (přístup se cachuje 60 s); seznam nástrojů v klientu zůstane,
+   nástroje odpoví jako bez Pro a asistent je v konverzaci dál nevolá.
+   - `files: false` knihovnu jen **pozastaví**: je dál vidět, dá se z ní
+     mazat i exportovat text, ale asistent v ní nehledá a nahrávat nejde.
+     K výmazu ji denní kontrola neoznačí — ta hledí jen na `pro`
+     (`libraryOwnerState`), vypnutí funkce nikdy nic nesmaže.
+   - `zotero: false` uložené připojení nechá být: web ukáže „Jen v režimu
+     Pro“, `zotero_*` odmítnou a po opětovném zapnutí vše funguje bez
+     nového připojení (odpojit se jde i mezitím).
+
+   Logika je v `buildAccess` (`src/files/access.ts`, `featureOff`), brána
+   nástrojů v `personalProCaller(ctx, feature)` (`src/mcp/pro-caller.ts`).
+5. **Odebrání Pro**: smaž `pro`. Denní cron to zaznamená (`pro_revoked_at`);
    asistent v knihovně přestane hledat, uživatel ji 90 dní vidí, může mazat
    a stahovat text svých dokumentů („Exportovat text“), pak se smaže. Vrátí-li
    se Pro dřív, než výmaz proběhne, cron označení zruší (nahrání do knihovny
    ji oživí hned). **Před smazáním mu napiš** (slibují to zásady ochrany
    osobních údajů); knihovny s odebraným Pro ukazuje stránka provozu.
-5. **Webhook**: *Configure → Webhooks → Add endpoint*
+6. **Webhook**: *Configure → Webhooks → Add endpoint*
    `https://<doména>/api/webhooks/clerk`, události `user.deleted`,
    `organization.deleted`, `organizationMembership.deleted`; *Signing
    secret* → `CLERK_WEBHOOK_SIGNING_SECRET` (Production) → Redeploy. Smazání

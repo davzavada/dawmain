@@ -39,7 +39,7 @@ const PERSONAL: LibraryAccess = {
   canManageAll: true,
   quotaPages: 3000,
 };
-const ACCESS: Access = { userId: USER, banned: false, libraries: [PERSONAL], all: [PERSONAL] };
+const ACCESS: Access = { userId: USER, banned: false, libraries: [PERSONAL], all: [PERSONAL], zotero: true };
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 

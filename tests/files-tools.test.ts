@@ -86,8 +86,8 @@ const PERSONAL_LIB: LibraryAccess = {
 const TEAM_LIB: LibraryAccess = { ...PERSONAL_LIB, id: TEAM, kind: "org", name: "Tým AK", slug: "tym-ak", role: "org:member", canManageAll: false, quotaPages: 10_000 };
 const EMPTY_LIB: LibraryAccess = { ...TEAM_LIB, id: EMPTY, name: "Prázdný tým", slug: "prazdny" };
 
-const PRO_ACCESS: Access = { userId: USER, banned: false, libraries: [PERSONAL_LIB, TEAM_LIB, EMPTY_LIB], all: [PERSONAL_LIB, TEAM_LIB, EMPTY_LIB] };
-const NON_PRO_ACCESS: Access = { userId: USER, banned: false, libraries: [], all: [{ ...PERSONAL_LIB, pro: false, canUpload: false }] };
+const PRO_ACCESS: Access = { userId: USER, banned: false, libraries: [PERSONAL_LIB, TEAM_LIB, EMPTY_LIB], all: [PERSONAL_LIB, TEAM_LIB, EMPTY_LIB], zotero: true };
+const NON_PRO_ACCESS: Access = { userId: USER, banned: false, libraries: [], all: [{ ...PERSONAL_LIB, pro: false, canUpload: false }], zotero: false };
 
 const COMMENTARY = `[s. 1245]
 
