@@ -10,7 +10,12 @@ export interface LibraryAccess {
   name: string;
   slug: string | null;
   role: "owner" | "org:admin" | "org:member";
-  /** Pro granted (user.publicMetadata.pro / organization.publicMetadata.pro === true). */
+  /**
+   * Vlastní zdroje enabled here: Pro granted (user.publicMetadata.pro /
+   * organization.publicMetadata.pro === true) and the feature not switched
+   * off (`publicMetadata.features.files === false` on the library's owner
+   * or on the user) — see src/files/access.ts.
+   */
   pro: boolean;
   /** Pro and allowed to upload (every member of a Pro team; the owner of a Pro personal library). */
   canUpload: boolean;
@@ -27,4 +32,10 @@ export interface Access {
   libraries: LibraryAccess[];
   /** Every library the user owns or belongs to, Pro or not — list, delete, export. */
   all: LibraryAccess[];
+  /**
+   * May use Zotero (zotero_*, connecting a library): Pro on the user or on
+   * one of their teams, with `features.zotero` not switched off there, and
+   * not switched off on the user.
+   */
+  zotero: boolean;
 }

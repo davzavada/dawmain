@@ -26,6 +26,7 @@ import {
   canDeleteDocument,
   canEditDocument,
   emptyAccess,
+  featureOff,
   getAccess,
   invalidateAccess,
   libraryOwnerState,
@@ -135,6 +136,65 @@ describe("buildAccess", () => {
   });
 });
 
+describe("feature switches (publicMetadata.features)", () => {
+  const ids = (a: Access) => a.libraries.map((l) => l.id);
+
+  it("only the boolean false switches off; anything else leaves the feature on", () => {
+    expect(featureOff({ features: { zotero: false } }, "zotero")).toBe(true);
+    expect(featureOff({ features: { zotero: false } }, "files")).toBe(false);
+    for (const meta of [null, undefined, {}, { features: null }, { features: "zotero" }, { features: { zotero: "false" } }, { features: { zotero: 0 } }, { features: { zotero: true } }]) {
+      expect(featureOff(meta, "zotero"), JSON.stringify(meta)).toBe(false);
+    }
+  });
+
+  it("Pro switches everything on; without Pro no switch turns anything on", () => {
+    expect(buildAccess({ id: "user_a", publicMetadata: { pro: true } }, [])).toMatchObject({ zotero: true, libraries: [{ id: "user_a" }] });
+    const free = buildAccess({ id: "user_a", publicMetadata: { features: { files: true, zotero: true } } }, [membership("org_b", { meta: { features: { zotero: true } } })]);
+    expect(free).toMatchObject({ zotero: false, libraries: [] });
+    expect(emptyAccess("user_a").zotero).toBe(false);
+  });
+
+  it("a user's switch: Zotero off keeps Vlastní zdroje, files off keeps Zotero", () => {
+    const noZotero = buildAccess({ id: "user_a", publicMetadata: { pro: true, features: { zotero: false } } }, []);
+    expect(noZotero.zotero).toBe(false);
+    expect(ids(noZotero)).toEqual(["user_a"]);
+    const noFiles = buildAccess({ id: "user_a", publicMetadata: { pro: true, features: { files: false } } }, []);
+    expect(noFiles.zotero).toBe(true);
+    expect(noFiles.libraries).toEqual([]);
+    // Paused, not taken away: the library is still listed, deletable and exportable.
+    expect(noFiles.all).toHaveLength(1);
+    expect(noFiles.all[0]).toMatchObject({ id: "user_a", pro: false, canUpload: false, canManageAll: true });
+  });
+
+  it("a user's switch holds in their teams too; a team's switch holds only in that team", () => {
+    const teams = [membership("org_b", { pro: true }), membership("org_c", { pro: true, meta: { pro: true, features: { files: false, zotero: false } } })];
+    const userOff = buildAccess({ id: "user_a", publicMetadata: { features: { files: false, zotero: false } } }, teams);
+    expect(userOff).toMatchObject({ zotero: false, libraries: [] });
+    expect(userOff.all.map((l) => [l.id, l.pro])).toEqual([["user_a", false], ["org_b", false], ["org_c", false]]);
+
+    const teamOff = buildAccess({ id: "user_a", publicMetadata: {} }, teams);
+    expect(ids(teamOff)).toEqual(["org_b"]);
+    // Zotero comes from any team that has it on (org_b), however another team is set.
+    expect(teamOff.zotero).toBe(true);
+    const onlyOffTeam = buildAccess({ id: "user_a", publicMetadata: {} }, [teams[1]]);
+    expect(onlyOffTeam).toMatchObject({ zotero: false, libraries: [] });
+    // A team's switch never reaches the member's own Pro.
+    expect(buildAccess({ id: "user_a", publicMetadata: { pro: true } }, [teams[1]])).toMatchObject({ zotero: true, libraries: [{ id: "user_a" }] });
+  });
+
+  it("a team member with Zotero from the team only: Pro team, personal free", () => {
+    const a = buildAccess({ id: "user_a", publicMetadata: {} }, [membership("org_b", { pro: true, meta: { pro: true, features: { files: false } } })]);
+    expect(a).toMatchObject({ zotero: true, libraries: [] });
+  });
+
+  it("the purge looks at Pro alone: a switched-off feature is never 'not_pro'", async () => {
+    clerk.getUser.mockResolvedValueOnce({ id: "user_a", publicMetadata: { pro: true, features: { files: false, zotero: false } } });
+    expect(await libraryOwnerState("user_a")).toBe("pro");
+    clerk.getOrganization.mockResolvedValueOnce({ id: "org_b", publicMetadata: { pro: true, features: { files: false } } });
+    expect(await libraryOwnerState("org_b")).toBe("pro");
+  });
+});
+
 describe("getAccess", () => {
   it("loads from Clerk (getUser + membership list with limit 100) and freezes the result", async () => {
     clerk.getUser.mockResolvedValue({ id: "user_a", banned: false, locked: false, publicMetadata: { pro: true } });
@@ -211,7 +271,7 @@ describe("getAccess", () => {
   });
 
   it("the test loader's result is frozen too", async () => {
-    __setAccessLoaderForTests(async (userId) => ({ userId, banned: false, libraries: [], all: [] }));
+    __setAccessLoaderForTests(async (userId) => ({ userId, banned: false, libraries: [], all: [], zotero: false }));
     expect(Object.isFrozen(await getAccess("user_z"))).toBe(true);
   });
 });

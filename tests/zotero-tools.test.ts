@@ -79,9 +79,9 @@ const PERSONAL_LIB: LibraryAccess = {
   canManageAll: true,
   quotaPages: 3000,
 };
-const PRO_ACCESS: Access = { userId: USER, banned: false, libraries: [PERSONAL_LIB], all: [PERSONAL_LIB] };
-const NON_PRO_ACCESS: Access = { userId: USER, banned: false, libraries: [], all: [{ ...PERSONAL_LIB, pro: false, canUpload: false }] };
-const BANNED_ACCESS: Access = { userId: USER, banned: true, libraries: [], all: [] };
+const PRO_ACCESS: Access = { userId: USER, banned: false, libraries: [PERSONAL_LIB], all: [PERSONAL_LIB], zotero: true };
+const NON_PRO_ACCESS: Access = { userId: USER, banned: false, libraries: [], all: [{ ...PERSONAL_LIB, pro: false, canUpload: false }], zotero: false };
+const BANNED_ACCESS: Access = { userId: USER, banned: true, libraries: [], all: [], zotero: false };
 
 const API_KEY = "AbCdEfGhIjKlMnOpQrStUvWx";
 function connection(groups: "all" | "none" | number[] = "none", notes = true): ConnectionState {

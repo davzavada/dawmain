@@ -1,10 +1,13 @@
-import { getAccess, type Access } from "@/src/files/access";
+import { getAccess, type Access, type Feature } from "@/src/files/access";
 import { callerFromCtx } from "@/src/mcp/caller";
 
 /**
  * The entitlement every personal Pro tool shares (files_*, zotero_*): a
  * personal OAuth sign-in — never the shared access code — whose account
- * holds at least one Pro library, personal or team.
+ * may use the feature: for "files" at least one library with Vlastní zdroje
+ * on (access.libraries), for "zotero" access.zotero — both Pro, personal or
+ * team, minus the switches in Clerk's publicMetadata.features
+ * (src/files/access.ts).
  *
  * Deliberately only the identity and the account: each tool family keeps
  * its own deployment switches and limits in its own gate. The files gate
@@ -19,7 +22,7 @@ import { callerFromCtx } from "@/src/mcp/caller";
  *   shared-token  the shared access code — a deployment secret, no user;
  *   anonymous     no (valid) signed-in user in the request context;
  *   banned        Clerk marks the account banned or locked;
- *   no-pro        a real account without a single Pro library.
+ *   no-pro        a real account without the feature (no Pro, or switched off).
  *
  * Clerk failures are NOT a reason: getAccess throws and so does this, so
  * each caller maps them to its own fixed "could not be verified" text
@@ -33,15 +36,13 @@ export type ProCaller =
   | { ok: true; userId: string; clientId: string; access: Access }
   | { ok: false; reason: ProCallerRefusal };
 
-export async function personalProCaller(ctx: unknown): Promise<ProCaller> {
+export async function personalProCaller(ctx: unknown, feature: Feature): Promise<ProCaller> {
   const caller = callerFromCtx(ctx);
   if (caller.kind === "shared-token") return { ok: false, reason: "shared-token" };
   if (caller.kind !== "user") return { ok: false, reason: "anonymous" };
   const access = await getAccess(caller.userId);
-  // A banned account keeps no library at all (buildAccess), but the flag is
-  // checked first so a gate can tell the two apart if it ever needs to.
-  if (access.banned) return { ok: false, reason: "banned" };
-  if (access.libraries.length === 0) return { ok: false, reason: "no-pro" };
+  const refusal = proRefusal(access, feature);
+  if (refusal) return { ok: false, reason: refusal };
   return { ok: true, userId: caller.userId, clientId: caller.clientId, access };
 }
 
@@ -53,8 +54,10 @@ export async function personalProCaller(ctx: unknown): Promise<ProCaller> {
  * so "Pro" on the website and in the MCP gate cannot drift apart
  * (tests/zotero-routes.test.ts compares the two).
  */
-export function proRefusal(access: Access): Extract<ProCallerRefusal, "banned" | "no-pro"> | null {
+export function proRefusal(access: Access, feature: Feature): Extract<ProCallerRefusal, "banned" | "no-pro"> | null {
+  // A banned account keeps no library at all (buildAccess), but the flag is
+  // checked first so a gate can tell the two apart if it ever needs to.
   if (access.banned) return "banned";
-  if (access.libraries.length === 0) return "no-pro";
-  return null;
+  const allowed = feature === "zotero" ? access.zotero : access.libraries.length > 0;
+  return allowed ? null : "no-pro";
 }

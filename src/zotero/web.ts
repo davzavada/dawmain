@@ -172,7 +172,7 @@ export async function connectResponse(request: Request): Promise<Response> {
   if (!userId) return seeOther(backTo("prihlaseni"));
   try {
     // `fresh`: someone who was just granted Pro should not wait out the 60-s access cache.
-    if (proRefusal(await getAccess(userId, { fresh: true })) !== null) return seeOther(backTo("nepro"));
+    if (proRefusal(await getAccess(userId, { fresh: true }), "zotero") !== null) return seeOther(backTo("nepro"));
   } catch (error) {
     logZoteroError("connect.access", error);
     return seeOther(backTo("chyba"));
@@ -360,7 +360,7 @@ function connectionView(conn: Extract<ConnectionState, { state: "ok" }>["conn"])
 export async function statusFor(userId: string): Promise<ZoteroStatus> {
   const configured = zoteroConfigured();
   const [access, stored] = await Promise.all([getAccess(userId), loadConnection(userId)]);
-  const pro = proRefusal(access) === null;
+  const pro = proRefusal(access, "zotero") === null;
   const base = { state: "ok", configured, pro, connection: null, revoked: null, unreadable: null } as const;
   if (stored.state === "none") return base;
   if (stored.state === "revoked") return { ...base, revoked: { username: stored.username, revokedAt: stored.revokedAt } };

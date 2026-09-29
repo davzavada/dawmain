@@ -194,7 +194,7 @@ async function gate(ctx: unknown): Promise<Gate> {
   }
   let caller: ProCaller;
   try {
-    caller = await personalProCaller(ctx);
+    caller = await personalProCaller(ctx, "files");
   } catch (error) {
     // Only the Clerk lookup throws (the context parse is total).
     return { ok: false, result: filesFailure(error, "files access") };

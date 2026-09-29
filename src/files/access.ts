@@ -21,7 +21,16 @@ export type { Access, LibraryAccess } from "./access-types";
  *     manages all of them;
  *   - quota: `publicMetadata.filesQuota.pages` (a positive number) on the
  *     user / organization overrides LIMITS.personalPages / teamPages;
- *   - banned or locked users get no library at all.
+ *   - banned or locked users get no library at all;
+ *   - feature switches: `publicMetadata.features` on the user or the
+ *     organization, e.g. `{ "pro": true, "features": { "zotero": false } }`.
+ *     Pro switches every feature on; `false` (strictly) switches one off —
+ *     on an organization for that team, on a user for that person
+ *     everywhere (their own library and their teams). Features:
+ *     `files` (Vlastní zdroje: search, read, upload) and `zotero`. A
+ *     switched-off library stays in `all` (list, delete, export), and only
+ *     Pro itself decides the 90-day purge (libraryOwnerState below): a
+ *     feature switched off never deletes anything.
  *
  * `libraries` holds the Pro libraries (search, read, upload); `all` every
  * library the user owns or belongs to, Pro or not (list, delete, export —
@@ -79,7 +88,7 @@ export function freezeAccess(access: Access): Access {
 
 /** An account that exists nowhere (or is banned): no libraries. */
 export function emptyAccess(userId: string, banned = false): Access {
-  return freezeAccess({ userId, banned, libraries: [], all: [] });
+  return freezeAccess({ userId, banned, libraries: [], all: [], zotero: false });
 }
 
 /**
@@ -144,6 +153,15 @@ export function proFrom(metadata: unknown): boolean {
   return (metadata as { pro?: unknown } | null | undefined)?.pro === true;
 }
 
+/** Features Pro switches on and `publicMetadata.features` can switch off one by one. */
+export type Feature = "files" | "zotero";
+
+/** Strict switch-off: only the boolean `false` at `features.<name>` turns a feature off; anything else leaves it on. */
+export function featureOff(metadata: unknown, feature: Feature): boolean {
+  const features = (metadata as { features?: unknown } | null | undefined)?.features;
+  return !!features && typeof features === "object" && (features as Record<string, unknown>)[feature] === false;
+}
+
 /** The subset of Clerk's User the access needs (keeps tests and mocks small). */
 export interface ClerkUserLike {
   id: string;
@@ -165,7 +183,12 @@ export interface ClerkMembershipLike {
 export function buildAccess(user: ClerkUserLike, memberships: ClerkMembershipLike[]): Access {
   const userId = user.id;
   if (user.banned === true || user.locked === true) return emptyAccess(userId, true);
-  const pro = proFrom(user.publicMetadata);
+  const userPro = proFrom(user.publicMetadata);
+  // A switch on the user turns the feature off for them everywhere, their teams included.
+  const userFilesOff = featureOff(user.publicMetadata, "files");
+  const userZoteroOff = featureOff(user.publicMetadata, "zotero");
+  const pro = userPro && !userFilesOff;
+  let zotero = userPro && !userZoteroOff;
   const personal: LibraryAccess = {
     id: userId,
     kind: "user",
@@ -183,7 +206,9 @@ export function buildAccess(user: ClerkUserLike, memberships: ClerkMembershipLik
     const org = m?.organization;
     if (!org || typeof org.id !== "string" || !/^org_[A-Za-z0-9]+$/.test(org.id) || seen.has(org.id)) continue;
     seen.add(org.id);
-    const teamPro = proFrom(org.publicMetadata);
+    const orgPro = proFrom(org.publicMetadata);
+    const teamPro = orgPro && !userFilesOff && !featureOff(org.publicMetadata, "files");
+    if (orgPro && !userZoteroOff && !featureOff(org.publicMetadata, "zotero")) zotero = true;
     const admin = m.role === "org:admin";
     const slug = typeof org.slug === "string" ? sanitizeLine(org.slug, MAX_NAME) : "";
     teams.push({
@@ -200,7 +225,7 @@ export function buildAccess(user: ClerkUserLike, memberships: ClerkMembershipLik
   }
   teams.sort((a, b) => a.name.localeCompare(b.name, "cs") || a.id.localeCompare(b.id));
   const all = [personal, ...teams];
-  return { userId, banned: false, libraries: all.filter((l) => l.pro), all };
+  return { userId, banned: false, libraries: all.filter((l) => l.pro), all, zotero };
 }
 
 async function loadFromClerk(userId: string): Promise<Access> {
@@ -234,7 +259,9 @@ export function __setOwnerLookupForTests(lookup: OwnerLookup | null): void {
 }
 
 /**
- * Does the owner of a library still exist in Clerk, and is it Pro? One
+ * Does the owner of a library still exist in Clerk, and is it Pro? Pro
+ * alone — deliberately not the feature switches: `features.files: false`
+ * pauses Vlastní zdroje, it must never start the 90-day purge. One
  * Backend API call (getUser / getOrganization). A 404 is "gone" (the
  * deletion webhook may have been missed); other failures throw.
  */

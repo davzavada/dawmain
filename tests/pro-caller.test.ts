@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __setAccessLoaderForTests, buildAccess, emptyAccess, type Access, type LibraryAccess } from "@/src/files/access";
 import { LIMITS } from "@/src/files/config";
 import { __resetGuardsForTests, allowToolCall } from "@/src/files/guards";
-import { personalProCaller } from "@/src/mcp/pro-caller";
+import { personalProCaller, proRefusal } from "@/src/mcp/pro-caller";
 
 /**
  * personalProCaller (src/mcp/pro-caller.ts): the entitlement files_* and
@@ -29,9 +29,9 @@ const PERSONAL_PRO: LibraryAccess = {
 const PERSONAL_FREE: LibraryAccess = { ...PERSONAL_PRO, pro: false, canUpload: false };
 const TEAM_PRO: LibraryAccess = { ...PERSONAL_PRO, id: "org_team", kind: "org", name: "Tým AK", slug: "tym-ak", role: "org:member", canManageAll: false };
 
-const PRO_ACCESS: Access = { userId: USER, banned: false, libraries: [PERSONAL_PRO], all: [PERSONAL_PRO] };
-const TEAM_ONLY_ACCESS: Access = { userId: USER, banned: false, libraries: [TEAM_PRO], all: [PERSONAL_FREE, TEAM_PRO] };
-const NON_PRO_ACCESS: Access = { userId: USER, banned: false, libraries: [], all: [PERSONAL_FREE] };
+const PRO_ACCESS: Access = { userId: USER, banned: false, libraries: [PERSONAL_PRO], all: [PERSONAL_PRO], zotero: true };
+const TEAM_ONLY_ACCESS: Access = { userId: USER, banned: false, libraries: [TEAM_PRO], all: [PERSONAL_FREE, TEAM_PRO], zotero: true };
+const NON_PRO_ACCESS: Access = { userId: USER, banned: false, libraries: [], all: [PERSONAL_FREE], zotero: false };
 
 const userCtx = (userId: unknown = USER, clientId: unknown = CLIENT) => ({
   http: { authInfo: { token: "t", clientId, scopes: [], extra: { userId } } },
@@ -52,19 +52,19 @@ afterEach(() => {
 
 describe("personalProCaller — refused before any lookup", () => {
   it("the shared access code, even with a userId riding along", async () => {
-    expect(await personalProCaller(SHARED_CTX)).toEqual({ ok: false, reason: "shared-token" });
+    expect(await personalProCaller(SHARED_CTX, "files")).toEqual({ ok: false, reason: "shared-token" });
     const riding = { http: { authInfo: { token: "t", clientId: "shared-token", scopes: [], extra: { userId: USER } } } };
-    expect(await personalProCaller(riding)).toEqual({ ok: false, reason: "shared-token" });
+    expect(await personalProCaller(riding, "files")).toEqual({ ok: false, reason: "shared-token" });
     expect(loader).not.toHaveBeenCalled();
   });
 
   it("no signed-in user: missing, malformed or the SDK v1 shape", async () => {
     const v1 = { authInfo: { token: "t", clientId: CLIENT, scopes: [], extra: { userId: USER } } };
     for (const ctx of [undefined, null, {}, 0, "user_abc", { http: {} }, { http: { authInfo: null } }, v1]) {
-      expect(await personalProCaller(ctx), JSON.stringify(ctx)).toEqual({ ok: false, reason: "anonymous" });
+      expect(await personalProCaller(ctx, "files"), JSON.stringify(ctx)).toEqual({ ok: false, reason: "anonymous" });
     }
     for (const ctx of [userCtx("org_x"), userCtx("user_a b"), userCtx(42), userCtx(USER, ""), userCtx(USER, "c".repeat(201))]) {
-      expect(await personalProCaller(ctx), JSON.stringify(ctx)).toEqual({ ok: false, reason: "anonymous" });
+      expect(await personalProCaller(ctx, "files"), JSON.stringify(ctx)).toEqual({ ok: false, reason: "anonymous" });
     }
     expect(loader).not.toHaveBeenCalled();
   });
@@ -78,15 +78,15 @@ describe("personalProCaller — refused before any lookup", () => {
         },
       },
     );
-    expect(await personalProCaller(hostile)).toEqual({ ok: false, reason: "anonymous" });
-    expect(await personalProCaller({ http: hostile })).toEqual({ ok: false, reason: "anonymous" });
+    expect(await personalProCaller(hostile, "files")).toEqual({ ok: false, reason: "anonymous" });
+    expect(await personalProCaller({ http: hostile }, "files")).toEqual({ ok: false, reason: "anonymous" });
     expect(loader).not.toHaveBeenCalled();
   });
 });
 
 describe("personalProCaller — the account", () => {
   it("a user with a personal Pro library", async () => {
-    const r = await personalProCaller(userCtx());
+    const r = await personalProCaller(userCtx(), "files");
     expect(r).toEqual({ ok: true, userId: USER, clientId: CLIENT, access: PRO_ACCESS });
     expect(loader).toHaveBeenCalledTimes(1);
     expect(loader).toHaveBeenCalledWith(USER);
@@ -96,7 +96,7 @@ describe("personalProCaller — the account", () => {
 
   it("a user whose only Pro library is a team's is still entitled", async () => {
     loader.mockImplementation(async () => TEAM_ONLY_ACCESS);
-    const r = await personalProCaller(userCtx());
+    const r = await personalProCaller(userCtx(), "files");
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.access.libraries.map((l) => l.id)).toEqual(["org_team"]);
   });
@@ -107,19 +107,19 @@ describe("personalProCaller — the account", () => {
         { role: "org:member", organization: { id: "org_pro", name: "Pro tým", slug: "pro", publicMetadata: { pro: true } } },
       ]),
     );
-    const r = await personalProCaller(userCtx());
+    const r = await personalProCaller(userCtx(), "files");
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.access.libraries.map((l) => l.id)).toEqual(["org_pro"]);
   });
 
   it("a user without any Pro library", async () => {
     loader.mockImplementation(async () => NON_PRO_ACCESS);
-    expect(await personalProCaller(userCtx())).toEqual({ ok: false, reason: "no-pro" });
+    expect(await personalProCaller(userCtx(), "files")).toEqual({ ok: false, reason: "no-pro" });
   });
 
   it("a user Clerk does not know (empty access) is no-pro", async () => {
     loader.mockImplementation(async (id) => emptyAccess(id));
-    expect(await personalProCaller(userCtx())).toEqual({ ok: false, reason: "no-pro" });
+    expect(await personalProCaller(userCtx(), "files")).toEqual({ ok: false, reason: "no-pro" });
   });
 
   it("a banned or locked account — also when the flag comes with libraries", async () => {
@@ -130,8 +130,37 @@ describe("personalProCaller — the account", () => {
     ]) {
       loader.mockImplementation(async (id) => make(id));
       __setAccessLoaderForTests(loader);
-      expect(await personalProCaller(userCtx())).toEqual({ ok: false, reason: "banned" });
+      expect(await personalProCaller(userCtx(), "files")).toEqual({ ok: false, reason: "banned" });
     }
+  });
+
+  it("each feature is gated on its own: files on the Vlastní zdroje libraries, zotero on access.zotero", async () => {
+    const noZotero: Access = { ...PRO_ACCESS, zotero: false };
+    const zoteroOnly: Access = { ...NON_PRO_ACCESS, zotero: true };
+    loader.mockImplementation(async () => noZotero);
+    expect((await personalProCaller(userCtx(), "files")).ok).toBe(true);
+    __setAccessLoaderForTests(loader);
+    expect(await personalProCaller(userCtx(), "zotero")).toEqual({ ok: false, reason: "no-pro" });
+    loader.mockImplementation(async () => zoteroOnly);
+    __setAccessLoaderForTests(loader);
+    expect(await personalProCaller(userCtx(), "files")).toEqual({ ok: false, reason: "no-pro" });
+    __setAccessLoaderForTests(loader);
+    expect((await personalProCaller(userCtx(), "zotero")).ok).toBe(true);
+    expect(proRefusal(noZotero, "files")).toBeNull();
+    expect(proRefusal(noZotero, "zotero")).toBe("no-pro");
+    expect(proRefusal({ ...zoteroOnly, banned: true }, "zotero")).toBe("banned");
+  });
+
+  it("the switches from Clerk's publicMetadata reach the gate", async () => {
+    loader.mockImplementation(async (id) => buildAccess({ id, publicMetadata: { pro: true, features: { zotero: false } } }, []));
+    expect((await personalProCaller(userCtx(), "files")).ok).toBe(true);
+    __setAccessLoaderForTests(loader);
+    expect(await personalProCaller(userCtx(), "zotero")).toEqual({ ok: false, reason: "no-pro" });
+    loader.mockImplementation(async (id) => buildAccess({ id, publicMetadata: { pro: true, features: { files: false } } }, []));
+    __setAccessLoaderForTests(loader);
+    expect(await personalProCaller(userCtx(), "files")).toEqual({ ok: false, reason: "no-pro" });
+    __setAccessLoaderForTests(loader);
+    expect((await personalProCaller(userCtx(), "zotero")).ok).toBe(true);
   });
 
   it("a Clerk failure is rethrown as is — never mistaken for 'not Pro'", async () => {
@@ -139,10 +168,10 @@ describe("personalProCaller — the account", () => {
     loader.mockImplementation(async () => {
       throw failure;
     });
-    await expect(personalProCaller(userCtx())).rejects.toBe(failure);
+    await expect(personalProCaller(userCtx(), "files")).rejects.toBe(failure);
     // Not cached: the next call asks Clerk again and succeeds.
     loader.mockImplementation(async () => PRO_ACCESS);
-    expect((await personalProCaller(userCtx())).ok).toBe(true);
+    expect((await personalProCaller(userCtx(), "files")).ok).toBe(true);
     expect(loader).toHaveBeenCalledTimes(2);
   });
 });
