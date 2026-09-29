@@ -5,7 +5,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboard
 import { countMembers, initials } from "./format";
 import { ZIcon } from "./icons";
 import { InvitationActions, InvitationText, useInvitations } from "./invitations";
-import { manageAccount, openSources, openTeam, rememberInitials, requestSignIn, signOut, useHintInitials, useZdroje } from "./store";
+import { manageAccount, openSources, openTeam, openZotero, rememberInitials, requestSignIn, signOut, useHintInitials, useZdroje } from "./store";
 
 /**
  * The account control at the right end of the header (design 1a, 2a, 3a,
@@ -13,7 +13,7 @@ import { manageAccount, openSources, openTeam, rememberInitials, requestSignIn, 
  * the avatar with initials (a crown badge with Pro, a blue dot when a
  * team invitation waits),
  * opening a menu — name and e-mail, pending invitations with Přijmout /
- * Odmítnout, Vlastní zdroje, Tým · N členů (admins of a Pro team),
+ * Odmítnout, Vlastní zdroje, Zotero, Tým · N členů (admins of a Pro team),
  * Spravovat účet, Odhlásit se. A menu button in the WAI-ARIA sense: arrow
  * keys move between items, Escape and a click outside close it. Nothing
  * at all on a deployment without Clerk.
@@ -153,6 +153,10 @@ function AccountMenu() {
             <button type="button" role="menuitem" className="zd-menu-item" onClick={choose(() => openSources("moje"))}>
               <ZIcon name="upload" />
               <span>Vlastní zdroje</span>
+            </button>
+            <button type="button" role="menuitem" className="zd-menu-item" onClick={choose(openZotero)}>
+              <ZIcon name="library" />
+              <span>Zotero</span>
             </button>
             {adminTeams.map((team) => (
               <button key={team.id} type="button" role="menuitem" className="zd-menu-item" onClick={choose(() => openTeam(team.id))}>

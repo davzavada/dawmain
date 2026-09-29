@@ -2164,6 +2164,150 @@ main > footer a {
   line-height: 1.4;
 }
 
+/* Zotero (the ?zotero=1 modal): connect, what the key reads, disconnect.
+   Colours come from the zd tokens only, so the dark theme needs no overrides. */
+
+.zd-zotero {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  overflow-y: auto;
+  padding: 22px 24px 24px;
+}
+@media (max-width: 640px) {
+  .zd-zotero {
+    padding: 18px 16px 24px;
+  }
+}
+.zd-zotero h3 {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.zd-zotero h4 {
+  margin: 0;
+}
+/* The live region stays in the DOM; empty, it must not add a gap. */
+.zd-zotero-live:empty {
+  margin-bottom: -22px;
+}
+.zd-zotero-banner[data-tone="ok"] {
+  background: var(--ok-soft-bg);
+  color: var(--ok);
+}
+.zd-zotero-banner[data-tone="info"] {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+.zd-zotero-banner[data-tone="bad"] {
+  background: var(--bad-bg);
+  color: var(--bad);
+}
+.zd-zotero-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.zd-zotero-who {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.zd-zotero-who-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.zd-zotero-user {
+  overflow-wrap: anywhere;
+}
+.zd-zotero-mark {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--body);
+}
+.zd-zotero-mark[data-tone="bad"] {
+  background: var(--bad-bg);
+  color: var(--bad);
+}
+.zd-zotero-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding-left: 20px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--body);
+}
+.zd-zotero-promises {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--well);
+  list-style: none;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--body);
+}
+.zd-zotero-promises li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.zd-zotero-promises .icon {
+  flex: none;
+  margin-top: 3px;
+  color: var(--ok);
+}
+.zd-zotero-note {
+  max-width: 72ch;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--soft);
+  text-wrap: pretty;
+}
+.zd-zotero-note a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.zd-zotero-form {
+  display: flex;
+  margin: 0;
+}
+.zd-zotero-more,
+.zd-zotero-disconnect,
+.zd-zotero-retry {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.zd-zotero-disconnect .zd-confirm {
+  align-self: stretch;
+  margin-top: 0;
+}
+@media (max-width: 640px) {
+  /* Phones: the main action spans the sheet, as the thumb expects. */
+  .zd-zotero-connect .zd-zotero-form .zd-btn {
+    flex: 1;
+  }
+}
+
 /* Operator page */
 
 .zd-ops {

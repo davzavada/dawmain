@@ -44,3 +44,17 @@ export async function personalProCaller(ctx: unknown): Promise<ProCaller> {
   if (access.libraries.length === 0) return { ok: false, reason: "no-pro" };
   return { ok: true, userId: caller.userId, clientId: caller.clientId, access };
 }
+
+/**
+ * The account half of personalProCaller as a pure rule on an Access, for a
+ * caller that already knows the user from a web session (the Zotero routes,
+ * src/zotero/web.ts): null when the account may use the personal Pro tools,
+ * else why not. personalProCaller applies the same rule in the same order,
+ * so "Pro" on the website and in the MCP gate cannot drift apart
+ * (tests/zotero-routes.test.ts compares the two).
+ */
+export function proRefusal(access: Access): Extract<ProCallerRefusal, "banned" | "no-pro"> | null {
+  if (access.banned) return "banned";
+  if (access.libraries.length === 0) return "no-pro";
+  return null;
+}

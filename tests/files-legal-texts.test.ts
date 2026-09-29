@@ -25,6 +25,7 @@ const { SiteNav } = await import("@/app/_nav");
 const { CONTACT, EFFECTIVE } = await import("@/app/_legal");
 const { PAGE_CHARS, metaModel } = await import("@/src/files/config");
 const { READ_COUNTER_KEEP_DAYS, USAGE_KEEP_DAYS } = await import("@/src/files/db/usage");
+const { STATE_COOKIE } = await import("@/src/zotero/config");
 
 /** Rendered page as plain text, whitespace collapsed (JSX line breaks vary). */
 function text(element: ReturnType<typeof createElement>): string {
@@ -153,7 +154,7 @@ describe("Zotero in the legal texts", () => {
   it("states retention of the key, the key left at zotero.org, and the connect cookie", () => {
     expect(privacy).toContain("dokud Zotero neodpojíte nebo nezrušíte účet");
     expect(privacy).toContain("zotero.org/settings/keys");
-    expect(privacy).toContain("dz_zotero_oauth");
+    expect(privacy).toContain(STATE_COOKIE);
   });
 
   it("states the read-only key and refuses write access", () => {

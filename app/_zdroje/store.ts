@@ -21,7 +21,7 @@ import { hintCookie, type Hint } from "./hint";
  * account state and the summary, so the server renders what the page will
  * look like and nothing jumps; the store keeps that cookie up to date.
  *
- * The modals are driven by the URL (?zdroje=moje|tym, ?tym=1): links work,
+ * The modals are driven by the URL (?zdroje=moje|tym, ?tym=1, ?zotero=1): links work,
  * the back button closes them. history.pushState integrates with Next's
  * router, so useSearchParams sees the change without a navigation — but
  * only when called with our own state (null): Next ignores a call whose
@@ -298,7 +298,7 @@ export function mayDiscardWork(): boolean {
 /** The modal already shows this tab and document: going there changes nothing, so nothing is asked. */
 function showing(tab: SourcesTab, documentId: string | null): boolean {
   const p = new URLSearchParams(window.location.search);
-  return p.get("zdroje") === tab && !p.has("tym") && (p.get("dokument") ?? null) === documentId;
+  return p.get("zdroje") === tab && !p.has("tym") && !p.has("zotero") && (p.get("dokument") ?? null) === documentId;
 }
 
 /** Open the Vlastní zdroje modal on a tab (and optionally a document's detail). Signed out: sign in first. */
@@ -314,6 +314,8 @@ export function openSources(tab: SourcesTab = "moje", documentId?: string): void
     (p) => {
       p.set("zdroje", tab);
       p.delete("tym");
+      p.delete("zotero");
+      p.delete("stav");
       if (documentId) p.set("dokument", documentId);
       else p.delete("dokument");
     },
@@ -361,6 +363,8 @@ export function openTeam(orgId?: string): void {
   pushParams((p) => {
     p.delete("zdroje");
     p.delete("dokument");
+    p.delete("zotero");
+    p.delete("stav");
     p.set("tym", orgId ?? "1");
   }, replace);
   if (!replace) pushedModal = true;
@@ -368,4 +372,35 @@ export function openTeam(orgId?: string): void {
 
 export function closeTeam(): void {
   closeModal(["tym"]);
+}
+
+/**
+ * Open the Zotero modal (?zotero=1). The connect flow comes back to the same URL
+ * from the server, with &stav=<outcome> for the modal's banner.
+ */
+export function openZotero(): void {
+  const params = new URLSearchParams(window.location.search);
+  const replace = params.has("zdroje") || params.has("tym") || params.has("zotero");
+  if (params.has("zdroje") && !mayDiscardWork()) return;
+  pushParams((p) => {
+    p.delete("zdroje");
+    p.delete("dokument");
+    p.delete("tym");
+    p.delete("stav");
+    p.set("zotero", "1");
+  }, replace);
+  if (!replace) pushedModal = true;
+}
+
+export function closeZotero(): void {
+  closeModal(["zotero", "stav"]);
+}
+
+/**
+ * The modal took the connect outcome into its banner: drop &stav from the URL
+ * (replacing the entry), so a reload or a copied link does not announce it again.
+ */
+export function dropZoteroStav(): void {
+  if (!new URLSearchParams(window.location.search).has("stav")) return;
+  pushParams((p) => p.delete("stav"), true);
 }
