@@ -10,7 +10,8 @@ import { getStatuses } from "./_status";
 import { Guide } from "./_guide";
 import { Icon, type IconName } from "./_icons";
 import { Mail } from "./_legal";
-import { OwnSourcesGroup } from "./_zdroje/own-sources";
+import { OwnSourcesGroup, ZoteroGroup } from "./_zdroje/own-sources";
+import { zoteroConfigured } from "@/src/zotero/config";
 
 export const dynamic = "force-dynamic";
 
@@ -155,6 +156,8 @@ export default async function Home() {
         <h2>Zdroje</h2>
         {/* Client island: counts from GET /api/files/summary; the page stays server-rendered. */}
         <OwnSourcesGroup />
+        {/* Zotero only where the deployment can connect it (the OAuth app and CREDENTIALS_SECRET). */}
+        {zoteroConfigured() ? <ZoteroGroup /> : null}
         <Suspense fallback={<SourceListFallback />}>
           <SourceList />
         </Suspense>
