@@ -14,6 +14,7 @@ import { SourceError } from "@/src/sources/shared/errors";
 import { interleave, maxTotal, pageOrExcerpt, uniqueQueries } from "@/src/sources/shared/text";
 import { buildPreviews, renderPreviews } from "./previews";
 import { failureLines, runVariants, variantFailureSchema, variantTotalsSchema } from "./variants";
+import { withZoteroLines, zoteroCaseLinks } from "./zotero";
 
 const fail = toolFailure("Ústavní soud (NALUS)");
 
@@ -133,7 +134,7 @@ export function registerNalus(server: McpServer): void {
       }),
       annotations: READ_ONLY,
     },
-    async ({ query, queries, case_number, ecli, judge, dissenting_judge, popular_name, date_from, date_to, published_from, published_to, types, only_published, include_dissents, outcome, petitioner, contested_organ_type, contested_organ, contested_act_kind, contested_act_number, contested_act_name, contested_act_clause, sort, page, read_top }) => {
+    async ({ query, queries, case_number, ecli, judge, dissenting_judge, popular_name, date_from, date_to, published_from, published_to, types, only_published, include_dissents, outcome, petitioner, contested_organ_type, contested_organ, contested_act_kind, contested_act_number, contested_act_name, contested_act_clause, sort, page, read_top }, ctx: unknown) => {
       try {
         const variants = uniqueQueries(query, queries);
         const keyed: Array<string | undefined> = variants.length ? variants : [undefined];
@@ -179,14 +180,17 @@ export function registerNalus(server: McpServer): void {
         const hits = (multi ? merged.slice(start, start + 20) : merged).slice(0, 20);
         const total = maxTotal(answered.map(totalOf));
         const empty = answered.every((pages) => pages.every((p) => p.empty)) && !hits.length;
-        const previews = await buildPreviews(
-          hits
-            .slice(0, read_top)
-            .filter((hit) => hit.sz)
-            .map((hit) => ({ id: hit.sz as string, caseNumber: hit.caseNumber })),
-          ({ id }) => getNalusDecision(id).then((d) => d.text),
-          variants,
-        );
+        const [previews, zotero] = await Promise.all([
+          buildPreviews(
+            hits
+              .slice(0, read_top)
+              .filter((hit) => hit.sz)
+              .map((hit) => ({ id: hit.sz as string, caseNumber: hit.caseNumber })),
+            ({ id }) => getNalusDecision(id).then((d) => d.text),
+            variants,
+          ),
+          zoteroCaseLinks(ctx, hits.map((hit) => hit.caseNumber)),
+        ]);
         const hasMore = multi
           ? merged.length > start + 20 || answered.some((pages) => (totalOf(pages) ?? 0) > listOf(pages).length)
           : total !== null && start + 20 < total;
@@ -210,6 +214,7 @@ export function registerNalus(server: McpServer): void {
         const variantLine = variantTotals
           ? `Variants: ${keyed.map((v, i) => `"${v}" ${variantTotals[i] ?? "✗"}`).join(" · ")} (merged round-robin)`
           : null;
+        const linked = withZoteroLines(lines, zotero);
         const text = empty
           ? [
               "No Constitutional Court decisions matched. Broaden the criteria or check the citace format ('I. ÚS 123/20').",
@@ -219,7 +224,8 @@ export function registerNalus(server: McpServer): void {
               ...failureLines(failures),
               ...(variantLine ? [variantLine] : []),
               `${total ?? "?"} decisions${multi ? " (best variant)" : ""}:`,
-              ...lines,
+              ...linked.lines,
+              ...linked.note,
               "Full text: us_get_decision {sz}.",
               ...renderPreviews(previews, "us_get_decision"),
             ].join("\n");

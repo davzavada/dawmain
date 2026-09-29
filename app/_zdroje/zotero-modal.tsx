@@ -339,7 +339,7 @@ function NotConnected() {
         <h4 className="zd-section-name">Co Dawmain na dotaz asistenta přečte</h4>
         <ul className="zd-zotero-list">
           <li>
-            <strong>záznamy</strong> - název, autoři, spisová značka a další údaje, štítky a kolekce,
+            <strong>záznamy</strong> - název, autoři, spisová značka a další údaje, štítky, kolekce a uložená hledání,
           </li>
           <li>
             <strong>poznámky a anotace</strong>,

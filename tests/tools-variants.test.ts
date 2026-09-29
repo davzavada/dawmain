@@ -20,13 +20,19 @@ vi.mock("@/src/sources/curia", () => ({
   caseNumberToCelex: vi.fn(),
 }));
 
+vi.mock("@/src/mcp/tools/zotero", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/mcp/tools/zotero")>()),
+  zoteroCaseLinks: vi.fn(async () => null),
+}));
+
 import { searchNs } from "@/src/sources/ns";
+import { zoteroCaseLinks } from "@/src/mcp/tools/zotero";
 import { searchNss } from "@/src/sources/nss";
 import { searchNalus } from "@/src/sources/nalus";
 import { registerCzCaselaw } from "@/src/mcp/tools/cz-caselaw";
 import { registerNs } from "@/src/mcp/tools/ns";
 
-type Handler = (args: Record<string, unknown>) => Promise<{
+type Handler = (args: Record<string, unknown>, ctx?: unknown) => Promise<{
   content: Array<{ text: string }>;
   structuredContent?: Record<string, unknown>;
 }>;
@@ -144,5 +150,30 @@ describe("caselaw_search", () => {
     expect(nss?.total).toBe(129);
     expect(nss?.variant_totals).toEqual([129, null]);
     expect(nss?.note).toContain('variant "nezákonný zásah správního orgánu" failed');
+  });
+});
+
+describe("the user's Zotero copies of listed decisions", () => {
+  it("ns_search and caselaw_search put the Zotero line under the linked hit, pass the call's context, and say how to cite", async () => {
+    vi.mocked(searchNs).mockResolvedValue(nsPage("A", 2) as never);
+    vi.mocked(zoteroCaseLinks).mockImplementation(async (_ctx, texts) => texts.map((t) => (t === "A 1" ? [{ key: "WRKA2345", library: "personal" }] : [])));
+    const ctx = { http: { authInfo: { extra: { userId: "u1" } } } };
+    const ns = await handlerOf(registerNs as never, "ns_search")({ query: "škoda", limit: 20, offset: 0, read_top: 0 }, ctx);
+    expect(zoteroCaseLinks).toHaveBeenCalledWith(ctx, ["A 0", "A 1"]);
+    const text = ns.content[0].text;
+    expect(text).toMatch(/2\. A 1 .*\n {3}https:\/\/ns\/A1\n {3}in the user's Zotero: zotero_get_item \{key: "WRKA2345", library: "personal"\}/);
+    expect(text).toContain("cited from its official text");
+
+    vi.mocked(searchNss).mockResolvedValue({ total: 0, hits: [], pagination: null, blankForm: false, page: 1 } as never);
+    vi.mocked(searchNalus).mockResolvedValue({ total: 0, empty: true, hits: [] } as never);
+    const all = await handlerOf(registerCzCaselaw as never, "caselaw_search")({ query: "škoda", per_source_limit: 5, include_eu: false, include_regional: false, read_top: 0 }, ctx);
+    expect(all.content[0].text).toContain('in the user\'s Zotero: zotero_get_item {key: "WRKA2345", library: "personal"}');
+  });
+
+  it("without links the answer is exactly as before", async () => {
+    vi.mocked(searchNs).mockResolvedValue(nsPage("A", 1) as never);
+    vi.mocked(zoteroCaseLinks).mockResolvedValue(null);
+    const ns = await handlerOf(registerNs as never, "ns_search")({ query: "škoda", limit: 20, offset: 0, read_top: 0 });
+    expect(ns.content[0].text).not.toContain("Zotero");
   });
 });

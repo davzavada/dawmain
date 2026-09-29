@@ -9,6 +9,7 @@ import { interleave, maxTotal, uniqueQueries } from "@/src/sources/shared/text";
 import { buildPreviews, previewBlock } from "./previews";
 import { READ_ONLY, isoDate } from "./shared";
 import { runVariants } from "./variants";
+import { withZoteroLines, zoteroCaseLinks } from "./zotero";
 
 /**
  * One call, many searches: up to 3 query variants across the three top Czech
@@ -176,7 +177,7 @@ export function registerCzCaselaw(server: McpServer): void {
       }),
       annotations: READ_ONLY,
     },
-    async ({ query, queries, date_from, date_to, per_source_limit, sources, include_eu, include_regional, read_top }) => {
+    async ({ query, queries, date_from, date_to, per_source_limit, sources, include_eu, include_regional, read_top }, ctx: unknown) => {
       const variants = uniqueQueries(query, queries);
       if (!variants.length) {
         return {
@@ -333,7 +334,11 @@ export function registerCzCaselaw(server: McpServer): void {
       // buildPreviews applies its own deadline per target; hand it the hit
       // itself rather than looking the id back up (two sources can mint the
       // same id string).
-      const previews = await buildPreviews(items.slice(0, read_top), fetchPreviewText, variants);
+      // The user's own Zotero copies of the listed decisions, looked up alongside (quietly; null when not applicable).
+      const [previews, zotero] = await Promise.all([
+        buildPreviews(items.slice(0, read_top), fetchPreviewText, variants),
+        zoteroCaseLinks(ctx, items.map((hit) => (hit.source === "sdeu" ? "" : hit.caseNumber))),
+      ]);
 
       statuses.sort((a, b) => SOURCES.indexOf(a.source) - SOURCES.indexOf(b.source));
       const statusLines = statuses.map((status) => {
@@ -348,6 +353,7 @@ export function registerCzCaselaw(server: McpServer): void {
         const court = foreignCourt(hit);
         return `${i + 1}. [${hit.source.toUpperCase()}] ${hit.caseNumber}${hit.category ? ` [${hit.category}]` : ""}${hit.date ? ` (${hit.date})` : ""}${court ? ` — ${court}` : ""} → ${hit.detail_tool} id/sz: ${hit.id}${hit.url ? `\n   ${hit.url}` : ""}`;
       });
+      const linked = withZoteroLines(hitLines, zotero);
       const previewBlocks = (previews ?? []).map((preview) =>
         previewBlock({ ...preview, caseNumber: `[${preview.source.toUpperCase()}] ${preview.caseNumber}` }, preview.detail_tool),
       );
@@ -359,7 +365,8 @@ export function registerCzCaselaw(server: McpServer): void {
               `Variants searched in parallel: ${variants.map((v) => `"${v}"`).join(", ")}`,
               ...statusLines,
               "",
-              ...(hitLines.length ? hitLines : ["No hits in any court — broaden the query or add variants."]),
+              ...(hitLines.length ? linked.lines : ["No hits in any court — broaden the query or add variants."]),
+              ...linked.note,
               ...(previewBlocks.length ? ["", ...previewBlocks] : []),
             ].join("\n"),
           },

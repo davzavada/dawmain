@@ -13,6 +13,7 @@ import { getNssDecision, searchNss } from "@/src/sources/nss";
 import { interleave, maxTotal, pageOrExcerpt, uniqueQueries } from "@/src/sources/shared/text";
 import { buildPreviews, renderPreviews } from "./previews";
 import { failureLines, runVariants, variantFailureSchema, variantTotalsSchema } from "./variants";
+import { withZoteroLines, zoteroCaseLinks } from "./zotero";
 
 const fail = toolFailure("Nejvyšší správní soud");
 
@@ -116,7 +117,7 @@ export function registerNss(server: McpServer): void {
       }),
       annotations: READ_ONLY,
     },
-    async ({ query, queries, case_number, date_from, date_to, published_from, published_to, court, registry, area, applies_act, applies_treaty, applies_eu_regulation, applies_eu_directive, applies_provision, page, read_top }) => {
+    async ({ query, queries, case_number, date_from, date_to, published_from, published_to, court, registry, area, applies_act, applies_treaty, applies_eu_regulation, applies_eu_directive, applies_provision, page, read_top }, ctx: unknown) => {
       try {
         const variants = uniqueQueries(query, queries);
         const keyed: Array<string | undefined> = variants.length ? variants : [undefined];
@@ -157,11 +158,14 @@ export function registerNss(server: McpServer): void {
         const hasMore = multi
           ? merged.length > end || answered.some((pages) => (totalOf(pages) ?? 0) > listOf(pages).length)
           : total !== null && end < total;
-        const previews = await buildPreviews(
-          hits.slice(0, read_top).map((hit) => ({ id: hit.id, caseNumber: hit.caseNumber ?? "?" })),
-          ({ id }) => getNssDecision(id).then((d) => d.text),
-          variants,
-        );
+        const [previews, zotero] = await Promise.all([
+          buildPreviews(
+            hits.slice(0, read_top).map((hit) => ({ id: hit.id, caseNumber: hit.caseNumber ?? "?" })),
+            ({ id }) => getNssDecision(id).then((d) => d.text),
+            variants,
+          ),
+          zoteroCaseLinks(ctx, hits.map((hit) => hit.caseNumber ?? "")),
+        ]);
         const variantTotals = multi ? values.map((value) => (value ? totalOf(value) : null)) : undefined;
         const output = {
           total,
@@ -180,6 +184,7 @@ export function registerNss(server: McpServer): void {
         const variantLine = variantTotals
           ? `Variants: ${keyed.map((v, i) => `"${v}" ${variantTotals[i] ?? "✗"}`).join(" · ")} (merged round-robin)`
           : null;
+        const linked = withZoteroLines(lines, zotero);
         const text =
           total === 0 || (!hits.length && total === null)
             ? ["No NSS decisions matched. Broaden the query or the date range.", ...failureLines(failures)].join("\n")
@@ -187,7 +192,8 @@ export function registerNss(server: McpServer): void {
                 ...failureLines(failures),
                 ...(variantLine ? [variantLine] : []),
                 `${total ?? "?"} decisions${multi ? " (best variant)" : ""}, newest first (page ${page}):`,
-                ...lines,
+                ...linked.lines,
+                ...linked.note,
                 "Full text: nss_get_decision {document_id}.",
                 ...renderPreviews(previews, "nss_get_decision"),
               ].join("\n");
