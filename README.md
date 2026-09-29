@@ -48,9 +48,9 @@ v ní pak hledá a čte vedle oficiálních databází: záznamy, poznámky, ano
 text příloh, v osobní knihovně i ve skupinách. Přístup je jen ke čtení -
 Dawmain v Zoteru nic nezmění; klíč s právem zápisu odmítne. Když Zotero text
 PDF nezaindexoval, Dawmain si soubor na dotaz stáhne, přečte a neuloží.
-Odpojit jde kdykoli na webu nebo smazáním klíče na zotero.org. Položka
-„Zotero“ v nabídce účtu a nástroje `zotero_*` se objeví, až bude Zotero na
-webu zapnuté.
+Odpojit jde kdykoli na webu nebo smazáním klíče na zotero.org. Řádek
+„Zotero“ na hlavní stránce (ve skupině Vlastní zdroje), položka v nabídce
+účtu a nástroje `zotero_*` se objeví, až bude Zotero na webu zapnuté.
 
 ## Endpoint
 

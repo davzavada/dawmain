@@ -8,6 +8,7 @@ import { Confirm, Dialog } from "./dialog";
 import { formatCount, formatDate, plural } from "./format";
 import { ZIcon, type ZIconName } from "./icons";
 import { closeZotero, dropZoteroStav, requestSignIn, useZdroje } from "./store";
+import { asStatus, notifyZoteroChanged, STATUS_URL } from "./zotero-status";
 
 /**
  * The Zotero modal, opened by ZdrojeModals (./modals.tsx) from ?zotero=1:
@@ -24,7 +25,6 @@ import { closeZotero, dropZoteroStav, requestSignIn, useZdroje } from "./store";
  * a reload or a copied link does not announce it again.
  */
 
-const STATUS_URL = "/api/zotero/status";
 const CONNECT_URL = "/api/zotero/connect";
 const DISCONNECT_URL = "/api/zotero/disconnect";
 const KEYS_URL = "https://www.zotero.org/settings/keys";
@@ -64,13 +64,6 @@ export const STAV_BANNER: Record<ZoteroStav, { tone: Tone; text: string }> = {
 
 function isStav(value: string | null): value is ZoteroStav {
   return value !== null && (ZOTERO_STAV as readonly string[]).includes(value);
-}
-
-/** The status route's answer, or null for anything else (an HTML error page, a proxy's JSON). */
-function asStatus(body: unknown): ZoteroStatus | null {
-  if (!body || typeof body !== "object") return null;
-  const state = (body as { state?: unknown }).state;
-  return state === "signed_out" || state === "ok" ? (body as ZoteroStatus) : null;
 }
 
 /** "od 12. 9. 2026", "od dneška", "od včerejška" — formatDate says "dnes" / "včera" for recent days. */
@@ -115,6 +108,8 @@ export function ZoteroModal({ stav }: { stav: string | null }) {
     setStatus(null);
     setError(null);
     setReload((r) => r + 1);
+    // The home page row (./own-sources.tsx) must not keep showing the old connection.
+    notifyZoteroChanged();
   }, []);
 
   // The outcome of the connect flow: into the banner, out of the URL.
