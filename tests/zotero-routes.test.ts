@@ -573,6 +573,20 @@ describe("GET /api/zotero/callback", () => {
     expect((await loadConnection(USER)).state).toBe("ok");
   });
 
+  it("answers stav=chyba and still clears the cookie when something unforeseen throws", async () => {
+    const request = callbackRequest(APPROVED, stateCookieFor());
+    // Past the state check, where no inner try reaches: a bare 500 would keep the cookie.
+    Object.defineProperty(request, "url", {
+      get() {
+        throw new Error(`boom ${VERIFIER}`);
+      },
+    });
+    const res = await callbackGET(request);
+    expect(stavOf(res)).toBe("chyba");
+    expectStateCookieCleared(res);
+    expect(callsTo(OAUTH_ACCESS_URL)).toEqual([]);
+  });
+
   it("revokes a key that can write and never stores it (stav=zapis)", async () => {
     zotero.keyInfo = () => json(fixture("keys-current-write.json"));
     const res = await callbackGET(callbackRequest(APPROVED, stateCookieFor()));
@@ -860,5 +874,49 @@ describe("GET /api/zotero/status", () => {
     const res = await statusGET();
     expect(res.status).toBe(503);
     expect((await res.json()).error).toMatch(/Zkuste to prosím za chvíli/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Static contract: what the routes may emit, log and how they are served
+
+describe("the Zotero routes' contract", () => {
+  const ROOT = path.resolve(import.meta.dirname, "..");
+  const read = (file: string) => readFileSync(path.join(ROOT, file), "utf8");
+  const ROUTES = ["connect", "callback", "disconnect", "status"].map((name) => `app/api/zotero/${name}/route.ts`);
+
+  it("every stav the server can send back is one the modal knows (ZOTERO_STAV)", () => {
+    const source = read("src/zotero/web.ts");
+    const emitted = new Set([...source.matchAll(/\b(?:backTo|done|refuse|callbackDone)\("([a-z]+)"/g)].map((m) => m[1]));
+    expect([...emitted].sort()).toEqual(
+      ["chyba", "limit", "nedostupne", "nepro", "pripojeno", "prihlaseni", "vyprselo", "zamitnuto", "zapis"].sort(),
+    );
+    for (const stav of emitted) expect(ZOTERO_STAV).toContain(stav);
+  });
+
+  it("every route runs on Node.js, is never prerendered or cached, and never logs by itself", () => {
+    for (const file of ROUTES) {
+      const source = read(file);
+      expect(source, file).toMatch(/export const runtime = "nodejs";/);
+      expect(source, file).toMatch(/export const dynamic = "force-dynamic";/);
+      expect(source, file).not.toMatch(/console\./);
+    }
+  });
+
+  it("logs only through logZoteroError, which prints the step and a code, never a value", () => {
+    const source = read("src/zotero/web.ts");
+    const lines = source.split("\n").filter((line) => /console\./.test(line));
+    expect(lines).toEqual(["  console.error(`zotero: ${where} failed (${code})`);"]);
+  });
+
+  it("serves /api/zotero/* as a private area: no-store, same-origin referrer, no framing", async () => {
+    const { default: config } = await import("@/next.config");
+    const rules = await config.headers!();
+    const rule = rules.find((r) => r.source === "/api/zotero/:path*");
+    expect(rule).toBeDefined();
+    const headers = Object.fromEntries(rule!.headers.map((h) => [h.key.toLowerCase(), h.value]));
+    expect(headers["cache-control"]).toBe("private, no-store");
+    expect(headers["referrer-policy"]).toBe("same-origin");
+    expect(headers["x-frame-options"]).toBe("DENY");
   });
 });

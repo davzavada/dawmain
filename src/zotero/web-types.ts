@@ -15,9 +15,9 @@
 export type ZoteroStav =
   | "pripojeno" // connected
   | "zamitnuto" // the user declined on zotero.org
-  | "vyprselo" // the 10-minute state expired or the cookie is missing
+  | "vyprselo" // the 10-minute state expired, the cookie is missing, it was started by another account, or the token does not match
   | "zapis" // the key had write access: revoked and refused
-  | "prihlaseni" // not signed in (or signed in as someone else than who started)
+  | "prihlaseni" // not signed in
   | "nepro" // no Pro library
   | "nedostupne" // not configured on this deployment
   | "limit" // too many connect attempts

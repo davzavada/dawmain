@@ -206,13 +206,26 @@ function stateFor(request: Request, userId: string): RequestToken | null {
   return null;
 }
 
+/** The callback's answer for `stav`: back to the modal, the state cookie cleared. */
+const callbackDone = (stav: ZoteroStav): Response => seeOther(backTo(stav), CLEAR_STATE_COOKIE);
+
 /**
  * zotero.org's redirect back. Every outcome clears the state cookie: a
  * temporary token is exchanged at most once, and whatever went wrong starts
- * over from "Připojit Zotero".
+ * over from "Připojit Zotero". That includes an unforeseen throw: it must
+ * not become a bare 500 that leaves the cookie (and the user) behind.
  */
 export async function callbackResponse(request: Request): Promise<Response> {
-  const done = (stav: ZoteroStav) => seeOther(backTo(stav), CLEAR_STATE_COOKIE);
+  try {
+    return await callbackFlow(request);
+  } catch (error) {
+    logZoteroError("callback", error);
+    return callbackDone("chyba");
+  }
+}
+
+async function callbackFlow(request: Request): Promise<Response> {
+  const done = callbackDone;
   if (!zoteroConfigured()) return done("nedostupne");
   let userId: string | null;
   try {
