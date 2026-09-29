@@ -1,0 +1,45 @@
+[
+  {
+    "id": 111111,
+    "version": 12,
+    "links": {
+      "self": { "href": "https://api.zotero.org/groups/111111", "type": "application/json" },
+      "alternate": { "href": "https://www.zotero.org/groups/111111", "type": "text/html" }
+    },
+    "meta": { "created": "2021-03-01T10:00:00Z", "lastModified": "2026-09-01T08:30:00Z", "numItems": 1234 },
+    "data": {
+      "id": 111111,
+      "version": 12,
+      "name": "Advokátní kancelář – judikatura",
+      "owner": 475425,
+      "type": "Private",
+      "description": "<p>Sdílená judikatura</p>",
+      "url": "",
+      "hasImage": 0,
+      "libraryEditing": "members",
+      "libraryReading": "members",
+      "fileEditing": "members"
+    }
+  },
+  {
+    "id": 222222,
+    "version": 3,
+    "links": {
+      "self": { "href": "https://api.zotero.org/groups/222222", "type": "application/json" },
+      "alternate": { "href": "https://www.zotero.org/groups/222222", "type": "text/html" }
+    },
+    "meta": { "created": "2024-01-15T12:00:00Z", "lastModified": "2026-08-20T14:00:00Z" },
+    "data": {
+      "id": 222222,
+      "version": 3,
+      "name": "Seminář občanské právo",
+      "owner": 999,
+      "type": "PublicClosed",
+      "description": "",
+      "url": "",
+      "libraryEditing": "admins",
+      "libraryReading": "all",
+      "fileEditing": "none"
+    }
+  }
+]

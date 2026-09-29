@@ -1,0 +1,25 @@
+[
+  {
+    "key": "CLLA2345",
+    "version": 40,
+    "library": { "type": "user", "id": 475425, "name": "zuser", "links": { "alternate": { "href": "https://www.zotero.org/zuser", "type": "text/html" } } },
+    "links": {
+      "self": { "href": "https://api.zotero.org/users/475425/collections/CLLA2345", "type": "application/json" },
+      "alternate": { "href": "https://www.zotero.org/zuser/collections/CLLA2345", "type": "text/html" }
+    },
+    "meta": { "numCollections": 1, "numItems": 17 },
+    "data": { "key": "CLLA2345", "version": 40, "name": "Náhrada škody", "parentCollection": false, "relations": {} }
+  },
+  {
+    "key": "CLLB2345",
+    "version": 41,
+    "library": { "type": "user", "id": 475425, "name": "zuser", "links": { "alternate": { "href": "https://www.zotero.org/zuser", "type": "text/html" } } },
+    "links": {
+      "self": { "href": "https://api.zotero.org/users/475425/collections/CLLB2345", "type": "application/json" },
+      "up": { "href": "https://api.zotero.org/users/475425/collections/CLLA2345", "type": "application/atom+xml" },
+      "alternate": { "href": "https://www.zotero.org/zuser/collections/CLLB2345", "type": "text/html" }
+    },
+    "meta": { "numCollections": 0, "numItems": 4 },
+    "data": { "key": "CLLB2345", "version": 41, "name": "Nemajetková újma", "parentCollection": "CLLA2345", "relations": {} }
+  }
+]

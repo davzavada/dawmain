@@ -1,0 +1,13 @@
+{
+  "key": "P9NiFoyLeZu2bZNvvuQPDWsd",
+  "userID": 475425,
+  "username": "zuser",
+  "displayName": "Z User",
+  "access": {
+    "user": { "library": true, "files": true, "notes": true, "write": false },
+    "groups": {
+      "all": { "library": true, "write": false },
+      "111111": { "library": true, "write": true }
+    }
+  }
+}
