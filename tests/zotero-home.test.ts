@@ -5,11 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ZoteroStatus } from "@/src/zotero/web-types";
 
 /**
- * The Zotero row on the home page (OwnSourcesGroup in
- * app/_zdroje/own-sources.tsx): shown only where the deployment can connect
- * Zotero (the `zotero` prop the server page passes), the connection state in
- * one line, and the way into the Zotero modal (?zotero=1) — or the sign-in
- * for a visitor, who never makes the status request.
+ * The Zotero group on the home page (ZoteroGroup in
+ * app/_zdroje/own-sources.tsx, rendered by app/page.tsx only where the
+ * deployment can connect Zotero): the connection state in one row, and the
+ * way into the Zotero modal (?zotero=1) — or the sign-in for a visitor, who
+ * never makes the status request.
  */
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -20,7 +20,7 @@ vi.mock("next/link", () => ({
 }));
 
 const store = await import("@/app/_zdroje/store");
-const { OwnSourcesGroup } = await import("@/app/_zdroje/own-sources");
+const { OwnSourcesGroup, ZoteroGroup } = await import("@/app/_zdroje/own-sources");
 const { notifyZoteroChanged } = await import("@/app/_zdroje/zotero-status");
 
 const NOT_CONNECTED: ZoteroStatus = { state: "ok", configured: true, pro: true, connection: null, revoked: null, unreadable: null };
@@ -70,87 +70,151 @@ async function settle(): Promise<void> {
   for (let i = 0; i < 5; i++) await act(async () => new Promise((r) => setTimeout(r, 0)));
 }
 
-async function render(zotero: boolean, auth: "signed_in" | "signed_out" = "signed_in"): Promise<void> {
+const PRO_SUMMARY = {
+  state: "ok",
+  mode: "on",
+  termsAccepted: true,
+  libraries: [
+    {
+      id: "user_jana",
+      kind: "user",
+      name: "Jana",
+      role: "owner",
+      pro: true,
+      canUpload: true,
+      canManageAll: true,
+      quotaPages: 1000,
+      pagesUsed: 10,
+      counts: { total: 2, ready: 2, review: 0, processing: 0, error: 0, searchable: 2 },
+      memberCount: null,
+    },
+  ],
+};
+
+async function render(auth: "signed_in" | "signed_out" = "signed_in"): Promise<void> {
   store.setAuth(auth);
-  await act(async () => root.render(createElement(OwnSourcesGroup, { zotero })));
+  await act(async () =>
+    root.render(createElement("div", null, createElement(OwnSourcesGroup), createElement(ZoteroGroup))),
+  );
   await settle();
 }
 
-function zoteroRow(): HTMLLIElement | null {
-  return [...host.querySelectorAll<HTMLLIElement>("li.source")].find((li) => li.querySelector(".source-title")?.textContent?.startsWith("Zotero")) ?? null;
+function group(): HTMLDivElement | null {
+  return [...host.querySelectorAll<HTMLDivElement>(".source-group")].find((g) => g.querySelector(".source-group-name")?.textContent === "Zotero") ?? null;
 }
 
-describe("the Zotero row on the home page", () => {
-  it("is absent where the deployment cannot connect Zotero, and nothing asks for its status", async () => {
-    await render(false);
-    expect(host.textContent).toContain("Vlastní zdroje");
-    expect(zoteroRow()).toBeNull();
-    expect(host.textContent).not.toMatch(/zotero/i);
-    expect(calls).not.toContain("/api/zotero/status");
-  });
+function statusCalls(): number {
+  return calls.filter((c) => c === "/api/zotero/status").length;
+}
 
+describe("the Zotero group on the home page", () => {
   it("invites a visitor to sign in, locked, without asking the server", async () => {
     const signIn = vi.fn();
     store.registerClerkActions({ signIn, manageAccount: vi.fn(), signOut: vi.fn() });
-    await render(true, "signed_out");
-    const row = zoteroRow()!;
-    expect(row).not.toBeNull();
-    expect(row.className).toContain("zd-row-locked");
-    expect(row.textContent).toContain("V režimu Pro");
-    expect(calls).not.toContain("/api/zotero/status");
-    await act(async () => row.querySelector<HTMLButtonElement>("button")!.click());
+    await render("signed_out");
+    const g = group()!;
+    expect(g).not.toBeNull();
+    expect(g.className).toContain("locked");
+    expect(g.textContent).toContain("V režimu Pro");
+    expect(statusCalls()).toBe(0);
+    await act(async () => g.querySelector<HTMLButtonElement>("button")!.click());
     expect(signIn).toHaveBeenCalledOnce();
   });
 
-  it("offers to connect, and the row opens the Zotero modal (?zotero=1)", async () => {
-    await render(true);
-    const row = zoteroRow()!;
-    expect(row.textContent).toContain("Připojte svou knihovnu na zotero.org");
-    await act(async () => row.querySelector<HTMLButtonElement>("button")!.click());
+  it("offers to connect, and opens the Zotero modal (?zotero=1)", async () => {
+    await render();
+    const g = group()!;
+    expect(g.className).not.toContain("locked");
+    expect(g.textContent).toContain("Připojte svou knihovnu");
+    await act(async () => g.querySelector<HTMLButtonElement>("button")!.click());
     expect(new URLSearchParams(window.location.search).get("zotero")).toBe("1");
   });
 
-  it("shows the connected account with a badge", async () => {
+  it("shows the connected account once, with the badge, not greyed out", async () => {
     status = { code: 200, body: CONNECTED };
-    await render(true);
-    const row = zoteroRow()!;
-    expect(row.textContent).toContain("Připojeno jako jnovakova");
-    expect(row.querySelector('.zd-badge[data-tone="ok"]')?.textContent).toBe("Připojeno");
+    await render();
+    const g = group()!;
+    expect(g.className).not.toContain("locked");
+    expect(g.textContent).toContain("Účet jnovakova");
+    expect(g.textContent!.match(/Připojeno/g)).toHaveLength(1);
+    expect(g.querySelector('.zd-badge[data-tone="ok"]')?.textContent).toBe("Připojeno");
   });
 
-  it("is locked without Pro, asks to reconnect after a revoked or unreadable key, and survives a server error", async () => {
-    status = { code: 200, body: { ...NOT_CONNECTED, pro: false } };
-    await render(true);
-    expect(zoteroRow()!.className).toContain("zd-row-locked");
-    expect(zoteroRow()!.textContent).toContain("Jen v režimu Pro");
+  it("asks for the status once, however the Vlastní zdroje summary settles", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        calls.push(url);
+        if (url === "/api/zotero/status") return json(CONNECTED);
+        if (url.startsWith("/api/files/summary")) return json(PRO_SUMMARY);
+        return json({ error: "Nenalezeno." }, 404);
+      }),
+    );
+    await render();
+    expect(host.textContent).toContain("Moje zdroje");
+    expect(statusCalls()).toBe(1);
+  });
 
-    await act(async () => root.unmount());
-    root = createRoot(host);
-    status = { code: 200, body: { ...NOT_CONNECTED, revoked: { username: "jnovakova", revokedAt: "2026-09-20T10:00:00Z" } } };
-    await render(true);
-    expect(zoteroRow()!.textContent).toContain("Klíč přestal platit");
+  it("a connection without Pro is locked and says the assistant cannot see the library", async () => {
+    status = { code: 200, body: { ...CONNECTED, pro: false } };
+    await render();
+    const g = group()!;
+    expect(g.className).toContain("locked");
+    expect(g.textContent).toContain("bez režimu Pro do knihovny asistent nevidí");
+    expect(g.querySelector(".zd-badge")).toBeNull();
+  });
 
-    await act(async () => root.unmount());
-    root = createRoot(host);
-    status = { code: 200, body: { ...NOT_CONNECTED, unreadable: { username: "jnovakova" } } };
-    await render(true);
-    expect(zoteroRow()!.textContent).toContain("Klíč přestal platit");
+  it("tells a revoked key from an unreadable one, is locked without Pro, and survives a server error", async () => {
+    const cases: Array<[unknown, number, string]> = [
+      [{ ...NOT_CONNECTED, pro: false }, 200, "Jen v režimu Pro"],
+      [{ ...NOT_CONNECTED, revoked: { username: "jnovakova", revokedAt: "2026-09-20T10:00:00Z" } }, 200, "Klíč přestal platit"],
+      [{ ...NOT_CONNECTED, unreadable: { username: "jnovakova" } }, 200, "Připojení je potřeba obnovit"],
+      [{ error: "Stav připojení Zotera se teď nepodařilo zjistit." }, 503, "Stav připojení se teď nepodařilo zjistit."],
+      [{ state: "signed_out" }, 200, "V režimu Pro"],
+    ];
+    for (const [body, code, text] of cases) {
+      await act(async () => root.unmount());
+      root = createRoot(host);
+      status = { code, body };
+      await render();
+      expect(group()!.textContent).toContain(text);
+    }
+  });
 
-    await act(async () => root.unmount());
-    root = createRoot(host);
-    status = { code: 503, body: { error: "Stav připojení Zotera se teď nepodařilo zjistit." } };
-    await render(true);
-    expect(zoteroRow()!.textContent).toContain("nepodařilo zjistit");
+  it("never shows the previous account after signing out and in as someone else", async () => {
+    status = { code: 200, body: CONNECTED };
+    await render();
+    expect(group()!.textContent).toContain("jnovakova");
+    await act(async () => store.setAuth("signed_out"));
+    // The next user's status request hangs: whatever shows meanwhile must not be the old account.
+    let release: (r: Response) => void = () => {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        calls.push(url);
+        if (url === "/api/zotero/status") return new Promise<Response>((r) => (release = r));
+        return json({ error: "Nenalezeno." }, 404);
+      }),
+    );
+    await act(async () => store.setAuth("signed_in"));
+    await settle();
+    expect(group()!.textContent).not.toContain("jnovakova");
+    expect(group()!.textContent).toContain("Načítám");
+    await act(async () => release(json({ ...CONNECTED, connection: { ...CONNECTED.connection!, username: "pdvorak" } })));
+    await settle();
+    expect(group()!.textContent).toContain("Účet pdvorak");
   });
 
   it("reloads the status when the modal reports a change (Odpojit)", async () => {
     status = { code: 200, body: CONNECTED };
-    await render(true);
-    expect(zoteroRow()!.textContent).toContain("Připojeno jako jnovakova");
+    await render();
+    expect(group()!.textContent).toContain("Účet jnovakova");
     status = { code: 200, body: NOT_CONNECTED };
     await act(async () => notifyZoteroChanged());
     await settle();
-    expect(zoteroRow()!.textContent).toContain("Připojte svou knihovnu");
-    expect(zoteroRow()!.textContent).not.toContain("jnovakova");
+    expect(group()!.textContent).toContain("Připojte svou knihovnu");
+    expect(group()!.textContent).not.toContain("jnovakova");
   });
 });

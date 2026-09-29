@@ -66,13 +66,8 @@ export function OwnSourcesNavItem({ variant, current }: { variant: "sidebar" | "
   );
 }
 
-/**
- * The home page group (design 2a / 3c; 1a when signed out). `zotero`: the
- * deployment can connect a Zotero library (zoteroConfigured(), passed by the
- * server page) — then the group ends with a Zotero row; elsewhere nothing
- * mentions it.
- */
-export function OwnSourcesGroup({ zotero = false }: { zotero?: boolean }) {
+/** The home page group (design 2a / 3c; 1a when signed out). */
+export function OwnSourcesGroup() {
   const { auth, summary } = useZdroje();
   const ok = auth === "signed_in" && summary?.state === "ok" ? summary : null;
 
@@ -99,7 +94,6 @@ export function OwnSourcesGroup({ zotero = false }: { zotero?: boolean }) {
               <span className="source-desc">Vlastní dokumenty, ve kterých bude asistent hledat vedle oficiálních databází.</span>
             </div>
           </li>
-          {zotero ? <ZoteroRow /> : null}
         </ul>
       </div>
     );
@@ -131,7 +125,6 @@ export function OwnSourcesGroup({ zotero = false }: { zotero?: boolean }) {
             </div>
           </li>
         )}
-        {zotero ? <ZoteroRow /> : null}
       </ul>
     </div>
   );
@@ -169,53 +162,74 @@ function LibraryRow({ lib, tab, title, icon }: { lib: LibrarySummary; tab: "moje
 }
 
 /**
- * The Zotero row: what the user's connection is and the way to the Zotero
- * modal (?zotero=1), which does the connecting and disconnecting. Visitors
- * get the sign-in; the status is asked only for a signed-in user.
+ * The Zotero group under Vlastní zdroje, rendered by the server page only
+ * where the deployment can connect Zotero (zoteroConfigured()); elsewhere
+ * nothing on the page mentions it. One row: what the user's connection is,
+ * and the way into the Zotero modal (?zotero=1), which does the connecting
+ * and disconnecting. A group of its own, not a row of Vlastní zdroje: that
+ * group is drawn locked while its summary loads or when the files are off,
+ * and a working Zotero connection must not look disabled then. Visitors get
+ * the sign-in and never ask for the status.
  */
-function ZoteroRow() {
+export function ZoteroGroup() {
   const { auth } = useZdroje();
   const signedIn = auth === "signed_in";
   const status = useZoteroStatus(signedIn);
   const ok = status?.state === "ok" ? status : null;
+  // The server may know better than the client that nobody is signed in (an expired session).
+  const visitor = !signedIn || status?.state === "signed_out";
 
   let desc: string;
   let locked = false;
-  if (!signedIn) {
+  let connected = false;
+  if (visitor) {
     desc = "Vaše knihovna na zotero.org - asistent v ní bude hledat a číst, nic nezmění. V režimu Pro.";
     locked = true;
   } else if (status === undefined) {
     desc = "Načítám…";
   } else if (!ok) {
-    desc = "Stav připojení se nepodařilo zjistit - otevřete pro podrobnosti.";
+    desc = "Stav připojení se teď nepodařilo zjistit.";
+  } else if (ok.connection && ok.pro) {
+    desc = `Účet ${ok.connection.username}`;
+    connected = true;
   } else if (ok.connection) {
-    desc = `Připojeno jako ${ok.connection.username}`;
+    desc = `Účet ${ok.connection.username} - bez režimu Pro do knihovny asistent nevidí.`;
+    locked = true;
   } else if (!ok.pro) {
     desc = "Jen v režimu Pro. Přiděluji ho ručně a zdarma.";
     locked = true;
-  } else if (ok.revoked || ok.unreadable) {
+  } else if (ok.revoked) {
     desc = "Klíč přestal platit - připojte Zotero znovu.";
+  } else if (ok.unreadable) {
+    desc = "Připojení je potřeba obnovit - připojte Zotero znovu.";
   } else {
-    desc = "Připojte svou knihovnu na zotero.org - asistent v ní bude jen číst.";
+    desc = "Připojte svou knihovnu - asistent v ní bude jen číst.";
   }
 
   return (
-    <li className={locked ? "source zd-row-locked" : "source"}>
-      <ZIcon name="library" />
-      <div className="source-name">
-        <button type="button" className="source-title zd-row-button" onClick={auth === "signed_out" ? requestSignIn : openZotero}>
-          Zotero
-          {locked ? <ZIcon name="lock" size={13} /> : null}
-        </button>
-        <span className="source-desc">{desc}</span>
+    <div className={locked ? "source-group locked zd-own" : "source-group zd-own"}>
+      <div className="source-group-head">
+        <span className="source-group-name">Zotero</span>
+        {locked ? <ZIcon name="lock" size={13} className="zd-group-lock" /> : null}
       </div>
-      {ok?.connection ? (
-        <div className="source-state">
-          <span className="zd-badge" data-tone="ok">
-            Připojeno
-          </span>
-        </div>
-      ) : null}
-    </li>
+      <ul>
+        <li className="source">
+          <ZIcon name="library" />
+          <div className="source-name">
+            <button type="button" className="source-title zd-row-button" onClick={visitor ? requestSignIn : openZotero}>
+              Knihovna na zotero.org
+            </button>
+            <span className="source-desc">{desc}</span>
+          </div>
+          {connected ? (
+            <div className="source-state">
+              <span className="zd-badge" data-tone="ok">
+                Připojeno
+              </span>
+            </div>
+          ) : null}
+        </li>
+      </ul>
+    </div>
   );
 }

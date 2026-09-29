@@ -341,12 +341,17 @@ describe("modal states (GET /api/zotero/status)", () => {
     // Full scope: nothing to widen, so no reconnect form.
     expect(connectForm()).toBeNull();
 
+    const changed = vi.fn();
+    window.addEventListener("dz-zotero-changed", changed);
     await act(async () => button("Odpojit")!.click());
     expect(host.querySelector('[role="alertdialog"]')?.textContent).toContain("Odpojit Zotero?");
     expect(calls.some((c) => c.url === "/api/zotero/disconnect")).toBe(false);
     await act(async () => host.querySelector<HTMLButtonElement>(".zd-confirm .zd-btn-danger")!.click());
     await settle();
     expect(calls).toContainEqual({ url: "/api/zotero/disconnect", method: "POST" });
+    // The home page's Zotero group hears about it and reloads its status too.
+    expect(changed).toHaveBeenCalledOnce();
+    window.removeEventListener("dz-zotero-changed", changed);
     // The status is loaded again: now not connected.
     expect(calls.filter((c) => c.url === "/api/zotero/status")).toHaveLength(2);
     expect(connectForm()).not.toBeNull();

@@ -44,12 +44,17 @@ export function useZoteroStatus(enabled: boolean): ZoteroStatus | null | undefin
   }, []);
 
   useEffect(() => {
-    if (!enabled) return;
+    // Signed out: forget the last answer, so the next account never sees the previous one's.
+    if (!enabled) {
+      setStatus(undefined);
+      return;
+    }
     const ctrl = new AbortController();
     void (async () => {
       try {
         const res = await api<unknown>(STATUS_URL, { signal: ctrl.signal });
-        setStatus(res.ok ? asStatus(res.data) : null);
+        // api() can come back from an abort that landed while reading the body: ignore it.
+        if (!ctrl.signal.aborted) setStatus(res.ok ? asStatus(res.data) : null);
       } catch {
         // aborted
       }

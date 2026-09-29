@@ -719,9 +719,9 @@ s modálem v `src/zotero/web-types.ts`. Rešerše k API a k cizím MCP serverům
 (`registerAllTools(server, { zotero })` v `src/mcp/tools/index.ts`), instrukce
 serveru o nich mlčí (`buildInstructions(false)` v `src/mcp/server.ts`), nabídka
 účtu nemá položku „Zotero“ (`app/_header.tsx` → `AccountControl zotero`)
-a hlavní stránka nemá řádek „Zotero“ ve skupině Vlastní zdroje
-(`app/page.tsx` → `OwnSourcesGroup zotero`; stav čte
-`app/_zdroje/zotero-status.ts`, modál po odpojení řádek obnoví),
+a hlavní stránka nemá skupinu „Zotero“ pod Vlastními zdroji
+(`app/page.tsx` → `ZoteroGroup` v `app/_zdroje/own-sources.tsx`; stav čte
+`app/_zdroje/zotero-status.ts`, modál po odpojení skupinu obnoví),
 sonda nemá kanárka a smoke podle `dawmain_ping` (`zotero: unconfigured`)
 čeká 24 nástrojů místo 28. Skill volá `zotero_*` jen tam, kde je klient
 v seznamu nástrojů vidí. Po nastavení proměnných (a novém nasazení) se vše
