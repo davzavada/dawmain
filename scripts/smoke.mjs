@@ -146,6 +146,11 @@ const EXPECTED_TOOLS = [
   "files_search",
   "files_get_document",
   "files_list",
+  // Zotero — the user's own cloud library, registered everywhere, gated per call (see checkZoteroGate).
+  "zotero_search",
+  "zotero_get_item",
+  "zotero_get_text",
+  "zotero_list",
   // EUIPO and ÚPV are deliberately not covered — see src/mcp/tools/index.ts.
 ];
 
@@ -185,6 +190,7 @@ async function checkTools(client) {
   ok("input validation", "esbirka_search rejected limit=9999");
 
   await checkFilesGate(client);
+  await checkZoteroGate(client);
 }
 
 /**
@@ -208,6 +214,28 @@ async function checkFilesGate(client) {
     throw new Error(`files_search without a personal sign-in did not return the gating text:\n${text.slice(0, 300)}`);
   }
   ok("files_search gate", gate.includes("not available") ? "Vlastní zdroje off on this deployment" : token ? "shared access code refused" : "anonymous caller refused");
+}
+
+/**
+ * The zotero_* tools read the user's own Zotero library with their stored
+ * key: without a personal OAuth sign-in they must refuse before any Zotero
+ * request — with the sign-in text, or "not available" on a deployment
+ * without the Zotero OAuth app (ZOTERO_GATE_TEXT in src/mcp/tools/zotero.ts).
+ */
+const ZOTERO_GATE_TEXTS = [
+  "Zotero needs a personal sign-in (OAuth login, not the shared access code): this connection uses the shared access code",
+  "Zotero needs a personal sign-in (OAuth login, not the shared access code): this call carries no signed-in user",
+  "Zotero is not available on this deployment",
+];
+
+async function checkZoteroGate(client) {
+  const result = await client.request("tools/call", { name: "zotero_search", arguments: { query: "náhrada škody" } });
+  const text = textOf(result, "zotero_search");
+  const gate = ZOTERO_GATE_TEXTS.find((expected) => text.includes(expected));
+  if (result.isError !== true || !gate) {
+    throw new Error(`zotero_search without a personal sign-in did not return the gating text:\n${text.slice(0, 300)}`);
+  }
+  ok("zotero_search gate", gate.includes("not available") ? "Zotero not configured on this deployment" : token ? "shared access code refused" : "anonymous caller refused");
 }
 
 /** SMOKE_LIVE=1: exercise real upstreams — meaningful only against a deployment. */

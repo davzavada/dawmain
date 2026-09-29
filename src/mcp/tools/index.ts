@@ -11,6 +11,7 @@ import { registerEurlex } from "./eurlex";
 import { registerJustice } from "./justice";
 import { registerDoctrine } from "./doctrine";
 import { registerFiles } from "./files";
+import { registerZotero } from "./zotero";
 
 /**
  * Every tool the server exposes. To add one: create `./<name>.ts` exporting a
@@ -40,6 +41,8 @@ const registrars: Array<(server: McpServer) => void> = [
   registerDoctrine,
   // Vlastní zdroje — the user's own uploads; gated per call (registration does no I/O).
   registerFiles,
+  // Zotero — the user's own cloud Zotero library, read-only; gated per call the same way.
+  registerZotero,
 ];
 
 type ToolConfig = Record<string, unknown> & { outputSchema?: unknown };
