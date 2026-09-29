@@ -24,7 +24,8 @@ export default function Soukromi() {
           jména účastníků v rozhodnutí nebo autorů článku. Jejich správcem jste vy (u týmové
           knihovny zpravidla kancelář nebo firma, za kterou tým vystupuje): vy rozhodujete, co
           nahrajete a komu to v týmu zpřístupníte. Já je zpracovávám jen jako zpracovatel, podle
-          vašich pokynů a <Link href="/podminky">Podmínek užití</Link>.
+          vašich pokynů a <Link href="/podminky">Podmínek užití</Link>. Totéž platí pro osobní
+          údaje v knihovně Zotero, kterou k Dawmainu připojíte (záznamy, poznámky, přílohy).
         </p>
       </Section>
 
@@ -79,6 +80,22 @@ export default function Soukromi() {
             z něj jen zjišťuji, ke kterým knihovnám máte přístup.
           </li>
         </ul>
+        <p>Připojíte-li v režimu Pro svou knihovnu Zotero, přibývá ještě:</p>
+        <ul>
+          <li>
+            <strong>klíč k vaší knihovně Zotero</strong> - vydá ho Zotero, když připojení na jeho
+            stránce potvrdíte. Ukládám ho zašifrovaný u vašeho účtu v Clerku, spolu s vaším
+            uživatelským jménem a číselným identifikátorem v Zoteru, datem připojení a tím, k čemu
+            klíč opravňuje (čtení knihovny, poznámek a skupin),
+          </li>
+          <li>
+            <strong>obsah knihovny, na který se váš asistent zeptá</strong> - záznamy (název,
+            autoři, další údaje, štítky, kolekce), poznámky, anotace a text příloh. Neukládám ho,
+            projde jen dočasnou pamětí (bod 5). Nemá-li Zotero text přílohy zaindexovaný, stáhnu
+            na dotaz asistenta PDF přílohu z úložiště Zotera, převedu ji na text a soubor hned
+            zahodím.
+          </li>
+        </ul>
         <p>
           Účty a týmy vede poskytovatel přihlášení Clerk; drží e-mailovou adresu, identifikátor
           účtu, jméno, pokud ho vyplníte, a u týmů jejich členy, role a pozvánky. Přihlásíte-li se
@@ -89,7 +106,8 @@ export default function Soukromi() {
         <p>
           Vaši konverzaci s AI asistentem server nevidí - nedostává ji. Dostane jen strojové
           volání, které asistent provede. Obsah rešerší v oficiálních zdrojích - dotazy a odpovědi
-          - si trvale neukládám; trvale ukládám jen to, co sami nahrajete do Vlastních zdrojů.
+          - si trvale neukládám; trvale ukládám jen to, co sami nahrajete do Vlastních zdrojů, a u
+          připojeného Zotera klíč k němu.
           Reklamu nemám, údaje neprodávám a nepředávám je pro marketing. Nic o vás automaticky
           nevyhodnocuji ani neprofiluji.
         </p>
@@ -105,6 +123,7 @@ export default function Soukromi() {
             návrh metadat, hledání a čtení v nich vaším asistentem a v týmu jejich sdílení s
             ostatními členy,
           </li>
+          <li>u Zotera připojení vaší knihovny a hledání a čtení v ní vaším asistentem,</li>
           <li>přehled o tom, jak se služba používá, a její další zlepšování,</li>
           <li>
             provoz a bezpečnost služby, hlídání limitů, díky kterým může běžet zdarma, a prevence
@@ -118,8 +137,9 @@ export default function Soukromi() {
           Účet, přihlašovací relaci a vyřízení rešerše včetně krátké dočasné paměti zpracovávám pro
           plnění smlouvy (čl. 6 odst. 1 písm. b) GDPR). Stejně tak Vlastní zdroje: uložení a
           zpracování dokumentů, jejich zpřístupnění vám a vašemu týmu, návrh metadat, členství v
-          týmu a záznamy o tom, kdo co nahrál. Skutečnost, že je služba bezúplatná, na tom nic
-          nemění.
+          týmu a záznamy o tom, kdo co nahrál. A také připojení Zotera: uložení klíče a čtení z
+          vaší knihovny, když se na ni váš asistent zeptá. Skutečnost, že je služba bezúplatná, na
+          tom nic nemění.
         </p>
         <p>
           Údaje o používání služby, provozní záznamy hostingu, zprávy, které mi napíšete, a záznam o
@@ -128,8 +148,9 @@ export default function Soukromi() {
           na mě obracíte, a abych mohl doložit, že jsem výmaz provedl.
         </p>
         <p>
-          Na osobní údaje v nahraných dokumentech se tento bod nevztahuje. Právní základ k nim musí
-          mít ten, kdo je nahrál, protože je jejich správcem (bod 1).
+          Na osobní údaje v nahraných dokumentech a v připojené knihovně Zotero se tento bod
+          nevztahuje. Právní základ k nim musí mít ten, kdo je nahrál nebo knihovnu připojil,
+          protože je jejich správcem (bod 1).
         </p>
       </Section>
 
@@ -178,6 +199,24 @@ export default function Soukromi() {
           </li>
           <li>záznam o přijetí pravidel Vlastních zdrojů - dokud trvá účet.</li>
         </ul>
+        <p>U Zotera platí:</p>
+        <ul>
+          <li>
+            klíč a údaje o připojení - dokud Zotero neodpojíte nebo nezrušíte účet. Odpojením klíč
+            smažu a požádám Zotero, aby ho zrušilo. Přestane-li klíč platit (třeba když ho smažete
+            v Zoteru), smažu ho také a do dalšího připojení si nechám jen vaše uživatelské jméno v
+            Zoteru a čas, kdy klíč přestal platit,
+          </li>
+          <li>
+            po zrušení účtu klíč smažu spolu s účtem; v Zoteru ale zůstane, dokud ho nesmažete v
+            jeho nastavení (zotero.org/settings/keys),
+          </li>
+          <li>
+            obsah knihovny - jen v dočasné paměti: seznamy skupin a kolekcí, údaje k hledání podle
+            spisové značky a texty příloh nejdéle 10 minut. Stažené PDF neukládám vůbec, zahodím
+            ho hned po převodu na text.
+          </li>
+        </ul>
         <p>
           O smazání účtu a všech souvisejících údajů můžete požádat na <Mail />. Provedu je bez
           zbytečného odkladu.
@@ -221,7 +260,14 @@ export default function Soukromi() {
           členové týmu, a to i s tím, kdo je nahrál; správce týmu navíc vidí seznam členů s jejich
           e-maily. Co si z vašich dokumentů přečte váš AI asistent, dostane i jeho poskytovatel
           (např. Anthropic nebo OpenAI) podle smlouvy, kterou s ním máte vy - to je vaše volba, ne
-          předání z mé strany.
+          předání z mé strany. Totéž platí pro obsah připojené knihovny Zotero.
+        </p>
+        <p>
+          <strong>Zotero</strong> (Corporation for Digital Scholarship, USA) není můj zpracovatel.
+          Je to služba, kterou máte vy a kterou jste k Dawmainu sami připojili. Na pokyn vašeho
+          asistenta do ní s vaším klíčem posílám jeho dotazy a načítám z ní záznamy a přílohy.
+          Zotero vede vaši knihovnu podle svých{" "}
+          <a href="https://www.zotero.org/support/privacy">zásad ochrany soukromí</a>.
         </p>
         <p>
           Poskytovatel přihlášení účtem jiné služby (např. Google) je samostatný správce - ověří
@@ -256,6 +302,11 @@ export default function Soukromi() {
           Privacy Framework, případně o standardní smluvní doložky ve smlouvách o zpracování.
           Clerk, Vercel i Google jsou v rámci Data Privacy Framework zapsány.
         </p>
+        <p>
+          Připojíte-li Zotero, putují dotazy vašeho asistenta a váš klíč do Zotera, které data vede
+          v USA. Nejde o předání, o kterém bych rozhodoval já: jde jen na váš pokyn, do služby,
+          kterou jste si sami vybrali a připojili.
+        </p>
       </Section>
 
       <Section heading="8. Cookies">
@@ -266,6 +317,11 @@ export default function Soukromi() {
           varianty s příponou a krátkodobé cookies pro obnovení relace). Bez nich by přihlášení
           nefungovalo, jsou tedy nezbytné a souhlas k nim nepotřebuji. Další cookies nutné k
           udržení přihlášení nastavuje Clerk na své vlastní adrese.
+        </p>
+        <p>
+          Když připojujete Zotero, nastavím na nejvýš 10 minut ještě cookie{" "}
+          <code>dz_zotero_oauth</code>. Spojí návrat ze stránky Zotera s vaším přihlášením a po
+          dokončení připojení ji smažu. Je také nezbytná.
         </p>
         <p>Analytické, reklamní ani jiné sledovací cookies nepoužívám.</p>
       </Section>
@@ -296,6 +352,26 @@ export default function Soukromi() {
             přístup, průběžně ověřuji u Clerku.
           </li>
         </ul>
+        <p>Připojení Zotera chrání:</p>
+        <ul>
+          <li>
+            <strong>klíč jen ke čtení</strong> - o právo zápisu si Dawmain vůbec neříká. Kdybyste
+            ho na stránce Zotera přesto povolili, připojení odmítnu a klíč hned zruším,
+          </li>
+          <li>
+            <strong>zašifrovaný klíč</strong> - šifruji ho (AES-256-GCM) klíčem, který je jen v
+            nastavení serveru, takže ze samotného záznamu v Clerku ho nikdo nepřečte,
+          </li>
+          <li>
+            <strong>přístup jen přes vaše přihlášení</strong> - stejně jako u Vlastních zdrojů jen s
+            vaším účtem v režimu Pro, ne přes sdílený přístupový kód.
+          </li>
+        </ul>
+        <p>
+          Na rozdíl od Vlastních zdrojů sem u Zotera originály přijít mohou: nemá-li Zotero text
+          přílohy, stáhnu PDF z jeho úložiště. Zůstane ale jen v paměti serveru po dobu převodu;
+          na disk ani do databáze ho neukládám.
+        </p>
         <p>
           Kromě mě mají k údajům přístup jen poskytovatelé uvedení výše a jejich dodavatelé, a to v
           rozsahu nutném k tomu, aby služba běžela; k týmovým dokumentům navíc členové týmu. Do

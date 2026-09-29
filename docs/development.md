@@ -629,7 +629,12 @@ ty, které jdou přečíst z kódu.
 - export textu („Exportovat text“) — i po odebrání Pro;
 - kontaktní místo DSA (čl. 11 a 12): `CONTACT`, česky a anglicky;
 - region Frankfurt u Vercelu i Neonu, rozsah textu k návrhu metadat
-  (~16 000 znaků), cookies Clerku.
+  (~16 000 znaků), cookies Clerku;
+- Zotero: není zpracovatel (službu si připojuje uživatel, Dawmain na jeho
+  pokyn čte), klíč jen ke čtení a zašifrovaný v `privateMetadata` Clerku,
+  klíč s právem zápisu se odmítne a zruší, obsah knihovny jen v dočasné
+  paměti (≤ 10 min), stažené PDF se neukládá, cookie `dz_zotero_oauth`
+  (≤ 10 min) při připojování; po smazání účtu klíč zůstane na zotero.org.
 
 Znění s Vlastními zdroji má `EFFECTIVE` 1. 11. 2026 a na `main` ještě není
 (tam platí 1. 9. 2026). Dokud se nenasadí, dá se upravovat bez posunu data.

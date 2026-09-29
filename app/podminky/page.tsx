@@ -4,7 +4,7 @@ import { LegalHeader, Mail, Section } from "../_legal";
 export const metadata = {
   title: "Podmínky užití - Dawmain",
   description:
-    "Dawmain je zdarma a nekomerčně. Co to znamená, co od služby čekat a jaká pravidla platí pro Vlastní zdroje.",
+    "Dawmain je zdarma a nekomerčně. Co to znamená, co od služby čekat a jaká pravidla platí pro Vlastní zdroje a Zotero.",
 };
 
 export default function Podminky() {
@@ -133,6 +133,34 @@ export default function Podminky() {
           orgán, vyhovím jen tak, jak to ukládá zákon, a jen v nezbytném rozsahu. Dám vám o tom
           vědět, pokud mi to zákon nezakazuje. U dokumentů advokátů budu trvat na postupu, který
           zákon předepisuje k ochraně advokátního tajemství (§ 85b trestního řádu).
+        </p>
+      </Section>
+
+      <Section heading="Zotero (Pro)">
+        <p>
+          V režimu Pro si můžete k Dawmainu připojit svou knihovnu v Zoteru (zotero.org). Váš
+          asistent v ní pak hledá a čte záznamy, poznámky, anotace a text příloh, včetně skupin,
+          kterých jste v Zoteru členem. Připojení je <strong>jen ke čtení</strong>: Dawmain ve
+          vaší knihovně nic nemění, nepřidává ani nemaže.
+        </p>
+        <p>
+          Připojíte ji v nabídce účtu (položka Zotero, tlačítko „Připojit Zotero“). Zotero vás na
+          své stránce požádá o souhlas s klíčem, který smí číst vaši knihovnu, poznámky a skupiny;
+          rozsah tam můžete zúžit. Právo zápisu Dawmain nepotřebuje, a kdybyste ho povolili,
+          připojení odmítne. Odpojit můžete kdykoli tamtéž tlačítkem „Odpojit“, nebo klíč smazat
+          přímo v nastavení Zotera.
+        </p>
+        <p>
+          Text příloh beru z indexu Zotera. Když tam chybí nebo je neúplný, převedu PDF přílohu na
+          text sám. Převod dělá automat a může se splést, takže citace si ověřte v originálu. PDF
+          uložená mimo úložiště Zotera (WebDAV, odkazované soubory) přečíst nejde.
+        </p>
+        <p>
+          Zotero se řídí vlastními podmínkami. Za jeho dostupnost ani za obsah vaší knihovny
+          neručím. U osobních údajů v připojené knihovně (třeba jména v rozhodnutích nebo v
+          poznámkách) jste správcem vy a já zpracovatelem, stejně jako u Vlastních zdrojů. Platí
+          pro ně přiměřeně odstavec „Osobní údaje v dokumentech“ výše, s tím, že je nikam
+          neukládám a jediným zpracovatelem, kterému je svěřuji, je Vercel (hosting).
         </p>
       </Section>
 
