@@ -194,14 +194,18 @@ const MAX_BUCKETS = 5_000;
 const HOUR_MS = 3_600_000;
 
 /**
- * Token bucket per user: LIMITS.toolCallsPerHour tokens, refilled
- * continuously over an hour. Returns false (and consumes nothing) when
- * empty. In memory per instance — a soft limit against runaway agents, the
- * DB counters are the hard ones.
+ * Token bucket per key: `capacity` tokens (LIMITS.toolCallsPerHour unless
+ * given), refilled continuously over an hour. Returns false (and consumes
+ * nothing) when empty. In memory per instance — a soft limit against
+ * runaway agents, the DB counters are the hard ones.
+ *
+ * files_* pass the bare Clerk user id; another tool family passes its own
+ * prefixed key ("zotero:<userId>") and capacity, so the two never drain
+ * each other's bucket — a Clerk id cannot contain ":" (USER_ID_RE). One key
+ * must always come with the same capacity. The LRU bound is shared.
  */
-export function allowToolCall(userId: string, now = Date.now()): boolean {
-  const capacity = LIMITS.toolCallsPerHour;
-  let bucket = buckets.get(userId);
+export function allowToolCall(key: string, now = Date.now(), capacity: number = LIMITS.toolCallsPerHour): boolean {
+  let bucket = buckets.get(key);
   if (!bucket) {
     if (buckets.size >= MAX_BUCKETS) {
       const oldest = buckets.keys().next().value;
@@ -212,9 +216,9 @@ export function allowToolCall(userId: string, now = Date.now()): boolean {
     const elapsed = Math.max(0, now - bucket.at);
     bucket.tokens = Math.min(capacity, bucket.tokens + (elapsed * capacity) / HOUR_MS);
     bucket.at = now;
-    buckets.delete(userId); // re-insert: Map order doubles as LRU order
+    buckets.delete(key); // re-insert: Map order doubles as LRU order
   }
-  buckets.set(userId, bucket);
+  buckets.set(key, bucket);
   if (bucket.tokens < 1) return false;
   bucket.tokens -= 1;
   return true;

@@ -5,6 +5,7 @@ import { USER_AGENT } from "@/src/sources/shared/http";
 import { PRIMO_PAGE_SIZE, buildPrimoUrl } from "@/src/sources/primo";
 import { READ_ONLY } from "./shared";
 import { DOC_PAGE_CHARS } from "@/src/sources/shared/text";
+import { API_ORIGIN as ZOTERO_API, ZOTERO_UA, zoteroConfigured } from "@/src/zotero/config";
 
 /**
  * Diagnostics for the upstream databases the tools query. This is the only integration
@@ -194,7 +195,24 @@ export function canaries(): Canary[] {
       }),
       marker: /"totalResultsLocal"/,
     },
-  ];
+    {
+      // Reachability of the Zotero Web API from this deployment, never a
+      // user's library: a public schema list, no key. api.zotero.org stays
+      // out of ALLOWED_FETCH_HOSTS (fetch_url must not reach the host the
+      // users' keys go to), and out of DATABASES in src/mcp/status.ts — a
+      // user's private library is not a public source's status.
+      id: "zotero",
+      source: "Zotero (Web API v3)",
+      note: "public item-type list, no API key (the users' own libraries are not probed)",
+      request: () => ({
+        url: `${ZOTERO_API}/itemTypes`,
+        init: { headers: { accept: "application/json", "zotero-api-version": "3", "user-agent": ZOTERO_UA } },
+      }),
+      marker: /"itemType"/,
+    },
+    // Zotero only where the deployment offers it (zoteroConfigured()): elsewhere
+    // the zotero_* tools are not registered and its reachability is nobody's concern.
+  ].filter((c) => c.id !== "zotero" || zoteroConfigured());
 }
 
 export interface ProbeResult {

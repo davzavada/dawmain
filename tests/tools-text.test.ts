@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { registerAllTools } from "@/src/mcp/tools";
 import { justiceDecisionHeader } from "@/src/mcp/tools/justice";
 import { isProcedurePaperwork } from "@/src/mcp/tools/eurlex";
@@ -17,13 +17,39 @@ describe("the registration boundary", () => {
       registerTool(name: string, config: Record<string, unknown>, handler: (args: unknown) => Promise<Record<string, unknown>>) {
         seen.push({ name, config, handler });
       },
-    } as never);
+    } as never, { zotero: true });
     expect(seen.length).toBeGreaterThan(15);
+    expect(seen.map((tool) => tool.name)).toContain("zotero_search");
     for (const tool of seen) expect(tool.config).not.toHaveProperty("outputSchema");
     const ping = seen.find((tool) => tool.name === "dawmain_ping");
     const result = await ping!.handler({});
     expect(result).not.toHaveProperty("structuredContent");
     expect((result.content as Array<{ text: string }>)[0].text).toContain('"server"');
+  });
+});
+
+describe("Zotero is offered only where configured", () => {
+  function names(opts?: { zotero: boolean }): string[] {
+    const seen: string[] = [];
+    registerAllTools({ registerTool: (name: string) => void seen.push(name) } as never, opts);
+    return seen;
+  }
+  const ZOTERO = ["zotero_search", "zotero_get_item", "zotero_get_text", "zotero_list"];
+
+  it("registers all four zotero_* tools with { zotero: true } and none with { zotero: false }", () => {
+    expect(names({ zotero: true })).toEqual(expect.arrayContaining(ZOTERO));
+    expect(names({ zotero: false }).filter((n) => n.startsWith("zotero_"))).toEqual([]);
+  });
+
+  it("defaults to the environment: without the Zotero OAuth app no zotero_* tools", () => {
+    vi.stubEnv("ZOTERO_OAUTH_CLIENT_KEY", "");
+    vi.stubEnv("ZOTERO_OAUTH_CLIENT_SECRET", "");
+    try {
+      expect(names().filter((n) => n.startsWith("zotero_"))).toEqual([]);
+      expect(names()).toContain("files_search");
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 

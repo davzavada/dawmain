@@ -25,6 +25,7 @@ const { SiteNav } = await import("@/app/_nav");
 const { CONTACT, EFFECTIVE } = await import("@/app/_legal");
 const { PAGE_CHARS, metaModel } = await import("@/src/files/config");
 const { READ_COUNTER_KEEP_DAYS, USAGE_KEEP_DAYS } = await import("@/src/files/db/usage");
+const { STATE_COOKIE } = await import("@/src/zotero/config");
 
 /** Rendered page as plain text, whitespace collapsed (JSX line breaks vary). */
 function text(element: ReturnType<typeof createElement>): string {
@@ -126,6 +127,42 @@ describe("privacy policy (/soukromi)", () => {
   it("shows the shared effective date", () => {
     expect(EFFECTIVE).toMatch(/^\d{1,2}\. \d{1,2}\. \d{4}$/);
     expect(privacy).toContain(`Účinné od ${EFFECTIVE}`);
+  });
+});
+
+describe("Zotero in the legal texts", () => {
+  it("lists the stored key and the library content read on request", () => {
+    expect(privacy).toContain("klíč k vaší knihovně Zotero");
+    expect(privacy).toContain("Ukládám ho zašifrovaný u vašeho účtu v Clerku");
+    expect(privacy).toContain("obsah knihovny, na který se váš asistent zeptá");
+  });
+
+  it("keeps Zotero out of the processor list: it is the user's own service", () => {
+    expect(privacy).toContain("tři zpracovatelé");
+    expect(privacy).toContain("není můj zpracovatel");
+    expect(privacy).toContain("Totéž platí pro osobní údaje v knihovně Zotero");
+  });
+
+  it("states that a PDF may be fetched when Zotero has no text, and is never stored", () => {
+    expect(privacy).toContain("stáhnu na dotaz asistenta PDF přílohu z úložiště Zotera");
+    expect(privacy).toContain("Stažené PDF neukládám vůbec");
+    // The Vlastní zdroje promise stays, scoped to Vlastní zdroje.
+    expect(privacy).toContain("Na rozdíl od Vlastních zdrojů sem u Zotera originály přijít mohou");
+    expect(privacy).toContain("originály sem vůbec nepřijdou");
+  });
+
+  it("states retention of the key, the key left at zotero.org, and the connect cookie", () => {
+    expect(privacy).toContain("dokud Zotero neodpojíte nebo nezrušíte účet");
+    expect(privacy).toContain("zotero.org/settings/keys");
+    expect(privacy).toContain(STATE_COOKIE);
+  });
+
+  it("states the read-only key and refuses write access", () => {
+    expect(privacy).toContain("o právo zápisu si Dawmain vůbec neříká");
+    expect(terms).toContain("Zotero (Pro)");
+    expect(terms).toContain("jen ke čtení");
+    expect(terms).toContain("kdybyste ho povolili, připojení odmítne");
+    expect(terms).toContain("„Odpojit“");
   });
 });
 

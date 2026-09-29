@@ -1,0 +1,155 @@
+[
+  {
+    "key": "CASE2345",
+    "version": 1201,
+    "library": { "type": "user", "id": 475425, "name": "zuser", "links": { "alternate": { "href": "https://www.zotero.org/zuser", "type": "text/html" } } },
+    "links": {
+      "self": { "href": "https://api.zotero.org/users/475425/items/CASE2345", "type": "application/json" },
+      "alternate": { "href": "https://www.zotero.org/zuser/items/CASE2345", "type": "text/html" }
+    },
+    "meta": { "creatorSummary": "Nejvyšší soud", "parsedDate": "2019-11-26", "numChildren": 0 },
+    "data": {
+      "key": "CASE2345",
+      "version": 1201,
+      "itemType": "case",
+      "caseName": "Rozsudek o náhradě nemajetkové újmy",
+      "creators": [{ "creatorType": "author", "name": "Nejvyšší soud" }],
+      "abstractNote": "Výše náhrady nemajetkové újmy pozůstalých.",
+      "court": "Nejvyšší soud",
+      "dateDecided": "2019-11-26",
+      "docketNumber": "25 Cdo 1234/2019",
+      "reporter": "",
+      "reporterVolume": "",
+      "firstPage": "",
+      "history": "",
+      "language": "cs",
+      "shortTitle": "",
+      "url": "https://nsoud.cz/Judikatura/judikatura_ns.nsf/WebSearch/1",
+      "accessDate": "",
+      "rights": "",
+      "extra": "ECLI: ECLI:CZ:NS:2019:25.CDO.1234.2019.1",
+      "tags": [{ "tag": "náhrada škody" }, { "tag": "nemajetková újma", "type": 1 }],
+      "collections": ["CLLA2345"],
+      "relations": {},
+      "dateAdded": "2026-09-01T08:00:00Z",
+      "dateModified": "2026-09-02T09:00:00Z"
+    }
+  },
+  {
+    "key": "JART7789",
+    "version": 1188,
+    "library": { "type": "user", "id": 475425, "name": "zuser", "links": { "alternate": { "href": "https://www.zotero.org/zuser", "type": "text/html" } } },
+    "links": {
+      "self": { "href": "https://api.zotero.org/users/475425/items/JART7789", "type": "application/json" },
+      "alternate": { "href": "https://www.zotero.org/zuser/items/JART7789", "type": "text/html" }
+    },
+    "meta": { "creatorSummary": "Nováková a Beran", "parsedDate": "2019-12", "numChildren": 2 },
+    "data": {
+      "key": "JART7789",
+      "version": 1188,
+      "itemType": "journalArticle",
+      "title": "Náhrada nemajetkové újmy v judikatuře",
+      "creators": [
+        { "creatorType": "author", "firstName": "Jana", "lastName": "Nováková" },
+        { "creatorType": "author", "firstName": "", "lastName": "Beran" },
+        { "creatorType": "editor", "name": "Redakce PR" }
+      ],
+      "abstractNote": "",
+      "publicationTitle": "Právní rozhledy",
+      "volume": "27",
+      "issue": "12",
+      "pages": "417-425",
+      "date": "prosinec 2019",
+      "language": "cs",
+      "url": "",
+      "extra": "",
+      "tags": [],
+      "collections": ["CLLA2345", "CLLB2345"],
+      "relations": {},
+      "dateAdded": "2026-08-01T08:00:00Z",
+      "dateModified": "2026-08-01T08:00:00Z"
+    }
+  },
+  {
+    "key": "PDFA2345",
+    "version": 1190,
+    "library": { "type": "user", "id": 475425, "name": "zuser", "links": { "alternate": { "href": "https://www.zotero.org/zuser", "type": "text/html" } } },
+    "links": {
+      "self": { "href": "https://api.zotero.org/users/475425/items/PDFA2345", "type": "application/json" },
+      "alternate": { "href": "https://www.zotero.org/zuser/items/PDFA2345", "type": "text/html" },
+      "up": { "href": "https://api.zotero.org/users/475425/items/JART7789", "type": "application/json" },
+      "enclosure": { "href": "https://api.zotero.org/users/475425/items/PDFA2345/file/view", "type": "application/pdf", "title": "novakova-2019.pdf", "length": 482113 }
+    },
+    "meta": { "numChildren": 1 },
+    "data": {
+      "key": "PDFA2345",
+      "version": 1190,
+      "parentItem": "JART7789",
+      "itemType": "attachment",
+      "linkMode": "imported_file",
+      "title": "Full Text PDF",
+      "accessDate": "",
+      "url": "",
+      "note": "",
+      "contentType": "application/pdf",
+      "charset": "",
+      "filename": "novakova-2019.pdf",
+      "md5": "0123456789abcdef0123456789abcdef",
+      "mtime": 1756713600000,
+      "tags": [],
+      "relations": {},
+      "dateAdded": "2026-08-01T08:00:00Z",
+      "dateModified": "2026-08-01T08:00:00Z"
+    }
+  },
+  {
+    "key": "NTAB3456",
+    "version": 1195,
+    "library": { "type": "user", "id": 475425, "name": "zuser", "links": { "alternate": { "href": "https://www.zotero.org/zuser", "type": "text/html" } } },
+    "links": {
+      "self": { "href": "https://api.zotero.org/users/475425/items/NTAB3456", "type": "application/json" },
+      "alternate": { "href": "https://www.zotero.org/zuser/items/NTAB3456", "type": "text/html" },
+      "up": { "href": "https://api.zotero.org/users/475425/items/JART7789", "type": "application/json" }
+    },
+    "meta": { "numChildren": 0 },
+    "data": {
+      "key": "NTAB3456",
+      "version": 1195,
+      "parentItem": "JART7789",
+      "itemType": "note",
+      "note": "<div data-schema-version=\"9\"><h1>Shrnutí &amp; závěry</h1>\n<p>Autorka kritizuje <strong>tabulkové</strong> výše náhrady.</p>\n<p>Viz též 25 Cdo 1234/2019.</p></div>",
+      "tags": [{ "tag": "k přečtení" }],
+      "relations": {},
+      "dateAdded": "2026-08-02T08:00:00Z",
+      "dateModified": "2026-08-03T08:00:00Z"
+    }
+  },
+  {
+    "key": "ANNT4567",
+    "version": 1196,
+    "library": { "type": "user", "id": 475425, "name": "zuser", "links": { "alternate": { "href": "https://www.zotero.org/zuser", "type": "text/html" } } },
+    "links": {
+      "self": { "href": "https://api.zotero.org/users/475425/items/ANNT4567", "type": "application/json" },
+      "alternate": { "href": "https://www.zotero.org/zuser/items/ANNT4567", "type": "text/html" },
+      "up": { "href": "https://api.zotero.org/users/475425/items/PDFA2345", "type": "application/json" }
+    },
+    "meta": { "numChildren": 0 },
+    "data": {
+      "key": "ANNT4567",
+      "version": 1196,
+      "parentItem": "PDFA2345",
+      "itemType": "annotation",
+      "annotationType": "highlight",
+      "annotationText": "Výše náhrady musí odpovídat okolnostem případu.",
+      "annotationComment": "klíčová věta",
+      "annotationColor": "#ffd400",
+      "annotationPageLabel": "418",
+      "annotationSortIndex": "00001|000123|00456",
+      "annotationPosition": "{\"pageIndex\":1,\"rects\":[[72.1,500.2,300.4,512.9]]}",
+      "tags": [],
+      "relations": {},
+      "dateAdded": "2026-08-04T08:00:00Z",
+      "dateModified": "2026-08-04T08:00:00Z"
+    }
+  }
+]

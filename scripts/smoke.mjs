@@ -149,11 +149,27 @@ const EXPECTED_TOOLS = [
   // EUIPO and ÚPV are deliberately not covered — see src/mcp/tools/index.ts.
 ];
 
+/**
+ * Zotero — the user's own cloud library: registered only where the
+ * deployment has it configured (dawmain_ping says "zotero": "configured"),
+ * then gated per call (see checkZoteroGate). All four or none.
+ */
+const ZOTERO_TOOLS = ["zotero_search", "zotero_get_item", "zotero_get_text", "zotero_list"];
+
 async function checkTools(client) {
   const { tools } = await client.request("tools/list");
   if (!tools?.length) throw new Error("tools/list returned no tools");
   const names = tools.map((t) => t.name).sort();
-  const expected = [...EXPECTED_TOOLS].sort();
+
+  const ping = await client.request("tools/call", { name: "dawmain_ping", arguments: {} });
+  const info = JSON.parse(textOf(ping, "dawmain_ping"));
+  if (info.ok !== true) throw new Error(`dawmain_ping did not report ok: ${JSON.stringify(ping)}`);
+  const zotero = info.zotero === "configured";
+  if (info.zotero !== "configured" && info.zotero !== "unconfigured") {
+    throw new Error(`dawmain_ping reported no zotero state: ${JSON.stringify(info.zotero)}`);
+  }
+
+  const expected = [...EXPECTED_TOOLS, ...(zotero ? ZOTERO_TOOLS : [])].sort();
   const missing = expected.filter((name) => !names.includes(name));
   const surplus = names.filter((name) => !expected.includes(name));
   if (missing.length || surplus.length) {
@@ -163,11 +179,8 @@ async function checkTools(client) {
   }
   const structured = tools.filter((t) => t.outputSchema).map((t) => t.name);
   if (structured.length) throw new Error(`tools declare an outputSchema: ${structured.join(", ")}`);
-  ok("tools/list", `${names.length} tools, roster matches, text-only`);
+  ok("tools/list", `${names.length} tools, roster matches, text-only${zotero ? "" : " (Zotero not configured: zotero_* not offered)"}`);
 
-  const ping = await client.request("tools/call", { name: "dawmain_ping", arguments: {} });
-  const info = JSON.parse(textOf(ping, "dawmain_ping"));
-  if (info.ok !== true) throw new Error(`dawmain_ping did not report ok: ${JSON.stringify(ping)}`);
   ok("dawmain_ping", `env=${info.environment} region=${info.region ?? "-"} commit=${info.commit ?? "-"}`);
 
   // Input validation must reject bad arguments without touching any upstream.
@@ -185,6 +198,9 @@ async function checkTools(client) {
   ok("input validation", "esbirka_search rejected limit=9999");
 
   await checkFilesGate(client);
+  if (zotero) await checkZoteroGate(client);
+  else ok("zotero_* gate", "not offered on this deployment (unconfigured)");
+  return zotero;
 }
 
 /**
@@ -208,6 +224,45 @@ async function checkFilesGate(client) {
     throw new Error(`files_search without a personal sign-in did not return the gating text:\n${text.slice(0, 300)}`);
   }
   ok("files_search gate", gate.includes("not available") ? "Vlastní zdroje off on this deployment" : token ? "shared access code refused" : "anonymous caller refused");
+}
+
+/**
+ * The zotero_* tools read the user's own Zotero library with their stored
+ * key: without a personal OAuth sign-in they must refuse before any Zotero
+ * request, with the sign-in text. They exist only where Zotero is
+ * configured (dawmain_ping and the tool gate read the same
+ * zoteroConfigured()), so "not available on this deployment" here would
+ * mean the two disagree — a failure, not a pass.
+ */
+const ZOTERO_GATE_TEXTS = [
+  "Zotero needs a personal sign-in (OAuth login, not the shared access code): this connection uses the shared access code",
+  "Zotero needs a personal sign-in (OAuth login, not the shared access code): this call carries no signed-in user",
+];
+
+/** One valid call per zotero_* tool — valid, so the refusal comes from the gate, not from schema validation. */
+const ZOTERO_GATE_CALLS = [
+  ["zotero_search", { query: "náhrada škody" }],
+  ["zotero_get_item", { key: "ABCD2345" }],
+  ["zotero_get_text", { key: "ABCD2345" }],
+  ["zotero_list", { list: "libraries" }],
+];
+
+async function checkZoteroGate(client) {
+  let gate;
+  for (const [name, args] of ZOTERO_GATE_CALLS) {
+    const result = await client.request("tools/call", { name, arguments: args });
+    const text = textOf(result, name);
+    const found = ZOTERO_GATE_TEXTS.find((expected) => text.includes(expected));
+    if (result.isError !== true || !found) {
+      throw new Error(`${name} without a personal sign-in did not return the gating text:\n${text.slice(0, 300)}`);
+    }
+    if (gate && found !== gate) throw new Error(`${name} refused with a different gate than zotero_search: ${found}`);
+    gate = found;
+  }
+  ok(
+    "zotero_* gate",
+    `${ZOTERO_GATE_CALLS.length} tools — ${token ? "shared access code refused" : "anonymous caller refused"}`,
+  );
 }
 
 /** SMOKE_LIVE=1: exercise real upstreams — meaningful only against a deployment. */
@@ -296,7 +351,13 @@ async function main() {
   });
   legacy.protocolVersion = init.protocolVersion;
   ok("initialize", `${init.serverInfo?.name} ${init.serverInfo?.version} (protocol ${init.protocolVersion})`);
-  await checkTools(legacy);
+  const zotero = await checkTools(legacy);
+  // The instructions are fixed at module load, the tools per request: both must agree on Zotero.
+  const mentionsZotero = /zotero/i.test(init.instructions ?? "");
+  if (mentionsZotero !== zotero) {
+    throw new Error(`instructions ${mentionsZotero ? "mention" : "omit"} Zotero while dawmain_ping says ${zotero ? "configured" : "unconfigured"}`);
+  }
+  ok("instructions", zotero ? "route to zotero_* (configured)" : "no Zotero (unconfigured)");
 
   if (process.env.SMOKE_LIVE === "1") {
     console.log("\nLive upstream checks (SMOKE_LIVE=1)");

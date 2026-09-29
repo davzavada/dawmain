@@ -1,8 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { getPublicOrigin } from "mcp-handler";
-import { callerFromCtx } from "@/src/mcp/caller";
-import { getAccess } from "@/src/files/access";
+import { personalProCaller, type ProCaller } from "@/src/mcp/pro-caller";
 import type { Access, LibraryAccess } from "@/src/files/access-types";
 import { LIMITS, type FilesMode } from "@/src/files/config";
 import { FilesUnavailableError, withScope, type Queryable } from "@/src/files/db/client";
@@ -40,17 +39,20 @@ import { errorCode, logFilesError } from "@/src/files/errors";
 import { allowToolCall, effectiveMode, envOnlyMode } from "@/src/files/guards";
 import { actName, resolveAct, zakId } from "@/src/files/index/acts";
 import { bestWindow, findMatches } from "@/src/files/index/highlight";
-import { canonicalCaseNumber, euActId, findIdentSpans, queryIdentKeys, stripIdentifiers } from "@/src/files/index/identifiers";
+import { euActId, queryIdentKeys, stripIdentifiers } from "@/src/files/index/identifiers";
 import { libraryHandle, readScope, safeLibraryName, type Scope } from "@/src/files/scope";
 import { buildTsQuery } from "@/src/files/text/analyze";
 import { DOC_TYPES, DOC_TYPE_LABELS, type AnchorLabel, type DocType, type PageLabelSource } from "@/src/files/types";
 import { SourceError, toToolError, type SourceErrorKind } from "@/src/sources/shared/errors";
 import { DOC_PAGE_CHARS, interleave, uniqueQueries } from "@/src/sources/shared/text";
+import { caseNumberKeys, czechDate, formatCount, hintArg, officialTextLines, toolCall } from "./private-text";
 import { PRIVATE_READ_ONLY, rangeContinuationHint } from "./shared";
 import { failureLines, runVariants } from "./variants";
 
 /** Moved to src/files/scope.ts (readScope's hints use it too); re-exported for callers of this module. */
 export { safeLibraryName };
+/** Moved to ./private-text.ts (zotero_* prints the same lines); re-exported for callers of this module. */
+export { caseNumberKeys, czechDate, formatCount, hintArg, officialTextLines, toolCall };
 
 /**
  * Vlastní zdroje — the user's own uploaded books, commentaries, articles and
@@ -107,7 +109,6 @@ const TAIL_REACH = 20_000;
 /** A footnote read shows its citing paragraph up to this length. */
 const CITING_PARAGRAPH_CHARS = 3_000;
 const MAX_FIND_EXCERPTS = 8;
-const MAX_OFFICIAL_PER_HIT = 3;
 /** Rows per search channel (see src/files/db/search.ts). */
 const CHANNEL_DEPTH = 60;
 /** Chunks shown per document in a library-wide search. */
@@ -179,6 +180,8 @@ type Gate =
  * Steps 1–3 of the gating (see the module header). Nothing here touches the
  * database before the caller is known to hold a Pro library; the rate limit
  * is in memory; effectiveMode() is the first (cached) database access.
+ * Steps 2–3 are personalProCaller (src/mcp/pro-caller.ts), shared with
+ * zotero_*; the env switch, the rate limit and the mode stay files-only.
  */
 async function gate(ctx: unknown): Promise<Gate> {
   const origin = siteOrigin(ctx);
@@ -189,10 +192,16 @@ async function gate(ctx: unknown): Promise<Gate> {
       result: errorResult("NOT_ENTITLED", GATE_TEXT.unavailable, "Do not call files_* again in this conversation."),
     };
   }
-  const caller = callerFromCtx(ctx);
-  if (caller.kind !== "user") {
+  let caller: ProCaller;
+  try {
+    caller = await personalProCaller(ctx);
+  } catch (error) {
+    // Only the Clerk lookup throws (the context parse is total).
+    return { ok: false, result: filesFailure(error, "files access") };
+  }
+  if (!caller.ok && (caller.reason === "shared-token" || caller.reason === "anonymous")) {
     const why =
-      caller.kind === "shared-token"
+      caller.reason === "shared-token"
         ? "this connection uses the shared access code, which belongs to no user."
         : "this call carries no signed-in user.";
     return {
@@ -204,13 +213,8 @@ async function gate(ctx: unknown): Promise<Gate> {
       ),
     };
   }
-  let access: Access;
-  try {
-    access = await getAccess(caller.userId);
-  } catch (error) {
-    return { ok: false, result: filesFailure(error, "files access") };
-  }
-  if (access.banned || access.libraries.length === 0) {
+  if (!caller.ok) {
+    // banned or no-pro: one answer — neither account reaches a library.
     return {
       ok: false,
       result: errorResult(
@@ -234,7 +238,7 @@ async function gate(ctx: unknown): Promise<Gate> {
   if (mode === "off" || mode === "unconfigured") {
     return { ok: false, result: errorResult("NOT_ENTITLED", GATE_TEXT.guardOff, "Try files_* again later in the day.") };
   }
-  return { ok: true, userId: caller.userId, access, mode, origin };
+  return { ok: true, userId: caller.userId, access: caller.access, mode, origin };
 }
 
 // ---------------------------------------------------------------------------
@@ -314,32 +318,6 @@ function notReady(row: DocumentRow, origin: string | null): ToolResult {
 
 export type { PageLite, SectionLite };
 
-/** "1 240" — thin-grouped Czech number. Pure. */
-export function formatCount(n: number): string {
-  return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
-}
-
-/** "2026-09-12T…" → "12. 9. 2026"; "" for anything else. Pure. */
-export function czechDate(iso: string | null | undefined): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso ?? "");
-  return m ? `${Number(m[3])}. ${Number(m[2])}. ${m[1]}` : "";
-}
-
-/** Values a tool hint may echo from a document: page labels, m. č., footnote labels, § designators. */
-const SAFE_HINT_VALUE = /^[\p{L}\p{N} .\-–§#*†]{1,24}$/u;
-
-/** `name: "value"` for a tool hint, or null when the value is not plainly safe to echo. Pure. */
-export function hintArg(name: string, value: string | number | boolean | null | undefined): string | null {
-  if (value === null || value === undefined || value === "") return null;
-  if (typeof value !== "string") return `${name}: ${value}`;
-  return SAFE_HINT_VALUE.test(value) ? `${name}: ${JSON.stringify(value)}` : null;
-}
-
-/** `tool {a: 1, b: "x"}` from the non-null args. Pure. */
-export function toolCall(tool: string, args: Array<string | null>): string {
-  return `${tool} {${args.filter((a): a is string => !!a).join(", ")}}`;
-}
-
 /** A regulation the act table knows under this bare "a/b" citation ("1215/2012", "2016/679"), or null. */
 function knownEuRegulation(a: string, b: string): string | null {
   const id = euActId("nařízení", a, b);
@@ -389,11 +367,6 @@ export function resolveActFilter(input: string): { act: string; name: string | n
   }
   const named = resolveAct(s);
   return named ? { act: named.act, name: named.name } : null;
-}
-
-/** Identifier keys of a spisová značka / ECLI / R / Sb. NSS / SbNU citation — the case_number filter. Pure. */
-export function caseNumberKeys(input: string): string[] {
-  return queryIdentKeys(input).keys.filter((k) => /^(sz|ecli|r|sbnss|sbnu):/.test(k));
 }
 
 export type SectionLocator = { key: string } | { ord: number } | { text: string };
@@ -543,36 +516,6 @@ export function clauseAt(raw: string, rel: number): string | null {
   const head = raw.slice(lineStart, lineStart + 16);
   const m = /^\s*\((\d{1,3}[a-z]?)\)/.exec(head) ?? /^\s*(\d{1,2}(?:\.\d{1,2})+)\.?\s/.exec(head);
   return m ? `odst. ${m[1]}` : null;
-}
-
-const OFFICIAL_TOOL: Record<"NS" | "NSS" | "US" | "SDEU", string> = {
-  NS: "ns_search",
-  NSS: "nss_search",
-  US: "us_search",
-  SDEU: "sdeu_search",
-};
-
-/**
- * "oficiální text: ns_search {case_number: …}" for every spisová značka in
- * `text` (at most `max`), routed by the court its registry belongs to; a
- * lower court's značka goes to justice_search. The display comes from the
- * parsed parts, never from the raw text. Pure.
- */
-export function officialTextLines(text: string, max = MAX_OFFICIAL_PER_HIT): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const span of findIdentSpans(text)) {
-    for (const key of span.keys) {
-      if (!key.startsWith("sz:")) continue;
-      const c = canonicalCaseNumber(key);
-      if (!c || seen.has(c.display)) continue;
-      seen.add(c.display);
-      const tool = c.court ? OFFICIAL_TOOL[c.court] : "justice_search";
-      out.push(`oficiální text: ${tool} {case_number: ${JSON.stringify(sanitizeLine(c.display, 40))}}`);
-      if (out.length >= max) return out;
-    }
-  }
-  return out;
 }
 
 const CHANNEL_LABELS: Record<string, string> = { and: "and", or: "or-fallback", idn: "identifiers", meta: "metadata" };

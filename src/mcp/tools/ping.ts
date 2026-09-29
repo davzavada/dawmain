@@ -3,6 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { authMode } from "../auth";
 import { SERVER_NAME, SERVER_VERSION } from "../config";
 import { envMode } from "@/src/files/config";
+import { zoteroConfigured } from "@/src/zotero/config";
 
 const outputSchema = z.object({
   ok: z.literal(true),
@@ -24,6 +25,11 @@ const outputSchema = z.object({
     .describe(
       "Vlastní zdroje (files_* tools) as configured by the environment: on, readonly (search and reading only), off, or unconfigured (no database). The free-tier guards may restrict it further at call time.",
     ),
+  zotero: z
+    .enum(["configured", "unconfigured"])
+    .describe(
+      "Zotero (zotero_* tools) as configured by the environment: the OAuth app, the sealing secret and Clerk are set, or not. Each user still connects their own library.",
+    ),
 });
 
 /**
@@ -37,7 +43,7 @@ export function registerPing(server: McpServer): void {
     {
       title: "Ping",
       description:
-        "Check that the MCP server is reachable and report which deployment answered: server name and version, current server time, Vercel environment, region and git commit, the accepted auth and whether Vlastní zdroje (files_*) are enabled. Takes no arguments.",
+        "Check that the MCP server is reachable and report which deployment answered: server name and version, current server time, Vercel environment, region and git commit, the accepted auth and whether Vlastní zdroje (files_*) and the optional integrations are enabled. Takes no arguments.",
       inputSchema: z.object({}),
       outputSchema,
       annotations: {
@@ -62,6 +68,8 @@ export function registerPing(server: McpServer): void {
         // Env only — the ping never wakes the database (envOnlyMode in
         // src/files/guards.ts is this same function, minus the DB-bound imports).
         files: envMode(),
+        // Env only as well: whether users can connect Zotero here, never whether this caller has.
+        zotero: zoteroConfigured() ? ("configured" as const) : ("unconfigured" as const),
       };
 
       return {

@@ -4,8 +4,9 @@ import type { NextConfig } from "next";
  * Security headers. Everywhere: no framing (the Vlastní zdroje modal with
  * its delete and confirm buttons opens over any page, so clickjacking
  * protection cannot stop at one path) and no MIME sniffing. On the
- * Vlastní zdroje pages and API: no referrer to other sites and no caching
- * of private responses anywhere between the server and the browser.
+ * Vlastní zdroje pages and API and the Zotero API: no referrer to other
+ * sites and no caching of private responses anywhere between the server
+ * and the browser.
  */
 const everywhere = [
   { key: "X-Frame-Options", value: "DENY" },
@@ -26,6 +27,7 @@ const nextConfig: NextConfig = {
       { source: "/vlastni-zdroje", headers: privateArea },
       { source: "/vlastni-zdroje/:path*", headers: privateArea },
       { source: "/api/files/:path*", headers: privateArea },
+      { source: "/api/zotero/:path*", headers: privateArea },
     ];
   },
 };

@@ -42,6 +42,16 @@ můžete stáhnout. Pravidla jsou v
 [podmínkách užití](https://dawmain.davidzavada.cz/podminky), o datech v
 [zásadách ochrany osobních údajů](https://dawmain.davidzavada.cz/soukromi).
 
+**Zotero (Pro).** S režimem Pro a přihlášením vlastním účtem si na webu
+(tlačítko „Připojit Zotero“) propojíte svou knihovnu na zotero.org. Asistent
+v ní pak hledá a čte vedle oficiálních databází: záznamy, poznámky, anotace a
+text příloh, v osobní knihovně i ve skupinách. Přístup je jen ke čtení -
+Dawmain v Zoteru nic nezmění; klíč s právem zápisu odmítne. Když Zotero text
+PDF nezaindexoval, Dawmain si soubor na dotaz stáhne, přečte a neuloží.
+Odpojit jde kdykoli na webu nebo smazáním klíče na zotero.org. Položka
+„Zotero“ v nabídce účtu a nástroje `zotero_*` se objeví, až bude Zotero na
+webu zapnuté.
+
 ## Endpoint
 
 ```

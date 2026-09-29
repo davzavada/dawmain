@@ -5,7 +5,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboard
 import { countMembers, initials } from "./format";
 import { ZIcon } from "./icons";
 import { InvitationActions, InvitationText, useInvitations } from "./invitations";
-import { manageAccount, openSources, openTeam, rememberInitials, requestSignIn, signOut, useHintInitials, useZdroje } from "./store";
+import { manageAccount, openSources, openTeam, openZotero, rememberInitials, requestSignIn, signOut, useHintInitials, useZdroje } from "./store";
 
 /**
  * The account control at the right end of the header (design 1a, 2a, 3a,
@@ -13,12 +13,13 @@ import { manageAccount, openSources, openTeam, rememberInitials, requestSignIn, 
  * the avatar with initials (a crown badge with Pro, a blue dot when a
  * team invitation waits),
  * opening a menu — name and e-mail, pending invitations with Přijmout /
- * Odmítnout, Vlastní zdroje, Tým · N členů (admins of a Pro team),
+ * Odmítnout, Vlastní zdroje, Zotero (only where the deployment has it
+ * configured — `zotero`), Tým · N členů (admins of a Pro team),
  * Spravovat účet, Odhlásit se. A menu button in the WAI-ARIA sense: arrow
  * keys move between items, Escape and a click outside close it. Nothing
  * at all on a deployment without Clerk.
  */
-export function AccountControl() {
+export function AccountControl({ zotero = false }: { zotero?: boolean }) {
   const { auth } = useZdroje();
   if (auth === "none") return null;
   // Still loading without a sign-in hint: most likely a visitor — show what they will see (nothing jumps).
@@ -29,10 +30,10 @@ export function AccountControl() {
       </button>
     );
   }
-  return <AccountMenu />;
+  return <AccountMenu zotero={zotero} />;
 }
 
-function AccountMenu() {
+function AccountMenu({ zotero }: { zotero: boolean }) {
   const { user } = useUser();
   const { summary } = useZdroje();
   const invites = useInvitations();
@@ -154,6 +155,12 @@ function AccountMenu() {
               <ZIcon name="upload" />
               <span>Vlastní zdroje</span>
             </button>
+            {zotero ? (
+              <button type="button" role="menuitem" className="zd-menu-item" onClick={choose(openZotero)}>
+                <ZIcon name="library" />
+                <span>Zotero</span>
+              </button>
+            ) : null}
             {adminTeams.map((team) => (
               <button key={team.id} type="button" role="menuitem" className="zd-menu-item" onClick={choose(() => openTeam(team.id))}>
                 <ZIcon name="users" />
