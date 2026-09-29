@@ -23,6 +23,10 @@ Uživatelský popis je v [README](../README.md).
 | `files_search` | Vlastní zdroje (Neon) | hledání ve vlastních dokumentech uživatele s Pro (osobní a týmové knihovny): český fulltext (Snowball stemmer v aplikaci; váhy vlastní nadpis › nadřazený nadpis › tělo › poznámky pod čarou), identifikátory (sp. zn. i s krátkým rokem, §, předpisy i zkratkami „o. z.“/„OSŘ“, ISBN, DOI, ECLI) a metadata — kanály sloučené přes RRF se stropem shod na dokument už v SQL; filtry typu dokumentu, roku, předpisu, jednoho dokumentu a jen poznámek; hit nese cestu oddíly, pinpoint (s., § + m. č., pozn.), výřez se zvýrazněním a pro každou sp. zn. řádek „oficiální text:“ s voláním `ns_search`/`nss_search`/`us_search`/`sdeu_search` |
 | `files_get_document` | Vlastní zdroje (Neon) | čtení vlastního dokumentu: u dokumentu nad ~30 stran bez cíle osnova (`toc`), jinak `section` (§, článek, kapitola), `mn` (marginální číslo, i rozsah), `at` (tištěná strana), `footnote`, `find`; okna ≤ 45 000 znaků zarovnaná na celé strany, hlavička „VLASTNÍ DOKUMENT“ s citací ČSN ISO 690, pokračování omezené na zvolený úsek, denní limit čtení na dokument (proti vysávání celých knih) |
 | `files_list` | Vlastní zdroje (Neon) | knihovny uživatele a jejich dokumenty (stav, typ, strany, co čeká na potvrzení metadat) a odkaz na nahrávání |
+| `zotero_search` | Zotero (api.zotero.org, klíč uživatele) | hledání v připojené knihovně Zotero, jen ke čtení: `mode` `title` (názvy, autoři, roky) / `everything` (všechna pole, poznámky, full-text index příloh), prázdné `title` se samo zopakuje v `everything`; `query`/`queries` (≤ 3 varianty round-robin), `library` (výchozí osobní + skupiny, nejvýš 6), `collection`, `tags` (všechny), `item_type`, `sort`, `limit` (≤ 50 na knihovnu), `page`; shody v přílohách, poznámkách a anotacích seskupené pod dílo; sp. zn. v dotazu navíc projde nejnovější položky `case` (Zotero `q` do `docketNumber` nevidí) a řekne, kolik jich prošla; řazení není podle relevance |
+| `zotero_get_item` | Zotero | jedna položka celá: pole po oddílech, abstrakt, extra, štítky, kolekce, poznámky jako text, přílohy (každá s voláním `zotero_get_text`) a anotace prvních PDF; u rozhodnutí řádek „oficiální text:“ |
+| `zotero_get_text` | Zotero | text přílohy: full-text index Zotera, když pokrývá celý soubor; jinak PDF ze Zotero Storage přes převodník Vlastních zdrojů (jen v paměti, 10 min); jinak částečný index s varováním nebo důvod, proč text není (neindexováno, WebDAV, odkazovaný soubor, sken, heslo) a co s tím; stránky ~45k znaků, `find` |
+| `zotero_list` | Zotero | knihovny (osobní + skupiny klíče), kolekce a štítky; `query`, `limit` (≤ 100), `page` |
 | `dawmain_ping` | — | které nasazení odpovědělo |
 | `dawmain_probe_sources` | — | diagnostika všech upstreamů z nasazené funkce; `include_raw` pro záchyt fixtures, `discover` pro hledání neověřených endpointů |
 
@@ -35,6 +39,17 @@ nemají. Veškerý text z dokumentů (i názvy, nadpisy a autoři) jde do plotu
 `⟦DOC nonce⟧ … ⟦/DOC nonce⟧` s náhodným nonce na každou odpověď — pro model
 data, ne instrukce; nápovědy nástroje jsou až za plotem. Limit 60 volání za
 hodinu na uživatele.
+
+Nástroje `zotero_*` pošlou první požadavek na Zotero až po pěti krocích brány
+(`zoteroGate` v `src/mcp/tools/zotero.ts`): nasazení má OAuth aplikaci,
+`CREDENTIALS_SECRET` i Clerk (`zoteroConfigured`) → osobní přihlášení OAuth
+s Pro (`personalProCaller`, stejný nárok jako `files_*`, ale **bez** vypínačů
+`FILES_MODE` — Zotero Neon nepotřebuje) → vlastní hodinový limit
+`zotero:<userId>` (`LIMITS.toolCallsPerHour` = 120) → pojistka neplatných
+klíčů v instanci → uložené připojení z Clerku (žádné / zneplatněné /
+nečitelné = připojit znovu na `/?zotero=1`). Odmítnutí kromě limitu a
+pojistky říká modelu `zotero_*` v konverzaci znovu nevolat. Obsah knihovny
+jde do stejného plotu `⟦DOC nonce⟧` jako u Vlastních zdrojů.
 
 Známá omezení (přiznaná i v popisech nástrojů): NS adresuje jen prvních 900
 výsledků dotazu (zužuj dotazem, ne stránkováním) a při řazení podle relevance
@@ -390,7 +405,7 @@ transakcí je bezpečný.
 ### Proměnné prostředí
 
 Vše **jen pro Production**; pro Preview nastav `FILES_MODE=off` (a nic
-dalšího). Po změně Redeploy.
+dalšího kromě tří proměnných Zotera na konci tabulky). Po změně Redeploy.
 
 | Proměnná | Význam | Výchozí |
 | --- | --- | --- |
@@ -410,6 +425,9 @@ dalšího). Po změně Redeploy.
 | `CLERK_WEBHOOK_SIGNING_SECRET` | podpisový klíč webhooku Clerku (`whsec_…`) | — |
 | `CRON_SECRET` | Vercel ho posílá cronu jako `Authorization: Bearer …`; bez něj cron odmítne všechno | — |
 | `AI_GATEWAY_API_KEY` | jen lokálně (`.env.local`); na Vercelu se Gateway ověřuje přes OIDC a klíč by ho přebil | — |
+| `ZOTERO_OAUTH_CLIENT_KEY` | Zotero: Client Key aplikace z zotero.org/oauth/apps; nastavuje se **i pro Preview** (viz Zotero — provoz) | — (Zotero vypnuté) |
+| `ZOTERO_OAUTH_CLIENT_SECRET` | Zotero: Client Secret téže aplikace | — (Zotero vypnuté) |
+| `CREDENTIALS_SECRET` | Zotero: klíč pečetění uložených klíčů (AES-256-GCM přes HKDF), ≥ 32 znaků, `openssl rand -base64 32`; změna = všichni připojí Zotero znovu | — (Zotero vypnuté) |
 
 Strana = 3 600 znaků převedeného textu včetně poznámek (`PAGE_CHARS`); cenu
 ve stranách vidí uživatel před nahráním. Kvóta jednoho uživatele nebo týmu jde
@@ -683,6 +701,150 @@ migrace přes `DATABASE_URL_UNPOOLED`, heslo pro `dawmain_app`,
 `FILES_DATABASE_URL` + `FILES_MODE=on` v `.env.local`, pro návrh metadat
 `AI_GATEWAY_API_KEY`. Neon dev větev nepoužívej — bere stejné CU-h i místo.
 Evaluace vyhledávání (výše) běží bez databáze, na PGlite.
+
+## Zotero — provoz
+
+Uživatel s Pro si na webu (modál `/?zotero=1`, `app/_zdroje/zotero-modal.tsx`)
+připojí svou knihovnu na zotero.org přes OAuth 1.0a; nástroje `zotero_*` pak
+čtou jeho klíčem Web API v3 (`api.zotero.org`). **Jen ke čtení**: žádost o
+klíč nese `write_access=0`, klíč, který přesto umí zapisovat, callback zruší
+a neuloží. Jádro je v `src/zotero/*` (konstanty a limity v `config.ts`),
+webová část v `src/zotero/web.ts` + tenké routy `app/api/zotero/*`, kontrakt
+s modálem v `src/zotero/web-types.ts`. Rešerše k API a k cizím MCP serverům:
+[docs/research/zotero.md](research/zotero.md).
+
+### Aplikace na zotero.org a proměnné
+
+1. Na <https://www.zotero.org/oauth/apps> zaregistrovat aplikaci „Dawmain“
+   s callbackem `https://<host>/api/zotero/callback` (`CALLBACK_PATH`).
+   **Neověřeno**, zda Zotero registrovaný callback vynucuje (posíláme ho v
+   `oauth_callback` při každém požadavku): pokud ano, potřebuje Preview
+   vlastní aplikaci nebo stabilní alias (ne adresu jednoho deploye).
+2. Client Key a Client Secret do `ZOTERO_OAUTH_CLIENT_KEY` a
+   `ZOTERO_OAUTH_CLIENT_SECRET`.
+3. `CREDENTIALS_SECRET` — aspoň 32 znaků (`openssl rand -base64 32`);
+   `src/secrets/seal.ts` z něj HKDF odvozuje klíč AES-256-GCM.
+
+Bez kterékoli z nich (nebo bez Clerku) je Zotero vypnuté: nástroje odpoví
+„není na tomto nasazení“, modál „nedostupné“. Na rozdíl od Vlastních zdrojů se
+nastavuje **i na Preview** (tam běží živý checklist níže). Po změně Redeploy.
+
+### Kde leží klíč
+
+V Clerku, `privateMetadata.zotero` (`src/zotero/store.ts`): `{v: 1, userID,
+username, sealed, fp, notes, groups, connectedAt, revokedAt}`. Klíč je
+zapečetěný (AES-256-GCM, AAD `zotero:<userId>` — zkopírovaný blob nejde
+otevřít pod jiným účtem), `fp` je krátký otisk klíče. Neon se nepoužívá, data
+zmizí se smazáním účtu v Clerku. `updateUserMetadata` slučuje do hloubky a
+**`null` maže** klíč, kam se zapíše — `zotero: null` odpojí, `null` pole
+záznamu se čtou jako chybějící. Proto se záznam vždy zapisuje celý a čte
+**jen přes `loadConnection`** (stavy `none` / `ok` / `revoked` /
+`unreadable`), nikdy přímo z metadat; cache jen 2 s, odpojení a callback
+běží na jiných instancích.
+
+### Připojení
+
+`POST /api/zotero/connect` (formulář; Origin, konfigurace, přihlášení, Pro,
+`LIMITS.connectsPerHour` = 10) → dočasný token od zotero.org zapečetěný v
+cookie `dz_zotero_oauth` (10 min, cesta jen `/api/zotero/callback`) → 303 na
+zotero.org (`name=Dawmain`, `library_access=1`, `notes_access=1`,
+`write_access=0`, `all_groups=read`; **nikdy `identity`**) → `GET
+/api/zotero/callback` vymění token za klíč, ověří ho na `/keys/current` (týž
+uživatel, osobní knihovna, nikde zápis), uloží a starý klíč zruší → 303 na
+`/?zotero=1&stav=…`. `GET /api/zotero/status` vrací stav pro modál (nikdy
+klíč ani otisk), `POST /api/zotero/disconnect` klíč zruší na zotero.org
+(nejvýš 5 s, jinak ho uživatel smaže na zotero.org/settings/keys) a zapíše
+`null`.
+
+Hodnoty `stav`: `pripojeno`, `zamitnuto` (uživatel na zotero.org odmítl),
+`vyprselo` (10 min stav, chybí cookie, připojování začal jiný účet, nebo token
+nesedí), `zapis` (klíč uměl zapisovat — zrušen a odmítnut), `prihlaseni`
+(nepřihlášen), `nepro`, `nedostupne`, `limit`, `chyba`.
+
+### Šetrnost a ochrana adresy
+
+Vlastní tenký klient (`src/zotero/http.ts`), ne `fetchUpstream`: přesměrování
+ručně (klíč se nesmí poslat dál na S3), `Zotero-API-Version: 3`, poctivý UA
+bez „Zotero/“ (`ZOTERO_UA`), osobní 403/404 se nepíšou do zdraví zdrojů.
+Limity v `LIMITS`: nejvýš 3 souběžné požadavky na uživatele a instanci
+(Zotero dovolí 5, sdílené se synchronizací desktopu), `Backoff` do 3 s
+počkat, delší selhat s udaným časem, 429/503 s `Retry-After` do 5 s jeden
+opakovaný pokus, 15 s na požadavek, 45 s na nástroj, JSON nejvýš 8 MB.
+Hledání se necachuje; seznam skupin a kolekcí, text příloh a sken spisových
+značek 10 min (klíč cache vždy s userId).
+
+**Zotero blokuje celou IP** (429 pro všechny) po více než 5 neplatných
+klíčích z ní za 300 s — a IP Vercelu sdílí všichni uživatelé. Proto:
+odmítnutý klíč („Invalid key“ → `ZoteroKeyInvalidError`) si instance pamatuje
+podle otisku a znovu ho nepošle; nástroj ho hned `markRevoked` označí v
+Clerku (podle `fp`, takže nezruší novější klíč připojený mezitím) a další
+volání skončí na bráně bez požadavku; po `breakerInvalidKeys` = 3 různých
+odmítnutých klíčích se instance na `breakerMs` = 5 min od Zotera odpojí
+úplně. `api.zotero.org` **nepřidávat** do `ALLOWED_FETCH_HOSTS` v
+`src/mcp/tools/probe.ts`; kanárek `zotero` čte veřejné schéma bez klíče.
+
+### PDF místo indexu
+
+Když full-text index Zotera chybí nebo nepokrývá celý soubor, stáhne
+`zotero_get_text` PDF (jen `application/pdf` s `linkMode`
+`imported_file`/`imported_url`) přes `GET /items/{key}/file`: přesměrování se
+následuje jednou, jen na HTTPS host S3 (`isAllowedStorageHost` — zatím
+kterýkoli endpoint S3, po živém ověření zúžit na jeden) a bez hlavičky s
+klíčem. Strop 25 MB (`Content-Length` i počítané bajty), převod po 300
+stranách, nejvýš 2 převody na volání, 30 s. Text vytáhne převodník Vlastních
+zdrojů (`src/zotero/pdf-text.ts` → `src/files/convert/pdf/*`); soubor se
+neukládá, text drží cache v paměti 10 min. `Zotero-File-Compressed`, heslo/DRM,
+sken bez OCR, WebDAV a odkazované soubory dostanou vlastní vysvětlení s
+radou pro uživatele.
+
+### Změna `CREDENTIALS_SECRET`
+
+Rotace znamená, že žádný uložený klíč už nejde otevřít: připojení přejdou do
+stavu `unreadable`, nástroje i modál řeknou „připojit znovu“. Staré klíče
+ale **zůstanou platné na zotero.org** (bez otevřeného klíče je Dawmain
+nezruší) — uživatelé si je smažou na zotero.org/settings/keys. Proto
+rotovat jen při úniku.
+
+### Živý checklist na Preview
+
+Nasadit s proměnnými výše, `MCP_URL=… npm run smoke` a `SMOKE_LIVE=1`
+(kanárek `zotero` projde). Pak se skutečným účtem Zotero (osobní knihovna +
+skupina):
+
+1. Připojit: Zotero ukáže „Dawmain“ jen ke čtení a bez identity; návrat na
+   `stav=pripojeno`, v Clerku jen zapečetěný blob.
+2. Na stránce Zotera povolit zápis: `stav=zapis` a klíč na
+   zotero.org/settings/keys zmizí.
+3. Z claude.ai s osobním OAuth: `zotero_list` ukáže knihovny a kolekce;
+   `zotero_search` najde titul v osobní knihovně i ve skupině; položka
+   „25 Cdo 1234/2019“ se najde dotazem „25 Cdo 1234/19“ a nabídne `ns_*`;
+   slovo jen v PDF vede na automatické `everything` a shoda se seskupí pod
+   dílo.
+4. `zotero_get_item` ukáže poznámky a anotace.
+5. `zotero_get_text`: indexované PDF stránkuje a `find` funguje; PDF nahrané
+   jen přes web (neindexované) → text vytažený z PDF; PDF nad 100 stran →
+   dočte i strany za limitem indexu; WebDAV nebo odkazovaný soubor →
+   vysvětlení; ve Vercel logu čas a paměť převodu.
+6. Smazat klíč na zotero.org: přijde právě jedna 403, připojení se označí,
+   další volání skončí na bráně bez požadavku a modál hlásí „Klíč přestal
+   platit“.
+7. „Odpojit“: klíč zmizí na zotero.org a v Clerku je `null`.
+8. Sdílený kód i účet bez Pro dostanou odmítnutí.
+9. Ve Vercel logu nejsou klíče, tokeny ani verifier.
+
+Zároveň ověřit, zda Zotero vynucuje registrovaný callback (výše).
+
+### Fixtures k nahrazení
+
+`tests/fixtures/zotero/*.json` jsou **ručně sestavené z dokumentace** (z
+vývojového kontejneru nebyl api.zotero.org dostupný). Na Preview je nahradit
+živými záchyty (klíče a tokeny vymazat): `keys-current*.json` (přesný tvar
+`access.groups`), `items-search.json`, `collections.json`, `groups.json`,
+`fulltext-*.json` (oddělovače stran, `indexedPages`/`totalPages`), a zapsat
+tělo 403 „Invalid key“ a host přesměrování `/file` (pak zúžit
+`isAllowedStorageHost`). Totéž připomínají hlavičky
+`tests/zotero-client.test.ts`, `tests/zotero-oauth.test.ts` a
+`tests/zotero-routes.test.ts`.
 
 ## Přidání zdroje
 
