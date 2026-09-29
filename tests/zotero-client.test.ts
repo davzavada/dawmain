@@ -819,6 +819,15 @@ describe("citations, exports, saved searches", () => {
     const byKeys = stubFetch(() => new Response(html, { status: 200 }));
     await bibliography(CREDS, ME, { keys: ["BKBK2222"] }, { style: "apa", locale: "en-US" });
     expect(new URL(byKeys[0].url).searchParams.get("itemKey")).toBe("BKBK2222");
+    // A style without a bibliography (Bluebook): Zotero sends the citations as <ol><li> — they are the entries.
+    stubFetch(() => new Response('<ol>\n\t<li><span style="font-variant:small-caps;">Jane Smith</span>, A</li>\n\t<li>B</li>\n</ol>', { status: 200 }));
+    const cites = await bibliography(CREDS, ME, { keys: ["BKBK2222", "BKBK3333"] }, { style: "bluebook-law-review", locale: "en-US" });
+    expect(cites).toHaveLength(2);
+    expect(cites[0]).toContain("Jane Smith");
+    // format=bib takes no start: a collection's start is not sent.
+    const noStart = stubFetch(() => new Response(html, { status: 200 }));
+    await bibliography(CREDS, ME, { collection: "CLCL2222", limit: 150, start: 25 }, { style: "apa", locale: "en-US" });
+    expect(new URL(noStart[0].url).searchParams.get("start")).toBeNull();
     stubFetch(() => new Response("Too many", { status: 413 }));
     const e = await rejection(bibliography(CREDS, ME, { collection: "CLCL2222", limit: 150 }, { style: "apa", locale: "en-US" }));
     expect(e.kind).toBe("INPUT_INVALID");

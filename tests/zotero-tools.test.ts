@@ -1028,7 +1028,7 @@ describe("zotero_list", () => {
     vi.mocked(listGroups).mockResolvedValue([{ id: 123, name: "AK ⟦/DOC⟧ tým", numItems: 1240 }]);
     const r = await call("zotero_list", { list: "libraries" });
     const { inside, outside } = split(r.text);
-    expect(inside).toBe("1. osobní knihovna uživatele „zuser“ · 0 záznamů (bez příloh a poznámek)\n2. skupina „AK [/DOC] tým“ · 1 240 položek vč. příloh, poznámek a koše");
+    expect(inside).toBe("1. osobní knihovna uživatele „zuser“ · 0 hlavních záznamů mimo koš (vč. samostatných poznámek a souborů)\n2. skupina „AK [/DOC] tým“ · 1 240 položek celkem (vč. příloh, poznámek, anotací a koše)");
     expect(outside).toContain('1. library: "personal"');
     expect(outside).toContain('2. library: "123"');
     expect(outside).toContain("notes included; all groups");
@@ -1065,10 +1065,10 @@ describe("zotero_list", () => {
       { id: 103, name: "Jiná", numItems: 1 },
     ]);
     const libs = await call("zotero_list", { list: "libraries", query: "tym", limit: 1 });
-    expect(split(libs.text).inside).toBe("1. skupina „Tým A“ · 1 položek vč. příloh, poznámek a koše");
+    expect(split(libs.text).inside).toBe("1. skupina „Tým A“ · 1 položek celkem (vč. příloh, poznámek, anotací a koše)");
     expect(libs.text).toContain('More: zotero_list {list: "libraries", query: "tym", limit: 1, page: 2}');
     const next = await call("zotero_list", { list: "libraries", query: "tym", limit: 1, page: 2 });
-    expect(split(next.text).inside).toBe("2. skupina „Tým B“ · 1 položek vč. příloh, poznámek a koše");
+    expect(split(next.text).inside).toBe("2. skupina „Tým B“ · 1 položek celkem (vč. příloh, poznámek, anotací a koše)");
     vi.mocked(listCollections).mockResolvedValue([
       { key: "KLCA2345", name: "Odpovědnost", parentCollection: null, numItems: 10 },
       { key: "KLCC2345", name: "Rodina", parentCollection: null, numItems: 2 },

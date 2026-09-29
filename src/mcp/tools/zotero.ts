@@ -633,8 +633,15 @@ interface SearchArgs {
  * ("\-", else Zotero reads a NOT), and " || " cannot be escaped at all.
  */
 function literalTag(tag: string): string {
-  if (tag.includes("||")) throw invalid(`The tag "${sanitizeLine(tag, 60)}" contains "||", which Zotero's tag filter reads as OR and cannot escape.`, "Filter by the other tags, or search for the words instead.");
-  return tag.startsWith("-") ? `\\${tag}` : tag;
+  return orSafe(tag).startsWith("-") ? `\\${tag}` : tag;
+}
+
+/** Zotero splits a tag parameter on " || " (whitespace around it) and has no escape for it. */
+function orSafe(tag: string): string {
+  if (/\s\|\|\s/.test(tag)) {
+    throw invalid(`The tag "${sanitizeLine(tag, 60)}" contains " || ", which Zotero's tag filter reads as OR and cannot escape.`, "Filter by the other tags, or search for the words instead.");
+  }
+  return tag;
 }
 
 interface LibraryHits {
@@ -749,14 +756,16 @@ async function groupHits(g: ZoteroCaller, ref: LibRef, items: ZoteroItem[], io: 
 
 /** "PDF text „smlouva.pdf“", "note „…“", "annotation (s. 12) „…“". */
 function matchedLabel(child: ZoteroItem, mode: SearchMode): string {
-  if (child.itemType === "note") return `note „${sanitizeLine(child.title || "…", 80)}“`;
+  // A trashed note or file of a live work (the trash scope, include_trashed) is marked, not its work.
+  const trash = child.deleted ? " [v koši]" : "";
+  if (child.itemType === "note") return `note „${sanitizeLine(child.title || "…", 80)}“${trash}`;
   if (child.itemType === "annotation") {
     const page = sanitizeLine(field(child, "annotationPageLabel"), 12);
-    return `annotation${page ? ` (s. ${page})` : ""} „${sanitizeLine(child.title || "…", 80)}“`;
+    return `annotation${page ? ` (s. ${page})` : ""} „${sanitizeLine(child.title || "…", 80)}“${trash}`;
   }
   const name = sanitizeLine(child.title || field(child, "filename") || "…", 80);
-  if (mode === "everything") return `${isPdf(child) ? "PDF" : "attachment"} text „${name}“`;
-  return `attachment „${name}“`;
+  if (mode === "everything") return `${isPdf(child) ? "PDF" : "attachment"} text „${name}“${trash}`;
+  return `attachment „${name}“${trash}`;
 }
 
 interface CaseMatch {
@@ -817,13 +826,25 @@ async function zoteroSearch(g: ZoteroCaller, args: SearchArgs, io: IoOptions): P
   }
   const itemTypes: string[] = args.exclude_item_type?.length ? [...new Set(args.exclude_item_type)].map((t) => `-${t}`) : [...new Set(args.item_type ?? [])];
   if (scope === "trash" && args.collection) return errorResult("INPUT_INVALID", 'scope "trash" is the whole library\'s trash: it takes no collection.', "Drop collection, or search the collection without the trash.");
+  if (scope === "publications" && args.include_trashed) {
+    return errorResult("INPUT_INVALID", "My Publications never include the trash (Zotero ignores includeTrashed there).", "Drop include_trashed.");
+  }
   if (scope === "publications" && (args.collection || (args.library && args.library !== "personal"))) {
     return errorResult("INPUT_INVALID", 'scope "publications" is My Publications of the personal library: no collection, no group.', 'Drop collection and library (or pass library: "personal").');
+  }
+  // A library version belongs to one library: `since` over several would compare it with the others' versions.
+  if (args.since !== undefined && !args.library && !args.collection && scope !== "publications") {
+    return errorResult(
+      "INPUT_INVALID",
+      "since is a version of ONE library: pass library too.",
+      'The answer that named the version named its library, e.g. zotero_search {library: "personal", since: 1234}.',
+    );
   }
   // Tag filters as Zotero's tag parameters: each entry ANDed, " || " inside one ORed, a leading "-" NOT.
   const tagParams = [
     ...tags.map(literalTag),
-    ...(tagsAny.length ? [tagsAny.map(literalTag).join(" || ")] : []),
+    // Zotero unescapes "\\-" only at the start of the whole value: a later OR part starting with "-" is already literal.
+    ...(tagsAny.length ? [tagsAny.map((t, i) => (i === 0 ? literalTag(t) : orSafe(t))).join(" || ")] : []),
     // A negated tag needs no escape: Zotero strips only the first "-" (so "--x" is NOT "-x").
     ...excludeTags.map((t) => `-${literalTag(t).replace(/^\\/, "")}`),
   ];
@@ -989,7 +1010,7 @@ async function zoteroSearch(g: ZoteroCaller, args: SearchArgs, io: IoOptions): P
     args.collection ? `collection ${args.collection}` : null,
     tags.length ? `tags ${quoted(tags).join(" + ")} (all must match)` : null,
     tagsAny.length ? `tags_any ${quoted(tagsAny).join(" or ")}` : null,
-    excludeTags.length ? `exclude_tags ${quoted(excludeTags).join(", ")}` : null,
+    excludeTags.length ? `exclude_tags ${quoted(excludeTags).join(", ")} (Zotero then leaves out annotations too)` : null,
     args.item_type?.length ? `item_type ${itemTypes.join(", ")}` : null,
     args.exclude_item_type?.length ? `exclude_item_type ${args.exclude_item_type.join(", ")} (annotations are then left out too)` : null,
     args.since !== undefined ? `modified after library version ${args.since}` : null,
@@ -1077,7 +1098,11 @@ async function zoteroSearch(g: ZoteroCaller, args: SearchArgs, io: IoOptions): P
     `Per library: ${perLibrary.join(" · ")} (attachments, notes and annotations count as items of their own and are shown under their work). ${coverage[0]}`,
     ...(more ? [`More: ${toolCall("zotero_search", [...echo, `page: ${args.page + 1}`])}`] : []),
     ...(cut ? ["(Cut short to keep the answer within size — a smaller limit, or library: \"<id>\" for one library, shows the rest of this page.)"] : []),
-    ...(versions.length ? [`Library version now: ${versions.join(" · ")} — since: <version> later lists only what changed after it; zotero_list {list: "deleted", since: <version>} what was deleted.`] : []),
+    ...(versions.length
+      ? [
+          `Library version now: ${versions.join(" · ")} — each library has its own. Later, zotero_search {library: "<id>", since: <its version>} lists what changed there after it, zotero_list {list: "deleted", library: "<id>", since: <its version>} what was deleted.`,
+        ]
+      : []),
     "",
     CITE_NOTE,
   ].join("\n");
@@ -1564,6 +1589,7 @@ interface CiteArgs {
   style: string;
   locale: string;
   format: CiteFormat;
+  page?: number;
 }
 
 /** A 400 on a citation call: most likely the style — say which ids work. */
@@ -1583,7 +1609,12 @@ async function zoteroCite(g: ZoteroCaller, args: CiteArgs, io: IoOptions): Promi
   }
   const ref = oneLibrary(g, args.library);
   const nonce = newNonce();
-  const limit = args.format === "text" ? LIMITS.maxCiteItems : args.format === "bibliography" ? LIMITS.maxCollectionBibItems : LIMITS.pageSize;
+  const page = args.page ?? 1;
+  if (page > 1 && (keys.length || args.format === "bibliography")) {
+    return errorResult("INPUT_INVALID", "page pages through a collection's items (format text or an export).", "A bibliography covers the whole collection at once; keys are cited as given.");
+  }
+  const limit = args.format === "text" ? LIMITS.maxCiteItems : args.format === "bibliography" ? LIMITS.maxCollectionBibItems : LIMITS.exportPageItems;
+  const start = (page - 1) * limit;
   const keyCap = args.format === "text" ? LIMITS.maxCiteItems : LIMITS.maxBibItems;
   if (keys.length > keyCap) {
     return errorResult(
@@ -1592,7 +1623,11 @@ async function zoteroCite(g: ZoteroCaller, args: CiteArgs, io: IoOptions): Promi
       args.format === "text" ? `Each item costs the citation server two calls: pass fewer keys, or format: "bibliography" for up to ${LIMITS.maxBibItems} in one list.` : "Split the keys over several calls.",
     );
   }
-  const target: CiteTarget = keys.length ? { keys } : { collection: args.collection!, limit };
+  const target: CiteTarget = keys.length ? { keys } : { collection: args.collection!, limit, start };
+  const nextPage = (total: number | null, shown: number) =>
+    !keys.length && total !== null && total > start + shown
+      ? `More: ${toolCall("zotero_cite", [`collection: "${safeKey(args.collection!)}"`, `library: "${ref.id}"`, args.format !== "text" ? `format: "${args.format}"` : null, args.style !== DEFAULT_STYLE ? `style: "${args.style}"` : null, args.locale !== DEFAULT_LOCALE ? `locale: "${args.locale}"` : null, `page: ${page + 1}`])} (items ${start + 1}–${start + shown} of ${formatCount(total)} here)`
+      : null;
   const what = keys.length ? `${keys.length} ${keys.length === 1 ? "item" : "items"}` : `the top-level items of collection ${safeKey(args.collection!)}`;
   const noneFound = () =>
     errorResult(
@@ -1609,16 +1644,20 @@ async function zoteroCite(g: ZoteroCaller, args: CiteArgs, io: IoOptions): Promi
     // Only normalized (no reserved brackets, no controls): RIS keeps its "ER  - " with the trailing space.
     const body = cutText(normalizeDmd(exported.text).text.replace(/\n+$/, ""), EXPORT_CHARS);
     if (!body.text) return noneFound();
-    const partial = !keys.length && exported.total !== null && exported.total > limit;
+    const more = nextPage(exported.total, Math.min(limit, Math.max(0, (exported.total ?? 0) - start)));
     return textResult(
       [
         `✓ Zotero: ${EXPORT_LABEL[args.format]} export of ${what} from library "${ref.id}" (Zotero's own export of the user's records).`,
-        ...(partial ? [`⚠ The collection has ${formatCount(exported.total!)} top-level items; this export holds the first ${limit}.`] : []),
-        ...(body.cut ? [`⚠ The export was cut at ${formatCount(EXPORT_CHARS)} characters — export fewer items per call.`] : []),
+        ...(body.cut
+          ? [
+              `⚠ INCOMPLETE: the export was cut at ${formatCount(EXPORT_CHARS)} characters, inside a record — do not hand it over as a file. ${keys.length ? "Export fewer keys per call." : "The records are long: export the collection by keys in smaller sets."}`,
+            ]
+          : []),
         fenceNote(nonce),
         fence(nonce, body.text),
         "",
-        "Give it to the user unchanged, in a code block, to import (Zotero, Citavi, EndNote, JabRef, a LaTeX bibliography …).",
+        ...(more ? [more, "Each page is a complete export of its items; give the user all pages."] : []),
+        ...(body.cut ? [] : ["Give it to the user unchanged, in a code block, to import (Zotero, Citavi, EndNote, JabRef, a LaTeX bibliography …)."]),
       ].join("\n"),
     );
   }
@@ -1684,17 +1723,18 @@ async function zoteroCite(g: ZoteroCaller, args: CiteArgs, io: IoOptions): Promi
       tools.push(...lines.map((line) => `   ${line}`));
     }
   });
-  const partial = !keys.length && result.total !== null && result.total > cited.length;
+  const more = nextPage(result.total, cited.length);
 
   return textResult(
     [
       `✓ Zotero: ${cited.length} ${cited.length === 1 ? "item" : "items"}${keys.length ? "" : ` of collection ${safeKey(args.collection!)}`} formatted with the citation style "${args.style}" (${args.locale}) by Zotero's citation server, from the user's records in library "${ref.id}".`,
       ...(missing.length ? [`⚠ Not in the library: ${missing.join(", ")}.`] : []),
-      ...(partial ? [`⚠ The collection has ${formatCount(result.total!)} top-level items; these are the first ${cited.length} — format: "bibliography" formats up to ${LIMITS.maxCollectionBibItems} in one list.`] : []),
+      ...(more ? [`The collection has more top-level items than this page — format: "bibliography" formats up to ${LIMITS.maxCollectionBibItems} in one list.`] : []),
       fenceNote(nonce),
       fence(nonce, data.join("\n")),
       "",
       ...tools,
+      ...(more ? [more] : []),
       "",
       "*…* marks italics, **…** bold. With a note style (iso690-full-note-cs) the citation is the full first footnote. The format follows the style; the content is only as complete as the user's record — check it (pages, edition, publisher) before relying on it, and add the pinpoint (s., bod, m. č.) yourself.",
       ...(official ? ["A decision is cited from its official text: take the court, date and sp. zn. from the oficiální text call, not from the record."] : []),
@@ -2103,11 +2143,11 @@ async function zoteroList(g: ZoteroCaller, args: ListArgs, io: IoOptions): Promi
     const data = shown.flatMap((r, i) => {
       if (r.lib.type === "user") {
         const total = personalCount?.ok ? personalCount.value.paging.total : null;
-        return [`${first + i + 1}. osobní knihovna uživatele „${sanitizeLine(g.conn.username, 80)}“${total !== null ? ` · ${formatCount(total)} záznamů (bez příloh a poznámek)` : ""}`];
+        return [`${first + i + 1}. osobní knihovna uživatele „${sanitizeLine(g.conn.username, 80)}“${total !== null ? ` · ${formatCount(total)} hlavních záznamů mimo koš (vč. samostatných poznámek a souborů)` : ""}`];
       }
       const gr = detail.get(r.lib.id);
       const bits = [
-        typeof r.numItems === "number" ? `${formatCount(r.numItems)} položek vč. příloh, poznámek a koše` : "",
+        typeof r.numItems === "number" ? `${formatCount(r.numItems)} položek celkem (vč. příloh, poznámek, anotací a koše)` : "",
         gr?.type ? (GROUP_TYPES[gr.type] ?? sanitizeLine(gr.type, 30)) : "",
         gr?.members !== undefined ? `${formatCount((gr.members ?? 0) + (gr.admins ?? 0) + 1)} členů` : "",
         gr?.isAdmin ? "uživatel je správce" : "",
@@ -2133,6 +2173,9 @@ async function zoteroList(g: ZoteroCaller, args: ListArgs, io: IoOptions): Promi
     if (args.list === "item_fields" && !args.item_type) {
       return errorResult("INPUT_INVALID", 'list "item_fields" needs item_type.', 'E.g. zotero_list {list: "item_fields", item_type: "case"}; list "item_types" names the types.');
     }
+    if (args.list === "item_fields" && args.item_type === "annotation") {
+      return errorResult("INPUT_INVALID", "Zotero's schema lists no fields for annotations (it answers 400).", "zotero_get_item shows an annotation's text, comment, colour and page.");
+    }
     const [fields, creators] =
       args.list === "item_types"
         ? [await getSchemaNames(g.conn.creds, { kind: "itemTypes" }, DEFAULT_LOCALE, io), null]
@@ -2148,7 +2191,7 @@ async function zoteroList(g: ZoteroCaller, args: ListArgs, io: IoOptions): Promi
     return textResult(
       [
         args.list === "item_types"
-          ? `✓ Zotero: ${fields.length} item types (Zotero's schema, names in ${DEFAULT_LOCALE}; attachment, note and annotation are not among them).`
+          ? `✓ Zotero: ${fields.length} item types (Zotero's schema, names in ${DEFAULT_LOCALE}; attachment and annotation are not among them, though zotero_search's item_type takes both).`
           : `✓ Zotero: the fields and creator types of item type "${args.item_type}" (Zotero's schema, names in ${DEFAULT_LOCALE}).`,
         fenceNote(nonce),
         fence(nonce, data.join("\n")),
@@ -2349,12 +2392,12 @@ export function registerZotero(server: McpServer): void {
         collection: collectionSchema.optional().describe("Only items in this collection and their notes and attachments (its key; the library defaults to personal)."),
         tags: z.array(z.string().min(1).max(200)).max(5).optional().describe("Only items with ALL of these tags (the tag text as zotero_list lists it; case-insensitive)."),
         tags_any: z.array(z.string().min(1).max(200)).max(10).optional().describe("Only items with AT LEAST ONE of these tags."),
-        exclude_tags: z.array(z.string().min(1).max(200)).max(5).optional().describe("Leave out items with any of these tags."),
+        exclude_tags: z.array(z.string().min(1).max(200)).max(5).optional().describe("Leave out items with any of these tags (Zotero then leaves out all annotations too)."),
         item_type: z.array(z.enum(ITEM_TYPES)).max(8).optional().describe("Only these Zotero item types (case = court decision, statute = legislation; zotero_list {list: \"item_types\"} names them all); matches inside attachments and notes are then not seen."),
         exclude_item_type: z.array(z.enum(ITEM_TYPES)).max(8).optional().describe("Leave out these item types (e.g. [\"attachment\", \"note\"]); not together with item_type."),
         sort: z.enum(SORTS).default("dateModified").describe("Order of the hits (Zotero has no relevance ranking); addedBy only in a group library."),
-        direction: z.enum(["asc", "desc"]).optional().describe("Zotero's default: descending for dates, ascending otherwise."),
-        since: z.number().int().min(0).optional().describe("Only items added or changed after this library version (a zotero_search answer names the current one)."),
+        direction: z.enum(["asc", "desc"]).optional().describe("Zotero's default: descending for date, dateAdded and dateModified; ascending for every other sort (accessDate and serverDateModified too)."),
+        since: z.number().int().min(0).optional().describe("Only items added or changed after this version of the library named in library (a zotero_search answer names each library's current version)."),
         limit: z.number().int().min(1).max(50).default(20).describe("Items per library and page (max 50)."),
         page: z.number().int().min(1).default(1).describe("1-based page."),
       }),
@@ -2411,6 +2454,7 @@ export function registerZotero(server: McpServer): void {
           .describe("CSL style id from zotero.org/styles."),
         locale: z.string().regex(LOCALE_RE, "A locale like cs-CZ or en-US.").default(DEFAULT_LOCALE).describe("Language of the terms the style prints (cs-CZ, en-US, de-DE …)."),
         format: z.enum(["text", "bibliography", ...EXPORT_FORMATS]).default("text").describe('"text": each item\'s citation and entry; "bibliography": one ordered list; or an export format.'),
+        page: z.number().int().min(1).default(1).describe(`With collection and format text or an export: 1-based page (${LIMITS.maxCiteItems} items per page for text, ${LIMITS.exportPageItems} for an export).`),
       }),
       annotations: READ_ONLY,
     },

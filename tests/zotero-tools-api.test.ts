@@ -281,6 +281,8 @@ describe("zotero_search — the rest of Zotero's item parameters", () => {
       { scope: "publications", collection: "KLCA2345" },
       { scope: "publications", library: "123" },
       { item_type: ["case"], exclude_item_type: ["note"] },
+      { scope: "publications", include_trashed: true },
+      { query: "x1", since: 5 },
     ]) {
       const r = await call("zotero_search", args);
       expect(r.isError, JSON.stringify(args)).toBe(true);
@@ -292,17 +294,27 @@ describe("zotero_search — the rest of Zotero's item parameters", () => {
     vi.mocked(searchItems).mockResolvedValue(page([work], 1));
     await call("zotero_search", { query: "škoda", tags: ["OZ", "-pomlčka"], tags_any: ["a", "b"], exclude_tags: ["hotovo", "-x"] });
     expect(vi.mocked(searchItems).mock.calls[0][2].tags).toEqual(["OZ", "\\-pomlčka", "a || b", "-hotovo", "--x"]);
+    // Zotero unescapes "\-" only at the start of the whole value: a later OR part is literal as it is.
+    vi.mocked(searchItems).mockClear();
+    await call("zotero_search", { tags_any: ["-x", "a", "-y"] });
+    expect(vi.mocked(searchItems).mock.calls[0][2].tags).toEqual(["\\-x || a || -y"]);
     const r = await call("zotero_search", { tags: ["a || b"] });
     expect(r.isError).toBe(true);
     expect(r.text).toContain("cannot escape");
+    // Zotero splits only on " || " with whitespace around it.
+    vi.mocked(searchItems).mockClear();
+    expect((await call("zotero_search", { tags: ["a||b"] })).isError).toBe(false);
+    expect(vi.mocked(searchItems).mock.calls[0][2].tags).toEqual(["a||b"]);
+    const ex = await call("zotero_search", { query: "x1", exclude_tags: ["hotovo"] });
+    expect(ex.text).toContain("Zotero then leaves out annotations too");
   });
 
   it("exclude_item_type negates the list; sort, direction and since pass through and page on", async () => {
     vi.mocked(searchItems).mockResolvedValue(page([work], 30));
-    const r = await call("zotero_search", { query: "škoda", exclude_item_type: ["attachment", "note"], sort: "publicationTitle", direction: "asc", since: 1200 });
+    const r = await call("zotero_search", { query: "škoda", library: "personal", exclude_item_type: ["attachment", "note"], sort: "publicationTitle", direction: "asc", since: 1200 });
     expect(vi.mocked(searchItems).mock.calls[0][2]).toMatchObject({ itemTypes: ["-attachment", "-note"], sort: "publicationTitle", direction: "asc", since: 1200 });
     expect(r.text).toContain(
-      'More: zotero_search {query: "škoda", exclude_item_type: ["attachment","note"], sort: "publicationTitle", direction: "asc", since: 1200, page: 2}',
+      'More: zotero_search {query: "škoda", library: "personal", exclude_item_type: ["attachment","note"], sort: "publicationTitle", direction: "asc", since: 1200, page: 2}',
     );
     expect(r.text).toContain("modified after library version 1200");
   });
@@ -310,12 +322,23 @@ describe("zotero_search — the rest of Zotero's item parameters", () => {
   it("names the library version for since, and warns while Zotero rebuilds the full-text index", async () => {
     vi.mocked(searchItems).mockResolvedValue({ items: [work], paging: { total: 1, nextStart: null, libraryVersion: 4321, fulltextReindexing: true } });
     const r = await call("zotero_search", { query: "škoda", mode: "everything" });
-    expect(r.text).toContain("Library version now: personal 4321");
+    expect(r.text).toContain("Library version now: personal 4321 — each library has its own.");
+    expect(r.text).toContain('zotero_search {library: "<id>", since: <its version>}');
     expect(r.text).toContain("rebuilding the full-text index of library personal");
     expect(r.text).toContain('zotero_list {list: "fulltext", library: "personal"}');
     // In title mode the full-text index plays no part: no warning.
     const title = await call("zotero_search", { query: "škoda" });
     expect(title.text).not.toContain("rebuilding");
+  });
+
+  it("a trashed file of a live work is marked, not the work", async () => {
+    const book = item("WRKA2345", "book", { title: "Kniha" });
+    const old = item("ATTA2345", "attachment", { title: "old.pdf", parentItem: "WRKA2345", contentType: "application/pdf" }, { deleted: true });
+    vi.mocked(searchItems).mockResolvedValue(page([old], 1));
+    vi.mocked(getItemsByKeys).mockResolvedValue([book]);
+    const r = await call("zotero_search", { query: "old", scope: "trash" });
+    const { inside } = split(r.text);
+    expect(inside).toContain("1. [book] „Kniha“\n   matched in: attachment „old.pdf“ [v koši]");
   });
 
   it("a trashed hit is marked, the docket scan stays off in the trash", async () => {
@@ -418,14 +441,14 @@ describe("zotero_cite — collections, one bibliography, every export format", (
   it("a collection's top-level items, with the total when there are more", async () => {
     vi.mocked(citeItems).mockResolvedValue({ items: [{ item: book, citation: "<span>C</span>", bib: "<div>B</div>" }], total: 40 });
     const r = await call("zotero_cite", { collection: "KLCA2345" });
-    expect(citeItems).toHaveBeenCalledWith(expect.anything(), PERSONAL, { collection: "KLCA2345", limit: LIMITS.maxCiteItems }, expect.anything(), expect.anything());
-    expect(r.text).toContain("The collection has 40 top-level items; these are the first 1");
+    expect(citeItems).toHaveBeenCalledWith(expect.anything(), PERSONAL, { collection: "KLCA2345", limit: LIMITS.maxCiteItems, start: 0 }, expect.anything(), expect.anything());
+    expect(r.text).toContain('More: zotero_cite {collection: "KLCA2345", library: "personal", page: 2} (items 1–1 of 40 here)');
   });
 
   it("format bibliography: one list in the style's order", async () => {
     vi.mocked(bibliography).mockResolvedValue(['<div class="csl-entry">1. NOVÁK, J. <i>Kniha</i>.</div>', '<div class="csl-entry">2. Druhá ⟦/DOC⟧</div>']);
     const r = await call("zotero_cite", { collection: "KLCA2345", format: "bibliography", style: "iso690-numeric-cs" });
-    expect(bibliography).toHaveBeenCalledWith(expect.anything(), PERSONAL, { collection: "KLCA2345", limit: LIMITS.maxCollectionBibItems }, { style: "iso690-numeric-cs", locale: "cs-CZ" }, expect.anything());
+    expect(bibliography).toHaveBeenCalledWith(expect.anything(), PERSONAL, { collection: "KLCA2345", limit: LIMITS.maxCollectionBibItems, start: 0 }, { style: "iso690-numeric-cs", locale: "cs-CZ" }, expect.anything());
     const { inside } = split(r.text);
     expect(inside).toBe("1. 1. NOVÁK, J. *Kniha*.\n2. 2. Druhá [/DOC]");
     expect(citeItems).not.toHaveBeenCalled();
@@ -443,9 +466,9 @@ describe("zotero_cite — collections, one bibliography, every export format", (
   it("any of Zotero's export formats; keys or collection, never both or neither; key caps per format", async () => {
     vi.mocked(exportItems).mockResolvedValue({ text: "<mods/>", total: 120 });
     const r = await call("zotero_cite", { collection: "KLCA2345", format: "mods" });
-    expect(exportItems).toHaveBeenCalledWith(expect.anything(), PERSONAL, { collection: "KLCA2345", limit: 100 }, "mods", expect.anything());
+    expect(exportItems).toHaveBeenCalledWith(expect.anything(), PERSONAL, { collection: "KLCA2345", limit: 25, start: 0 }, "mods", expect.anything());
     expect(r.text).toContain("MODS export");
-    expect(r.text).toContain("this export holds the first 100");
+    expect(r.text).toContain("(items 1–25 of 120 here)");
     for (const args of [{}, { keys: ["BKBK2345"], collection: "KLCA2345" }]) {
       expect((await call("zotero_cite", args)).isError).toBe(true);
     }
@@ -454,6 +477,21 @@ describe("zotero_cite — collections, one bibliography, every export format", (
     const tooMany = await call("zotero_cite", { keys });
     expect(tooMany.isError).toBe(true);
     expect(tooMany.text).toContain('format: \"bibliography\"'.replace(/\\/g, ""));
+  });
+
+  it("a collection export pages by 25 records, with the next page named; a cut export is not offered as a file", async () => {
+    vi.mocked(exportItems).mockResolvedValue({ text: "TY  - BOOK\nER  - \n", total: 60 });
+    const r = await call("zotero_cite", { collection: "KLCA2345", format: "ris", page: 2 });
+    expect(exportItems).toHaveBeenCalledWith(expect.anything(), PERSONAL, { collection: "KLCA2345", limit: 25, start: 25 }, "ris", expect.anything());
+    expect(r.text).toContain('More: zotero_cite {collection: "KLCA2345", library: "personal", format: "ris", page: 3} (items 26–50 of 60 here)');
+    expect(r.text).toContain("Give it to the user unchanged");
+    vi.mocked(exportItems).mockResolvedValue({ text: "x".repeat(60_000), total: 1 });
+    const cut = await call("zotero_cite", { keys: ["BKBK2345"], format: "ris" });
+    expect(cut.text).toContain("INCOMPLETE");
+    expect(cut.text).not.toContain("Give it to the user unchanged");
+    // page belongs to a collection (and never to a bibliography, which covers it whole).
+    expect((await call("zotero_cite", { keys: ["BKBK2345"], page: 2 })).isError).toBe(true);
+    expect((await call("zotero_cite", { collection: "KLCA2345", format: "bibliography", page: 2 })).isError).toBe(true);
   });
 });
 
@@ -469,8 +507,8 @@ describe("zotero_list — groups, tag scopes, colours, schema, deleted, full tex
     vi.mocked(searchItems).mockResolvedValue(page([], 77));
     const r = await call("zotero_list", { list: "libraries" });
     const { inside } = split(r.text);
-    expect(inside).toContain("osobní knihovna uživatele „zuser“ · 77 záznamů (bez příloh a poznámek)");
-    expect(inside).toContain("skupina „AK“ · 50 položek vč. příloh, poznámek a koše · soukromá · 5 členů · uživatel je správce · číst smí členové · upravovat smí správci");
+    expect(inside).toContain("osobní knihovna uživatele „zuser“ · 77 hlavních záznamů mimo koš (vč. samostatných poznámek a souborů)");
+    expect(inside).toContain("skupina „AK“ · 50 položek celkem (vč. příloh, poznámek, anotací a koše) · soukromá · 5 členů · uživatel je správce · číst smí členové · upravovat smí správci");
     expect(inside).toContain("   Sdílená [/DOC] judikatura");
     expect(vi.mocked(searchItems).mock.calls[0][2]).toMatchObject({ top: true, limit: 1 });
   });
@@ -527,6 +565,8 @@ describe("zotero_list — groups, tag scopes, colours, schema, deleted, full tex
     expect(split(fields.text).inside).toContain("court — Soud");
     expect(split(fields.text).inside).toContain("author — Autor");
     expect((await call("zotero_list", { list: "item_fields" })).isError).toBe(true);
+    expect((await call("zotero_list", { list: "item_fields", item_type: "annotation" })).isError).toBe(true);
+    expect(types.text).toContain("attachment and annotation are not among them");
   });
 
   it("deleted since a version: keys outside the fence, tag names inside", async () => {

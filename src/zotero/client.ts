@@ -725,9 +725,9 @@ function scanView(scan: CaseScan & { complete: boolean }, maxPages: number): Cas
 
 /**
  * Which items a citation or export call covers: keys (in the order asked),
- * or the top-level items of a collection (its first `limit`).
+ * or the top-level items of a collection (`limit` of them from `start`).
  */
-export type CiteTarget = { keys: string[] } | { collection: string; limit: number };
+export type CiteTarget = { keys: string[] } | { collection: string; limit: number; start?: number };
 
 function citePath(lib: Library, target: CiteTarget, qs: URLSearchParams, maxKeys: number): string {
   if ("keys" in target) {
@@ -737,6 +737,8 @@ function citePath(lib: Library, target: CiteTarget, qs: URLSearchParams, maxKeys
     qs.set("itemKey", unique.join(","));
     return `${libraryPrefix(lib)}/items`;
   }
+  // format=bib takes no start (400); the others page through the collection.
+  if (target.start && qs.get("format") !== "bib") qs.set("start", String(clampInt(target.start, 0, Number.MAX_SAFE_INTEGER)));
   return `${libraryPrefix(lib)}/collections/${objectKey(target.collection, "collection")}/items/top`;
 }
 
@@ -784,7 +786,8 @@ export async function citeItems(
 /**
  * One bibliography of the items (format=bib), formatted and ordered by the
  * style — one call to the citation server for all of them. The entries'
- * HTML, in the style's order. Zotero allows 150 items (413 above that);
+ * HTML, in the style's order (for a style without a bibliography, Zotero's
+ * list of citations instead). Zotero allows 150 items (413 above that);
  * with keys, 100 (itemKey caps the page).
  */
 export async function bibliography(
@@ -808,11 +811,19 @@ export async function bibliography(
     );
   }
   if (res.status !== 200) throw unexpected(res, "formatting a bibliography");
-  const $ = loadHtml(res.text());
+  const body = res.text();
+  const $ = loadHtml(body);
   const entries: string[] = [];
   $(".csl-entry").each((_, el) => {
     entries.push($.html(el) ?? "");
   });
+  // A style without a bibliography (Bluebook, many note styles): Zotero sends the citations as <ol><li>.
+  if (!entries.length) {
+    $("li").each((_, el) => {
+      entries.push($(el).html() ?? "");
+    });
+  }
+  if (!entries.length && htmlToText(body).trim()) entries.push(body);
   return entries;
 }
 

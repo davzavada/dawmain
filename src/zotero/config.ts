@@ -82,6 +82,8 @@ export const LIMITS = Object.freeze({
   maxCiteItems: 25,
   maxBibItems: 100,
   maxCollectionBibItems: 150,
+  /** A collection export is read this many records per page (a record can be several kB; one answer carries ~45k characters). */
+  exportPageItems: 25,
   /** Libraries one search visits at most. */
   maxLibrariesPerSearch: 6,
   /** Tool calls per user per hour (own bucket, not the files_* one). */

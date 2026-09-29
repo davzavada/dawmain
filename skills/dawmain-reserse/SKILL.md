@@ -639,7 +639,7 @@ their Zotero.
 | koš / moje publikace / jen hlavní záznamy | `scope: "trash"` / `"publications"` / `"top"` |
 | některý ze štítků / bez štítku | `tags_any: [...]` / `exclude_tags: [...]` |
 | štítky kolekce nebo výsledků hledání, barevné štítky | `zotero_list {list: "tags", collection / items_query}`, `{list: "tag_colors"}` |
-| co se změnilo od minula | `since: <library version>` (the answer names it); `zotero_list {list: "deleted", since}` |
+| co se změnilo od minula | `library` + `since: <that library's version>` (the answer names each library's); `zotero_list {list: "deleted", library, since}` |
 | rozhodnutí podle sp. zn. | `query: "25 Cdo 1234/19"` — short years match too |
 | jen rozhodnutí / jen předpisy | `item_type: ["case"]` / `item_type: ["statute"]` |
 | jednu kolekci, štítky, skupinu | `collection` (key), `tags` (all must match), `library: "<group id>"` — names from `zotero_list {list: "collections"}` / `"tags"` / `"libraries"` |
