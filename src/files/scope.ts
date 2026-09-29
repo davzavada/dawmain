@@ -62,20 +62,31 @@ export function libraryHandle(lib: LibraryAccess): string {
   return lib.slug && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(lib.slug) ? lib.slug : lib.id;
 }
 
-/** A plain library name: letters, digits and light punctuation, short. */
-const SAFE_LIBRARY_NAME = /^[\p{L}\p{N}][\p{L}\p{N} .,&'()\-–]{0,39}$/u;
-/** Words a team name has no business carrying — it is printed outside the fence. */
+/** A plain name: letters, digits and light punctuation, short. */
+const SAFE_DISPLAY_NAME = /^[\p{L}\p{N}][\p{L}\p{N} .,&'()\-–]{0,39}$/u;
+/** Words a name has no business carrying — it is printed outside the fence. */
 const INSTRUCTION_WORDS = /\b(?:ignore|ignoruj|instructions?|pokyn|pokyny|system|assistant|asistent|prompt|tool|call|zavolej)\b/i;
+
+/**
+ * A name somebody else chose (a team name, a Zotero group or collection),
+ * as tool-authored lines print it outside the fence: one that is not
+ * plainly a name — too long, unusual characters, instruction-like words —
+ * gives way to `fallback`, which the caller builds from verified values
+ * only (a handle, an id). A non-string `raw` (a field missing from
+ * upstream JSON) counts as empty. Pure.
+ */
+export function safeDisplayName(raw: string, fallback: string): string {
+  const name = sanitizeLine(typeof raw === "string" ? raw : "", 60).trim();
+  return SAFE_DISPLAY_NAME.test(name) && !INSTRUCTION_WORDS.test(name) ? name : fallback;
+}
 
 /**
  * A library's name as tool-authored lines print it (outside the fence): a
  * team name is set by the team's admin, so a name that is not plainly a
- * name — too long, unusual characters, instruction-like words — gives way
- * to the library's handle. Pure.
+ * name gives way to the library's handle. Pure.
  */
 export function safeLibraryName(lib: LibraryAccess): string {
-  const name = sanitizeLine(lib.name ?? "", 60).trim();
-  return SAFE_LIBRARY_NAME.test(name) && !INSTRUCTION_WORDS.test(name) ? name : libraryHandle(lib);
+  return safeDisplayName(lib.name ?? "", libraryHandle(lib));
 }
 
 /** How a library is named in "available libraries" hints: safe name + the filter value to use. */
