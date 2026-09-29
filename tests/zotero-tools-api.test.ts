@@ -298,6 +298,20 @@ describe("zotero_search — the rest of Zotero's item parameters", () => {
     vi.mocked(searchItems).mockClear();
     await call("zotero_search", { tags_any: ["-x", "a", "-y"] });
     expect(vi.mocked(searchItems).mock.calls[0][2].tags).toEqual(["\\-x || a || -y"]);
+    // A part ending in " ||" goes last (it would merge with the separator); one starting with "\\-" behind the first.
+    vi.mocked(searchItems).mockClear();
+    await call("zotero_search", { tags_any: ["a ||", "\\-z", "b"] });
+    expect(vi.mocked(searchItems).mock.calls[0][2].tags).toEqual(["b || \\-z || a ||"]);
+    expect((await call("zotero_search", { tags_any: ["a ||", "b ||"] })).isError).toBe(true);
+    expect((await call("zotero_search", { tags_any: ["\\-z"] })).isError).toBe(true);
+    expect((await call("zotero_search", { tags: ["\\-z"] })).isError).toBe(true);
+    // A negated tag is taken literally after its "-": no escaping, a leading backslash kept.
+    vi.mocked(searchItems).mockClear();
+    await call("zotero_search", { exclude_tags: ["\\foo"] });
+    expect(vi.mocked(searchItems).mock.calls[0][2].tags).toEqual(["-\\foo"]);
+    // PHP's \\s is ASCII: "a || b" with no-break spaces is one tag to Zotero.
+    vi.mocked(searchItems).mockClear();
+    expect((await call("zotero_search", { tags: ["a\u00a0||\u00a0b"] })).isError).toBe(false);
     const r = await call("zotero_search", { tags: ["a || b"] });
     expect(r.isError).toBe(true);
     expect(r.text).toContain("cannot escape");
@@ -329,6 +343,16 @@ describe("zotero_search — the rest of Zotero's item parameters", () => {
     // In title mode the full-text index plays no part: no warning.
     const title = await call("zotero_search", { query: "škoda" });
     expect(title.text).not.toContain("rebuilding");
+  });
+
+  it("a trashed note is named by its own key (zotero_get_item on its work does not list trashed children); trashed parents are found", async () => {
+    const book = item("WRKA2345", "book", { title: "Kniha" });
+    const note = item("NTEA2345", "note", { parentItem: "WRKA2345", note: "<p>stará poznámka</p>" }, { title: "stará poznámka", deleted: true });
+    vi.mocked(searchItems).mockResolvedValue(page([note], 1));
+    vi.mocked(getItemsByKeys).mockResolvedValue([book]);
+    const r = await call("zotero_search", { query: "stará", scope: "trash" });
+    expect(r.text).toContain('the trashed note itself → zotero_get_item {key: "NTEA2345", library: "personal"}');
+    expect(vi.mocked(getItemsByKeys).mock.calls[0][4]).toEqual({ includeTrashed: true });
   });
 
   it("a trashed file of a live work is marked, not the work", async () => {
@@ -446,12 +470,20 @@ describe("zotero_cite — collections, one bibliography, every export format", (
   });
 
   it("format bibliography: one list in the style's order", async () => {
-    vi.mocked(bibliography).mockResolvedValue(['<div class="csl-entry">1. NOVÁK, J. <i>Kniha</i>.</div>', '<div class="csl-entry">2. Druhá ⟦/DOC⟧</div>']);
+    vi.mocked(bibliography).mockResolvedValue({ entries: ['<div class="csl-entry">1. NOVÁK, J. <i>Kniha</i>.</div>', '<div class="csl-entry">2. Druhá ⟦/DOC⟧</div>'], citationList: false });
     const r = await call("zotero_cite", { collection: "KLCA2345", format: "bibliography", style: "iso690-numeric-cs" });
     expect(bibliography).toHaveBeenCalledWith(expect.anything(), PERSONAL, { collection: "KLCA2345", limit: LIMITS.maxCollectionBibItems, start: 0 }, { style: "iso690-numeric-cs", locale: "cs-CZ" }, expect.anything());
     const { inside } = split(r.text);
     expect(inside).toBe("1. 1. NOVÁK, J. *Kniha*.\n2. 2. Druhá [/DOC]");
     expect(citeItems).not.toHaveBeenCalled();
+  });
+
+  it("a style without a bibliography: Zotero's citations, said to be in Zotero's order, not the style's", async () => {
+    vi.mocked(bibliography).mockResolvedValue({ entries: ["<span>Jane Smith, A</span>"], citationList: true });
+    const r = await call("zotero_cite", { keys: ["BKBK2345"], format: "bibliography", style: "bluebook-law-review", locale: "en-US" });
+    expect(r.text).toContain('the citation style "bluebook-law-review" defines no bibliography');
+    expect(r.text).toContain("NOT sorted by the style");
+    expect(r.text).not.toContain("ordered by the style —");
   });
 
   it("the 413 of a big collection is passed on as it is, not as a style problem", async () => {
@@ -466,9 +498,10 @@ describe("zotero_cite — collections, one bibliography, every export format", (
   it("any of Zotero's export formats; keys or collection, never both or neither; key caps per format", async () => {
     vi.mocked(exportItems).mockResolvedValue({ text: "<mods/>", total: 120 });
     const r = await call("zotero_cite", { collection: "KLCA2345", format: "mods" });
-    expect(exportItems).toHaveBeenCalledWith(expect.anything(), PERSONAL, { collection: "KLCA2345", limit: 25, start: 0 }, "mods", expect.anything());
+    // The XML formats page by 10 records.
+    expect(exportItems).toHaveBeenCalledWith(expect.anything(), PERSONAL, { collection: "KLCA2345", limit: 10, start: 0 }, "mods", expect.anything());
     expect(r.text).toContain("MODS export");
-    expect(r.text).toContain("(items 1–25 of 120 here)");
+    expect(r.text).toContain("(items 1–10 of 120 here)");
     for (const args of [{}, { keys: ["BKBK2345"], collection: "KLCA2345" }]) {
       expect((await call("zotero_cite", args)).isError).toBe(true);
     }
@@ -489,6 +522,23 @@ describe("zotero_cite — collections, one bibliography, every export format", (
     const cut = await call("zotero_cite", { keys: ["BKBK2345"], format: "ris" });
     expect(cut.text).toContain("INCOMPLETE");
     expect(cut.text).not.toContain("Give it to the user unchanged");
+    // A cut collection page: no "complete page" claim and no next page (its lost records would be skipped);
+    // the way on is the page's keys.
+    vi.mocked(exportItems).mockResolvedValue({ text: "x".repeat(60_000), total: 60 });
+    const cutPage = await call("zotero_cite", { collection: "KLCA2345", format: "ris" });
+    expect(cutPage.text).not.toContain("More:");
+    expect(cutPage.text).not.toContain("complete export");
+    expect(cutPage.text).toContain('zotero_search {library: "personal", collection: "KLCA2345", scope: "top", sort: "dateAdded", direction: "asc", limit: 25, page: 1}');
+    // A page past the end is not an empty collection.
+    vi.mocked(exportItems).mockResolvedValue({ text: "", total: 30 });
+    const past = await call("zotero_cite", { collection: "KLCA2345", format: "ris", page: 3 });
+    expect(past.isError).toBe(true);
+    expect(past.text).toContain("page 3 is past the end: collection KLCA2345 has 30 top-level items (pages 1–2)");
+    vi.mocked(citeItems).mockResolvedValue({ items: [], total: 30 });
+    expect((await call("zotero_cite", { collection: "KLCA2345", page: 3 })).text).toContain("past the end");
+    // csljson's empty export is {"items":[]}: nothing found, not an export.
+    vi.mocked(exportItems).mockResolvedValue({ text: '{"items":[]}', total: 0 });
+    expect((await call("zotero_cite", { collection: "KLCA2345", format: "csljson" })).isError).toBe(true);
     // page belongs to a collection (and never to a bibliography, which covers it whole).
     expect((await call("zotero_cite", { keys: ["BKBK2345"], page: 2 })).isError).toBe(true);
     expect((await call("zotero_cite", { collection: "KLCA2345", format: "bibliography", page: 2 })).isError).toBe(true);
@@ -499,6 +549,13 @@ describe("zotero_cite — collections, one bibliography, every export format", (
 // zotero_list
 
 describe("zotero_list — groups, tag scopes, colours, schema, deleted, full text", () => {
+  it("the personal count says when notes are not counted (a key without notes access)", async () => {
+    vi.mocked(loadConnection).mockResolvedValue(connection("none", false));
+    vi.mocked(searchItems).mockResolvedValue(page([], 12));
+    const r = await call("zotero_list", { list: "libraries" });
+    expect(split(r.text).inside).toContain("12 hlavních záznamů mimo koš (vč. samostatných souborů; poznámky klíč nesdílí, nejsou započteny)");
+  });
+
   it("libraries: the group's type, members, rights and description; the personal library's count", async () => {
     vi.mocked(loadConnection).mockResolvedValue(connection("all"));
     vi.mocked(listGroups).mockResolvedValue([

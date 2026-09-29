@@ -803,14 +803,18 @@ describe("citations, exports, saved searches", () => {
     expect(u.pathname).toBe("/users/475425/collections/CLCL2222/items/top");
     expect(u.searchParams.get("limit")).toBe("10");
     expect(u.searchParams.get("itemKey")).toBeNull();
+    // Pages of a collection follow the order the items were added: an edit between two pages moves nothing.
+    expect(u.searchParams.get("sort")).toBe("dateAdded");
+    expect(u.searchParams.get("direction")).toBe("asc");
   });
 
   it("bibliography asks for format=bib and returns the entries in the style's order; 413 says to cite fewer", async () => {
     const html = '<?xml version="1.0"?><div class="csl-bib-body"><div class="csl-entry">A <i>Kniha</i></div><div class="csl-entry">B</div></div>';
     const calls = stubFetch(() => new Response(html, { status: 200, headers: { "content-type": "text/html" } }));
-    const entries = await bibliography(CREDS, ME, { collection: "CLCL2222", limit: 150 }, { style: "iso690-numeric-cs", locale: "cs-CZ" });
+    const { entries, citationList } = await bibliography(CREDS, ME, { collection: "CLCL2222", limit: 150 }, { style: "iso690-numeric-cs", locale: "cs-CZ" });
     expect(entries).toHaveLength(2);
     expect(entries[0]).toContain("<i>Kniha</i>");
+    expect(citationList).toBe(false);
     const u = new URL(calls[0].url);
     expect(u.pathname).toBe("/users/475425/collections/CLCL2222/items/top");
     expect(u.searchParams.get("format")).toBe("bib");
@@ -822,8 +826,12 @@ describe("citations, exports, saved searches", () => {
     // A style without a bibliography (Bluebook): Zotero sends the citations as <ol><li> — they are the entries.
     stubFetch(() => new Response('<ol>\n\t<li><span style="font-variant:small-caps;">Jane Smith</span>, A</li>\n\t<li>B</li>\n</ol>', { status: 200 }));
     const cites = await bibliography(CREDS, ME, { keys: ["BKBK2222", "BKBK3333"] }, { style: "bluebook-law-review", locale: "en-US" });
-    expect(cites).toHaveLength(2);
-    expect(cites[0]).toContain("Jane Smith");
+    expect(cites.entries).toHaveLength(2);
+    expect(cites.entries[0]).toContain("Jane Smith");
+    expect(cites.citationList).toBe(true);
+    // Nothing at all (an empty csl-bib-body after the XML prolog): no entries.
+    stubFetch(() => new Response('<?xml version="1.0"?>\n<div class="csl-bib-body"></div>', { status: 200 }));
+    expect(await bibliography(CREDS, ME, { keys: ["BKBK2222"] }, { style: "apa", locale: "en-US" })).toEqual({ entries: [], citationList: false });
     // format=bib takes no start: a collection's start is not sent.
     const noStart = stubFetch(() => new Response(html, { status: 200 }));
     await bibliography(CREDS, ME, { collection: "CLCL2222", limit: 150, start: 25 }, { style: "apa", locale: "en-US" });

@@ -541,12 +541,20 @@ export async function searchItems(
 }
 
 /** Items by key, in the order asked (missing ones left out), LIMITS.maxItemKeys per request. */
-export async function getItemsByKeys(creds: ZoteroCreds, lib: Library, keys: string[], io: IoOptions = {}): Promise<ZoteroItem[]> {
+export async function getItemsByKeys(
+  creds: ZoteroCreds,
+  lib: Library,
+  keys: string[],
+  io: IoOptions = {},
+  opts: { includeTrashed?: boolean } = {},
+): Promise<ZoteroItem[]> {
   const unique = [...new Set(keys.map((k) => objectKey(k, "item")))];
   const chunks: string[][] = [];
   for (let i = 0; i < unique.length; i += LIMITS.maxItemKeys) chunks.push(unique.slice(i, i + LIMITS.maxItemKeys));
-  // In parallel: zoteroFetch's per-user slots keep it polite.
-  const pages = await Promise.all(chunks.map((itemKeys) => searchItems(creds, lib, { itemKeys, limit: LIMITS.pageSize, start: 0 }, io)));
+  // In parallel: zoteroFetch's per-user slots keep it polite. itemKey leaves out the trash unless includeTrashed.
+  const pages = await Promise.all(
+    chunks.map((itemKeys) => searchItems(creds, lib, { itemKeys, limit: LIMITS.pageSize, start: 0, includeTrashed: opts.includeTrashed || undefined }, io)),
+  );
   const byKey = new Map(pages.flatMap((p) => p.items).map((item) => [item.key, item]));
   return unique.flatMap((k) => byKey.get(k) ?? []);
 }
@@ -737,8 +745,13 @@ function citePath(lib: Library, target: CiteTarget, qs: URLSearchParams, maxKeys
     qs.set("itemKey", unique.join(","));
     return `${libraryPrefix(lib)}/items`;
   }
-  // format=bib takes no start (400); the others page through the collection.
-  if (target.start && qs.get("format") !== "bib") qs.set("start", String(clampInt(target.start, 0, Number.MAX_SAFE_INTEGER)));
+  // format=bib takes no start, sort or direction (400); the others page through the collection in the order the
+  // items were added — an edit between two pages does not move a record (Zotero's default is dateModified desc).
+  if (qs.get("format") !== "bib") {
+    qs.set("sort", "dateAdded");
+    qs.set("direction", "asc");
+    if (target.start) qs.set("start", String(clampInt(target.start, 0, Number.MAX_SAFE_INTEGER)));
+  }
   return `${libraryPrefix(lib)}/collections/${objectKey(target.collection, "collection")}/items/top`;
 }
 
@@ -786,9 +799,10 @@ export async function citeItems(
 /**
  * One bibliography of the items (format=bib), formatted and ordered by the
  * style — one call to the citation server for all of them. The entries'
- * HTML, in the style's order (for a style without a bibliography, Zotero's
- * list of citations instead). Zotero allows 150 items (413 above that);
- * with keys, 100 (itemKey caps the page).
+ * HTML, in the style's order. A style without a bibliography (Bluebook,
+ * many note styles): Zotero sends each item's citation instead, in its own
+ * default order (last modified first) — `citationList` says so. Zotero
+ * allows 150 items (413 above that); with keys, 100 (itemKey caps the page).
  */
 export async function bibliography(
   creds: ZoteroCreds,
@@ -796,7 +810,7 @@ export async function bibliography(
   target: CiteTarget,
   opts: { style: string; locale: string },
   io: IoOptions = {},
-): Promise<string[]> {
+): Promise<{ entries: string[]; citationList: boolean }> {
   checkStyle(opts);
   const qs = new URLSearchParams({ format: "bib", style: opts.style, locale: opts.locale });
   const path = citePath(checkedLibrary(creds, lib), target, qs, LIMITS.maxBibItems);
@@ -817,17 +831,16 @@ export async function bibliography(
   $(".csl-entry").each((_, el) => {
     entries.push($.html(el) ?? "");
   });
+  if (entries.length) return { entries, citationList: false };
   // A style without a bibliography (Bluebook, many note styles): Zotero sends the citations as <ol><li>.
-  if (!entries.length) {
-    $("li").each((_, el) => {
-      entries.push($(el).html() ?? "");
-    });
-  }
+  $("li").each((_, el) => {
+    entries.push($(el).html() ?? "");
+  });
   if (!entries.length && htmlToText(body).trim()) entries.push(body);
-  return entries;
+  return { entries, citationList: entries.length > 0 };
 }
 
-/** Items in one of Zotero's export formats, as the text Zotero sends (keys, or the first `limit` top-level items of a collection). */
+/** Items in one of Zotero's export formats, as the text Zotero sends (keys, or `limit` top-level items of a collection from `start`). */
 export async function exportItems(
   creds: ZoteroCreds,
   lib: Library,
