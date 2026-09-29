@@ -386,6 +386,11 @@ function libraryLabel(ref: LibRef, fallbackName?: string | null): string {
   return name ? `skupina „${sanitizeLine(name, 80)}“` : `skupina ${ref.lib.id}`;
 }
 
+/** A key as the tool's own lines echo it: only a well-formed Zotero key, else "?". */
+function safeKey(key: string): string {
+  return ITEM_KEY_RE.test(key) ? key : "?";
+}
+
 /** `key: "ABCD2345", library: "personal"` — both validated. */
 function itemArgs(key: string, ref: LibRef): Array<string | null> {
   return [ITEM_KEY_RE.test(key) ? `key: "${key}"` : null, `library: "${ref.id}"`];
@@ -690,7 +695,10 @@ async function zoteroSearch(g: ZoteroCaller, args: SearchArgs, io: IoOptions): P
     start,
   };
 
-  const scanning = caseKeys.length ? docketScan(g, libs, caseKeys, io) : Promise.resolve(null);
+  // The scan belongs to page 1, where its matches are listed first (a later page would scan again and repeat
+  // them), and only where a case item can match.
+  const scanWanted = caseKeys.length > 0 && (!itemTypes.length || itemTypes.includes("case"));
+  const scanning = scanWanted && args.page === 1 ? docketScan(g, libs, caseKeys, io) : Promise.resolve(null);
   // A failed search must not leave the scan's rejection unobserved; it is awaited below otherwise.
   scanning.catch(() => undefined);
   let mode: SearchMode = args.mode;
@@ -753,7 +761,7 @@ async function zoteroSearch(g: ZoteroCaller, args: SearchArgs, io: IoOptions): P
     const block: Block = {
       data: [`${n}. ${bits.join(" · ")}${multi ? ` · ${libraryLabel(m.ref)}` : ""}`],
       tools: [
-        `${n}. key ${ITEM_KEY_RE.test(e.key) ? e.key : "?"} · library: "${m.ref.id}" → ${toolCall("zotero_get_item", itemArgs(e.key, m.ref))}`,
+        `${n}. key ${safeKey(e.key)} · library: "${m.ref.id}" → ${toolCall("zotero_get_item", itemArgs(e.key, m.ref))}`,
         ...officialTextLines([e.docketNumber, e.title].join("\n")).map((line) => `   ${line}`),
       ],
     };
@@ -771,7 +779,7 @@ async function zoteroSearch(g: ZoteroCaller, args: SearchArgs, io: IoOptions): P
         const more = entry.matched.length > 5 ? ` (+${entry.matched.length - 5})` : "";
         lines.push(`   ${entry.direct ? "also matched in" : "matched in"}: ${labels.join("; ")}${more}`);
       }
-      const hints = [`${n}. key ${ITEM_KEY_RE.test(entry.work.key) ? entry.work.key : "?"} · library: "${r.ref.id}" → ${toolCall("zotero_get_item", itemArgs(entry.work.key, r.ref))}`];
+      const hints = [`${n}. key ${safeKey(entry.work.key)} · library: "${r.ref.id}" → ${toolCall("zotero_get_item", itemArgs(entry.work.key, r.ref))}`];
       const texts = entry.matched.filter((c) => c.itemType === "attachment" && c.key !== entry.work.key).slice(0, 2);
       for (const att of texts) {
         const find = variants[0] ? `find: ${JSON.stringify(sanitizeLine(variants[0], 120))}` : null;
@@ -806,7 +814,11 @@ async function zoteroSearch(g: ZoteroCaller, args: SearchArgs, io: IoOptions): P
   const coverage = [
     `Searched ${libs.map((r) => r.id).join(", ")}${omitted.length ? ` — not searched (over ${LIMITS.maxLibrariesPerSearch} libraries): ${omitted.map((r) => r.id).join(", ")}; pass library: "<id>" for one of them` : ""}.`,
   ];
-  const scanLine = scan ? docketCoverageLine(caseKeys, scan) : null;
+  const scanLine = scan
+    ? `${docketCoverageLine(caseKeys, scan)}${args.collection || tags.length ? " (The scan does not apply the collection and tags filters.)" : ""}`
+    : scanWanted
+      ? `Spisová značka ${caseDisplays(caseKeys).join(", ") || "in the query"}: the docket-number matches are listed on page 1 only.`
+      : null;
 
   const noHits = n === 0 && !cut;
   if (noHits) {
@@ -825,7 +837,7 @@ async function zoteroSearch(g: ZoteroCaller, args: SearchArgs, io: IoOptions): P
   const totalItems = results.reduce((s, r) => s + Math.max(0, ...r.totals.map((t) => t ?? 0), r.items.length), 0);
   const libsWithHits = results.filter((r) => r.items.length > 0 || r.totals.some((t) => (t ?? 0) > 0)).length;
   const header = totalItems
-    ? `✓ Zotero: ${formatCount(totalItems)} matching ${totalItems === 1 ? "item" : "items"} in ${libsWithHits} of ${libs.length} searched ${libs.length === 1 ? "library" : "libraries"} (${modeLabel}); page ${args.page}, up to ${perVariant * Math.max(1, variants.length)} items per library — NOT ranked by relevance: Zotero lists them by ${args.sort}.`
+    ? `✓ Zotero: ${formatCount(totalItems)} matching ${totalItems === 1 ? "item" : "items"} in ${libsWithHits} of ${libs.length} searched ${libs.length === 1 ? "library" : "libraries"} (${modeLabel}); page ${args.page}, up to ${perVariant * Math.max(1, variants.length)} items per library — NOT ranked by relevance: Zotero lists them by ${args.sort}.${caseMatches.length ? ` Plus ${caseMatches.length === 1 ? "one decision" : `${caseMatches.length} decisions`} found by the docket-number scan, listed first.` : ""}`
     : `✓ Zotero: no item matches the query words (${modeLabel}); the docket-number scan found ${caseMatches.length === 1 ? "one decision" : `${caseMatches.length} decisions`}.`;
   // "first N of M" per library; a match inside a work (its PDF, a note) is an item of its own in Zotero's count.
   const perLibrary = results.map((r) => {
@@ -843,14 +855,14 @@ async function zoteroSearch(g: ZoteroCaller, args: SearchArgs, io: IoOptions): P
   const more = results.some((r) => r.more);
   const echo = [
     variants.length > 1
-      ? `queries: ${JSON.stringify(variants.map((v) => sanitizeLine(v, 120)))}`
+      ? `queries: ${JSON.stringify(variants.map((v) => sanitizeLine(v, 300)))}`
       : variants[0]
-        ? `query: ${JSON.stringify(sanitizeLine(variants[0], 120))}`
+        ? `query: ${JSON.stringify(sanitizeLine(variants[0], 300))}`
         : null,
     mode !== "title" ? `mode: "${mode}"` : null,
     args.library ? `library: "${libs[0].id}"` : null,
     args.collection ? `collection: "${args.collection}"` : null,
-    tags.length ? `tags: ${JSON.stringify(tags.map((t) => sanitizeLine(t, 80)))}` : null,
+    tags.length ? `tags: ${JSON.stringify(tags.map((t) => sanitizeLine(t, 200)))}` : null,
     itemTypes.length ? `item_type: ${JSON.stringify(itemTypes)}` : null,
     args.sort !== "dateModified" ? `sort: "${args.sort}"` : null,
     args.limit !== 20 ? `limit: ${args.limit}` : null,
@@ -1144,7 +1156,7 @@ async function zoteroGetItem(g: ZoteroCaller, args: { key: string; library?: str
   const official = item.itemType === "case" ? officialTextLines([field(item, "docketNumber"), item.title, field(item, "extra")].join("\n")) : [];
   const nonce = newNonce();
   const text = [
-    `Zotero item ${item.key} (library: "${ref.id}") — a record in the user's own Zotero library, not an official source.`,
+    `Zotero item ${safeKey(item.key)} (library: "${ref.id}") — a record in the user's own Zotero library, not an official source.`,
     ...problems,
     fenceNote(nonce),
     fence(nonce, data.join("\n")),
@@ -1331,7 +1343,7 @@ async function zoteroGetText(g: ZoteroCaller, args: { key: string; library?: str
   } else if (item.itemType === "note" || item.itemType === "annotation") {
     return errorResult(
       "INPUT_INVALID",
-      `Item ${item.key} is ${item.itemType === "note" ? "a note" : "an annotation"}, not an attachment.`,
+      `Item ${safeKey(item.key)} is ${item.itemType === "note" ? "a note" : "an annotation"}, not an attachment.`,
       `Its text is in ${toolCall("zotero_get_item", itemArgs(item.key, ref))}.`,
     );
   } else {
@@ -1340,16 +1352,16 @@ async function zoteroGetText(g: ZoteroCaller, args: { key: string; library?: str
     if (!picked) {
       return errorResult(
         "NOT_FOUND",
-        `Item ${item.key} has no attachment with a file${attachments.length ? " (only links)" : ""}.`,
+        `Item ${safeKey(item.key)} has no attachment with a file${attachments.length ? " (only links)" : ""}.`,
         `${toolCall("zotero_get_item", itemArgs(item.key, ref))} shows its data, notes and annotations.`,
       );
     }
     att = picked;
     parent = item;
-    others = attachments.filter((a) => a.key !== att.key && field(a, "linkMode") !== "linked_url");
+    others = attachments.filter((a) => a.key !== att.key && field(a, "linkMode") !== "linked_url" && field(a, "linkMode") !== "embedded_image");
   }
   if (field(att, "linkMode") === "linked_url") {
-    return errorResult("NOT_FOUND", `Attachment ${att.key} is a link only — there is no file and no text in Zotero.`, "Open the link's own page instead, if it is a source you may cite.");
+    return errorResult("NOT_FOUND", `Attachment ${safeKey(att.key)} is a link only — there is no file and no text in Zotero.`, "Open the link's own page instead, if it is a source you may cite.");
   }
 
   // (1) Zotero's index when it covers the whole file.
@@ -1383,7 +1395,7 @@ async function zoteroGetText(g: ZoteroCaller, args: { key: string; library?: str
     kind = "partial-index";
     text = indexText;
   }
-  if (!kind) return noTextResult(att.key, pdfFailure ?? "not-indexed");
+  if (!kind) return noTextResult(safeKey(att.key), pdfFailure ?? "not-indexed");
 
   const warnings: string[] = [];
   let source: string;
@@ -1424,7 +1436,7 @@ async function zoteroGetText(g: ZoteroCaller, args: { key: string; library?: str
     if (!found.matches) {
       return textResult(
         [
-          `Zotero attachment ${att.key} (library: "${ref.id}") — ${source}`,
+          `Zotero attachment ${safeKey(att.key)} (library: "${ref.id}") — ${source}`,
           ...warnings,
           `find ${term}: no match in this text (${formatCount(text.length)} characters searched${scope}; case- and diacritics-insensitive). Try a shorter stem or another word, or read the pages: ${call([])}.`,
         ].join("\n"),
@@ -1457,7 +1469,7 @@ async function zoteroGetText(g: ZoteroCaller, args: { key: string; library?: str
   const official = parent?.itemType === "case" ? officialTextLines([field(parent, "docketNumber"), parent.title].join("\n")) : [];
 
   const answer = [
-    `Zotero attachment ${att.key} (library: "${ref.id}")${parent ? ` of item ${parent.key}` : ""} — ${source} · ${position}`,
+    `Zotero attachment ${safeKey(att.key)} (library: "${ref.id}")${parent ? ` of item ${safeKey(parent.key)}` : ""} — ${source} · ${position}`,
     ...warnings,
     fenceNote(nonce),
     fence(nonce, [...head, body].join("\n")),
@@ -1510,6 +1522,10 @@ function collectionTree(cols: ZoteroCollection[]): Array<{ col: ZoteroCollection
   return out;
 }
 
+/** zotero_list's default page size: a next-page call repeats any other limit (page N starts at (N−1)·limit). */
+const LIST_LIMIT = 50;
+const limitArg = (limit: number): string[] => (limit !== LIST_LIMIT ? [`limit: ${limit}`] : []);
+
 async function zoteroList(
   g: ZoteroCaller,
   args: { list: "libraries" | "collections" | "tags"; library?: string; query?: string; limit: number; page: number },
@@ -1533,7 +1549,7 @@ async function zoteroList(
       `✓ Zotero: ${named.length} ${named.length === 1 ? "library" : "libraries"} the connected key reads (connected ${czechDate(g.conn.connectedAt) || "?"}; read-only; notes ${g.conn.notes ? "included" : "not shared"}; ${groups}).`,
       ...(groupsFailed ? [`⚠ The group libraries could not be listed: ${groupsFailed}`] : []),
       ...(shown.length ? [fenceNote(nonce), fence(nonce, data.join("\n")), ...shown.map((r, i) => `${first + i + 1}. library: "${r.id}"`)] : ["(none on this page)"]),
-      ...(named.length > first + shown.length ? [`More: ${toolCall("zotero_list", ['list: "libraries"', `page: ${args.page + 1}`])}`] : []),
+      ...(named.length > first + shown.length ? [`More: ${toolCall("zotero_list", ['list: "libraries"', q ? `query: ${JSON.stringify(sanitizeLine(args.query ?? "", 100))}` : null, ...limitArg(args.limit), `page: ${args.page + 1}`])}`] : []),
       "",
       `Pass library: "personal" or the group id to zotero_search (default: the personal library and up to ${LIMITS.maxLibrariesPerSearch} libraries in all), zotero_get_item, zotero_get_text and zotero_list.`,
     ].join("\n");
@@ -1554,10 +1570,10 @@ async function zoteroList(
     const text = [
       `✓ Zotero: ${formatCount(matching.length)} ${matching.length === 1 ? "collection" : "collections"}${q ? " matching the query" : ""} in library "${ref.id}"${matching.length ? `; showing ${first + 1}–${first + shown.length}` : ""}.`,
       ...(shown.length
-        ? [fenceNote(nonce), fence(nonce, data.join("\n")), ...shown.map((t, i) => `${first + i + 1}. collection: "${t.col.key}"`)]
+        ? [fenceNote(nonce), fence(nonce, data.join("\n")), ...shown.flatMap((t, i) => (ITEM_KEY_RE.test(t.col.key) ? [`${first + i + 1}. collection: "${t.col.key}"`] : []))]
         : [matching.length ? `(nothing on page ${args.page})` : "(no collections)"]),
       ...(matching.length > first + shown.length
-        ? [`More: ${toolCall("zotero_list", ['list: "collections"', `library: "${ref.id}"`, q ? `query: ${JSON.stringify(sanitizeLine(args.query ?? "", 80))}` : null, `page: ${args.page + 1}`])}`]
+        ? [`More: ${toolCall("zotero_list", ['list: "collections"', `library: "${ref.id}"`, q ? `query: ${JSON.stringify(sanitizeLine(args.query ?? "", 100))}` : null, ...limitArg(args.limit), `page: ${args.page + 1}`])}`]
         : []),
       "",
       `Search inside one collection: ${toolCall("zotero_search", [`library: "${ref.id}"`, 'collection: "<key>"', 'query: "…"'])} (subcollections are not included).`,
@@ -1572,7 +1588,7 @@ async function zoteroList(
     `✓ Zotero: ${formatCount(total)} ${total === 1 ? "tag" : "tags"}${args.query ? " containing the query" : ""} in library "${ref.id}"${tags.length ? `; showing ${first + 1}–${first + tags.length}` : ""}.`,
     ...(tags.length ? [fenceNote(nonce), fence(nonce, data.join("\n"))] : [total ? `(nothing on page ${args.page})` : "(no tags)"]),
     ...(paging.nextStart !== null || total > first + tags.length
-      ? [`More: ${toolCall("zotero_list", ['list: "tags"', `library: "${ref.id}"`, args.query ? `query: ${JSON.stringify(sanitizeLine(args.query, 80))}` : null, `page: ${args.page + 1}`])}`]
+      ? [`More: ${toolCall("zotero_list", ['list: "tags"', `library: "${ref.id}"`, args.query ? `query: ${JSON.stringify(sanitizeLine(args.query, 100))}` : null, ...limitArg(args.limit), `page: ${args.page + 1}`])}`]
       : []),
     "",
     'Filter a search by tags: zotero_search {tags: ["…"]} with each tag copied exactly as listed (several tags: all must match).',
@@ -1654,7 +1670,7 @@ export function registerZotero(server: McpServer): void {
         list: z.enum(["libraries", "collections", "tags"]).describe("What to list."),
         library: librarySchema.optional().describe('For collections and tags: "personal" (default) or a group id.'),
         query: z.string().min(1).max(100).optional().describe("Only names containing this (diacritics-insensitive for libraries and collections)."),
-        limit: z.number().int().min(1).max(100).default(50).describe("Entries per page (max 100)."),
+        limit: z.number().int().min(1).max(100).default(LIST_LIMIT).describe("Entries per page (max 100)."),
         page: z.number().int().min(1).default(1).describe("1-based page."),
       }),
       annotations: READ_ONLY,
