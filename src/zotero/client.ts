@@ -2,21 +2,27 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { TtlCache } from "@/src/sources/shared/cache";
 import { SourceError } from "@/src/sources/shared/errors";
-import { htmlToText } from "@/src/sources/shared/html";
+import { htmlToText, loadHtml } from "@/src/sources/shared/html";
 import { API_ORIGIN, CACHE_TTL_MS, EXPORT_FORMATS, ITEM_KEY_RE, LIMITS, LOCALE_RE, SOURCE, STYLE_RE, ZOTERO_UA, isAllowedStorageHost, type ExportFormat } from "./config";
 import { ZoteroBodyTooLargeError, ZoteroKeyInvalidError, readBody, zoteroFetch, type ZoteroResponse } from "./http";
 import type {
+  DeletedObjects,
   Fulltext,
+  FulltextIndexStatus,
   KeyInfo,
   Library,
+  LocalizedName,
   Paging,
   SavedSearch,
   SavedSearchCondition,
+  TagColor,
   ZoteroCollection,
   ZoteroCreator,
   ZoteroCreds,
   ZoteroGroup,
   ZoteroItem,
+  ZoteroSettings,
+  ZoteroTag,
 } from "./types";
 
 /**
@@ -41,6 +47,12 @@ export interface IoOptions {
 export interface ItemsQuery {
   /** /items/top: top-level items only (no child attachments, notes or annotations). */
   top?: boolean;
+  /** /items/trash: the items in the trash only. Not with a collection or My Publications. */
+  trash?: boolean;
+  /** /users/{id}/publications/items: My Publications of the personal library. */
+  publications?: boolean;
+  /** includeTrashed=1: the trash too. */
+  includeTrashed?: boolean;
   q?: string;
   qmode?: "titleCreatorYear" | "everything";
   /**
@@ -103,7 +115,8 @@ const NOTE_TITLE_CHARS = 120;
 const NOTE_TITLE_HTML = 4_000;
 const MAX_SEARCH_PAGES = 5;
 const TITLE_FIELDS = ["title", "caseName", "nameOfAct", "subject"] as const;
-const DATE_FIELDS = ["date", "dateDecided", "dateEnacted"] as const;
+const DATE_FIELDS = ["date", "dateDecided", "dateEnacted", "issueDate"] as const;
+const MAX_SETTINGS_BYTES = LIMITS.maxJsonBytes;
 
 // ---------------------------------------------------------------------------
 // Pure: paths
@@ -117,7 +130,10 @@ export function libraryPrefix(lib: Library): string {
 /** Path + query of an items search; the key is never part of it. Invalid input is INPUT_INVALID. */
 export function buildItemsPath(lib: Library, p: ItemsQuery): string {
   const collection = p.collection !== undefined ? objectKey(p.collection, "collection") : null;
-  const base = `${libraryPrefix(lib)}${collection ? `/collections/${collection}` : ""}/items${p.top ? "/top" : ""}`;
+  if (p.trash && (p.top || collection || p.publications)) throw invalid("the trash is a scope of its own (not with top, a collection or My Publications)");
+  if (p.publications && (collection || lib.type !== "user")) throw invalid("My Publications belong to the personal library (no collection)");
+  const scope = p.publications ? "/publications" : collection ? `/collections/${collection}` : "";
+  const base = `${libraryPrefix(lib)}${scope}/items${p.top ? "/top" : p.trash ? "/trash" : ""}`;
   const qs = new URLSearchParams();
   const q = p.q?.trim();
   if (q) {
@@ -142,6 +158,7 @@ export function buildItemsPath(lib: Library, p: ItemsQuery): string {
     if (!Number.isSafeInteger(p.since) || p.since < 0) throw invalid("`since` is a library version (a non-negative integer)");
     qs.set("since", String(p.since));
   }
+  if (p.includeTrashed) qs.set("includeTrashed", "1");
   qs.set("limit", String(clampInt(p.limit, 1, LIMITS.pageSize)));
   qs.set("start", String(clampInt(p.start, 0, Number.MAX_SAFE_INTEGER)));
   return `${base}?${qs.toString()}`;
@@ -168,6 +185,7 @@ export function parsePaging(headers: Headers): Paging {
     total: headerInt(headers.get("total-results")),
     nextStart: nextStart(headers.get("link")),
     libraryVersion: headerInt(headers.get("last-modified-version")),
+    fulltextReindexing: headers.get("zotero-full-text-reindexing")?.trim() === "1",
   };
 }
 
@@ -235,7 +253,22 @@ export function parseGroup(json: unknown): ZoteroGroup {
   const id = positiveInt(o.id) ?? positiveInt(data.id);
   if (id === null) throw drift("a group without an id");
   const meta = isObject(o.meta) ? o.meta : {};
-  return { id, name: str(data.name)?.trim() || `Skupina ${id}`, numItems: nonNegInt(meta.numItems) };
+  return {
+    id,
+    name: str(data.name)?.trim() || `Skupina ${id}`,
+    numItems: nonNegInt(meta.numItems),
+    type: str(data.type)?.trim() || null,
+    description: str(data.description)?.trim() || null,
+    url: str(data.url)?.trim() || null,
+    libraryReading: str(data.libraryReading)?.trim() || null,
+    libraryEditing: str(data.libraryEditing)?.trim() || null,
+    fileEditing: str(data.fileEditing)?.trim() || null,
+    members: Array.isArray(data.members) ? data.members.length : 0,
+    admins: Array.isArray(data.admins) ? data.admins.length : 0,
+    isAdmin: typeof meta.isAdmin === "boolean" ? meta.isAdmin : null,
+    created: str(meta.created)?.trim() || null,
+    lastModified: str(meta.lastModified)?.trim() || null,
+  };
 }
 
 /** One entry of /collections (`parentCollection` is false at the top level). */
@@ -251,6 +284,8 @@ export function parseCollection(json: unknown): ZoteroCollection {
     name: str(data.name)?.trim() ?? "",
     parentCollection: parent && ITEM_KEY_RE.test(parent) ? parent : null,
     numItems: nonNegInt(meta.numItems),
+    numCollections: nonNegInt(meta.numCollections),
+    deleted: isDeleted(data.deleted),
   };
 }
 
@@ -269,7 +304,7 @@ export function parseSavedSearch(json: unknown): SavedSearch {
         return [{ condition, operator, value: str(c.value) ?? (typeof c.value === "number" ? String(c.value) : "") }];
       })
     : [];
-  return { key, name: str(data.name)?.trim() ?? "", conditions };
+  return { key, name: str(data.name)?.trim() ?? "", conditions, deleted: isDeleted(data.deleted) };
 }
 
 /**
@@ -291,6 +326,9 @@ export function parseItem(json: unknown, fallback?: Library): ZoteroItem {
   const links = isObject(o.links) ? o.links : {};
   const alternate = isObject(links.alternate) ? str(links.alternate.href) : null;
   const parent = str(data.parentItem);
+  const tagObjects = Array.isArray(data.tags) ? data.tags.filter(isObject) : [];
+  const enclosure = isObject(links.enclosure) ? links.enclosure : null;
+  const username = (u: unknown) => (isObject(u) ? str(u.username)?.trim() || null : null);
   return {
     key,
     version: nonNegInt(o.version) ?? nonNegInt(data.version) ?? 0,
@@ -302,12 +340,17 @@ export function parseItem(json: unknown, fallback?: Library): ZoteroItem {
     date: firstText(data, DATE_FIELDS),
     url: str(data.url)?.trim() || null,
     webLink: alternate && isZoteroWebLink(alternate) ? alternate : null,
-    tags: Array.isArray(data.tags) ? data.tags.flatMap((t) => (isObject(t) && str(t.tag)?.trim() ? [str(t.tag)!.trim()] : [])) : [],
+    tags: tagObjects.flatMap((t) => (str(t.tag)?.trim() ? [str(t.tag)!.trim()] : [])),
+    automaticTags: tagObjects.flatMap((t) => (str(t.tag)?.trim() && Number(t.type) === 1 ? [str(t.tag)!.trim()] : [])),
     collections: Array.isArray(data.collections) ? data.collections.filter((c): c is string => typeof c === "string" && ITEM_KEY_RE.test(c)) : [],
+    deleted: isDeleted(data.deleted),
+    file: enclosure ? { size: nonNegInt(enclosure.length), contentType: str(enclosure.type)?.trim() || null } : null,
     meta: {
       creatorSummary: str(meta.creatorSummary)?.trim() || null,
       parsedDate: str(meta.parsedDate)?.trim() || null,
       numChildren: nonNegInt(meta.numChildren),
+      createdBy: username(meta.createdByUser),
+      lastModifiedBy: username(meta.lastModifiedByUser),
     },
     data,
   };
@@ -324,6 +367,43 @@ export function parseFulltext(json: unknown): Fulltext {
     indexedChars: nonNegInt(o.indexedChars),
     totalChars: nonNegInt(o.totalChars),
   };
+}
+
+/** data.deleted is 1 (items) or true (collections, searches) in the trash, absent otherwise. */
+function isDeleted(v: unknown): boolean {
+  return v === true || v === 1 || v === "1";
+}
+
+/** GET {lib}/settings: `{name: {value, version}}`. */
+export function parseSettings(json: unknown): ZoteroSettings {
+  const o = envelope(json, "the settings");
+  const out: ZoteroSettings = {};
+  for (const [name, entry] of Object.entries(o)) {
+    if (!isObject(entry) || !("value" in entry)) continue;
+    out[name] = { value: entry.value, version: nonNegInt(entry.version) };
+  }
+  return out;
+}
+
+/** The tagColors setting: `[{name, color}]`, in Zotero's order; malformed entries dropped. */
+export function tagColorsOf(settings: ZoteroSettings): TagColor[] {
+  const value = settings.tagColors?.value;
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((c) => {
+    if (!isObject(c)) return [];
+    const name = str(c.name)?.trim();
+    const color = str(c.color)?.trim();
+    return name && color && /^#[0-9A-Fa-f]{3,8}$/.test(color) ? [{ name, color: color.toLowerCase() }] : [];
+  });
+}
+
+/** One entry of a tag listing. */
+export function parseTag(json: unknown): ZoteroTag | null {
+  if (!isObject(json)) return null;
+  const tag = str(json.tag)?.trim();
+  if (!tag) return null;
+  const meta = isObject(json.meta) ? json.meta : {};
+  return { tag, type: nonNegInt(meta.type) ?? 0, numItems: nonNegInt(meta.numItems) ?? 0 };
 }
 
 function parseLibrary(raw: unknown): Library | null {
@@ -411,6 +491,8 @@ export function __resetZoteroClientForTests(): void {
   collectionsCache = new TtlCache<ZoteroCollection[]>(CACHE_TTL_MS.collections, 400);
   scanCache = new TtlCache<CaseScan & { complete: boolean }>(CACHE_TTL_MS.caseScan, 100);
   searchesCache = new TtlCache<SavedSearch[]>(CACHE_TTL_MS.searches, 200);
+  settingsCache = new TtlCache<ZoteroSettings>(CACHE_TTL_MS.settings, 200);
+  schemaCache = new TtlCache<LocalizedName[]>(CACHE_TTL_MS.schema, 200);
 }
 
 /**
@@ -501,30 +583,70 @@ export async function listCollections(creds: ZoteroCreds, lib: Library, io: IoOp
   });
 }
 
-/** One page of a library's tags, optionally those containing `q`. */
-export async function listTags(
-  creds: ZoteroCreds,
-  lib: Library,
-  params: { q?: string; limit: number; start: number },
-  io: IoOptions = {},
-): Promise<{ tags: Array<{ tag: string; numItems: number }>; paging: Paging }> {
+/** A tag listing: the library's tags, or those of the items in a scope (Zotero's /items/tags proxy parameters). */
+export interface TagsQuery {
+  /** Tag names containing (or starting with) this — Zotero compares tag names case- and diacritics-SENSITIVELY. */
+  q?: string;
+  qmode?: "contains" | "startswith";
+  /** 0 = the user's own tags, 1 = automatic ones. */
+  tagType?: 0 | 1;
+  sort?: "title" | "numItems" | "dateAdded" | "dateModified";
+  direction?: "asc" | "desc";
+  /**
+   * Only tags of these items: those in a collection (and their child notes
+   * and attachments), the top-level ones, the trash, and/or those a quick
+   * search, item types or item tags select.
+   */
+  items?: {
+    collection?: string;
+    subset?: "top" | "trash";
+    q?: string;
+    qmode?: "titleCreatorYear" | "everything";
+    itemTypes?: string[];
+    tag?: string;
+  };
+  limit: number;
+  start: number;
+}
+
+/** Path + query of a tag listing. Pure. */
+export function buildTagsPath(lib: Library, p: TagsQuery): string {
   const qs = new URLSearchParams();
-  const q = params.q?.trim();
+  let path = `${libraryPrefix(lib)}/tags`;
+  if (p.items) {
+    const collection = p.items.collection !== undefined ? objectKey(p.items.collection, "collection") : null;
+    if (collection && p.items.subset === "trash") throw invalid("the trash has no collections");
+    path = `${libraryPrefix(lib)}${collection ? `/collections/${collection}` : ""}/items${p.items.subset ? `/${p.items.subset}` : ""}/tags`;
+    const q = p.items.q?.trim();
+    if (q) {
+      qs.set("itemQ", q);
+      // The proxy compares the mode exactly: lower case.
+      if (p.items.qmode === "everything") qs.set("itemQMode", "everything");
+    }
+    if (p.items.itemTypes?.length) qs.set("itemType", itemTypeParam(p.items.itemTypes));
+    if (p.items.tag?.trim()) qs.set("itemTag", p.items.tag.trim());
+  }
+  const q = p.q?.trim();
   if (q) {
     qs.set("q", q);
-    qs.set("qmode", "contains");
+    qs.set("qmode", p.qmode === "startswith" ? "startswith" : "contains");
   }
-  qs.set("limit", String(clampInt(params.limit, 1, LIMITS.pageSize)));
-  qs.set("start", String(clampInt(params.start, 0, Number.MAX_SAFE_INTEGER)));
-  const res = await zoteroFetch(creds, `${libraryPrefix(checkedLibrary(creds, lib))}/tags?${qs.toString()}`, io);
+  if (p.tagType !== undefined) qs.set("tagType", String(p.tagType === 1 ? 1 : 0));
+  if (p.sort) qs.set("sort", p.sort);
+  if (p.direction) qs.set("direction", p.direction === "asc" ? "asc" : "desc");
+  qs.set("limit", String(clampInt(p.limit, 1, LIMITS.pageSize)));
+  qs.set("start", String(clampInt(p.start, 0, Number.MAX_SAFE_INTEGER)));
+  return `${path}?${qs.toString()}`;
+}
+
+/** One page of a tag listing (see TagsQuery). */
+export async function listTags(creds: ZoteroCreds, lib: Library, params: TagsQuery, io: IoOptions = {}): Promise<{ tags: ZoteroTag[]; paging: Paging }> {
+  const res = await zoteroFetch(creds, buildTagsPath(checkedLibrary(creds, lib), params), io);
+  if (res.status === 404 && params.items?.collection) {
+    throw new SourceError(SOURCE, "NOT_FOUND", `${SOURCE}: the collection was not found.`, "List the collections of the library, then use one of those keys.");
+  }
   if (res.status !== 200) throw unexpected(res, "listing tags");
-  const tags = array(res.json(), "a tag list").flatMap((entry) => {
-    if (!isObject(entry)) return [];
-    const tag = str(entry.tag)?.trim();
-    if (!tag) return [];
-    const meta = isObject(entry.meta) ? entry.meta : {};
-    return [{ tag, numItems: nonNegInt(meta.numItems) ?? 0 }];
-  });
+  const tags = array(res.json(), "a tag list").flatMap((entry) => parseTag(entry) ?? []);
   return { tags, paging: parsePaging(res.headers) };
 }
 
@@ -602,47 +724,114 @@ function scanView(scan: CaseScan & { complete: boolean }, maxPages: number): Cas
 }
 
 /**
- * Items formatted by Zotero's citation server (CSL): each item's in-text
- * citation (for a note style: the footnote) and bibliography entry, as
- * HTML. In the order asked; keys the library does not have are left out.
- * A style Zotero does not know answers 400 (INPUT_INVALID).
+ * Which items a citation or export call covers: keys (in the order asked),
+ * or the top-level items of a collection (its first `limit`).
+ */
+export type CiteTarget = { keys: string[] } | { collection: string; limit: number };
+
+function citePath(lib: Library, target: CiteTarget, qs: URLSearchParams, maxKeys: number): string {
+  if ("keys" in target) {
+    const unique = [...new Set(target.keys.map((k) => objectKey(k, "item")))];
+    if (!unique.length) throw invalid("no item key");
+    if (unique.length > maxKeys) throw invalid(`at most ${maxKeys} item keys per request`);
+    qs.set("itemKey", unique.join(","));
+    return `${libraryPrefix(lib)}/items`;
+  }
+  return `${libraryPrefix(lib)}/collections/${objectKey(target.collection, "collection")}/items/top`;
+}
+
+function checkStyle(opts: { style: string; locale: string }): void {
+  if (!STYLE_RE.test(opts.style) || opts.style.length > 100) throw invalid(`"${opts.style.slice(0, 40)}" is not a citation style id (like iso690-full-note-cs)`);
+  if (!LOCALE_RE.test(opts.locale)) throw invalid(`"${opts.locale.slice(0, 20)}" is not a locale (like cs-CZ)`);
+}
+
+function collectionMissing(target: CiteTarget): SourceError | null {
+  return "collection" in target
+    ? new SourceError(SOURCE, "NOT_FOUND", `${SOURCE}: the collection was not found.`, "List the collections of the library, then use one of those keys.")
+    : null;
+}
+
+/**
+ * Items formatted by Zotero's citation server (CSL, include=citation,bib):
+ * each item's in-text citation (for a note style: the footnote) and
+ * bibliography entry, as HTML. Keys come back in the order asked (missing
+ * ones left out); a collection's in Zotero's order. A style Zotero does not
+ * know answers 400 (INPUT_INVALID).
  */
 export async function citeItems(
   creds: ZoteroCreds,
   lib: Library,
-  keys: string[],
+  target: CiteTarget,
   opts: { style: string; locale: string },
   io: IoOptions = {},
-): Promise<CitedItem[]> {
-  if (!STYLE_RE.test(opts.style) || opts.style.length > 100) throw invalid(`"${opts.style.slice(0, 40)}" is not a citation style id (like iso690-full-note-cs)`);
-  if (!LOCALE_RE.test(opts.locale)) throw invalid(`"${opts.locale.slice(0, 20)}" is not a locale (like cs-CZ)`);
-  const unique = citeKeys(keys);
-  const qs = new URLSearchParams({ itemKey: unique.join(","), include: "data,citation,bib", style: opts.style, locale: opts.locale, limit: String(LIMITS.maxItemKeys) });
-  const res = await zoteroFetch(creds, `${libraryPrefix(checkedLibrary(creds, lib))}/items?${qs.toString()}`, io);
+): Promise<{ items: CitedItem[]; total: number | null }> {
+  checkStyle(opts);
+  const qs = new URLSearchParams({ include: "data,citation,bib", style: opts.style, locale: opts.locale });
+  const path = citePath(checkedLibrary(creds, lib), target, qs, LIMITS.maxCiteItems);
+  qs.set("limit", String("keys" in target ? LIMITS.maxCiteItems : clampInt(target.limit, 1, LIMITS.maxCiteItems)));
+  const res = await zoteroFetch(creds, `${path}?${qs.toString()}`, io);
+  if (res.status === 404) throw collectionMissing(target) ?? unexpected(res, "formatting citations");
   if (res.status !== 200) throw unexpected(res, "formatting citations");
-  const byKey = new Map<string, CitedItem>();
-  for (const raw of array(res.json(), "an item list")) {
-    const item = parseItem(raw, lib);
+  const cited: CitedItem[] = array(res.json(), "an item list").map((raw) => {
     const o = raw as Record<string, unknown>;
-    byKey.set(item.key, { item, citation: str(o.citation), bib: str(o.bib) });
+    return { item: parseItem(raw, lib), citation: str(o.citation), bib: str(o.bib) };
+  });
+  if (!("keys" in target)) return { items: cited, total: parsePaging(res.headers).total };
+  const byKey = new Map(cited.map((c) => [c.item.key, c]));
+  return { items: [...new Set(target.keys)].flatMap((k) => byKey.get(k) ?? []), total: null };
+}
+
+/**
+ * One bibliography of the items (format=bib), formatted and ordered by the
+ * style — one call to the citation server for all of them. The entries'
+ * HTML, in the style's order. Zotero allows 150 items (413 above that);
+ * with keys, 100 (itemKey caps the page).
+ */
+export async function bibliography(
+  creds: ZoteroCreds,
+  lib: Library,
+  target: CiteTarget,
+  opts: { style: string; locale: string },
+  io: IoOptions = {},
+): Promise<string[]> {
+  checkStyle(opts);
+  const qs = new URLSearchParams({ format: "bib", style: opts.style, locale: opts.locale });
+  const path = citePath(checkedLibrary(creds, lib), target, qs, LIMITS.maxBibItems);
+  const res = await zoteroFetch(creds, `${path}?${qs.toString()}`, io);
+  if (res.status === 404) throw collectionMissing(target) ?? unexpected(res, "formatting a bibliography");
+  if (res.status === 413) {
+    throw new SourceError(
+      SOURCE,
+      "INPUT_INVALID",
+      `${SOURCE}: a bibliography covers at most ${LIMITS.maxCollectionBibItems} items, and this collection has more.`,
+      "Format a smaller set: pass the keys of the items to cite (up to 100).",
+    );
   }
-  return unique.flatMap((k) => byKey.get(k) ?? []);
+  if (res.status !== 200) throw unexpected(res, "formatting a bibliography");
+  const $ = loadHtml(res.text());
+  const entries: string[] = [];
+  $(".csl-entry").each((_, el) => {
+    entries.push($.html(el) ?? "");
+  });
+  return entries;
 }
 
-/** Items in one of Zotero's export formats (RIS, BibTeX, BibLaTeX, CSL JSON), as the text Zotero sends. */
-export async function exportItems(creds: ZoteroCreds, lib: Library, keys: string[], format: ExportFormat, io: IoOptions = {}): Promise<string> {
+/** Items in one of Zotero's export formats, as the text Zotero sends (keys, or the first `limit` top-level items of a collection). */
+export async function exportItems(
+  creds: ZoteroCreds,
+  lib: Library,
+  target: CiteTarget,
+  format: ExportFormat,
+  io: IoOptions = {},
+): Promise<{ text: string; total: number | null }> {
   if (!(EXPORT_FORMATS as readonly string[]).includes(format)) throw invalid(`unknown export format "${String(format).slice(0, 20)}"`);
-  const qs = new URLSearchParams({ itemKey: citeKeys(keys).join(","), format, limit: String(LIMITS.maxItemKeys) });
-  const res = await zoteroFetch(creds, `${libraryPrefix(checkedLibrary(creds, lib))}/items?${qs.toString()}`, io);
+  const qs = new URLSearchParams({ format });
+  const path = citePath(checkedLibrary(creds, lib), target, qs, LIMITS.maxBibItems);
+  qs.set("limit", String("keys" in target ? LIMITS.pageSize : clampInt(target.limit, 1, LIMITS.pageSize)));
+  const res = await zoteroFetch(creds, `${path}?${qs.toString()}`, io);
+  if (res.status === 404) throw collectionMissing(target) ?? unexpected(res, "exporting items");
   if (res.status !== 200) throw unexpected(res, "exporting items");
-  return res.text();
-}
-
-function citeKeys(keys: string[]): string[] {
-  const unique = [...new Set(keys.map((k) => objectKey(k, "item")))];
-  if (!unique.length) throw invalid("no item key");
-  if (unique.length > LIMITS.maxItemKeys) throw invalid(`at most ${LIMITS.maxItemKeys} item keys per request`);
-  return unique;
+  return { text: res.text(), total: parsePaging(res.headers).total };
 }
 
 /** The saved searches of a library (all pages; cached). */
@@ -654,12 +843,79 @@ export async function listSearches(creds: ZoteroCreds, lib: Library, io: IoOptio
   });
 }
 
-/** One saved search, or null when the library has no such key. */
-export async function getSearch(creds: ZoteroCreds, lib: Library, key: string, io: IoOptions = {}): Promise<SavedSearch | null> {
-  const res = await zoteroFetch(creds, `${libraryPrefix(checkedLibrary(creds, lib))}/searches/${objectKey(key, "saved search")}`, io);
-  if (res.status === 404) return null;
-  if (res.status !== 200) throw unexpected(res, "reading a saved search");
-  return parseSavedSearch(res.json());
+let settingsCache = new TtlCache<ZoteroSettings>(CACHE_TTL_MS.settings, 200);
+let schemaCache = new TtlCache<LocalizedName[]>(CACHE_TTL_MS.schema, 200);
+
+/**
+ * A library's settings (GET {lib}/settings; cached): tagColors, and in the
+ * personal library also the reading positions (lastPageIndex_u_<key>,
+ * lastPageIndex_g<group>_<key>) and group items' lastRead_g<group>_<key>.
+ */
+export async function getSettings(creds: ZoteroCreds, lib: Library, io: IoOptions = {}): Promise<ZoteroSettings> {
+  const prefix = libraryPrefix(checkedLibrary(creds, lib));
+  return settingsCache.through(cacheKey(creds, lib), async () => {
+    const res = await zoteroFetch(creds, `${prefix}/settings`, { signal: io.signal, maxBytes: MAX_SETTINGS_BYTES });
+    if (res.status !== 200) throw unexpected(res, "reading the library settings");
+    return parseSettings(res.json());
+  });
+}
+
+/** GET {lib}/fulltext/index: whether Zotero's full-text search index of the library is complete. */
+export async function getFulltextIndex(creds: ZoteroCreds, lib: Library, io: IoOptions = {}): Promise<FulltextIndexStatus> {
+  const res = await zoteroFetch(creds, `${libraryPrefix(checkedLibrary(creds, lib))}/fulltext/index`, io);
+  if (res.status !== 200) throw unexpected(res, "reading the full-text index status");
+  const o = envelope(res.json(), "the full-text index status");
+  return { status: str(o.status) ?? "?", indexedCount: nonNegInt(o.indexedCount), expectedCount: nonNegInt(o.expectedCount) };
+}
+
+/** GET {lib}/fulltext?since=N: how many attachments got full-text content after library version N (0: all that have any). */
+export async function countFulltext(creds: ZoteroCreds, lib: Library, since: number, io: IoOptions = {}): Promise<number> {
+  if (!Number.isSafeInteger(since) || since < 0) throw invalid("`since` is a library version (a non-negative integer)");
+  const res = await zoteroFetch(creds, `${libraryPrefix(checkedLibrary(creds, lib))}/fulltext?since=${since}`, io);
+  if (res.status !== 200) throw unexpected(res, "listing the attachments with full text");
+  return Object.keys(envelope(res.json(), "the full-text versions")).length;
+}
+
+/** GET {lib}/deleted?since=N: what was deleted after library version N. */
+export async function getDeleted(creds: ZoteroCreds, lib: Library, since: number, io: IoOptions = {}): Promise<{ deleted: DeletedObjects; libraryVersion: number | null }> {
+  if (!Number.isSafeInteger(since) || since < 0) throw invalid("`since` is a library version (a non-negative integer)");
+  const res = await zoteroFetch(creds, `${libraryPrefix(checkedLibrary(creds, lib))}/deleted?since=${since}`, io);
+  if (res.status !== 200) throw unexpected(res, "listing deleted objects");
+  const o = envelope(res.json(), "the deleted objects");
+  const list = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+  return {
+    deleted: { collections: list(o.collections), items: list(o.items), searches: list(o.searches), tags: list(o.tags), settings: list(o.settings) },
+    libraryVersion: parsePaging(res.headers).libraryVersion,
+  };
+}
+
+/**
+ * Zotero's schema, localized (no library involved; cached a day):
+ * item types, all fields, the fields and the creator types of one item type.
+ */
+export async function getSchemaNames(
+  creds: ZoteroCreds,
+  what: { kind: "itemTypes" | "itemFields" } | { kind: "itemTypeFields" | "itemTypeCreatorTypes"; itemType: string },
+  locale: string,
+  io: IoOptions = {},
+): Promise<LocalizedName[]> {
+  if (!LOCALE_RE.test(locale)) throw invalid(`"${locale.slice(0, 20)}" is not a locale (like cs-CZ)`);
+  const qs = new URLSearchParams({ locale });
+  if ("itemType" in what) {
+    if (!/^[A-Za-z]{1,40}$/.test(what.itemType)) throw invalid(`unknown item type "${what.itemType.slice(0, 40)}"`);
+    qs.set("itemType", what.itemType);
+  }
+  const path = `/${what.kind}?${qs.toString()}`;
+  return schemaCache.through(path, async () => {
+    const res = await zoteroFetch(creds, path, io);
+    if (res.status !== 200) throw unexpected(res, "reading Zotero's item types and fields");
+    const nameKey = what.kind === "itemTypes" ? "itemType" : what.kind === "itemTypeCreatorTypes" ? "creatorType" : "field";
+    return array(res.json(), "a schema list").flatMap((e) => {
+      if (!isObject(e)) return [];
+      const name = str(e[nameKey])?.trim();
+      return name ? [{ name, localized: str(e.localized)?.trim() || name }] : [];
+    });
+  });
 }
 
 /**

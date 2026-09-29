@@ -4,16 +4,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SourceError } from "@/src/sources/shared/errors";
 import {
   __resetZoteroClientForTests,
+  bibliography,
   buildItemsPath,
+  buildTagsPath,
   citeItems,
+  countFulltext,
   downloadPdf,
   exportItems,
   getChildren,
   getFulltext,
   getItem,
   getItemsByKeys,
+  getDeleted,
+  getFulltextIndex,
   getKeyInfo,
-  getSearch,
+  getSchemaNames,
+  getSettings,
   libraryPrefix,
   listCollections,
   listGroups,
@@ -26,9 +32,12 @@ import {
   parseKeyInfo,
   parsePaging,
   parseSavedSearch,
+  parseSettings,
+  parseTag,
   revokeKey,
   scanCases,
   searchItems,
+  tagColorsOf,
 } from "@/src/zotero/client";
 import { API_ORIGIN, LIMITS, ZOTERO_UA, isAllowedStorageHost } from "@/src/zotero/config";
 import { __resetZoteroHttpForTests } from "@/src/zotero/http";
@@ -184,12 +193,13 @@ describe("parsePaging", () => {
       "Last-Modified-Version": "1201",
       Link: '<https://api.zotero.org/users/475425/items?itemKey=CASE2345,JART7789&limit=100&start=100>; rel="next", <https://api.zotero.org/users/475425/items?itemKey=CASE2345,JART7789&limit=100&start=200>; rel="last", <https://www.zotero.org/zuser/items>; rel="alternate"',
     });
-    expect(parsePaging(headers)).toEqual({ total: 257, nextStart: 100, libraryVersion: 1201 });
+    expect(parsePaging(headers)).toEqual({ total: 257, nextStart: 100, libraryVersion: 1201, fulltextReindexing: false });
+    expect(parsePaging(new Headers({ "Zotero-Full-Text-Reindexing": "1" })).fulltextReindexing).toBe(true);
   });
 
   it("has no next page on the last one and tolerates missing headers", () => {
     const last = new Headers({ Link: '<https://api.zotero.org/users/1/items?start=0>; rel="first", <https://www.zotero.org/u/items>; rel="alternate"' });
-    expect(parsePaging(last)).toEqual({ total: null, nextStart: null, libraryVersion: null });
+    expect(parsePaging(last)).toEqual({ total: null, nextStart: null, libraryVersion: null, fulltextReindexing: false });
     expect(parsePaging(new Headers({ "Total-Results": "abc" })).total).toBeNull();
     // A next link without start= is the first page.
     expect(parsePaging(new Headers({ Link: "<https://api.zotero.org/users/1/items?limit=25>; rel=next" })).nextStart).toBe(0);
@@ -244,19 +254,38 @@ describe("parseKeyInfo", () => {
 describe("parseGroup / parseCollection / parseFulltext", () => {
   it("parses groups", () => {
     const groups = (fixture("groups.json") as unknown[]).map(parseGroup);
-    expect(groups).toEqual([
-      { id: 111111, name: "Advokátní kancelář – judikatura", numItems: 1234 },
-      { id: 222222, name: "Seminář občanské právo", numItems: null },
-    ]);
-    expect(parseGroup({ id: 5 })).toEqual({ id: 5, name: "Skupina 5", numItems: null });
+    expect(groups[0]).toEqual({
+      id: 111111,
+      name: "Advokátní kancelář – judikatura",
+      numItems: 1234,
+      type: "Private",
+      description: "<p>Sdílená judikatura</p>",
+      url: null,
+      libraryReading: "members",
+      libraryEditing: "members",
+      fileEditing: "members",
+      members: 0,
+      admins: 0,
+      isAdmin: null,
+      created: "2021-03-01T10:00:00Z",
+      lastModified: "2026-09-01T08:30:00Z",
+    });
+    expect(groups[1]).toMatchObject({ id: 222222, name: "Seminář občanské právo", numItems: null, type: "PublicClosed", libraryEditing: "admins" });
+    expect(parseGroup({ id: 5 })).toMatchObject({ id: 5, name: "Skupina 5", numItems: null, type: null, members: 0 });
+    expect(parseGroup({ id: 5, meta: { isAdmin: true }, data: { members: [1, 2], admins: [3] } })).toMatchObject({ members: 2, admins: 1, isAdmin: true });
     expect(() => parseGroup({ data: {} })).toThrow(expect.objectContaining({ kind: "PARSE_DRIFT" }));
   });
 
   it("parses collections (parentCollection false → null)", () => {
-    expect((fixture("collections.json") as unknown[]).map(parseCollection)).toEqual([
-      { key: "CLLA2345", name: "Náhrada škody", parentCollection: null, numItems: 17 },
-      { key: "CLLB2345", name: "Nemajetková újma", parentCollection: "CLLA2345", numItems: 4 },
+    expect((fixture("collections.json") as unknown[]).map(parseCollection)).toMatchObject([
+      { key: "CLLA2345", name: "Náhrada škody", parentCollection: null, numItems: 17, deleted: false },
+      { key: "CLLB2345", name: "Nemajetková újma", parentCollection: "CLLA2345", numItems: 4, deleted: false },
     ]);
+    // A trashed collection is still listed by Zotero, with data.deleted; meta.numCollections counts its subcollections.
+    expect(parseCollection({ key: "CLLC2345", meta: { numCollections: 3 }, data: { name: "Stará", parentCollection: false, deleted: true } })).toMatchObject({
+      deleted: true,
+      numCollections: 3,
+    });
     expect(() => parseCollection({ key: "bad", data: {} })).toThrow(expect.objectContaining({ kind: "PARSE_DRIFT" }));
   });
 
@@ -376,7 +405,7 @@ describe("calls", () => {
     );
     const { items: found, paging } = await searchItems(CREDS, ME, { q: "náhrada", limit: 25, start: 0 });
     expect(found.map((i) => i.key)).toEqual(["CASE2345", "JART7789", "PDFA2345", "NTAB3456", "ANNT4567"]);
-    expect(paging).toEqual({ total: 57, nextStart: 25, libraryVersion: 1201 });
+    expect(paging).toEqual({ total: 57, nextStart: 25, libraryVersion: 1201, fulltextReindexing: false });
     expect(new URL(calls[0].url).pathname).toBe("/users/475425/items");
   });
 
@@ -526,8 +555,8 @@ describe("calls", () => {
     );
     const { tags, paging } = await listTags(CREDS, ME, { q: "náhr", limit: 50, start: 0 });
     expect(tags).toEqual([
-      { tag: "náhrada škody", numItems: 12 },
-      { tag: "nemajetková újma", numItems: 0 },
+      { tag: "náhrada škody", type: 0, numItems: 12 },
+      { tag: "nemajetková újma", type: 1, numItems: 0 },
     ]);
     expect(paging.total).toBe(2);
     const url = new URL(calls[0].url);
@@ -535,6 +564,117 @@ describe("calls", () => {
     expect(url.searchParams.get("q")).toBe("náhr");
     expect(url.searchParams.get("qmode")).toBe("contains");
     expect(url.searchParams.get("limit")).toBe("50");
+  });
+
+  it("buildTagsPath: every tag scope and parameter Zotero takes", () => {
+    const u = (path: string) => new URL(path, API_ORIGIN);
+    const lib = u(buildTagsPath(ME, { q: "OZ", qmode: "startswith", tagType: 0, sort: "numItems", direction: "desc", limit: 20, start: 40 }));
+    expect(lib.pathname).toBe("/users/475425/tags");
+    expect(Object.fromEntries(lib.searchParams)).toEqual({ q: "OZ", qmode: "startswith", tagType: "0", sort: "numItems", direction: "desc", limit: "20", start: "40" });
+    const col = u(buildTagsPath(GROUP, { items: { collection: "CLCL2222", subset: "top" }, limit: 50, start: 0 }));
+    expect(col.pathname).toBe("/groups/111111/collections/CLCL2222/items/top/tags");
+    const facets = u(buildTagsPath(ME, { items: { q: "škoda", qmode: "everything", itemTypes: ["case"], tag: "OZ" }, limit: 50, start: 0 }));
+    expect(facets.pathname).toBe("/users/475425/items/tags");
+    expect(facets.searchParams.get("itemQ")).toBe("škoda");
+    // The proxy compares the mode exactly: lower-case "everything".
+    expect(facets.searchParams.get("itemQMode")).toBe("everything");
+    expect(facets.searchParams.get("itemType")).toBe("case");
+    expect(facets.searchParams.get("itemTag")).toBe("OZ");
+    expect(u(buildTagsPath(ME, { items: { subset: "trash" }, limit: 50, start: 0 })).pathname).toBe("/users/475425/items/trash/tags");
+    expect(() => buildTagsPath(ME, { items: { collection: "CLCL2222", subset: "trash" }, limit: 50, start: 0 })).toThrow(SourceError);
+    expect(parseTag({ tag: " x ", meta: { type: 1, numItems: 4 } })).toEqual({ tag: "x", type: 1, numItems: 4 });
+    expect(parseTag({ meta: {} })).toBeNull();
+  });
+});
+
+describe("scopes, settings, schema, sync", () => {
+  it("buildItemsPath: top, trash, My Publications and includeTrashed", () => {
+    expect(buildItemsPath(ME, { trash: true, limit: 25, start: 0 })).toMatch(/^\/users\/475425\/items\/trash\?/);
+    expect(buildItemsPath(ME, { publications: true, top: true, limit: 25, start: 0 })).toMatch(/^\/users\/475425\/publications\/items\/top\?/);
+    expect(buildItemsPath(ME, { collection: "CLCL2222", top: true, limit: 25, start: 0 })).toMatch(/^\/users\/475425\/collections\/CLCL2222\/items\/top\?/);
+    expect(new URL(buildItemsPath(ME, { includeTrashed: true, limit: 25, start: 0 }), API_ORIGIN).searchParams.get("includeTrashed")).toBe("1");
+    for (const bad of [
+      { trash: true, collection: "CLCL2222" },
+      { trash: true, top: true },
+      { publications: true, collection: "CLCL2222" },
+    ]) {
+      expect(() => buildItemsPath(ME, { ...bad, limit: 25, start: 0 })).toThrow(SourceError);
+    }
+    expect(() => buildItemsPath(GROUP, { publications: true, limit: 25, start: 0 })).toThrow(SourceError);
+  });
+
+  it("parseItem: trash flag, automatic tags, the stored file and who added it", () => {
+    const item = parseItem({
+      key: "ATTA2345",
+      version: 3,
+      library: { type: "group", id: 111111, name: "AK" },
+      links: { enclosure: { type: "application/pdf", href: "https://api.zotero.org/groups/111111/items/ATTA2345/file/view", length: 123456 } },
+      meta: { createdByUser: { id: 1, username: "novak" }, lastModifiedByUser: { id: 2, username: "svoboda" } },
+      data: { itemType: "attachment", deleted: 1, tags: [{ tag: "OZ" }, { tag: "import", type: 1 }], issueDate: "2020" },
+    });
+    expect(item.deleted).toBe(true);
+    expect(item.automaticTags).toEqual(["import"]);
+    expect(item.file).toEqual({ size: 123456, contentType: "application/pdf" });
+    expect(item.meta.createdBy).toBe("novak");
+    expect(item.meta.lastModifiedBy).toBe("svoboda");
+    expect(item.date).toBe("2020");
+    const plain = parseItem({ key: "WRKA2345", library: { type: "user", id: 1 }, data: { itemType: "book" } });
+    expect(plain.deleted).toBe(false);
+    expect(plain.file).toBeNull();
+  });
+
+  it("settings: parsed, cached, and the tag colours read in order", async () => {
+    const body = {
+      tagColors: { value: [{ name: "OZ", color: "#FF6666" }, { name: "bad" }, { name: "Nové", color: "#5FB236" }], version: 7 },
+      lastPageIndex_u_ATTA2345: { value: 11, version: 8 },
+      junk: 5,
+    };
+    const calls = stubFetch(() => json(body));
+    const settings = await getSettings(CREDS, ME);
+    await getSettings(CREDS, ME);
+    expect(calls).toHaveLength(1);
+    expect(new URL(calls[0].url).pathname).toBe("/users/475425/settings");
+    expect(settings.lastPageIndex_u_ATTA2345).toEqual({ value: 11, version: 8 });
+    expect(settings).not.toHaveProperty("junk");
+    expect(tagColorsOf(settings)).toEqual([
+      { name: "OZ", color: "#ff6666" },
+      { name: "Nové", color: "#5fb236" },
+    ]);
+    expect(tagColorsOf(parseSettings({}))).toEqual([]);
+  });
+
+  it("the schema: localized item types and a type's fields and creator types, cached per request", async () => {
+    const calls = stubFetch((call) => {
+      const u = new URL(call.url);
+      if (u.pathname === "/itemTypes") return json([{ itemType: "case", localized: "Případ" }, { itemType: "" }]);
+      if (u.pathname === "/itemTypeFields") return json([{ field: "court", localized: "Soud" }]);
+      return json([{ creatorType: "author", localized: "Autor" }]);
+    });
+    expect(await getSchemaNames(CREDS, { kind: "itemTypes" }, "cs-CZ")).toEqual([{ name: "case", localized: "Případ" }]);
+    await getSchemaNames(CREDS, { kind: "itemTypes" }, "cs-CZ");
+    expect(calls).toHaveLength(1);
+    expect(new URL(calls[0].url).searchParams.get("locale")).toBe("cs-CZ");
+    expect(await getSchemaNames(CREDS, { kind: "itemTypeFields", itemType: "case" }, "cs-CZ")).toEqual([{ name: "court", localized: "Soud" }]);
+    expect(new URL(calls[1].url).searchParams.get("itemType")).toBe("case");
+    expect(await getSchemaNames(CREDS, { kind: "itemTypeCreatorTypes", itemType: "case" }, "cs-CZ")).toEqual([{ name: "author", localized: "Autor" }]);
+    expect((await rejection(getSchemaNames(CREDS, { kind: "itemTypeFields", itemType: "x&y" }, "cs-CZ"))).kind).toBe("INPUT_INVALID");
+  });
+
+  it("deleted, the full-text index status and the full-text count", async () => {
+    const calls = stubFetch((call) => {
+      const u = new URL(call.url);
+      if (u.pathname.endsWith("/deleted")) return json({ collections: ["CLCL2222"], items: ["WRKA2345", 5], searches: [], tags: ["OZ"], settings: [] }, { "Last-Modified-Version": "900" });
+      if (u.pathname.endsWith("/fulltext/index")) return json({ status: "reindexing", indexedCount: 10, expectedCount: 40 });
+      return json({ ATTA2345: 3, ATTB2345: 4 });
+    });
+    const { deleted, libraryVersion } = await getDeleted(CREDS, GROUP, 800);
+    expect(deleted).toEqual({ collections: ["CLCL2222"], items: ["WRKA2345"], searches: [], tags: ["OZ"], settings: [] });
+    expect(libraryVersion).toBe(900);
+    expect(new URL(calls[0].url).searchParams.get("since")).toBe("800");
+    expect(await getFulltextIndex(CREDS, ME)).toEqual({ status: "reindexing", indexedCount: 10, expectedCount: 40 });
+    expect(await countFulltext(CREDS, ME, 0)).toBe(2);
+    expect(new URL(calls[2].url).pathname).toBe("/users/475425/fulltext");
+    expect((await rejection(getDeleted(CREDS, ME, -1))).kind).toBe("INPUT_INVALID");
   });
 });
 
@@ -631,7 +771,7 @@ describe("citations, exports, saved searches", () => {
       bib: `<div class="csl-bib-body"><div class="csl-entry">${key} bib</div></div>`,
     });
     const calls = stubFetch(() => json([entry("BKBK3333"), entry("BKBK2222")]));
-    const cited = await citeItems(CREDS, ME, ["BKBK2222", "BKBK3333", "BKBK4444"], { style: "iso690-full-note-cs", locale: "cs-CZ" });
+    const { items: cited } = await citeItems(CREDS, ME, { keys: ["BKBK2222", "BKBK3333", "BKBK4444"] }, { style: "iso690-full-note-cs", locale: "cs-CZ" });
     expect(cited.map((c) => c.item.key)).toEqual(["BKBK2222", "BKBK3333"]);
     expect(cited[0].citation).toBe("<span>BKBK2222 cit</span>");
     expect(cited[0].bib).toContain("BKBK2222 bib");
@@ -642,22 +782,70 @@ describe("citations, exports, saved searches", () => {
     expect(u.searchParams.get("locale")).toBe("cs-CZ");
     // Style and locale are validated before any request.
     const before = calls.length;
-    expect((await rejection(citeItems(CREDS, ME, ["BKBK2222"], { style: "../evil", locale: "cs-CZ" }))).kind).toBe("INPUT_INVALID");
-    expect((await rejection(citeItems(CREDS, ME, ["BKBK2222"], { style: "apa", locale: "cs_CZ&x=1" }))).kind).toBe("INPUT_INVALID");
+    expect((await rejection(citeItems(CREDS, ME, { keys: ["BKBK2222"] }, { style: "../evil", locale: "cs-CZ" }))).kind).toBe("INPUT_INVALID");
+    expect((await rejection(citeItems(CREDS, ME, { keys: ["BKBK2222"] }, { style: "apa", locale: "cs_CZ&x=1" }))).kind).toBe("INPUT_INVALID");
+    // The citation server reads only "xx-XX": a bare language would reach it as garbage.
+    expect((await rejection(citeItems(CREDS, ME, { keys: ["BKBK2222"] }, { style: "apa", locale: "cs" }))).kind).toBe("INPUT_INVALID");
     expect(calls.length).toBe(before);
     // An unknown style: Zotero's 400 becomes INPUT_INVALID.
     stubFetch(() => new Response("Invalid style", { status: 400 }));
-    expect((await rejection(citeItems(CREDS, ME, ["BKBK2222"], { style: "no-such-style", locale: "cs-CZ" }))).kind).toBe("INPUT_INVALID");
+    expect((await rejection(citeItems(CREDS, ME, { keys: ["BKBK2222"] }, { style: "no-such-style", locale: "cs-CZ" }))).kind).toBe("INPUT_INVALID");
+  });
+
+  it("citeItems of a collection reads its top-level items with a limit and returns the total", async () => {
+    const calls = stubFetch(() =>
+      json([{ key: "BKBK2222", version: 1, library: { type: "user", id: 475425 }, data: { itemType: "book", title: "K" }, citation: "<span>c</span>", bib: null }], { "Total-Results": "40" }),
+    );
+    const result = await citeItems(CREDS, ME, { collection: "CLCL2222", limit: 10 }, { style: "apa", locale: "en-US" });
+    expect(result.total).toBe(40);
+    expect(result.items[0].bib).toBeNull();
+    const u = new URL(calls[0].url);
+    expect(u.pathname).toBe("/users/475425/collections/CLCL2222/items/top");
+    expect(u.searchParams.get("limit")).toBe("10");
+    expect(u.searchParams.get("itemKey")).toBeNull();
+  });
+
+  it("bibliography asks for format=bib and returns the entries in the style's order; 413 says to cite fewer", async () => {
+    const html = '<?xml version="1.0"?><div class="csl-bib-body"><div class="csl-entry">A <i>Kniha</i></div><div class="csl-entry">B</div></div>';
+    const calls = stubFetch(() => new Response(html, { status: 200, headers: { "content-type": "text/html" } }));
+    const entries = await bibliography(CREDS, ME, { collection: "CLCL2222", limit: 150 }, { style: "iso690-numeric-cs", locale: "cs-CZ" });
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toContain("<i>Kniha</i>");
+    const u = new URL(calls[0].url);
+    expect(u.pathname).toBe("/users/475425/collections/CLCL2222/items/top");
+    expect(u.searchParams.get("format")).toBe("bib");
+    // format=bib takes no limit, start or sort (Zotero answers 400).
+    expect(u.searchParams.get("limit")).toBeNull();
+    const byKeys = stubFetch(() => new Response(html, { status: 200 }));
+    await bibliography(CREDS, ME, { keys: ["BKBK2222"] }, { style: "apa", locale: "en-US" });
+    expect(new URL(byKeys[0].url).searchParams.get("itemKey")).toBe("BKBK2222");
+    stubFetch(() => new Response("Too many", { status: 413 }));
+    const e = await rejection(bibliography(CREDS, ME, { collection: "CLCL2222", limit: 150 }, { style: "apa", locale: "en-US" }));
+    expect(e.kind).toBe("INPUT_INVALID");
+    expect(e.message).toContain("covers at most 150");
+    // More than 100 distinct keys are refused before any request.
+    const A = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+    const many = Array.from({ length: 101 }, (_, i) => `BKBK22${A[Math.floor(i / 32)]}${A[i % 32]}`);
+    const before = stubFetch(() => new Response("x", { status: 200 }));
+    const tooMany = await rejection(bibliography(CREDS, ME, { keys: many }, { style: "apa", locale: "en-US" }));
+    expect(tooMany.kind).toBe("INPUT_INVALID");
+    expect(tooMany.message).toContain("at most 100 item keys");
+    expect(before).toHaveLength(0);
   });
 
   it("exportItems returns Zotero's export text and refuses an unknown format", async () => {
     const calls = stubFetch(() => new Response("TY  - BOOK\nTI  - Kniha\nER  - \n", { status: 200, headers: { "content-type": "application/x-research-info-systems" } }));
-    expect(await exportItems(CREDS, GROUP, ["BKBK2222"], "ris")).toContain("TY  - BOOK");
+    expect((await exportItems(CREDS, GROUP, { keys: ["BKBK2222"] }, "ris")).text).toContain("TY  - BOOK");
     const u = new URL(calls[0].url);
     expect(u.pathname).toBe("/groups/111111/items");
     expect(u.searchParams.get("format")).toBe("ris");
-    expect((await rejection(exportItems(CREDS, GROUP, ["BKBK2222"], "keys" as never))).kind).toBe("INPUT_INVALID");
-    expect((await rejection(exportItems(CREDS, GROUP, [], "ris"))).kind).toBe("INPUT_INVALID");
+    expect((await rejection(exportItems(CREDS, GROUP, { keys: ["BKBK2222"] }, "keys" as never))).kind).toBe("INPUT_INVALID");
+    expect((await rejection(exportItems(CREDS, GROUP, { keys: [] }, "ris"))).kind).toBe("INPUT_INVALID");
+    // Every format of Zotero's own export list passes.
+    for (const format of ["mods", "endnote_xml", "refworks_tagged", "rdf_zotero", "tei", "wikipedia", "csv"] as const) {
+      stubFetch(() => new Response("x", { status: 200 }));
+      await exportItems(CREDS, GROUP, { collection: "CLCL2222", limit: 100 }, format);
+    }
   });
 
   it("parses saved searches, lists them (cached) and reads one", async () => {
@@ -682,17 +870,15 @@ describe("citations, exports, saved searches", () => {
         { condition: "tag", operator: "is", value: "škoda" },
         { condition: "joinMode", operator: "any", value: "all" },
       ],
+      deleted: false,
     });
+    expect(parseSavedSearch({ ...raw, data: { ...raw.data, deleted: true } }).deleted).toBe(true);
     expect(() => parseSavedSearch({ data: {} })).toThrow(SourceError);
     const calls = stubFetch(() => json([raw]));
     expect((await listSearches(CREDS, ME)).map((x) => x.key)).toEqual(["SRCH2222"]);
     await listSearches(CREDS, ME);
     expect(calls).toHaveLength(1);
     expect(new URL(calls[0].url).pathname).toBe("/users/475425/searches");
-    stubFetch(() => json(raw));
-    expect((await getSearch(CREDS, ME, "SRCH2222"))?.name).toBe("Náhrada škody");
-    stubFetch(() => new Response("Not found", { status: 404 }));
-    expect(await getSearch(CREDS, ME, "SRCH2222")).toBeNull();
   });
 });
 

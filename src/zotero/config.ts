@@ -73,8 +73,15 @@ export const LIMITS = Object.freeze({
   /** Docket-number scan over itemType=case. */
   scanPagesPerLibrary: 5,
   scanPagesTotal: 10,
-  /** zotero_cite: items per call (Zotero's itemKey cap). */
-  maxCiteItems: 50,
+  /**
+   * zotero_cite: per-item citations cost the citation server two calls per
+   * item, one after another, so fewer per call; one bibliography (format=bib)
+   * and the exports take up to 100 keys (itemKey forces limit=100), a whole
+   * collection up to 150 items (Zotero answers 413 above that).
+   */
+  maxCiteItems: 25,
+  maxBibItems: 100,
+  maxCollectionBibItems: 150,
   /** Libraries one search visits at most. */
   maxLibrariesPerSearch: 6,
   /** Tool calls per user per hour (own bucket, not the files_* one). */
@@ -91,6 +98,9 @@ export const CACHE_TTL_MS = Object.freeze({
   text: 10 * 60 * 1000,
   caseScan: 10 * 60 * 1000,
   searches: 10 * 60 * 1000,
+  settings: 10 * 60 * 1000,
+  /** Item types and fields change with a Zotero schema release, not per library. */
+  schema: 24 * 60 * 60 * 1000,
 });
 
 /**
@@ -132,13 +142,32 @@ export function zoteroConfigured(): boolean {
 /** Zotero object keys: 8 characters from this alphabet (write_requests docs). */
 export const ITEM_KEY_RE = /^[23456789ABCDEFGHIJKLMNPQRSTUVWXYZ]{8}$/;
 
-/** zotero_cite's export formats (Zotero's own export formats). */
-export const EXPORT_FORMATS = ["ris", "bibtex", "biblatex", "csljson"] as const;
+/** Zotero's export formats (format=…, Zotero_Translate::$exportFormats in the dataserver). */
+export const EXPORT_FORMATS = [
+  "ris",
+  "bibtex",
+  "biblatex",
+  "csljson",
+  "bookmarks",
+  "coins",
+  "csv",
+  "endnote_xml",
+  "evernote",
+  "mods",
+  "rdf_bibliontology",
+  "rdf_dc",
+  "rdf_zotero",
+  "refer",
+  "refworks_tagged",
+  "tei",
+  "wikipedia",
+] as const;
 export type ExportFormat = (typeof EXPORT_FORMATS)[number];
 
 /** A citation style id from zotero.org/styles ("iso690-full-note-cs") and a CSL locale ("cs-CZ"). */
 export const STYLE_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-export const LOCALE_RE = /^[a-z]{2,3}(?:-[A-Z]{2})?$/;
+// The citation server reads only "xx-XX": a bare "cs" becomes garbage server-side.
+export const LOCALE_RE = /^[a-z]{2}-[A-Z]{2}$/;
 
 /** Zotero API keys are 24 alphanumerics today; the range leaves room without admitting anything else. */
 export const ZOTERO_KEY_RE = /^[A-Za-z0-9]{8,64}$/;

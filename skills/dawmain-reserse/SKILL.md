@@ -635,16 +635,21 @@ their Zotero.
 | jen poznámky / jen anotace | `item_type: ["note"]` / `item_type: ["annotation"]` (Zotero matches a note by its first line only) |
 | citace podle ČSN ISO 690 / export RIS, BibTeX | `zotero_cite {keys: [...]}` (style `iso690-full-note-cs` by default) / `format: "ris"` |
 | uložená hledání | `zotero_list {list: "searches"}` — their conditions; the API does not run them |
+| bibliografie kolekce | `zotero_cite {collection: "<key>", format: "bibliography"}` |
+| koš / moje publikace / jen hlavní záznamy | `scope: "trash"` / `"publications"` / `"top"` |
+| některý ze štítků / bez štítku | `tags_any: [...]` / `exclude_tags: [...]` |
+| štítky kolekce nebo výsledků hledání, barevné štítky | `zotero_list {list: "tags", collection / items_query}`, `{list: "tag_colors"}` |
+| co se změnilo od minula | `since: <library version>` (the answer names it); `zotero_list {list: "deleted", since}` |
 | rozhodnutí podle sp. zn. | `query: "25 Cdo 1234/19"` — short years match too |
 | jen rozhodnutí / jen předpisy | `item_type: ["case"]` / `item_type: ["statute"]` |
 | jednu kolekci, štítky, skupinu | `collection` (key), `tags` (all must match), `library: "<group id>"` — names from `zotero_list {list: "collections"}` / `"tags"` / `"libraries"` |
 | celou položku: údaje, poznámky, anotace, přílohy, související | `zotero_get_item {key, library}` |
 | text přílohy (PDF) / pasáž v něm | `zotero_get_text {key, library}`, then `page: 2` …; `find: "liberační důvod"` for excerpts |
 
-**Zotero matches words literally.** Every word of the query must occur as written —
-no stemming, so "nájemce" does not find "nájemci": fewer words, a stem-like short
-form, or three variants in `queries`. A hyphen splits the query into separate words:
-write "zákoník práce", not "zákoník-práce". The default `mode: "title"` looks at
+**How Zotero matches words.** The query is split at spaces ("double quotes" keep a
+phrase) and every word must occur — as a substring, case- and diacritics-insensitive,
+so a stem finds every form: "nájem" finds "nájemce" and "nájemci", "nájemce" does not
+find "nájemci". Fewer words, a stem, or three variants in `queries`. The default `mode: "title"` looks at
 titles, creators, years and a note's first line only; when it finds nothing, the tool
 repeats the search in everything mode (plus the attachments' full text) by itself and
 says so — do not call again for that. Pass `mode: "everything"` straight away when the
