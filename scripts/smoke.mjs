@@ -146,19 +146,30 @@ const EXPECTED_TOOLS = [
   "files_search",
   "files_get_document",
   "files_list",
-  // Zotero — the user's own cloud library, registered everywhere, gated per call (see checkZoteroGate).
-  "zotero_search",
-  "zotero_get_item",
-  "zotero_get_text",
-  "zotero_list",
   // EUIPO and ÚPV are deliberately not covered — see src/mcp/tools/index.ts.
 ];
+
+/**
+ * Zotero — the user's own cloud library: registered only where the
+ * deployment has it configured (dawmain_ping says "zotero": "configured"),
+ * then gated per call (see checkZoteroGate). All four or none.
+ */
+const ZOTERO_TOOLS = ["zotero_search", "zotero_get_item", "zotero_get_text", "zotero_list"];
 
 async function checkTools(client) {
   const { tools } = await client.request("tools/list");
   if (!tools?.length) throw new Error("tools/list returned no tools");
   const names = tools.map((t) => t.name).sort();
-  const expected = [...EXPECTED_TOOLS].sort();
+
+  const ping = await client.request("tools/call", { name: "dawmain_ping", arguments: {} });
+  const info = JSON.parse(textOf(ping, "dawmain_ping"));
+  if (info.ok !== true) throw new Error(`dawmain_ping did not report ok: ${JSON.stringify(ping)}`);
+  const zotero = info.zotero === "configured";
+  if (info.zotero !== "configured" && info.zotero !== "unconfigured") {
+    throw new Error(`dawmain_ping reported no zotero state: ${JSON.stringify(info.zotero)}`);
+  }
+
+  const expected = [...EXPECTED_TOOLS, ...(zotero ? ZOTERO_TOOLS : [])].sort();
   const missing = expected.filter((name) => !names.includes(name));
   const surplus = names.filter((name) => !expected.includes(name));
   if (missing.length || surplus.length) {
@@ -168,11 +179,8 @@ async function checkTools(client) {
   }
   const structured = tools.filter((t) => t.outputSchema).map((t) => t.name);
   if (structured.length) throw new Error(`tools declare an outputSchema: ${structured.join(", ")}`);
-  ok("tools/list", `${names.length} tools, roster matches, text-only`);
+  ok("tools/list", `${names.length} tools, roster matches, text-only${zotero ? "" : " (Zotero not configured: zotero_* not offered)"}`);
 
-  const ping = await client.request("tools/call", { name: "dawmain_ping", arguments: {} });
-  const info = JSON.parse(textOf(ping, "dawmain_ping"));
-  if (info.ok !== true) throw new Error(`dawmain_ping did not report ok: ${JSON.stringify(ping)}`);
   ok("dawmain_ping", `env=${info.environment} region=${info.region ?? "-"} commit=${info.commit ?? "-"}`);
 
   // Input validation must reject bad arguments without touching any upstream.
@@ -190,7 +198,8 @@ async function checkTools(client) {
   ok("input validation", "esbirka_search rejected limit=9999");
 
   await checkFilesGate(client);
-  await checkZoteroGate(client);
+  if (zotero) await checkZoteroGate(client);
+  else ok("zotero_* gate", "not offered on this deployment (unconfigured)");
 }
 
 /**

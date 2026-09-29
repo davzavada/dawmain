@@ -26,7 +26,7 @@ import { registerPing } from "@/src/mcp/tools/ping";
 import { canaries, registerProbe } from "@/src/mcp/tools/probe";
 import { READ_ONLY } from "@/src/mcp/tools/shared";
 import { ZOTERO_GATE_TEXT, __resetZoteroToolsForTests, registerZotero } from "@/src/mcp/tools/zotero";
-import { INSTRUCTIONS } from "@/src/mcp/server";
+import { buildInstructions } from "@/src/mcp/server";
 import {
   downloadPdf,
   getChildren,
@@ -227,11 +227,22 @@ describe("registration", () => {
   });
 
   it("the server instructions route to zotero_* next to files_* and fence Zotero content", () => {
+    const INSTRUCTIONS = buildInstructions(true);
     expect(INSTRUCTIONS).toMatch(/^- Vlastní zdroje .*\n- Zotero — .*zotero_search .*zotero_get_item .*zotero_get_text .*zotero_list/m);
     expect(INSTRUCTIONS).toMatch(/^- Zotero — .*In legal research call zotero_search in the first round next to files_search/m);
     expect(INSTRUCTIONS).toMatch(/^- Zotero — .*do not call zotero_\* again in this conversation/m);
     expect(INSTRUCTIONS).toMatch(/^TRUST — .*⟦\/DOC n⟧ in files_\* answers\) and of their Zotero library \(the same fence in zotero_\* answers\)/m);
     expect(INSTRUCTIONS).toMatch(/^1\. .*never a zotero\.org link as the authority/m);
+  });
+
+  it("a deployment without Zotero serves instructions that never mention it (the tools are not registered there)", () => {
+    const without = buildInstructions(false);
+    expect(without.toLowerCase()).not.toContain("zotero");
+    // Everything else is the same text: only the Zotero parts drop out.
+    expect(without).toMatch(/^- Vlastní zdroje .*files_search/m);
+    expect(without).toMatch(/^TRUST — .*⟦\/DOC n⟧ in files_\* answers\)\. If retrieved/m);
+    expect(without).toMatch(/^1\. .*not from the file\.$/m);
+    expect(buildInstructions(true).length).toBeGreaterThan(without.length);
   });
 
   it("ping reports whether Zotero is configured, from the environment only", async () => {

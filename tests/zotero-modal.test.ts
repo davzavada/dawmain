@@ -244,7 +244,7 @@ describe("openZotero / closeZotero", () => {
 
   it("the account menu has Zotero right after Vlastní zdroje, and it opens the modal", async () => {
     store.setAuth("signed_in");
-    await act(async () => root.render(createElement(AccountControl)));
+    await act(async () => root.render(createElement(AccountControl, { zotero: true })));
     await act(async () => host.querySelector<HTMLButtonElement>(".zd-avatar-button")!.click());
     const items = [...host.querySelectorAll('[role="menuitem"]')].map((e) => e.textContent?.trim());
     expect(items.indexOf("Zotero")).toBe(items.indexOf("Vlastní zdroje") + 1);
@@ -253,6 +253,18 @@ describe("openZotero / closeZotero", () => {
     expect(routed).toEqual([{ kind: "push", url: "/?zotero=1" }]);
     // The menu closed behind it.
     expect(host.querySelector('[role="menu"]')).toBeNull();
+    store.setAuth("loading");
+  });
+});
+
+describe("account menu without Zotero configured", () => {
+  it("offers no Zotero item (the deployment cannot connect one)", async () => {
+    store.setAuth("signed_in");
+    await act(async () => root.render(createElement(AccountControl)));
+    await act(async () => host.querySelector<HTMLButtonElement>(".zd-avatar-button")!.click());
+    const items = [...host.querySelectorAll('[role="menuitem"]')].map((e) => e.textContent?.trim());
+    expect(items).toContain("Vlastní zdroje");
+    expect(items).not.toContain("Zotero");
     store.setAuth("loading");
   });
 });

@@ -34,7 +34,7 @@ registerAllTools({
     }
     tools[name] = { params: new Set(Object.keys(properties)), enums };
   },
-} as never);
+} as never, { zotero: true }); // the skill documents zotero_* for deployments that offer them
 
 const SKILL = readFileSync(
   path.join(path.dirname(__dirname), "skills", "dawmain-reserse", "SKILL.md"),

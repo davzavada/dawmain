@@ -12,6 +12,7 @@ import { registerJustice } from "./justice";
 import { registerDoctrine } from "./doctrine";
 import { registerFiles } from "./files";
 import { registerZotero } from "./zotero";
+import { zoteroConfigured } from "@/src/zotero/config";
 
 /**
  * Every tool the server exposes. To add one: create `./<name>.ts` exporting a
@@ -41,8 +42,6 @@ const registrars: Array<(server: McpServer) => void> = [
   registerDoctrine,
   // Vlastní zdroje — the user's own uploads; gated per call (registration does no I/O).
   registerFiles,
-  // Zotero — the user's own cloud Zotero library, read-only; gated per call the same way.
-  registerZotero,
 ];
 
 type ToolConfig = Record<string, unknown> & { outputSchema?: unknown };
@@ -77,9 +76,17 @@ function textOnly(server: McpServer): McpServer {
   } as unknown as McpServer;
 }
 
-export function registerAllTools(server: McpServer): void {
+/**
+ * `zotero`: whether to offer the zotero_* tools (the user's own cloud Zotero
+ * library, read-only, gated per call like files_*). Only a deployment with
+ * the Zotero OAuth app and CREDENTIALS_SECRET can connect a library at all;
+ * elsewhere the tools stay out of tools/list, as their lines stay out of the
+ * server instructions (buildInstructions in src/mcp/server.ts).
+ */
+export function registerAllTools(server: McpServer, opts: { zotero: boolean } = { zotero: zoteroConfigured() }): void {
   const target = textOnly(server);
   for (const register of registrars) {
     register(target);
   }
+  if (opts.zotero) registerZotero(target);
 }

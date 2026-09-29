@@ -2,6 +2,7 @@ import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { formatTime } from "@/src/mcp/status";
+import { zoteroConfigured } from "@/src/zotero/config";
 import { getStatuses } from "./_status";
 import { AccountControl } from "./_zdroje/account";
 
@@ -46,7 +47,8 @@ export function SiteHeader() {
       <Suspense fallback={<Summary state="pending" text="Ověřuji zdroje…" />}>
         <StatusSummary />
       </Suspense>
-      <AccountControl />
+      {/* Zotero only where the deployment can connect it (the OAuth app and CREDENTIALS_SECRET). */}
+      <AccountControl zotero={zoteroConfigured()} />
     </header>
   );
 }

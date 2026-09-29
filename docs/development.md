@@ -713,6 +713,17 @@ webová část v `src/zotero/web.ts` + tenké routy `app/api/zotero/*`, kontrakt
 s modálem v `src/zotero/web-types.ts`. Rešerše k API a k cizím MCP serverům:
 [docs/research/zotero.md](research/zotero.md).
 
+**Bez konfigurace se Zotero neukazuje vůbec.** Dokud nasazení nemá
+`ZOTERO_OAUTH_CLIENT_KEY`, `ZOTERO_OAUTH_CLIENT_SECRET` a `CREDENTIALS_SECRET`
+(`zoteroConfigured()`), nástroje `zotero_*` se neregistrují
+(`registerAllTools(server, { zotero })` v `src/mcp/tools/index.ts`), instrukce
+serveru o nich mlčí (`buildInstructions(false)` v `src/mcp/server.ts`), nabídka
+účtu nemá položku „Zotero“ (`app/_header.tsx` → `AccountControl zotero`),
+sonda nemá kanárka a smoke podle `dawmain_ping` (`zotero: unconfigured`)
+čeká 24 nástrojů místo 28. Skill volá `zotero_*` jen tam, kde je klient
+v seznamu nástrojů vidí. Po nastavení proměnných (a novém nasazení) se vše
+objeví samo.
+
 ### Aplikace na zotero.org a proměnné
 
 1. Na <https://www.zotero.org/oauth/apps> zaregistrovat aplikaci „Dawmain“

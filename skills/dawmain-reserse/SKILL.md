@@ -129,7 +129,7 @@ Names follow one pattern: `<zdroj>_search` finds, `<zdroj>_get_*` reads.
 | EU legislative materials (travaux) | `eurlex_get_history {celex}` — the act's whole dossier: proposal + explanatory memorandum, impact assessments, EESC/CoR opinions, EP/Council positions; or `eurlex_search` with `types: ["proposal", "opinion", …]` |
 | Literature — monographs, commentaries, articles (doctrine) | `doctrine_search` — UKAŽ (Univerzita Karlova, Primo: the UK catalogue + the Central Discovery Index) → `doctrine_get_record {id}` for the record in full: the whole abstract and table of contents |
 | The user's own books, commentaries, articles and templates (Vlastní zdroje — Pro, personal sign-in) | `files_search` → `files_get_document` (the outline first, then `section` / `mn` / `footnote`); `files_list` lists the libraries and documents |
-| The user's own Zotero library — references, notes, annotations, PDFs (read-only; Pro, personal sign-in, Zotero connected) | `zotero_search` → `zotero_get_item {key}` → `zotero_get_text {key}`; `zotero_list` names the libraries, collections and tags |
+| The user's own Zotero library — references, notes, annotations, PDFs (read-only; Pro, personal sign-in, Zotero connected; only where the deployment offers the tools) | `zotero_search` → `zotero_get_item {key}` → `zotero_get_text {key}`; `zotero_list` names the libraries, collections and tags |
 | A source misbehaves | `dawmain_probe_sources` |
 
 Not covered: EUIPO, ÚPV and the Peace Palace Library. If the question needs them,
@@ -613,6 +613,9 @@ official sources.
 
 ## Zotero (zotero_*): the user's own reference library
 
+Only on a deployment that offers Zotero: if `zotero_search` is not among your
+tools, the deployment has it off — skip this section and never mention Zotero.
+
 With Pro, a personal sign-in and Zotero connected on the Dawmain website
 (`/?zotero=1`, the button „Připojit Zotero“), the user's cloud library on zotero.org
 is searchable here, read-only: the books, articles, decisions (item type `case`) and
@@ -764,8 +767,8 @@ Stopping the search never shortens the reading: what you cite, you have read who
    and needs no keywords. Always add `files_search` to the same turn — the user's own
    books, commentaries and articles come first: read what they hold on the point
    (`files_get_document`) and build the argument on it where it fits. An answer that
-   the account has no library ends `files_*` for the conversation, silently. Add
-   `zotero_search` to the same turn as well — the works, decisions and notes the user
+   the account has no library ends `files_*` for the conversation, silently. When
+   `zotero_search` is among your tools, add it to the same turn as well — the works, decisions and notes the user
    collected in Zotero (`zotero_get_item` for the ones on point); a refusal ends
    `zotero_*` for the conversation, silently. Always
    add `doctrine_search` too: the UKAŽ catalogue gives the works worth going through
