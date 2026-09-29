@@ -73,6 +73,20 @@ export interface ZoteroItem {
   data: Record<string, unknown>;
 }
 
+/** One condition of a saved search, as Zotero stores it ("tag" "is" "smlouvy"). */
+export interface SavedSearchCondition {
+  condition: string;
+  operator: string;
+  value: string;
+}
+
+/** A saved search of a library (/searches): its name and conditions — the API returns no results for it. */
+export interface SavedSearch {
+  key: string;
+  name: string;
+  conditions: SavedSearchCondition[];
+}
+
 /** Response headers that drive paging and caching. */
 export interface Paging {
   /** Total-Results. */

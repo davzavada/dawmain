@@ -5,15 +5,19 @@ import { SourceError } from "@/src/sources/shared/errors";
 import {
   __resetZoteroClientForTests,
   buildItemsPath,
+  citeItems,
   downloadPdf,
+  exportItems,
   getChildren,
   getFulltext,
   getItem,
   getItemsByKeys,
   getKeyInfo,
+  getSearch,
   libraryPrefix,
   listCollections,
   listGroups,
+  listSearches,
   listTags,
   parseCollection,
   parseFulltext,
@@ -21,6 +25,7 @@ import {
   parseItem,
   parseKeyInfo,
   parsePaging,
+  parseSavedSearch,
   revokeKey,
   scanCases,
   searchItems,
@@ -612,6 +617,82 @@ describe("scanCases", () => {
     const scan = await scanCases(CREDS, ME, { maxPages: 3 });
     expect(headerOf(calls[0], "if-modified-since-version")).toBeNull();
     expect(scan.scannedPages).toBe(3);
+  });
+});
+
+describe("citations, exports, saved searches", () => {
+  it("citeItems asks for citation and bib in the style and locale, and keeps the order asked", async () => {
+    const entry = (key: string) => ({
+      key,
+      version: 1,
+      library: { type: "user", id: 475425 },
+      data: { itemType: "book", title: `Kniha ${key}` },
+      citation: `<span>${key} cit</span>`,
+      bib: `<div class="csl-bib-body"><div class="csl-entry">${key} bib</div></div>`,
+    });
+    const calls = stubFetch(() => json([entry("BKBK3333"), entry("BKBK2222")]));
+    const cited = await citeItems(CREDS, ME, ["BKBK2222", "BKBK3333", "BKBK4444"], { style: "iso690-full-note-cs", locale: "cs-CZ" });
+    expect(cited.map((c) => c.item.key)).toEqual(["BKBK2222", "BKBK3333"]);
+    expect(cited[0].citation).toBe("<span>BKBK2222 cit</span>");
+    expect(cited[0].bib).toContain("BKBK2222 bib");
+    const u = new URL(calls[0].url);
+    expect(u.searchParams.get("itemKey")).toBe("BKBK2222,BKBK3333,BKBK4444");
+    expect(u.searchParams.get("include")).toBe("data,citation,bib");
+    expect(u.searchParams.get("style")).toBe("iso690-full-note-cs");
+    expect(u.searchParams.get("locale")).toBe("cs-CZ");
+    // Style and locale are validated before any request.
+    const before = calls.length;
+    expect((await rejection(citeItems(CREDS, ME, ["BKBK2222"], { style: "../evil", locale: "cs-CZ" }))).kind).toBe("INPUT_INVALID");
+    expect((await rejection(citeItems(CREDS, ME, ["BKBK2222"], { style: "apa", locale: "cs_CZ&x=1" }))).kind).toBe("INPUT_INVALID");
+    expect(calls.length).toBe(before);
+    // An unknown style: Zotero's 400 becomes INPUT_INVALID.
+    stubFetch(() => new Response("Invalid style", { status: 400 }));
+    expect((await rejection(citeItems(CREDS, ME, ["BKBK2222"], { style: "no-such-style", locale: "cs-CZ" }))).kind).toBe("INPUT_INVALID");
+  });
+
+  it("exportItems returns Zotero's export text and refuses an unknown format", async () => {
+    const calls = stubFetch(() => new Response("TY  - BOOK\nTI  - Kniha\nER  - \n", { status: 200, headers: { "content-type": "application/x-research-info-systems" } }));
+    expect(await exportItems(CREDS, GROUP, ["BKBK2222"], "ris")).toContain("TY  - BOOK");
+    const u = new URL(calls[0].url);
+    expect(u.pathname).toBe("/groups/111111/items");
+    expect(u.searchParams.get("format")).toBe("ris");
+    expect((await rejection(exportItems(CREDS, GROUP, ["BKBK2222"], "keys" as never))).kind).toBe("INPUT_INVALID");
+    expect((await rejection(exportItems(CREDS, GROUP, [], "ris"))).kind).toBe("INPUT_INVALID");
+  });
+
+  it("parses saved searches, lists them (cached) and reads one", async () => {
+    const raw = {
+      key: "SRCH2222",
+      version: 5,
+      data: {
+        key: "SRCH2222",
+        name: " Náhrada škody ",
+        conditions: [
+          { condition: "tag", operator: "is", value: "škoda" },
+          { condition: "joinMode", operator: "any", value: "all" },
+          { condition: "", operator: "is", value: "x" },
+          "junk",
+        ],
+      },
+    };
+    expect(parseSavedSearch(raw)).toEqual({
+      key: "SRCH2222",
+      name: "Náhrada škody",
+      conditions: [
+        { condition: "tag", operator: "is", value: "škoda" },
+        { condition: "joinMode", operator: "any", value: "all" },
+      ],
+    });
+    expect(() => parseSavedSearch({ data: {} })).toThrow(SourceError);
+    const calls = stubFetch(() => json([raw]));
+    expect((await listSearches(CREDS, ME)).map((x) => x.key)).toEqual(["SRCH2222"]);
+    await listSearches(CREDS, ME);
+    expect(calls).toHaveLength(1);
+    expect(new URL(calls[0].url).pathname).toBe("/users/475425/searches");
+    stubFetch(() => json(raw));
+    expect((await getSearch(CREDS, ME, "SRCH2222"))?.name).toBe("Náhrada škody");
+    stubFetch(() => new Response("Not found", { status: 404 }));
+    expect(await getSearch(CREDS, ME, "SRCH2222")).toBeNull();
   });
 });
 

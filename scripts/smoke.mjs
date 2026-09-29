@@ -152,9 +152,9 @@ const EXPECTED_TOOLS = [
 /**
  * Zotero — the user's own cloud library: registered only where the
  * deployment has it configured (dawmain_ping says "zotero": "configured"),
- * then gated per call (see checkZoteroGate). All four or none.
+ * then gated per call (see checkZoteroGate). All five or none.
  */
-const ZOTERO_TOOLS = ["zotero_search", "zotero_get_item", "zotero_get_text", "zotero_list"];
+const ZOTERO_TOOLS = ["zotero_search", "zotero_get_item", "zotero_get_text", "zotero_list", "zotero_cite"];
 
 async function checkTools(client) {
   const { tools } = await client.request("tools/list");
@@ -245,6 +245,7 @@ const ZOTERO_GATE_CALLS = [
   ["zotero_get_item", { key: "ABCD2345" }],
   ["zotero_get_text", { key: "ABCD2345" }],
   ["zotero_list", { list: "libraries" }],
+  ["zotero_cite", { keys: ["ABCD2345"] }],
 ];
 
 async function checkZoteroGate(client) {
