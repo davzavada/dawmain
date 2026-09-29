@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { registerAllTools } from "@/src/mcp/tools";
 import { justiceDecisionHeader } from "@/src/mcp/tools/justice";
 import { isProcedurePaperwork } from "@/src/mcp/tools/eurlex";
@@ -41,10 +41,15 @@ describe("Zotero is offered only where configured", () => {
     expect(names({ zotero: false }).filter((n) => n.startsWith("zotero_"))).toEqual([]);
   });
 
-  it("defaults to the environment: no Zotero OAuth app here, so no zotero_* tools", () => {
-    for (const key of ["ZOTERO_OAUTH_CLIENT_KEY", "ZOTERO_OAUTH_CLIENT_SECRET"]) expect(process.env[key]).toBeUndefined();
-    expect(names().filter((n) => n.startsWith("zotero_"))).toEqual([]);
-    expect(names()).toContain("files_search");
+  it("defaults to the environment: without the Zotero OAuth app no zotero_* tools", () => {
+    vi.stubEnv("ZOTERO_OAUTH_CLIENT_KEY", "");
+    vi.stubEnv("ZOTERO_OAUTH_CLIENT_SECRET", "");
+    try {
+      expect(names().filter((n) => n.startsWith("zotero_"))).toEqual([]);
+      expect(names()).toContain("files_search");
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 

@@ -63,12 +63,19 @@ OUTPUT
 5. Say what a search did not cover: a truncated list, a failed court or variant, a date window you or the tool added.`;
 }
 
+/**
+ * Decided once, at module load: the instructions are fixed server options,
+ * while the tools are registered per request — one flag keeps the two from
+ * ever disagreeing (the env is fixed per deployment on Vercel anyway).
+ */
+const ZOTERO = zoteroConfigured();
+
 /** The instructions this deployment serves (Zotero only when configured). */
-export const INSTRUCTIONS = buildInstructions(zoteroConfigured());
+export const INSTRUCTIONS = buildInstructions(ZOTERO);
 
 export const mcpHandler = createMcpHandler(
   (server) => {
-    registerAllTools(server);
+    registerAllTools(server, { zotero: ZOTERO });
   },
   {
     serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },

@@ -200,6 +200,7 @@ async function checkTools(client) {
   await checkFilesGate(client);
   if (zotero) await checkZoteroGate(client);
   else ok("zotero_* gate", "not offered on this deployment (unconfigured)");
+  return zotero;
 }
 
 /**
@@ -228,13 +229,14 @@ async function checkFilesGate(client) {
 /**
  * The zotero_* tools read the user's own Zotero library with their stored
  * key: without a personal OAuth sign-in they must refuse before any Zotero
- * request — with the sign-in text, or "not available" on a deployment
- * without the Zotero OAuth app (ZOTERO_GATE_TEXT in src/mcp/tools/zotero.ts).
+ * request, with the sign-in text. They exist only where Zotero is
+ * configured (dawmain_ping and the tool gate read the same
+ * zoteroConfigured()), so "not available on this deployment" here would
+ * mean the two disagree — a failure, not a pass.
  */
 const ZOTERO_GATE_TEXTS = [
   "Zotero needs a personal sign-in (OAuth login, not the shared access code): this connection uses the shared access code",
   "Zotero needs a personal sign-in (OAuth login, not the shared access code): this call carries no signed-in user",
-  "Zotero is not available on this deployment",
 ];
 
 /** One valid call per zotero_* tool — valid, so the refusal comes from the gate, not from schema validation. */
@@ -259,7 +261,7 @@ async function checkZoteroGate(client) {
   }
   ok(
     "zotero_* gate",
-    `${ZOTERO_GATE_CALLS.length} tools — ${gate.includes("not available") ? "Zotero not configured on this deployment" : token ? "shared access code refused" : "anonymous caller refused"}`,
+    `${ZOTERO_GATE_CALLS.length} tools — ${token ? "shared access code refused" : "anonymous caller refused"}`,
   );
 }
 
@@ -349,7 +351,13 @@ async function main() {
   });
   legacy.protocolVersion = init.protocolVersion;
   ok("initialize", `${init.serverInfo?.name} ${init.serverInfo?.version} (protocol ${init.protocolVersion})`);
-  await checkTools(legacy);
+  const zotero = await checkTools(legacy);
+  // The instructions are fixed at module load, the tools per request: both must agree on Zotero.
+  const mentionsZotero = /zotero/i.test(init.instructions ?? "");
+  if (mentionsZotero !== zotero) {
+    throw new Error(`instructions ${mentionsZotero ? "mention" : "omit"} Zotero while dawmain_ping says ${zotero ? "configured" : "unconfigured"}`);
+  }
+  ok("instructions", zotero ? "route to zotero_* (configured)" : "no Zotero (unconfigured)");
 
   if (process.env.SMOKE_LIVE === "1") {
     console.log("\nLive upstream checks (SMOKE_LIVE=1)");

@@ -43,7 +43,7 @@ export function registerPing(server: McpServer): void {
     {
       title: "Ping",
       description:
-        "Check that the MCP server is reachable and report which deployment answered: server name and version, current server time, Vercel environment, region and git commit, the accepted auth and whether Vlastní zdroje (files_*) and Zotero (zotero_*) are enabled. Takes no arguments.",
+        "Check that the MCP server is reachable and report which deployment answered: server name and version, current server time, Vercel environment, region and git commit, the accepted auth and whether Vlastní zdroje (files_*) and the optional integrations are enabled. Takes no arguments.",
       inputSchema: z.object({}),
       outputSchema,
       annotations: {
