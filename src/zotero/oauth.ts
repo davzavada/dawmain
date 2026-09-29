@@ -10,6 +10,7 @@ import {
   OAUTH_REQUEST_URL,
   SOURCE,
   STATE_TTL_SECONDS,
+  ZOTERO_KEY_RE,
   ZOTERO_UA,
   clientKey,
   clientSecret,
@@ -48,8 +49,8 @@ export interface AccessGrant {
   username: string;
 }
 
-/** Zotero API keys are 24 alphanumerics today; the range leaves room without admitting anything else. */
-export const ZOTERO_KEY_RE = /^[A-Za-z0-9]{8,64}$/;
+/** Defined in ./config, which ./store shares without importing the OAuth flow; re-exported for this module's callers. */
+export { ZOTERO_KEY_RE };
 /** Request tokens and verifiers are opaque; this admits hex, base64 and base64url and nothing that needs escaping. */
 const TOKEN_RE = /^[A-Za-z0-9._~+/=-]{1,256}$/;
 /** Zotero user ids: positive integers (kept within Number's exact range). */

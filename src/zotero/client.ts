@@ -383,12 +383,29 @@ export function __resetZoteroClientForTests(): void {
   scanCache = new TtlCache<CaseScan & { complete: boolean }>(CACHE_TTL_MS.caseScan, 100);
 }
 
-/** The groups the user belongs to (all pages; cached). */
-export async function listGroups(creds: ZoteroCreds, io: IoOptions = {}): Promise<ZoteroGroup[]> {
-  return groupsCache.through(cacheKey(creds, null), async () => {
+/**
+ * The groups whose library the key may read (all pages; cached), given the
+ * key's group access as stored with the connection (KeyInfo.groups).
+ * /users/{id}/groups alone is not that list: it also names public groups
+ * the key owner belongs to even when the key has no permission for them,
+ * and a members-only library of such a group answers 403 — which would
+ * fail a search fanned out over every group as a whole.
+ */
+export async function listGroups(creds: ZoteroCreds, access: KeyInfo["groups"], io: IoOptions = {}): Promise<ZoteroGroup[]> {
+  if (access === "none" || (Array.isArray(access) && !access.length)) return [];
+  const groups = await groupsCache.through(cacheKey(creds, null), async () => {
     const { items } = await allPages(creds, (start) => `/users/${userIdOf(creds)}/groups?${pageQuery(start)}`, parseGroup, MAX_GROUP_PAGES, "throw", io);
     return items;
   });
+  return readableGroups(groups, access);
+}
+
+/** Pure: "all" keeps every group, "none" none, a list of ids only those groups. */
+export function readableGroups(groups: ZoteroGroup[], access: KeyInfo["groups"]): ZoteroGroup[] {
+  if (access === "all") return groups;
+  if (access === "none") return [];
+  const ids = new Set(access);
+  return groups.filter((g) => ids.has(g.id));
 }
 
 /** One page of an items search. */

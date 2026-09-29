@@ -19,13 +19,22 @@ import type { ZoteroCreds } from "./types";
  *   slot nor buffer an unbounded body.
  * - Politeness per Zotero user (Zotero allows 5 concurrent requests per
  *   user, shared with the user's desktop sync): at most
- *   LIMITS.concurrencyPerUser at a time on this instance, a Backoff header
- *   remembered as a not-before time, one retry of a GET after a short
- *   Retry-After.
+ *   LIMITS.concurrencyPerUser at a time on this instance, one retry of a GET
+ *   after a short Retry-After, and a 429's Retry-After remembered as the
+ *   user's not-before time, so queued and later requests do not go straight
+ *   back (a short one is waited out, a long one fails fast).
+ * - Politeness per instance: Backoff (and a 503's Retry-After) speaks of
+ *   Zotero's load, not of one user, so it holds every request of this
+ *   instance — one IP and one UA to Zotero.
+ * - A key Zotero rejected ("Invalid key") is remembered by fingerprint and
+ *   never sent again from this instance: requests of the same key waiting
+ *   for a slot, a retry and later calls fail here without a request, so a
+ *   revoked key costs at most the requests already in flight.
  * - Invalid keys trip an instance-wide breaker: Zotero blocks the WHOLE IP
  *   (Vercel's, shared with every other user) after more than 5 invalid keys
- *   in 300 s, so after LIMITS.breakerInvalidKeys this instance stops calling
- *   Zotero for LIMITS.breakerMs.
+ *   in 300 s, so after LIMITS.breakerInvalidKeys DISTINCT rejected keys this
+ *   instance stops calling Zotero for LIMITS.breakerMs. Counting keys, not
+ *   responses, keeps one user's revoked key from pausing Zotero for all.
  *
  * Nothing here records source health (a user's private library is not a
  * public source's status), and no message carries the key or a URL.
@@ -87,7 +96,7 @@ const RESERVED_HEADERS = new Set(["zotero-api-key", "zotero-api-version", "user-
 const FORBIDDEN_BODY_BYTES = 4 * 1024;
 
 // ---------------------------------------------------------------------------
-// Per-instance state: slots, Backoff and the invalid-key breaker
+// Per-instance state: slots, pauses, rejected keys and the invalid-key breaker
 
 interface Gate {
   active: number;
@@ -95,8 +104,23 @@ interface Gate {
 }
 
 const gates = new Map<string, Gate>();
-/** Per user: epoch ms before which no request may start (the latest Backoff seen). */
+/**
+ * Epoch ms before which no request may start: per user (a 429's
+ * Retry-After) and under INSTANCE for everyone (Backoff, a 503's Retry-After).
+ */
 const notBefore = new Map<string, number>();
+/** The notBefore entry that holds every user (politeness keys start with "u:" or "k:"). */
+const INSTANCE = "*";
+/**
+ * Fingerprints of keys Zotero rejected → epoch ms until which they are not
+ * sent again. As long as the breaker's window, so each key counts at most
+ * once in it. Beyond that the caller marks the connection revoked
+ * (markRevoked in ./store.ts) and the tool gate never hands the key here.
+ */
+const rejectedKeys = new Map<string, number>();
+/** Bound on rejectedKeys (the breaker trips long before; this only caps memory). */
+const MAX_REJECTED_KEYS = 1_000;
+/** When each distinct rejected key within the last breakerMs was first rejected. */
 let invalidKeysAt: number[] = [];
 let breakerUntil = 0;
 
@@ -108,28 +132,55 @@ export function zoteroBreakerOpen(now = Date.now()): boolean {
 export function __resetZoteroHttpForTests(): void {
   gates.clear();
   notBefore.clear();
+  rejectedKeys.clear();
   invalidKeysAt = [];
   breakerUntil = 0;
 }
 
-function noteInvalidKey(now = Date.now()): void {
+/**
+ * A key's fingerprint: never the key itself, which must not sit in a map
+ * that a heap snapshot or a debug dump could show.
+ */
+function keyFingerprint(key: string): string {
+  return createHash("sha256").update(key).digest("hex").slice(0, 24);
+}
+
+function keyRejected(fp: string, now = Date.now()): boolean {
+  const until = rejectedKeys.get(fp);
+  if (until === undefined) return false;
+  if (until > now) return true;
+  rejectedKeys.delete(fp);
+  return false;
+}
+
+/**
+ * Zotero rejected this key: remember it, and count it towards the breaker
+ * once — the other requests of the same key that were already in flight
+ * come back rejected too, and counting those would let one user's revoked
+ * key pause Zotero for every user of the instance.
+ */
+function noteInvalidKey(fp: string, now = Date.now()): void {
+  if (keyRejected(fp, now)) return;
+  if (rejectedKeys.size >= MAX_REJECTED_KEYS) {
+    for (const [other, until] of rejectedKeys) if (until <= now) rejectedKeys.delete(other);
+    // Still full: drop the oldest (a Map iterates in insertion order).
+    const oldest = rejectedKeys.keys().next();
+    if (rejectedKeys.size >= MAX_REJECTED_KEYS && !oldest.done) rejectedKeys.delete(oldest.value);
+  }
+  rejectedKeys.set(fp, now + LIMITS.breakerMs);
   invalidKeysAt = invalidKeysAt.filter((at) => now - at < LIMITS.breakerMs);
   invalidKeysAt.push(now);
   if (invalidKeysAt.length >= LIMITS.breakerInvalidKeys) {
     breakerUntil = now + LIMITS.breakerMs;
-    // The events that tripped it are spent; a fresh run of failures is needed to trip it again.
+    // The keys that tripped it are spent; a fresh run of rejected keys is needed to trip it again.
     invalidKeysAt = [];
   }
 }
 
-/**
- * Who a request counts against: the Zotero user id when known, else a hash
- * of the key — never the key itself, which must not sit in a map that a
- * heap snapshot or a debug dump could show.
- */
-function politenessKey(auth: ZoteroAuth): string {
+/** Who a request counts against: the Zotero user id when known, else the key's fingerprint. */
+function politenessKey(auth: ZoteroAuth, fp: string): string {
   if (typeof auth.userID === "number" && Number.isSafeInteger(auth.userID) && auth.userID > 0) return `u:${auth.userID}`;
-  return `k:${createHash("sha256").update(auth.key).digest("hex").slice(0, 24)}`;
+  return `k:${fp}`;
 }
 
 /** Take one of the user's slots; the returned release hands it straight to the next waiter. */
@@ -169,29 +220,31 @@ async function acquire(who: string, signal: AbortSignal | undefined): Promise<()
   };
 }
 
-function noteBackoff(who: string, headers: Headers): void {
-  const seconds = parseSeconds(headers.get("backoff"));
-  if (seconds === null || seconds <= 0) return;
-  const until = Date.now() + seconds * 1000;
-  if (until > (notBefore.get(who) ?? 0)) notBefore.set(who, until);
+/** Hold requests under `scope` (a user, or INSTANCE) for `ms` from now; an earlier, longer pause stands. */
+function pause(scope: string, ms: number): void {
+  if (!(ms > 0)) return;
+  const now = Date.now();
+  for (const [other, until] of notBefore) if (until <= now) notBefore.delete(other);
+  const until = now + ms;
+  if (until > (notBefore.get(scope) ?? 0)) notBefore.set(scope, until);
 }
 
-/** Wait out a short Backoff; refuse a long one with the time left, so the model can tell the user. */
-async function honourBackoff(who: string, signal: AbortSignal | undefined): Promise<void> {
-  const until = notBefore.get(who);
-  if (until === undefined) return;
-  const wait = until - Date.now();
-  if (wait <= 0) {
-    notBefore.delete(who);
-    return;
-  }
+/**
+ * Wait out a short pause (the user's or the instance's, whichever ends
+ * later); refuse a long one with the time left, so the model can tell the
+ * user.
+ */
+async function honourPause(who: string, signal: AbortSignal | undefined): Promise<void> {
+  const now = Date.now();
+  const wait = Math.max(notBefore.get(who) ?? 0, notBefore.get(INSTANCE) ?? 0) - now;
+  if (wait <= 0) return;
   if (wait > LIMITS.maxBackoffWaitMs) {
     const seconds = Math.ceil(wait / 1000);
     throw new SourceError(
       SOURCE,
       "UPSTREAM_ERROR",
-      `${SOURCE} asked clients to pause for another ${seconds} s (Backoff) — it is under load.`,
-      `Wait about ${seconds} s before calling zotero_* again; tell the user if they are waiting.`,
+      `${SOURCE} asked this server to pause for another ${seconds} s (Backoff / Retry-After) — it is under load or got too many requests.`,
+      `Wait about ${seconds} s before calling zotero_* again, and make fewer calls; tell the user if they are waiting.`,
     );
   }
   await sleep(wait, signal);
@@ -206,27 +259,37 @@ async function honourBackoff(who: string, signal: AbortSignal | undefined): Prom
  * caller; throws SourceError for everything this layer decides on its own:
  * 403 (ZoteroKeyInvalidError or NOT_ENTITLED), 429/503 after at most one
  * retry, other 5xx, network failures and timeouts, an oversized body, an
- * open breaker and a long Backoff.
+ * open breaker, a long pause (Backoff / Retry-After) and a key Zotero
+ * already rejected (ZoteroKeyInvalidError without a request).
  */
 export async function zoteroFetch(auth: ZoteroAuth, pathAndQuery: string, opts: ZoteroFetchOptions = {}): Promise<ZoteroResponse> {
   const url = apiUrl(pathAndQuery);
   if (typeof auth.key !== "string" || !auth.key) throw new Error("zoteroFetch needs an API key.");
   const method = opts.method ?? "GET";
   const maxBytes = opts.maxBytes ?? LIMITS.maxJsonBytes;
+  const fp = keyFingerprint(auth.key);
+  if (keyRejected(fp)) throw new ZoteroKeyInvalidError();
   if (zoteroBreakerOpen()) throw breakerError();
 
-  const who = politenessKey(auth);
+  const who = politenessKey(auth, fp);
   const release = await acquire(who, opts.signal);
   try {
     for (let attempt = 1; ; attempt++) {
-      await honourBackoff(who, opts.signal);
-      // Another request may have tripped the breaker while this one waited for its slot.
+      await honourPause(who, opts.signal);
+      // While this request waited for its slot (or a pause), another one may
+      // have had the same key rejected, or tripped the breaker.
+      if (keyRejected(fp)) throw new ZoteroKeyInvalidError();
       if (zoteroBreakerOpen()) throw breakerError();
       const res = await send(url, method, auth.key, opts, maxBytes);
-      noteBackoff(who, res.headers);
+      // Backoff: Zotero is overloaded — fewer requests from this instance as a whole, not from one user.
+      pause(INSTANCE, (parseSeconds(res.headers.get("backoff")) ?? 0) * 1000);
 
       if (res.status === 429 || res.status === 503) {
         const waitMs = parseRetryAfter(res.headers.get("retry-after"));
+        // Remembered, so the user's queued and later requests wait too (or
+        // fail fast on a long wait). A 429 is Zotero's per-user rate limit;
+        // a 503 means the API itself is unavailable, for everyone.
+        if (waitMs !== null) pause(res.status === 429 ? who : INSTANCE, waitMs);
         // Only a GET is repeated: a DELETE that Zotero may have applied is the caller's call.
         if (attempt === 1 && method === "GET" && waitMs !== null && waitMs <= LIMITS.maxRetryAfterMs) {
           await sleep(waitMs, opts.signal);
@@ -236,7 +299,7 @@ export async function zoteroFetch(auth: ZoteroAuth, pathAndQuery: string, opts: 
       }
       if (res.status === 403) {
         if (/invalid key/i.test(res.text())) {
-          noteInvalidKey();
+          noteInvalidKey(fp);
           throw new ZoteroKeyInvalidError();
         }
         throw new SourceError(

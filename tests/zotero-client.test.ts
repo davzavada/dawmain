@@ -25,7 +25,7 @@ import {
   scanCases,
   searchItems,
 } from "@/src/zotero/client";
-import { API_ORIGIN, LIMITS, ZOTERO_UA } from "@/src/zotero/config";
+import { API_ORIGIN, LIMITS, ZOTERO_UA, isAllowedStorageHost } from "@/src/zotero/config";
 import { __resetZoteroHttpForTests } from "@/src/zotero/http";
 import { fulltextComplete, type Library, type ZoteroItem } from "@/src/zotero/types";
 
@@ -452,6 +452,11 @@ describe("calls", () => {
     expect(calls[0].url).toBe(`${API_ORIGIN}/keys/current`);
     stubFetch(() => new Response("Invalid key", { status: 403 }));
     expect(await revokeKey(CREDS)).toBe(false);
+    // Zotero already rejected that key: a second revoke never sends it again.
+    const again = stubFetch(() => new Response(null, { status: 204 }));
+    expect(await revokeKey(CREDS)).toBe(false);
+    expect(again).toHaveLength(0);
+    __resetZoteroHttpForTests();
     stubFetch(() => new Response("Forbidden", { status: 403 }));
     expect(await revokeKey(CREDS)).toBe(false);
     stubFetch(() => new Response("Not found", { status: 404 }));
@@ -467,14 +472,30 @@ describe("calls", () => {
         ? json([g1], { Link: '<https://api.zotero.org/users/475425/groups?limit=100&start=100>; rel="next"' })
         : json([g2]),
     );
-    const groups = await listGroups(CREDS);
+    const groups = await listGroups(CREDS, "all");
     expect(groups.map((g) => g.id)).toEqual([111111, 222222]);
     expect(new URL(calls[0].url).pathname).toBe("/users/475425/groups");
-    await listGroups(CREDS);
+    await listGroups(CREDS, "all");
     expect(calls).toHaveLength(2);
     // Another key of the same Zotero user does not see this key's cache.
-    await listGroups({ ...CREDS, key: "AnotherKeyOfTheSameUser0" });
+    await listGroups({ ...CREDS, key: "AnotherKeyOfTheSameUser0" }, "all");
     expect(calls).toHaveLength(4);
+  });
+
+  it("listGroups keeps only the groups a per-group key may read (Zotero also lists public groups it may not)", async () => {
+    // The key of keys-current-groups.json reads 111111 and 222222; 333333 is listed without library access.
+    const access = parseKeyInfo(fixture("keys-current-groups.json")).groups;
+    const listed = [...(fixture("groups.json") as unknown[]), { id: 333333, data: { id: 333333, name: "Veřejná skupina" } }, { id: 444444, data: { id: 444444, name: "Jiná" } }];
+    const calls = stubFetch(() => json(listed));
+    expect((await listGroups(CREDS, access)).map((g) => g.id)).toEqual([111111, 222222]);
+    expect((await listGroups(CREDS, [222222])).map((g) => g.id)).toEqual([222222]);
+    expect((await listGroups(CREDS, "all")).map((g) => g.id)).toEqual([111111, 222222, 333333, 444444]);
+    expect(calls).toHaveLength(1);
+    // A key without group access asks nothing.
+    __resetZoteroClientForTests();
+    expect(await listGroups(CREDS, "none")).toEqual([]);
+    expect(await listGroups(CREDS, [])).toEqual([]);
+    expect(calls).toHaveLength(1);
   });
 
   it("listCollections reads every page and caches per library", async () => {
@@ -661,6 +682,44 @@ describe("downloadPdf", () => {
       expect(await downloadPdf(CREDS, ME, parsedItem("PDFA2345")), location).toEqual({ unavailable: "storage-host" });
       expect(calls).toHaveLength(1);
     }
+  });
+
+  it("the storage allowlist takes every S3 URL style (the host Zotero uses is still unverified) and nothing else", () => {
+    const allowed = [
+      "s3.amazonaws.com",
+      "zoteroupload.s3.amazonaws.com",
+      "s3.us-east-1.amazonaws.com",
+      "s3-us-west-2.amazonaws.com",
+      "zoterofilestorage.s3.us-east-1.amazonaws.com",
+      "zoterofilestorage.s3-us-west-2.amazonaws.com",
+      "zoterofilestorage.s3.dualstack.us-east-1.amazonaws.com",
+      "s3.dualstack.eu-central-1.amazonaws.com",
+      "zotero.files.s3.eu-central-1.amazonaws.com",
+    ];
+    const refused = [
+      "evil.example",
+      "s3.amazonaws.com.evil.example",
+      "zoteroupload.s3.amazonaws.com.evil.example",
+      "evils3.amazonaws.com",
+      "s3.evil.example",
+      "ec2.us-east-1.amazonaws.com",
+      "amazonaws.com",
+      "s3.us-east-1.amazonaws.com.cn",
+      "zotero.org",
+      "api.zotero.org",
+    ];
+    for (const host of allowed) expect(isAllowedStorageHost(new URL(`https://${host}/abc?sig=1`)), host).toBe(true);
+    for (const host of refused) expect(isAllowedStorageHost(new URL(`https://${host}/abc?sig=1`)), host).toBe(false);
+    expect(isAllowedStorageHost(new URL("http://zoterofilestorage.s3.us-east-1.amazonaws.com/abc"))).toBe(false);
+  });
+
+  it("follows a redirect to a regional virtual-hosted S3 URL", async () => {
+    const regional = "https://zoterofilestorage.s3.us-east-1.amazonaws.com/abc123?X-Amz-Signature=sig";
+    const calls = stubFetch(({ url }) =>
+      url.startsWith(API_ORIGIN) ? new Response(null, { status: 302, headers: { location: regional } }) : new Response(pdfBytes, { status: 200 }),
+    );
+    expect("bytes" in (await downloadPdf(CREDS, ME, parsedItem("PDFA2345")))).toBe(true);
+    expect(calls.map((c) => c.url)).toEqual([`${API_ORIGIN}/users/475425/items/PDFA2345/file`, regional]);
   });
 
   it("never follows a second redirect from storage", async () => {

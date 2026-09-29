@@ -91,15 +91,24 @@ export const CACHE_TTL_MS = Object.freeze({
 });
 
 /**
+ * Amazon S3 endpoints in every URL style a signed URL comes in: path style
+ * (s3.amazonaws.com, s3.<region>…, s3-<region>…) and virtual-hosted
+ * (<bucket>.s3.amazonaws.com, <bucket>.s3.<region>…, <bucket>.s3-<region>…),
+ * each optionally dualstack. AWS SDKs sign buckets outside the legacy
+ * us-east-1 endpoint in the virtual-hosted regional style.
+ */
+const S3_HOST_RE = /^(?:[a-z0-9][a-z0-9.-]*\.)?s3(?:[.-](?:dualstack\.)?[a-z0-9-]+)?\.amazonaws\.com$/;
+
+/**
  * Hosts a `GET /items/{key}/file` redirect may point to. The API answers
  * with a 302 to a short-lived signed URL on Zotero's S3 storage; the key is
- * never sent there. Anything else is refused. Confirm on a live preview and
- * narrow if Zotero uses a single bucket host.
+ * never sent there. Anything else is refused. Which bucket and URL style
+ * Zotero uses is not verified yet, so any S3 endpoint passes: confirm on a
+ * live preview and narrow to that one host.
  */
 export function isAllowedStorageHost(url: URL): boolean {
   if (url.protocol !== "https:") return false;
-  const host = url.hostname.toLowerCase();
-  return host === "s3.amazonaws.com" || host.endsWith(".s3.amazonaws.com") || /^s3[.-][a-z0-9-]+\.amazonaws\.com$/.test(host);
+  return S3_HOST_RE.test(url.hostname.toLowerCase());
 }
 
 export function clientKey(): string | undefined {
@@ -119,3 +128,6 @@ export function zoteroConfigured(): boolean {
 
 /** Zotero object keys: 8 characters from this alphabet (write_requests docs). */
 export const ITEM_KEY_RE = /^[23456789ABCDEFGHIJKLMNPQRSTUVWXYZ]{8}$/;
+
+/** Zotero API keys are 24 alphanumerics today; the range leaves room without admitting anything else. */
+export const ZOTERO_KEY_RE = /^[A-Za-z0-9]{8,64}$/;

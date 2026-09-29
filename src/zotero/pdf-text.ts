@@ -1,6 +1,8 @@
 import "server-only";
-import { layoutToDmd, readPdf } from "@/src/files/convert/pdf";
+import { layoutToDmd, readPdf, type PdfDocInput } from "@/src/files/convert/pdf";
+import { buildRows } from "@/src/files/convert/pdf/geometry";
 import { ConvertError, DEFAULT_CONVERT_OPTIONS, type ConvertResult } from "@/src/files/convert/types";
+import { sanitizeLine } from "@/src/files/dmd/normalize";
 import { parseDmd } from "@/src/files/dmd/parse";
 import { renderRange, type RenderFootnote, type TextSource } from "@/src/files/dmd/render";
 import { DMD_LIMITS, DmdLimitError, type ParsedDoc } from "@/src/files/dmd/types";
@@ -20,6 +22,14 @@ import { LIMITS } from "./config";
  * them), LIMITS.pdfTimeoutMs, and a file with more pages than Vlastní
  * zdroje accept at all is refused before any layout. Nothing is stored;
  * the caller caches the result in memory.
+ *
+ * "scan" means that not one page of the pages read has a text layer. The
+ * converter's own scan verdict is stricter — more than 30 % of the pages
+ * under 40 characters — and suits an upload, whose uploader sees the
+ * error and picks another range; a Zotero reader cannot, and a blank page
+ * inside a short window or a decision whose last page holds only the
+ * signature is no scan. Such a window is laid out in runs that each pass
+ * that rule (see layoutWindow).
  */
 
 export type PdfTextUnavailable = "encrypted" | "scan" | "broken" | "too-many-pages" | "timeout";
@@ -43,6 +53,17 @@ export type PdfTextResult =
  * the budget, so such a file is refused as soon as its page count is known.
  */
 const MAX_TOTAL_PAGES = DMD_LIMITS.maxPages;
+
+/** The converter's sparse-page rule (SPARSE_CHARS and the 30 % share in scanCheck, src/files/convert/pdf/layout.ts). */
+const SPARSE_CHARS = 40;
+const SPARSE_SHARE = 0.3;
+/**
+ * Pages each side of a run whose text the layout still sees: enough to
+ * recognise running heads and printed page numbers, while each run costs
+ * about its own pages — not the whole window again (a window of alternating
+ * blank pages is laid out in one run per text page).
+ */
+const RUN_CONTEXT_PAGES = 10;
 
 /** Sentinels thrown out of readPdf's progress callback to stop it between pages. */
 class Stop extends Error {
@@ -101,15 +122,15 @@ export async function pdfText(
     }
     const last = Math.min(to, total);
     // The layout is synchronous and bounded by the range; the deadline is checked around it.
-    const converted = layoutToDmd(doc, { ...DEFAULT_CONVERT_OPTIONS, pageRange: [from, last] });
-    if (stopped()) return { unavailable: "timeout" };
-    const parsed = parseDmd(converted.dmd);
+    const laid = layoutWindow(doc, from, last, stopped);
+    if (laid === "scan") return { unavailable: "scan" };
+    if (laid === "timeout" || stopped()) return { unavailable: "timeout" };
     return {
-      text: renderDoc(parsed),
+      text: laid.text,
       pages: total,
       pageRange: [from, last],
       // Cut: pages the caller wanted (and the file has) that this call did not read.
-      warnings: warningsFor(converted, { from, last, total, cut: last < Math.min(askedTo, total) }),
+      warnings: warningsFor(laid.results, { from, last, total, cut: last < Math.min(askedTo, total) }),
     };
   } catch (error) {
     if (error instanceof Stop) return { unavailable: error.reason };
@@ -122,6 +143,91 @@ export async function pdfText(
     clearTimeout(timer);
     if (onAbort) opts.signal?.removeEventListener("abort", onAbort);
   }
+}
+
+/**
+ * Pages [from, last] laid out and rendered. When the converter calls the
+ * window a scan because of its sparse-page rule while some page of it has
+ * text, the window is laid out in runs that each pass the rule (pages of
+ * text, joined across the short pages between them while a run keeps at
+ * most 30 % short pages), and a short page left between runs is shown as
+ * it stands: its marker and its few words. Runs lose little: the layout
+ * still sees the text of RUN_CONTEXT_PAGES around each run (it keeps only
+ * the run's pages), so page furniture and printed page numbers are
+ * recognised as in one pass. The verdict stands when the window has no
+ * text page at all (a scanner's stamp on each page does not make one), or
+ * when the rule was not what refused it (unmapped glyphs, garbage text).
+ */
+function layoutWindow(
+  doc: PdfDocInput,
+  from: number,
+  last: number,
+  stopped: () => boolean,
+): { text: string; results: ConvertResult[] } | "scan" | "timeout" {
+  try {
+    const whole = layoutToDmd(doc, { ...DEFAULT_CONVERT_OPTIONS, pageRange: [from, last] });
+    return { text: renderDoc(parseDmd(whole.dmd)), results: [whole] };
+  } catch (error) {
+    if (!(error instanceof ConvertError) || error.code !== "scan") throw error;
+  }
+  const pageRows = doc.pages.slice(from - 1, last).map((page) => buildRows(page));
+  const sparse = pageRows.map((rows) => rows.rawChars < SPARSE_CHARS);
+  const short = sparse.filter(Boolean).length;
+  if (short <= SPARSE_SHARE * sparse.length || short === sparse.length) return "scan";
+
+  const laid: Array<{ at: number; end: number; result: ConvertResult }> = [];
+  for (const [a, b] of textRuns(sparse)) {
+    if (stopped()) return "timeout";
+    const [lo, hi] = [from + a - RUN_CONTEXT_PAGES, from + b + RUN_CONTEXT_PAGES];
+    // Pages outside the context keep their place (the layout numbers pages by position) but lose their text.
+    const context: PdfDocInput = { ...doc, pages: doc.pages.map((p, i) => (i + 1 >= lo && i + 1 <= hi ? p : { ...p, items: [] })) };
+    try {
+      laid.push({ at: a, end: b, result: layoutToDmd(context, { ...DEFAULT_CONVERT_OPTIONS, pageRange: [from + a, from + b] }) });
+    } catch (error) {
+      if (error instanceof ConvertError && error.code === "scan") return "scan";
+      throw error;
+    }
+  }
+
+  const parts: string[] = [];
+  for (let i = 0, k = 0; i < sparse.length; i++) {
+    if (k < laid.length && laid[k].at === i) {
+      parts.push(renderDoc(parseDmd(laid[k].result.dmd)));
+      i = laid[k].end;
+      k++;
+      continue;
+    }
+    // A short page between runs, in the renderer's shape (marker line, blank line, text),
+    // labelled as the run next to it labels it.
+    const ord = from + i;
+    const labels = laid[Math.max(0, k - 1)].result.pageLabels;
+    const label = sanitizeLine(labels[ord - 1] ?? "", 20) || String(ord);
+    const words = sanitizeLine(pageRows[i].rawText, 200);
+    parts.push(words ? `⟦s. ${label}⟧\n\n${words}` : `⟦s. ${label}⟧`);
+  }
+  return { text: parts.join("\n\n"), results: laid.map((x) => x.result) };
+}
+
+/**
+ * Runs [a, b] (0-based in the window) that pass the sparse-page rule:
+ * every text page is in one; a run grows over the short pages up to the
+ * next text page while at most SPARSE_SHARE of it stays short.
+ */
+function textRuns(sparse: boolean[]): Array<[number, number]> {
+  const runs: Array<[number, number]> = [];
+  for (let i = 0; i < sparse.length; i++) {
+    if (sparse[i]) continue;
+    const run = runs[runs.length - 1];
+    if (run) {
+      const span = sparse.slice(run[0], i + 1);
+      if (span.filter(Boolean).length <= SPARSE_SHARE * span.length) {
+        run[1] = i;
+        continue;
+      }
+    }
+    runs.push([i, i]);
+  }
+  return runs;
 }
 
 /** 1-based inclusive, ordered; without a range the whole file is asked for (and cut to LIMITS.maxPdfPages). */
@@ -185,23 +291,25 @@ function pageLabelAt(doc: ParsedDoc, offset: number): string | null {
 /**
  * The converter's own warnings speak to the upload preview ("zkontrolujte
  * v náhledu"), which a Zotero reader does not have; these say what the
- * model needs to cite and quote correctly.
+ * model needs to cite and quote correctly. `results`: one per laid-out run
+ * (usually one for the whole window).
  */
-function warningsFor(result: ConvertResult, r: { from: number; last: number; total: number; cut: boolean }): string[] {
+function warningsFor(results: ConvertResult[], r: { from: number; last: number; total: number; cut: boolean }): string[] {
   const out: string[] = [];
   if (r.cut) {
     out.push(`Přečteny strany ${r.from}–${r.last} z ${r.total}; najednou lze vytáhnout nejvýš ${LIMITS.maxPdfPages} stran.`);
   }
-  if (result.quality.ocr) {
+  if (results.some((x) => x.quality.ocr)) {
     out.push("Text pochází z OCR vrstvy PDF: jen strany a odstavce (bez poznámek pod čarou a nadpisů) a může obsahovat chyby rozpoznání.");
   }
-  if (result.labelSource === "physical" && r.last > r.from) {
+  if (results.some((x) => x.labelSource === "physical") && r.last > r.from) {
     out.push("Tištěná čísla stran se nepodařilo zjistit — ⟦s. N⟧ je pořadí strany v PDF.");
   }
-  if (result.quality.columns_pages) {
-    out.push(`Dvousloupcová sazba na ${result.quality.columns_pages} ${pagesWord(result.quality.columns_pages, "locative")} — pořadí čtení nemusí být přesné.`);
+  const columns = results.reduce((n, x) => n + x.quality.columns_pages, 0);
+  if (columns) {
+    out.push(`Dvousloupcová sazba na ${columns} ${pagesWord(columns, "locative")} — pořadí čtení nemusí být přesné.`);
   }
-  if (result.quality.footnotes === "unsure" || result.quality.footnotes === "partial") {
+  if (results.some((x) => x.quality.footnotes === "unsure" || x.quality.footnotes === "partial")) {
     out.push("Poznámky pod čarou se podařilo spárovat s odkazy jen zčásti; některé zůstaly jako běžný text.");
   }
   return out;

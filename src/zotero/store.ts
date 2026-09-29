@@ -4,8 +4,7 @@ import { clerkClient } from "@clerk/nextjs/server";
 import { USER_ID_RE } from "@/src/files/config";
 import { openSecret, sealSecret } from "@/src/secrets/seal";
 import { TtlCache } from "@/src/sources/shared/cache";
-import { CACHE_TTL_MS } from "./config";
-import { ZOTERO_KEY_RE } from "./oauth";
+import { CACHE_TTL_MS, ZOTERO_KEY_RE } from "./config";
 import type { ConnectionState } from "./types";
 
 /**

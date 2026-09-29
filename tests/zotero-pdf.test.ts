@@ -157,6 +157,56 @@ describe("pdfText", () => {
     expect(await pdfText(await scanPdf())).toEqual({ unavailable: "scan" });
   });
 
+  it("reads a window around a blank page — short pages in a window are not a scan", async () => {
+    // Page 2 is blank, as in a book. The converter's upload rule (over 30 % of the kept pages under
+    // 40 characters → scan) would refuse [1, 2], [2, 3] and [1, 3]; the uploader could pick another
+    // range, a Zotero reader cannot.
+    const withBlank = await textPdf([PAGE_TEXT[0], [], PAGE_TEXT[1], PAGE_TEXT[2]]);
+    const cases: Array<[[number, number], string[]]> = [
+      [[1, 2], ["1", "2"]],
+      [[2, 3], ["2", "3"]],
+      [[1, 3], ["1", "2", "3"]],
+    ];
+    for (const [range, markers] of cases) {
+      const r = ok(await pdfText(withBlank, { pageRange: range }));
+      expect(r.pageRange, String(range)).toEqual(range);
+      expect([...r.text.matchAll(/⟦s\. (\d+)⟧/g)].map((m) => m[1]), String(range)).toEqual(markers);
+    }
+    const r = ok(await pdfText(withBlank, { pageRange: [1, 3] }));
+    const at = (x: string) => r.text.indexOf(x);
+    expect(at("⟦s. 1⟧")).toBeLessThan(at("Nejvyssi soud se zabyval"));
+    expect(at("zda je zalobce opravnen pozadovat nahradu nemajetkove ujmy")).toBeGreaterThan(-1);
+    expect(at("Nejvyssi soud se zabyval")).toBeLessThan(at("⟦s. 2⟧"));
+    expect(at("⟦s. 2⟧")).toBeLessThan(at("⟦s. 3⟧"));
+    expect(at("⟦s. 3⟧")).toBeLessThan(at("Dovolani je pripustne"));
+    expect(r.text).not.toContain("Z techto duvodu");
+    // The whole file was fine all along (1 blank page of 4).
+    expect(ok(await pdfText(withBlank)).pageRange).toEqual([1, 4]);
+  });
+
+  it("reads a decision whose last page holds only the signature", async () => {
+    const signed = await textPdf([PAGE_TEXT[0], ["JUDr. Jan Novak"]]);
+    const r = ok(await pdfText(signed));
+    expect(r.pageRange).toEqual([1, 2]);
+    expect([...r.text.matchAll(/⟦s\. (\d+)⟧/g)].map((m) => m[1])).toEqual(["1", "2"]);
+    expect(r.text.indexOf("⟦s. 2⟧")).toBeGreaterThan(r.text.indexOf("Nejvyssi soud se zabyval"));
+    expect(r.text.indexOf("JUDr. Jan Novak")).toBeGreaterThan(r.text.indexOf("⟦s. 2⟧"));
+  });
+
+  it("still calls a window without a single text page a scan — also with a scanner's stamp on each page", async () => {
+    const doc = await PDFDocument.create();
+    doc.setProducer("pdf-lib");
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    for (let i = 0; i < 3; i++) {
+      const page = doc.addPage([595, 842]);
+      page.drawRectangle({ x: 60, y: 60, width: 475, height: 722, color: rgb(0.93, 0.93, 0.9) });
+      page.drawText(`Strana ${i + 1} z 3`, { x: 500, y: 30, size: 8, font });
+    }
+    expect(await pdfText(toBuffer(await doc.save({ useObjectStreams: false })))).toEqual({ unavailable: "scan" });
+    // A window of nothing but a blank page cannot be told from a scan without reading more of the file.
+    expect(await pdfText(await textPdf([PAGE_TEXT[0], [], PAGE_TEXT[1]]), { pageRange: [2, 2] })).toEqual({ unavailable: "scan" });
+  });
+
   it("gives up as a timeout when the caller's budget is already spent", async () => {
     const ctrl = new AbortController();
     ctrl.abort();

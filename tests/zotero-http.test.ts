@@ -19,6 +19,8 @@ import { SourceError } from "@/src/sources/shared/errors";
 
 const CREDS = { userID: 475425, key: "SecretKeyValue1234567890" };
 const PATH = "/users/475425/items?limit=1&start=0";
+/** Another Zotero user on the same instance. */
+const OTHER = { userID: 1, key: "OtherKey000000000000000" };
 
 interface Call {
   url: string;
@@ -217,27 +219,27 @@ describe("zoteroFetch: what comes back", () => {
 describe("zoteroFetch: Backoff and Retry-After", () => {
   beforeEach(() => vi.useFakeTimers());
 
-  it("waits out a short Backoff before the next request of the same user", async () => {
+  it("waits out a short Backoff before the next request — of any user: Backoff speaks of Zotero's load", async () => {
     const calls = stubFetch((_, n) => json([], n === 1 ? { Backoff: "2" } : {}));
     await zoteroFetch(CREDS, PATH);
     const second = zoteroFetch(CREDS, PATH);
+    const other = zoteroFetch(OTHER, "/users/1/items");
     await vi.advanceTimersByTimeAsync(1_900);
     expect(calls).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(200);
-    await second;
-    expect(calls).toHaveLength(2);
-    // Another user is not held back.
-    await zoteroFetch({ userID: 1, key: "OtherKey000000000000000" }, "/users/1/items");
+    await Promise.all([second, other]);
     expect(calls).toHaveLength(3);
   });
 
-  it("fails fast on a long Backoff and says how many seconds are left", async () => {
+  it("fails fast on a long Backoff for every user and says how many seconds are left", async () => {
     const calls = stubFetch(() => json([], { Backoff: "120" }));
     await zoteroFetch(CREDS, PATH);
-    const e = (await rejection(zoteroFetch(CREDS, PATH))) as SourceError;
-    expect(e).toBeInstanceOf(SourceError);
-    expect(e.kind).toBe("UPSTREAM_ERROR");
-    expect(e.message).toContain("120 s");
+    for (const [auth, path] of [[CREDS, PATH], [OTHER, "/users/1/items"]] as const) {
+      const e = (await rejection(zoteroFetch(auth, path))) as SourceError;
+      expect(e).toBeInstanceOf(SourceError);
+      expect(e.kind).toBe("UPSTREAM_ERROR");
+      expect(e.message).toContain("120 s");
+    }
     expect(calls).toHaveLength(1);
     // Once it has passed, requests flow again.
     await vi.advanceTimersByTimeAsync(120_000);
@@ -276,6 +278,33 @@ describe("zoteroFetch: Backoff and Retry-After", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("remembers a 429's long Retry-After: the user's queued and later requests stay home, other users do not", async () => {
+    const calls = stubFetch(({ url }) =>
+      url.includes("/users/1/") ? json([]) : new Response("slow down", { status: 429, headers: { "Retry-After": "60" } }),
+    );
+    const burst = await Promise.all(Array.from({ length: 6 }, () => rejection(zoteroFetch(CREDS, PATH))));
+    expect(burst.every((e) => e instanceof SourceError && e.kind === "UPSTREAM_ERROR")).toBe(true);
+    // Only the requests that were already in flight reached Zotero; the queued ones waited for nothing.
+    expect(calls).toHaveLength(LIMITS.concurrencyPerUser);
+    const later = (await rejection(zoteroFetch(CREDS, PATH))) as SourceError;
+    expect(later.message).toMatch(/pause for another (59|60) s/);
+    expect(calls).toHaveLength(LIMITS.concurrencyPerUser);
+    // Zotero's rate limit is per user: someone else is not held.
+    expect((await zoteroFetch(OTHER, "/users/1/items")).status).toBe(200);
+    expect(calls).toHaveLength(LIMITS.concurrencyPerUser + 1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    stubFetch(() => json([]));
+    expect((await zoteroFetch(CREDS, PATH)).status).toBe(200);
+  });
+
+  it("remembers a 503's long Retry-After for every user: the API itself is down", async () => {
+    const calls = stubFetch(() => new Response("maintenance", { status: 503, headers: { "Retry-After": "30" } }));
+    await rejection(zoteroFetch(CREDS, PATH));
+    const other = (await rejection(zoteroFetch(OTHER, "/users/1/items"))) as SourceError;
+    expect(other.message).toMatch(/pause for another (29|30) s/);
+    expect(calls).toHaveLength(1);
+  });
+
   it("never retries a DELETE", async () => {
     const calls = stubFetch(() => new Response("busy", { status: 503, headers: { "Retry-After": "1" } }));
     const pending = rejection(zoteroFetch(CREDS, "/keys/current", { method: "DELETE" }));
@@ -286,6 +315,9 @@ describe("zoteroFetch: Backoff and Retry-After", () => {
 });
 
 describe("zoteroFetch: 403 and the invalid-key breaker", () => {
+  /** A different user's revoked key, one per `i`. */
+  const dead = (i: number) => ({ userID: 100 + i, key: `DeadKey${i}00000000000000` });
+
   it("throws ZoteroKeyInvalidError on 'Invalid key' without retrying or leaking the key", async () => {
     const calls = stubFetch(() => new Response("Invalid key", { status: 403 }));
     const e = (await rejection(zoteroFetch(CREDS, PATH))) as SourceError;
@@ -311,9 +343,7 @@ describe("zoteroFetch: 403 and the invalid-key breaker", () => {
     const calls = stubFetch(() => new Response("Invalid key", { status: 403 }));
     for (let i = 0; i < LIMITS.breakerInvalidKeys; i++) {
       expect(zoteroBreakerOpen()).toBe(false);
-      await expect(zoteroFetch({ userID: 100 + i, key: `DeadKey${i}00000000000000` }, `/users/${100 + i}/items`)).rejects.toBeInstanceOf(
-        ZoteroKeyInvalidError,
-      );
+      await expect(zoteroFetch(dead(i), `/users/${100 + i}/items`)).rejects.toBeInstanceOf(ZoteroKeyInvalidError);
     }
     expect(calls).toHaveLength(LIMITS.breakerInvalidKeys);
     expect(zoteroBreakerOpen()).toBe(true);
@@ -335,19 +365,63 @@ describe("zoteroFetch: 403 and the invalid-key breaker", () => {
   it("counts only invalid keys within breakerMs", async () => {
     vi.useFakeTimers();
     stubFetch(() => new Response("Invalid key", { status: 403 }));
-    for (let i = 0; i < LIMITS.breakerInvalidKeys - 1; i++) await rejection(zoteroFetch(CREDS, PATH));
+    for (let i = 0; i < LIMITS.breakerInvalidKeys - 1; i++) await rejection(zoteroFetch(dead(i), `/users/${100 + i}/items`));
     await vi.advanceTimersByTimeAsync(LIMITS.breakerMs);
-    await rejection(zoteroFetch(CREDS, PATH));
+    await rejection(zoteroFetch(dead(9), "/users/109/items"));
     expect(zoteroBreakerOpen()).toBe(false);
   });
 
   it("makes no request at all while open", async () => {
     stubFetch(() => new Response("Invalid key", { status: 403 }));
-    for (let i = 0; i < LIMITS.breakerInvalidKeys; i++) await rejection(zoteroFetch(CREDS, PATH));
+    for (let i = 0; i < LIMITS.breakerInvalidKeys; i++) await rejection(zoteroFetch(dead(i), `/users/${100 + i}/items`));
     const calls = stubFetch(() => json([]));
     await rejection(zoteroFetch(CREDS, PATH));
     await rejection(zoteroFetch({ key: "AnotherKey0000000000000" }, "/keys/current"));
     expect(calls).toHaveLength(0);
+  });
+
+  it("sends a rejected key no more than the requests already in flight, and never again", async () => {
+    // Zotero answers a moment later, as it would: the burst queues behind the user's slots first.
+    const calls = stubFetch(({ url }) =>
+      url.includes("/users/1/")
+        ? json([])
+        : new Promise<Response>((resolve) => setTimeout(() => resolve(new Response("Invalid key", { status: 403 })), 5)),
+    );
+    const burst = await Promise.all(Array.from({ length: 8 }, () => rejection(zoteroFetch(CREDS, PATH))));
+    expect(burst.every((e) => e instanceof ZoteroKeyInvalidError)).toBe(true);
+    expect(calls.length).toBeLessThanOrEqual(LIMITS.concurrencyPerUser);
+    // A later call with the same key — even as a bare key — fails here, without a request.
+    expect(await rejection(zoteroFetch(CREDS, PATH))).toBeInstanceOf(ZoteroKeyInvalidError);
+    expect(await rejection(zoteroFetch({ key: CREDS.key }, "/keys/current"))).toBeInstanceOf(ZoteroKeyInvalidError);
+    const sent = calls.length;
+    expect(calls.every((c) => new Headers(c.init.headers).get("zotero-api-key") === CREDS.key)).toBe(true);
+    // One user's revoked key, however many requests it had in flight, is one key: the breaker stays closed.
+    expect(zoteroBreakerOpen()).toBe(false);
+    expect((await zoteroFetch(OTHER, "/users/1/items")).status).toBe(200);
+    expect(calls).toHaveLength(sent + 1);
+  });
+
+  it("counts a key rejected by several requests in flight once towards the breaker", async () => {
+    stubFetch(() => new Promise<Response>((resolve) => setTimeout(() => resolve(new Response("Invalid key", { status: 403 })), 5)));
+    for (let i = 0; i < LIMITS.breakerInvalidKeys - 1; i++) {
+      await Promise.all(Array.from({ length: LIMITS.concurrencyPerUser }, () => rejection(zoteroFetch(dead(i), `/users/${100 + i}/items`))));
+    }
+    expect(zoteroBreakerOpen()).toBe(false);
+    // The next distinct key is the one that trips it.
+    await rejection(zoteroFetch(dead(9), "/users/109/items"));
+    expect(zoteroBreakerOpen()).toBe(true);
+  });
+
+  it("forgets a rejected key after breakerMs (a revoked key is marked in the store long before)", async () => {
+    vi.useFakeTimers();
+    const calls = stubFetch(() => new Response("Invalid key", { status: 403 }));
+    await rejection(zoteroFetch(CREDS, PATH));
+    await vi.advanceTimersByTimeAsync(LIMITS.breakerMs - 1);
+    await rejection(zoteroFetch(CREDS, PATH));
+    expect(calls).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await rejection(zoteroFetch(CREDS, PATH));
+    expect(calls).toHaveLength(2);
   });
 });
 
