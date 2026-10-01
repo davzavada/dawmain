@@ -32,12 +32,16 @@
  *
  * findIdentSpans also returns WHERE each identifier sits, so the highlighter
  * marks identifier matches with the same regexes that produced the keys.
+ * The query side (queryIdentKeys, stripIdentifiers) runs it in query mode,
+ * which also accepts a known registry typed in lowercase ("25 cdo
+ * 1234/2019", "ii. ús 5/20", "c-311/18"): the key is folded either way, so
+ * it meets the index; document text stays case-sensitive (precision).
  *
  * Pure — unit-tested (tests/files-identifiers.test.ts).
  */
 
 import { ACT_ABBREVIATIONS, ACT_NUMBER_RE, resolveAct, zakId } from "@/src/files/index/acts";
-import { foldWord } from "@/src/files/text/analyze";
+import { foldWord, STOPWORDS } from "@/src/files/text/analyze";
 
 /** Keys per extractIdentKeys call. */
 export const MAX_IDENT_KEYS = 200;
@@ -80,6 +84,16 @@ const NSS_REGISTRIES = new Set([
 ]);
 /** Registries that appear without a senate number (plenary / grand panel). */
 const SENATELESS = new Set(["cpjn", "tpjn", "cpj", "tpj", "konf", "komp"]);
+/**
+ * Registries a QUERY may type in lowercase: those of NS and NSS and the
+ * common lower-court ones — minus Czech words ("na", "nad", "to") and
+ * single letters ("C", "T"), which would turn "5 na 12/2020" into a case.
+ */
+const LOWERCASE_REGISTRIES = new Set(
+  [...NS_REGISTRIES, ...NSS_REGISTRIES, "co", "cmo", "cm", "nc", "ins", "icm", "ca", "af", "ad"].filter(
+    (r) => r.length > 1 && r !== "na" && r !== "nad" && r !== "to",
+  ),
+);
 /** Capitalized words that look like a registry but are not one. */
 const NOT_REGISTRIES = new Set(["sb", "sbnu", "sbnss", "r", "rc", "n", "u", "cl", "odst", "zn", "str", "us"]);
 /** Display spelling of registries whose folded key loses case or háčky. */
@@ -108,6 +122,10 @@ const SZ_RE = new RegExp(
 );
 /** CJEU: "C-123/20", "T‑12/19 P". */
 const EU_CASE_RE = new RegExp(`${NB}([CTF])\\s?${DASH}\\s?(\\d{1,4})\\s*\\/\\s*(\\d{2})(?![\\p{N}])`, "gu");
+/** Query mode: the same patterns in any case (under the i flag \p{Lu} matches lowercase letters too). */
+const US_RE_ANY_CASE = new RegExp(US_RE.source, "giu");
+const SZ_RE_ANY_CASE = new RegExp(SZ_RE.source, "giu");
+const EU_CASE_RE_ANY_CASE = new RegExp(EU_CASE_RE.source, "giu");
 const R_RE = /(?<![\p{L}\p{N}.]|\d\s)Rc?\s(\d{1,4})\s*\/\s*(\d{4}|\d{2})(?![\p{N}])/gu;
 const SBNSS_RE =
   /(?<![\p{L}\p{N}])(?:č\.\s*)?(\d{1,5})\s*\/\s*(\d{4})\s*Sb\.\s*NSS|Sb\.\s*NSS\s*(?:č\.\s*)?(\d{1,5})\s*\/\s*(\d{4})(?![\p{N}])/gu;
@@ -136,33 +154,51 @@ function caseKey(p: CaseParts): string {
   return `sz:${p.senate ?? ""}${p.registry}${p.number}-${p.year}`;
 }
 
-function* caseNumbers(t: string): Generator<{ start: number; end: number; parts: CaseParts }> {
+/**
+ * Case numbers in `t`: ÚS, then CJEU, then the generic sp. zn., never two
+ * over one span. `anyCase` (query mode) adds a second pass of each pattern
+ * in any case; a lowercase sp. zn. counts only with a registry of
+ * LOWERCASE_REGISTRIES.
+ */
+function* caseNumbers(t: string, anyCase = false): Generator<{ start: number; end: number; parts: CaseParts }> {
   const taken: Array<[number, number]> = [];
   const free = (s: number, e: number) => !taken.some(([a, b]) => s < b && e > a);
-  for (const m of t.matchAll(US_RE)) {
-    const senate = m[1] === "Pl" ? "pl" : String(ROMAN[m[1].toLowerCase()]);
-    const parts: CaseParts = { kind: "us", senate, registry: m[2] ? "usst" : "us", number: num(m[3]), year: fullYear(m[4]) };
-    taken.push([m.index, m.index + m[0].length]);
-    yield { start: m.index, end: m.index + m[0].length, parts };
+  for (const re of anyCase ? [US_RE, US_RE_ANY_CASE] : [US_RE]) {
+    for (const m of t.matchAll(re)) {
+      if (!free(m.index, m.index + m[0].length)) continue;
+      const roman = m[1].toLowerCase();
+      const senate = roman === "pl" ? "pl" : String(ROMAN[roman]);
+      const parts: CaseParts = { kind: "us", senate, registry: m[2] ? "usst" : "us", number: num(m[3]), year: fullYear(m[4]) };
+      taken.push([m.index, m.index + m[0].length]);
+      yield { start: m.index, end: m.index + m[0].length, parts };
+    }
   }
-  for (const m of t.matchAll(EU_CASE_RE)) {
-    const parts: CaseParts = { kind: "eu", senate: m[1].toLowerCase(), registry: "", number: num(m[2]), year: fullYear(m[3], 60) };
-    taken.push([m.index, m.index + m[0].length]);
-    yield { start: m.index, end: m.index + m[0].length, parts };
+  for (const re of anyCase ? [EU_CASE_RE, EU_CASE_RE_ANY_CASE] : [EU_CASE_RE]) {
+    for (const m of t.matchAll(re)) {
+      if (!free(m.index, m.index + m[0].length)) continue;
+      const parts: CaseParts = { kind: "eu", senate: m[1].toLowerCase(), registry: "", number: num(m[2]), year: fullYear(m[3], 60) };
+      taken.push([m.index, m.index + m[0].length]);
+      yield { start: m.index, end: m.index + m[0].length, parts };
+    }
   }
-  for (const m of t.matchAll(SZ_RE)) {
-    const [whole, senate, registryRaw, number, year] = m;
-    const registry = foldWord(registryRaw);
-    if (NOT_REGISTRIES.has(registry)) continue;
-    if (!senate && !SENATELESS.has(registry)) continue;
-    const y = fullYear(year);
-    if (Number(y) < 1950 || Number(y) > 2099) continue;
-    if (!free(m.index, m.index + whole.length)) continue;
-    yield {
-      start: m.index,
-      end: m.index + whole.length,
-      parts: { kind: "cz", senate: senate ? num(senate) : null, registry, number: num(number), year: y },
-    };
+  for (const re of anyCase ? [SZ_RE, SZ_RE_ANY_CASE] : [SZ_RE]) {
+    const lowercase = re === SZ_RE_ANY_CASE;
+    for (const m of t.matchAll(re)) {
+      const [whole, senate, registryRaw, number, year] = m;
+      const registry = foldWord(registryRaw);
+      if (NOT_REGISTRIES.has(registry)) continue;
+      if (lowercase && !LOWERCASE_REGISTRIES.has(registry)) continue;
+      if (!senate && !SENATELESS.has(registry)) continue;
+      const y = fullYear(year);
+      if (Number(y) < 1950 || Number(y) > 2099) continue;
+      if (!free(m.index, m.index + whole.length)) continue;
+      taken.push([m.index, m.index + whole.length]);
+      yield {
+        start: m.index,
+        end: m.index + whole.length,
+        parts: { kind: "cz", senate: senate ? num(senate) : null, registry, number: num(number), year: y },
+      };
+    }
   }
 }
 
@@ -254,26 +290,45 @@ export function normalizeIsbn(raw: string): string | null {
 
 // ---------------------------------------------------------------------------
 
+/**
+ * A DOI without the punctuation that ends the sentence around it and
+ * without closing brackets that close nothing inside it ("(doi 10.1/x)").
+ * Linear: the bracket counts are taken once and kept as closers are
+ * dropped (re-splitting the DOI per dropped closer was quadratic — a query
+ * of "10.1234/" and 40,000 ")" pinned the CPU for 20 s).
+ */
 function trimDoi(doi: string): string {
-  let d = doi.replace(/[.,;:!?'"]+$/, "");
-  // Drop closing brackets that close nothing inside the DOI.
+  let end = doi.length;
+  while (end > 0 && `.,;:!?'"`.includes(doi[end - 1])) end--;
   for (const [open, close] of [["(", ")"], ["[", "]"]] as const) {
-    while (d.endsWith(close) && d.split(open).length <= d.split(close).length - 1) d = d.slice(0, -1).replace(/[.,;:]+$/, "");
+    let opens = 0;
+    let closes = 0;
+    for (let i = 0; i < end; i++) {
+      if (doi[i] === open) opens++;
+      else if (doi[i] === close) closes++;
+    }
+    while (end > 0 && doi[end - 1] === close && opens <= closes - 1) {
+      end--;
+      closes--;
+      while (end > 0 && ".,;:".includes(doi[end - 1])) end--;
+    }
   }
-  return d;
+  return doi.slice(0, end);
 }
 
 /**
- * Every identifier in `text` with its span and keys, in text order. Pure.
+ * Every identifier in `text` with its span and keys, in text order.
+ * `query`: query mode (case numbers typed in lowercase count — see the
+ * header). Pure.
  */
-export function findIdentSpans(text: string, ctx?: { commentedAct?: string | null }): IdentSpan[] {
+export function findIdentSpans(text: string, ctx?: { commentedAct?: string | null; query?: boolean }): IdentSpan[] {
   const t = text.replace(ODD_SPACES, " ");
   const spans: IdentSpan[] = [];
   const push = (start: number, end: number, keys: string[]) => {
     if (keys.length) spans.push({ start, end, keys });
   };
 
-  for (const c of caseNumbers(t)) push(c.start, c.end, [caseKey(c.parts)]);
+  for (const c of caseNumbers(t, ctx?.query === true)) push(c.start, c.end, [caseKey(c.parts)]);
   for (const m of t.matchAll(R_RE)) push(m.index, m.index + m[0].length, [`r:${num(m[1])}/${fullYear(m[2])}`]);
   for (const m of t.matchAll(SBNSS_RE)) {
     const [n, y] = m[1] ? [m[1], m[2]] : [m[3], m[4]];
@@ -406,7 +461,7 @@ export function extractIdentKeys(text: string, ctx?: { commentedAct?: string | n
 export function queryIdentKeys(query: string): { keys: string[]; act: string | null; sections: string[] } {
   const act = resolveAct(query.replace(ODD_SPACES, " "))?.act ?? null;
   const parz = parzAct(act);
-  const spans = findIdentSpans(query, { commentedAct: act });
+  const spans = findIdentSpans(query, { commentedAct: act, query: true });
   const keys: string[] = [];
   const sections: string[] = [];
   for (const span of spans) {
@@ -423,26 +478,70 @@ export function queryIdentKeys(query: string): { keys: string[]; act: string | n
   return { keys: dedupe(keys, MAX_IDENT_KEYS), act, sections: dedupe(sections, MAX_IDENT_KEYS) };
 }
 
+/** Citation furniture right before a case number: "sp. zn.", "sen. zn.", "č. j.", "čj." (any case). */
+const CASE_CUE_BEFORE = /(?<![\p{L}\p{N}])(?:(?:sp|sen|spis)\.\s*zn\.|č\.\s*j\.|čj\.)\s*$/iu;
+/** "Sb." right after "zákon č. 89/2012" (ACT_NUMBER_RE's second form stops before it) — not "Sb. m. s." / "Sb. NSS". */
+const SB_AFTER = /^\s*Sb(?![\p{L}])(?!\.?\s*(?:m\.\s*s\.|NSS))\.?/u;
+const CASE_KEY_RE = /^(sz|ecli|r|sbnss|sbnu):/;
+
 /**
  * The query minus what the identifier channel already covers: identifier
  * spans (case numbers, §§, act numbers, ISBN, DOI, ECLI) and act
  * abbreviations ("OZ", "o. z.") become spaces, so the lexical tsquery does
- * not demand the tokens "cdo", "2019" or "oz" of every chunk. Act NAMES
- * ("zákoník práce") stay — they are words worth searching. Use as
- * buildTsQuery(stripIdentifiers(q)). Pure.
+ * not demand the tokens "cdo", "2019" or "oz" of every chunk. So does the
+ * furniture that always comes with an identifier — "sp. zn." / "č. j."
+ * before a case number, "Sb." after "zákon č. 89/2012" — which is in every
+ * chunk citing ANY decision or act: demanded by the AND channel it tied a
+ * passage citing another decision with the real hit. Pinpoint words after
+ * a § ("písm. g)", "věta první") stay: they rank the passages inside the §
+ * (see pinpointOnly). Act NAMES ("zákoník práce") stay — they are words
+ * worth searching. Use as buildTsQuery(stripIdentifiers(q)). Pure.
  */
 export function stripIdentifiers(query: string): string {
   const chars = query.split("");
   const blank = (start: number, end: number) => {
     for (let i = start; i < end; i++) chars[i] = " ";
   };
-  for (const span of findIdentSpans(query)) blank(span.start, span.end);
   const t = query.replace(ODD_SPACES, " ");
+  for (const span of findIdentSpans(query, { query: true })) {
+    blank(span.start, span.end);
+    if (span.keys.some((k) => CASE_KEY_RE.test(k))) {
+      const cue = CASE_CUE_BEFORE.exec(t.slice(Math.max(0, span.start - 24), span.start));
+      if (cue) blank(span.start - cue[0].length, span.start);
+    }
+    if (span.keys.some((k) => k.startsWith("zak:"))) {
+      const sb = SB_AFTER.exec(t.slice(span.end, span.end + 16));
+      if (sb) blank(span.end, span.end + sb[0].length);
+    }
+  }
   for (const entry of ACT_ABBREVIATIONS) {
     if (!entry.abbreviation) continue;
     for (const m of t.matchAll(new RegExp(entry.pattern.source, `${entry.pattern.flags}g`))) blank(m.index, m.index + m[0].length);
   }
   return chars.join("").replace(/\s+/g, " ").trim();
+}
+
+/** Words that only point INTO a § — "písm. g)", "bod 3", "věta první", "část věty za středníkem". */
+const PINPOINT_WORDS = new Set(["pism", "bod", "bodu", "body", "veta", "vety", "vetu", "vete", "cast", "casti", "odst"]);
+/** Words that come with them ("věta první", "za středníkem") but point nowhere on their own. */
+const PINPOINT_FILLERS = new Set(["prvni", "druha", "druhe", "druhou", "treti", "ctvrta", "pata", "posledni", "strednik", "strednikem"]);
+
+/**
+ * True when `rest` (a query after stripIdentifiers) holds only pinpoint
+ * words into a § — "písm. g)", "bod 3", "věta první" — with letters,
+ * numbers and stopwords around them. Such a remainder must rank passages
+ * INSIDE the § it points into, not every "písm. g)" in the library: the
+ * caller then requires the query's § keys of every chunk. Pure.
+ */
+export function pinpointOnly(rest: string): boolean {
+  const words = rest.match(/[\p{L}\p{N}]+/gu) ?? [];
+  let pinpoint = false;
+  for (const w of words) {
+    const f = foldWord(w);
+    if (PINPOINT_WORDS.has(f)) pinpoint = true;
+    else if (!PINPOINT_FILLERS.has(f) && !/^(?:[a-z]|\d{1,3}[a-z]?|[ivx]{1,4})$/.test(f) && !STOPWORDS.has(f)) return false;
+  }
+  return pinpoint;
 }
 
 // ---------------------------------------------------------------------------

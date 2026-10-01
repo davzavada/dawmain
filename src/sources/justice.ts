@@ -25,6 +25,14 @@ const BASE = "https://rozhodnuti.justice.cz/api";
  * client saw a bare "server isn't responding" instead of the hint below.
  */
 const SEARCH_TIMEOUT_MS = 45_000;
+/**
+ * retry:false above exists only so a 45 s timeout is never followed by a
+ * second one. A 429/5xx or dropped connection that comes back FAST is another
+ * matter: the server 429s under load (other clients back off 2 s and get
+ * through), so a failure inside this window gets one retry, its timeout cut to
+ * what is left of the 45 s — the whole search still ends within 45 s.
+ */
+const RETRY_WINDOW_MS = 5_000;
 
 const searchCache = new TtlCache<JusticeSearchPage>(SEARCH_TTL_MS);
 const decisionCache = new TtlCache<JusticeDecision>(DOCUMENT_TTL_MS, 24);
@@ -199,10 +207,30 @@ export function parseJusticeSearch(json: unknown): JusticeSearchPage {
   };
 }
 
-/** "§ 2201", "2201", "2201a" → the number as the API wants it. Pure. */
-export function normalizeSection(section: string): string {
-  const cleaned = section.replace(/^§\s*/u, "").trim();
-  if (!/^\d{1,4}[a-z]{0,3}$/i.test(cleaned)) {
+export interface JusticeSection {
+  /** "2201", "14b" — what regulationParagraph takes. */
+  paragraph: string;
+  /** The "odst. 1 písm. a)" tail the index cannot filter on, when one was given. */
+  dropped?: string;
+}
+
+/** A § number with its letter, then optionally an odstavec/písmeno/věta/bod tail. */
+const SECTION_LABEL =
+  /^(\d{1,4}[a-z]{0,3})(?:\s*,?\s*((?:odst|odstavec|písm|písmeno|věta|bod)(?![\p{L}\d]).*))?$/iu;
+
+/**
+ * "§ 2201", "§§ 2201", "2201", "§ 14B", "§ 2201 odst. 1 písm. a)" → the
+ * paragraph as the API wants it. The letter goes LOWER-case: regulationParagraph
+ * matches case-sensitively and the index stores "14b" (live 2026-09, 177/1996
+ * published June 2026: "14B" → 0 hits, "14b" → 1 382), so "§ 14B" read as a
+ * silent nothing-found. The index records paragraphs, not odstavce, so an
+ * odstavec tail is accepted and handed back as `dropped` for the tool to say
+ * so, instead of costing the model a round trip. Pure — unit-tested.
+ */
+export function parseSection(section: string): JusticeSection {
+  const cleaned = section.trim().replace(/^§+\s*/u, "");
+  const m = SECTION_LABEL.exec(cleaned);
+  if (!m) {
     throw new SourceError(
       SOURCE,
       "INPUT_INVALID",
@@ -210,8 +238,17 @@ export function normalizeSection(section: string): string {
       'Pass the section as "§ 2201" or just "2201".',
     );
   }
-  return cleaned;
+  const dropped = m[2]?.trim();
+  return { paragraph: m[1].toLowerCase(), ...(dropped ? { dropped } : {}) };
 }
+
+/** parseSection's paragraph alone. Pure. */
+export function normalizeSection(section: string): string {
+  return parseSection(section).paragraph;
+}
+
+/** "89/2012", "89/2012 Sb.", "č. 89/2012 Sb.", "zákon č. 89/2012 Sb." — number and year. */
+const ACT_REFERENCE = /^\s*(?:(?:zákon\p{L}*|zák\.)\s*)?(?:č\.\s*)?(\d{1,4})\s*\/\s*(\d{4})\s*(?:Sb\.?)?\s*$/iu;
 
 /** Build the query string. Pure — unit-tested. */
 export function buildJusticeQuery(
@@ -269,7 +306,7 @@ export function buildJusticeQuery(
     );
   }
   if (input.appliesAct) {
-    const act = /^\s*(\d{1,4})\s*\/\s*(\d{4})\s*(?:Sb\.?)?\s*$/i.exec(input.appliesAct);
+    const act = ACT_REFERENCE.exec(input.appliesAct);
     if (!act) {
       throw new SourceError(
         SOURCE,
@@ -290,66 +327,136 @@ export function buildJusticeQuery(
 
 // ---------- fetch (I/O) ----------
 
+/**
+ * The timeout hint, fitted to what timed out. Measured live (2026-09, 45 s
+ * each): a query holding a number or act citation — '89/2012', even a bare
+ * '2012' — timed out inside a 10-day window, because such tokens occur in
+ * nearly every decision; applies_act '89/2012' alone timed out from 2020-10;
+ * while 'nájemné' over five years (20 297 hits) answered at once. Telling the
+ * first two to "use one word and a window of months" only buys a second 45 s
+ * wait. Pure — unit-tested.
+ */
+export function slowSearchHint(input: JusticeSearchInput): string {
+  const others = "for NS/NSS/ÚS case law use caselaw_search.";
+  const query = input.query?.trim();
+  if (query && /[\d§]/u.test(query)) {
+    return `Numbers and act citations in query ('89/2012', '2012', '§ 2201') occur in nearly every decision, so the full-text index times out on them whatever the date window. Drop them from query — the act goes in applies_act '89/2012' (+ applies_section '§ 2201') — and keep query to 1–2 words; ${others}`;
+  }
+  if (!query && input.appliesAct && !input.appliesSection) {
+    return `applies_act alone matches most of the archive for the big codes (o. z., o. s. ř.), and that set is too large to sort in time — the index is slow, not down. Add applies_section '§ …', court_codes or types, or a date window of months; ${others}`;
+  }
+  if (!query) {
+    return `The index is slow on large result sets, not down. Narrow the listing with court_codes, types or a date window of months; ${others}`;
+  }
+  return `Its full-text index is slow on multi-word queries and on large result sets, not down. Retry with ONE distinctive word (e.g. 'sazebník' rather than a sentence), a date window of months rather than years, and/or court_codes; ${others}`;
+}
+
+/** Cut off by the timeout signal — wrapped by fetchUpstream, or raw from a body read. */
+function isTimeout(error: unknown): boolean {
+  if (error instanceof SourceError) return error.kind === "UPSTREAM_UNREACHABLE" && /timeout/i.test(error.message);
+  return (error as { name?: unknown } | null)?.name === "TimeoutError";
+}
+
+/** "429" or "5xx" when fetchUpstream refused an overloaded answer (it throws those). */
+function overloadStatus(error: unknown): string | undefined {
+  return error instanceof SourceError && error.kind === "UPSTREAM_ERROR"
+    ? /HTTP (429|5\d\d)\b/.exec(error.message)?.[1]
+    : undefined;
+}
+
+/** The back-off before the one retry, or undefined when the failure does not earn one. */
+function transientBackoff(error: unknown): number | undefined {
+  if (!(error instanceof SourceError) || isTimeout(error)) return undefined;
+  if (error.kind === "UPSTREAM_UNREACHABLE") return 500 + Math.random() * 1000;
+  const status = overloadStatus(error);
+  if (!status) return undefined;
+  return status === "429" ? 2000 : 500 + Math.random() * 1000;
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export async function searchJustice(
   input: JusticeSearchInput,
   page: number,
   limit: number,
 ): Promise<JusticeSearchPage> {
-  return searchCache.through(memoKey("justice-search", [input, page, limit]), () =>
-    runSearchJustice(input, page, limit),
-  );
+  // Keyed on the request, not the raw input: 'ksbr' and 'KSBR', '89/2012 Sb.'
+  // and '89/2012', '§ 2201' and '2201' send the byte-identical URL, so a
+  // respelled repeat is a cache hit instead of another slow full-text query.
+  // An input error throws here, before the cache is touched.
+  const params = buildJusticeQuery(input, page, limit);
+  return searchCache.through(memoKey("justice-search", params.toString()), () => runSearchJustice(params, input));
 }
 
-async function runSearchJustice(
-  input: JusticeSearchInput,
-  page: number,
-  limit: number,
-): Promise<JusticeSearchPage> {
-  const params = buildJusticeQuery(input, page, limit);
-  let response: Response;
-  try {
-    response = await fetchUpstream(SOURCE, `${BASE}/finaldoc?${params}`, {
+async function runSearchJustice(params: URLSearchParams, input: JusticeSearchInput): Promise<JusticeSearchPage> {
+  const started = Date.now();
+  const attempt = (timeoutMs: number) =>
+    fetchUpstream(SOURCE, `${BASE}/finaldoc?${params}`, {
       headers: { accept: "application/json" },
-      timeoutMs: SEARCH_TIMEOUT_MS,
+      timeoutMs,
       retry: false,
     });
+  let retried = false;
+  try {
+    let response: Response;
+    try {
+      response = await attempt(SEARCH_TIMEOUT_MS);
+    } catch (error) {
+      const backoff = transientBackoff(error);
+      if (backoff === undefined || Date.now() - started >= RETRY_WINDOW_MS) throw error;
+      await sleep(backoff);
+      retried = true;
+      response = await attempt(SEARCH_TIMEOUT_MS - (Date.now() - started));
+    }
+    if (response.status === 400) {
+      // Spring names the field it rejected; that beats any guess we could make.
+      const detail = (await response.text()).slice(0, 400);
+      throw new SourceError(
+        SOURCE,
+        "INPUT_INVALID",
+        `justice.cz rejected the search: ${detail}`,
+        "One of the filter vocabularies has changed upstream — run dawmain_probe_sources with include_raw and check the field the message names.",
+      );
+    }
+    if (!response.ok) {
+      // 429 and 5xx never get here (fetchUpstream throws them, handled below).
+      throw new SourceError(
+        SOURCE,
+        "UPSTREAM_ERROR",
+        `justice.cz answered HTTP ${response.status} for the search.`,
+        "Unexpected for this endpoint — run dawmain_probe_sources (canary 'justice') to see whether the API moved.",
+      );
+    }
+    // Inside the try: the timeout signal also covers the body, and a read cut
+    // off by it must get the same hint as a request that never answered.
+    return parseJusticeSearch(await response.json());
   } catch (error) {
-    if (error instanceof SourceError && error.kind === "UPSTREAM_UNREACHABLE" && /timeout/i.test(error.message)) {
+    if (isTimeout(error)) {
       throw new SourceError(
         SOURCE,
         "UPSTREAM_UNREACHABLE",
         `justice.cz did not answer the search within ${SEARCH_TIMEOUT_MS / 1000} s.`,
-        "Its full-text index is slow on multi-word queries and on large result sets, not down. Retry with ONE distinctive word (e.g. 'sazebník' rather than a sentence), a date window of months rather than years, and/or court_codes; for NS/NSS/ÚS case law use caselaw_search.",
+        slowSearchHint(input),
+      );
+    }
+    const status = overloadStatus(error);
+    if (status) {
+      throw new SourceError(
+        SOURCE,
+        "UPSTREAM_ERROR",
+        `justice.cz answered HTTP ${status} for the search${retried ? " even after a retry" : ""}.`,
+        status === "429"
+          ? "The server returns 429 under load and is slow on unbounded full-text queries — wait a minute, add a date range and retry."
+          : (error as SourceError).hint,
       );
     }
     throw error;
   }
-  if (response.status === 400) {
-    // Spring names the field it rejected; that beats any guess we could make.
-    const detail = (await response.text()).slice(0, 400);
-    throw new SourceError(
-      SOURCE,
-      "INPUT_INVALID",
-      `justice.cz rejected the search: ${detail}`,
-      "One of the filter vocabularies has changed upstream — run dawmain_probe_sources with include_raw and check the field the message names.",
-    );
-  }
-  if (!response.ok) {
-    throw new SourceError(
-      SOURCE,
-      "UPSTREAM_ERROR",
-      `justice.cz answered HTTP ${response.status} for the search.`,
-      "The server returns 429 under load and is slow on unbounded full-text queries — add a date range and retry.",
-    );
-  }
-  return parseJusticeSearch(await response.json());
 }
 
 // ---------- full text ----------
-
-interface JusticeParagraph {
-  texts?: Array<{ text?: string }>;
-}
 
 export interface JusticeDecision {
   uuid: string;
@@ -360,27 +467,47 @@ export interface JusticeDecision {
 
 /** Parse a finaldoc response — leniently, the field types drift. Pure. */
 export function parseJusticeDecision(json: unknown, uuid: string): JusticeDecision {
+  // Paragraph = { texts: [{ text, anonStyle }], … }; read without trusting
+  // the shape, which has drifted before (a bare string is taken as it is).
   const data = json as {
-    verdictText?: string | null;
-    justificationText?: string | null;
-    header?: JusticeParagraph[] | null;
-    verdict?: JusticeParagraph[] | null;
-    justification?: JusticeParagraph[] | null;
+    verdictText?: unknown;
+    justificationText?: unknown;
+    header?: unknown;
+    verdict?: unknown;
+    justification?: unknown;
+    information?: unknown;
     metadata?: Record<string, unknown> | null;
   };
 
-  const joinParagraphs = (paragraphs: JusticeParagraph[] | null | undefined): string =>
-    (paragraphs ?? [])
-      .map((paragraph) => (paragraph.texts ?? []).map((t) => t.text ?? "").join(""))
-      .filter(Boolean)
+  const flatText = (value: unknown): string => (typeof value === "string" ? value : "");
+  const paragraphText = (paragraph: unknown): string => {
+    if (typeof paragraph === "string") return paragraph;
+    const texts = (paragraph as { texts?: unknown } | null)?.texts;
+    return Array.isArray(texts) ? texts.map((t) => flatText((t as { text?: unknown } | null)?.text)).join("") : "";
+  };
+  const joinParagraphs = (paragraphs: unknown): string =>
+    (Array.isArray(paragraphs) ? paragraphs : [])
+      .map(paragraphText)
+      .filter((line) => line.trim())
       .join("\n");
 
-  let text = [data.verdictText, data.justificationText].filter(Boolean).join("\n\n");
-  if (!text.trim()) {
-    text = [joinParagraphs(data.header), joinParagraphs(data.verdict), joinParagraphs(data.justification)]
-      .filter(Boolean)
-      .join("\n\n");
-  }
+  // Section by section, the paragraph arrays first. They hold one paragraph
+  // per entry, while the flat verdictText/justificationText of current
+  // documents run the paragraphs together with no separator at all
+  // ("…zastavuje.II. Žádný", "…výroku).2. Proti" — live 8d2e6b9a, 2026-09):
+  // the bod number sinks into the previous sentence and find's excerpts
+  // cannot start at it. Only the arrays carry the záhlaví (court, senate,
+  // parties, the decision under review) and the poučení. Each section falls
+  // back to its own flat field, so one drifted null array cannot drop the
+  // odůvodnění while the rest of the document still reads as complete.
+  const text = [
+    joinParagraphs(data.header),
+    joinParagraphs(data.verdict) || flatText(data.verdictText),
+    joinParagraphs(data.justification) || flatText(data.justificationText),
+    joinParagraphs(data.information),
+  ]
+    .filter((part) => part.trim())
+    .join("\n\n");
   if (!text.trim()) {
     throw new SourceError(
       SOURCE,

@@ -12,7 +12,7 @@ Uživatelský popis je v [README](../README.md).
 | `esbirka_get_text` | e-Sbírka | konsolidovaný text k datu — jeden §, jeden článek (`čl. 36`, `čl. I`), nebo celý předpis po ~45k znacích; verze se nejdřív určí přes REST detail (bez data = účinná dnes), odpověď nese „účinné od–do“ a upozornění na zveřejněné budoucí znění |
 | `ns_search` / `ns_get_decision` | rozhodnuti.nsoud.cz | judikatura NS: fulltext řazený podle relevance (holá slova spojena AND, fráze jen v uvozovkách, Domino operátory AND/OR/NOT, `nájem*`, NEAR/SENTENCE/PARAGRAPH), přesná sp. zn. (`[spzn1]`–`[spzn4]`), typ rozhodnutí, kategorie A–E, datum rozhodnutí i datum předání na web; hit nese soud a kategorii |
 | `nss_search` / `nss_get_decision` | vyhledavac.nssoud.cz | judikatura NSS i krajských správních soudů: fulltext, sp. zn., aplikovaný předpis a ustanovení (`applies_act`/`applies_treaty`/`applies_eu_regulation`/`applies_eu_directive` + `applies_provision`), soud/senát vč. rozšířeného, rejstřík, oblast úpravy, datum rozhodnutí i zpřístupnění — vše server-side dle zachyceného POSTu formuláře (číselníky se řeší za běhu z `ciselnikTreeData`) |
-| `us_search` / `us_get_decision` | nalus.usoud.cz | judikatura ÚS: fulltext (vč. zóny disentů a řazení dle významu), citace/ECLI, soudce zpravodaj i disentující, výrok, navrhovatel, napadený akt (druh/číslo/název/ust. — abstraktní přezkum bez klíčových slov), dotčený orgán, jen publikovaná, datum rozhodnutí i zpřístupnění — číselníky verbatim ze zachyceného POSTu formuláře |
+| `us_search` / `us_get_decision` | nalus.usoud.cz | judikatura ÚS: fulltext (vč. zóny disentů a řazení dle významu; `§` se z dotazu vypouští), citace/ECLI, populární název, napadený akt (číslo/název/ust. — abstraktní přezkum bez klíčových slov), dotčený orgán, jen publikovaná, datum rozhodnutí i zpřístupnění; každý hit nese soudce zpravodaje. Číselníkové filtry NALUS (`judge`, `dissenting_judge`, `outcome`, `petitioner`, `contested_organ_type`, `contested_act_kind`) NALUS ignoruje (readonly pickery z popupu, bez zachyceného toku nejdou přehrát) — `us_search` je proto odmítá s `INPUT_INVALID` dřív, než pošle request, místo aby nefiltrovaný seznam vydával za filtrovaný |
 | `caselaw_search` | NSS + NS + ÚS | jeden dotaz paralelně přes tři vrcholné soudy; varianty round-robin s počty za variantu, každá varianta s vlastním limitem (pomalá shodí jen sebe); dráha NSS jen NSS (krajské soudy přes `include_regional`), ÚS podle relevance, hit nese soud |
 | `justice_search` / `justice_get_decision` | rozhodnuti.justice.cz | obecné soudy (okresní/krajské/vrchní): fulltext (`match` všechna slova/jedno ze slov/fráze), spisová značka, kódy soudů, druh rozhodnutí, datum vydání i zveřejnění, aplikovaný předpis a § (`applies_act` + `applies_section`) — vše server-side přes `/api/finaldoc`, backend SPA zachycený z živého požadavku; hit nese i `affects` (co rozhodnutí udělalo s rozhodnutím nižšího soudu: CHANGE/CONFIRM/CANCEL…) |
 | `sdeu_search` / `sdeu_get_document` | InfoCuria + Cellar | FULLTEXT judikatury SDEU (C i T) přes vlastní index soudu — hledá napříč všemi jazykovými verzemi; typ dokumentu, stav věci, citovaný předpis a článek (`cites_celex`/`cites_article`), předběžné otázky podle předkládajícího státu (`referred_from`), datumy — vše server-side dle zachyceného payloadu SPA | 
@@ -20,7 +20,7 @@ Uživatelský popis je v [README](../README.md).
 | `eurlex_get_history` | Cellar SPARQL (Publications Office) | travaux préparatoires aktu z dossieru interinstitucionálního postupu (`cdm:dossier_contains_work` — obsahuje i přijatý akt, takže kotví CELEX aktu i kteréhokoli dokumentu postupu, případně číslo postupu `2012/0011(COD)`); vrací návrh s důvodovou zprávou, impact assessmenty, stanoviska, postoje EP/Rady + číslo postupu, právní základ a stav (přijato/projednáváno/staženo) |
 | `doctrine_search` | cuni.primo.exlibrisgroup.com | doktrína: knihy, kapitoly a články z UKAŽ Univerzity Karlovy (Primo VE: katalog UK + Central Discovery Index licencovaných e-zdrojů); `query`/`queries` (≤ 3 varianty), `title`, `author`, `subject`, `language`, `year_from`/`year_to`; katalog stránkuje po 10, `limit` (≤ 20; nad 10 záznamy stručně, bez abstraktů) stáhne víc stránek v paralelní dávce a `page` kráčí dál (`total` = `total_local` + `total_central`) — vrací bibliografické záznamy s odkazem na záznam, abstraktem/obsahem a přístupovými odkazy, žádné plné texty; klient postavený na zachyceném požadavku SPA (HAR 2026-09), ověřený živě z produkce |
 | `doctrine_get_record` | cuni.primo.exlibrisgroup.com | jeden záznam v plném znění přes full-display endpoint Prima (ověřený živě): celý abstrakt, obsah (TOC), hesla, identifikátory a přístupové odkazy — hledání ukazuje jen začátek abstraktu a obsahu; text díla se nestahuje (k němu vede odkaz na záznam, licencované tituly si čtenář otevře sám přes vzdálený přístup UK) |
-| `files_search` | Vlastní zdroje (Neon) | hledání ve vlastních dokumentech uživatele s Pro (osobní a týmové knihovny): český fulltext (Snowball stemmer v aplikaci; váhy vlastní nadpis › nadřazený nadpis › tělo › poznámky pod čarou), identifikátory (sp. zn. i s krátkým rokem, §, předpisy i zkratkami „o. z.“/„OSŘ“, ISBN, DOI, ECLI) a metadata — kanály sloučené přes RRF se stropem shod na dokument už v SQL; filtry typu dokumentu, roku, předpisu, jednoho dokumentu a jen poznámek; hit nese cestu oddíly, pinpoint (s., § + m. č., pozn.), výřez se zvýrazněním a pro každou sp. zn. řádek „oficiální text:“ s voláním `ns_search`/`nss_search`/`us_search`/`sdeu_search` |
+| `files_search` | Vlastní zdroje (Neon) | hledání ve vlastních dokumentech uživatele s Pro (osobní a týmové knihovny): český fulltext (Snowball stemmer v aplikaci; váhy vlastní nadpis › nadřazený nadpis › tělo › poznámky pod čarou), identifikátory (sp. zn. i s krátkým rokem, §, předpisy i zkratkami „o. z.“/„OSŘ“, ISBN, DOI, ECLI) a metadata — kanály sloučené přes RRF se stropem shod na dokument už v SQL; filtry typu dokumentu, roku, předpisu, § / článku, sp. zn., jednoho dokumentu a jen poznámek (§ a sp. zn. se uplatní v SQL před stropem); hit nese cestu oddíly, pinpoint (s., § + m. č., pozn.), výřez se zvýrazněním a pro každou sp. zn. řádek „oficiální text:“ s voláním `ns_search`/`nss_search`/`us_search`/`sdeu_search` |
 | `files_get_document` | Vlastní zdroje (Neon) | čtení vlastního dokumentu: u dokumentu nad ~30 stran bez cíle osnova (`toc`), jinak `section` (§, článek, kapitola), `mn` (marginální číslo, i rozsah), `at` (tištěná strana), `footnote`, `find`; okna ≤ 45 000 znaků zarovnaná na celé strany, hlavička „VLASTNÍ DOKUMENT“ s citací ČSN ISO 690, pokračování omezené na zvolený úsek, denní limit čtení na dokument (proti vysávání celých knih) |
 | `files_list` | Vlastní zdroje (Neon) | knihovny uživatele a jejich dokumenty (stav, typ, strany, co čeká na potvrzení metadat) a odkaz na nahrávání |
 | `zotero_search` | Zotero (api.zotero.org, klíč uživatele) | hledání v připojené knihovně Zotero, jen ke čtení: `mode` `title` (názvy, autoři, roky) / `everything` (všechna pole, poznámky, full-text index příloh), prázdné `title` se samo zopakuje v `everything`; `query`/`queries` (≤ 3 varianty round-robin), `library` (výchozí osobní + skupiny, nejvýš 6), `collection`, `tags` (všechny), `item_type`, `sort`, `limit` (≤ 50 na knihovnu), `page`; shody v přílohách, poznámkách a anotacích seskupené pod dílo; sp. zn. v dotazu navíc projde nejnovější položky `case` (Zotero `q` do `docketNumber` nevidí) a řekne, kolik jich prošla; řazení není podle relevance |
@@ -280,7 +280,13 @@ ne hádat.
   dovolil až 300 s, ale odpověď nástroje má přijít dřív, než to klient vzdá, a
   delší běh jen ukrajuje z měsíčního rozpočtu Hobby (Active CPU, paměť), jehož
   překročení pozastaví celý tým. Pomalé zdroje proto mají timeouty pod touto
-  hranicí. Až 300 s běží jen nahrání a zpracování dokumentu Vlastních zdrojů.
+  hranicí. Celé volání nástroje hlídá `CALL_BUDGET_MS` = 54 s od příchodu
+  requestu (hodiny `runWithCallClock` v route, `src/sources/shared/clock.ts`):
+  po něm registr odpoví textovou chybou místo useknutého streamu. Rozpočty
+  jednotlivých zdrojů (NS/NALUS náhledy, Cellar) se počítají přes
+  `callDeadline` a končí nejpozději 3 s před touto hranicí, aby jejich
+  částečné výsledky a nápovědy stihly odejít. Až 300 s běží jen nahrání a
+  zpracování dokumentu Vlastních zdrojů.
 
 ## Autentizace
 
@@ -295,9 +301,12 @@ Endpoint přijímá dvě credentials naráz (stačí kterákoli); logika žije v
    a provede uživatele přihlášením — e-mail + heslo, e-mailový kód či SSO,
    podle toho, co je v Clerku zapnuté. Přihlašovací stránku hostuje Clerk
    Account Portal; server jen ověřuje předložené OAuth tokeny přes Clerk
-   (`verifyClerkToken`), k čemuž potřebuje secret key. `proxy.ts` (Clerk
-   middleware na stránkách, `/api` a `/__clerk`; bez `protect()`, takže nic
-   nezamyká) je to, co `auth()` v route zprovozňuje; bez klíčů je no-op.
+   (`verifyClerkToken`), k čemuž potřebuje secret key. MCP route ověřuje
+   token sama — `authenticateRequest` přes `clerkClient()` v
+   `src/mcp/auth.ts`, ne přes `auth()` z middlewaru — takže na `proxy.ts`
+   nezávisí. `proxy.ts` (Clerk middleware na stránkách, `/api` a `/__clerk`;
+   bez `protect()`, takže nic nezamyká) slouží stránkám (nabídka účtu); bez
+   klíčů je no-op.
 2. **Sdílený přístupový kód** (`MCP_BEARER_TOKEN`) — původní schéma,
    ponechané pro existující klienty; token se přijímá z `Authorization`,
    `X-API-Key` i `cf-aig-authorization` (stačí, když sedí kterákoli).
@@ -381,10 +390,11 @@ co čeká. Už aplikovaný soubor se nemění — oprava = nový soubor.
 | `0002_rls.sql` | role `dawmain_app`, row-level security, systémové funkce (rezervace stran, součty, seznam knihoven, fronta zpracování) |
 | `0003_ops.sql` | rozpočet přeindexování (`usage_daily.reindexes`, `documents.reindex_requested_at`), `files_db_usage()` a `files_table_usage()` (živá data, plán `VACUUM FULL`), úklid auditu vymazaných knihoven, oznámení a odstranění napříč knihovnami, noční přepočet počítadel |
 | `0004_search.sql` | kanály hledání jako funkce `SECURITY DEFINER` (`files_search_chunks`, `files_search_meta`), aby dotazy role aplikace šly přes GIN indexy |
+| `0005_search_filters.sql` | přetížení obou funkcí: filtry `case_number` a `section` (§ i s vnořenými oddíly) přímo v SQL před stropem shod na dokument, strop na dokument až 200 (hledání uvnitř dokumentu), knihovna u každé shody, ISBN/DOI z metadat dokumentu; podpisy z `0004` zůstávají, dokud je volá nasazená verze |
 
-**Tahle verze potřebuje `0003` a `0004`** — pusť `--dry-run`, pak migraci,
-a teprve potom nasazuj. Všechny přidávají jen sloupce `IF NOT EXISTS`, indexy
-a funkce, na data nesahají. Po nasazení je navíc potřeba přeindexovat starší
+**Tahle verze potřebuje `0003`, `0004` a `0005`** — pusť `--dry-run`, pak
+migraci, a teprve potom nasazuj. Všechny přidávají jen sloupce `IF NOT
+EXISTS`, indexy a funkce, na data nesahají. Po nasazení je navíc potřeba přeindexovat starší
 dokumenty (`ANALYZER_VERSION` 2, viz Kapacita).
 
 Migrace `0002` založí roli `dawmain_app` SQL příkazem — jen taková role na

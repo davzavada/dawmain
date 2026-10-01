@@ -70,8 +70,8 @@ export function authMode(): AuthMode {
  * unrelated Authorization header must not be locked out when the real token
  * rides in x-api-key (the reason those fallbacks exist). Only the
  * Authorization bearer value is tried against Clerk — that is where OAuth
- * clients put access tokens; `auth()` reads it from the request context the
- * Clerk proxy (proxy.ts) attached.
+ * clients put access tokens; the route verifies it itself with
+ * authenticateRequest (below), never through the middleware's `auth()`.
  */
 export async function verifyRequestAuth(
   request: Request,

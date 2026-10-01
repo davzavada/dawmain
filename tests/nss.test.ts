@@ -4,9 +4,11 @@ import { describe, expect, it } from "vitest";
 import {
   buildNssSearchForm,
   ciselnikTitles,
+  decodeNssScriptLiteral,
   findField,
   findFieldStrict,
   isNssMissingBody,
+  nssFullText,
   parseCiselnikTree,
   parseNssActRef,
   parseNssDetail,
@@ -15,6 +17,7 @@ import {
   parseNssResults,
   selectFromCiselnik,
   validateNssApplies,
+  validateNssDates,
 } from "@/src/sources/nss";
 import { SourceError } from "@/src/sources/shared/errors";
 
@@ -118,12 +121,99 @@ describe("parseNssResults", () => {
     expect(page.pagination?.currSort).toContain("order by");
   });
 
+  it("reads a bare MyResTRowsCont fragment (per-row <tbody>) like page 1", () => {
+    // The row endpoint answers <tbody> blocks with no <table> around them;
+    // parsed as a document those start tags vanish and every row came out
+    // as "? — id N".
+    const fragment = RESULTS_HTML.slice(RESULTS_HTML.indexOf("<tbody>"), RESULTS_HTML.lastIndexOf("</tbody>") + 8);
+    expect(fragment).not.toContain("<table");
+    const page = parseNssResults(fragment);
+    expect(page.hits.map((hit) => hit.id)).toEqual(["743842", "724005"]);
+    expect(page.hits[0]).toMatchObject({
+      caseNumber: "1 Afs 25/2024 - 30",
+      date: "2026-06-10",
+      form: "rozsudek",
+      court: "Nejvyšší správní soud",
+    });
+    expect(page.hits[1].caseNumber).toContain("2 Azs 100/2025");
+    expect(page.hits[1].date).toBe("2026-06-09");
+  });
+
+  it("reads a fragment whose cell holds a table of its own like any other fragment", () => {
+    const fragment = `
+<tbody><tr><td><input type="hidden" name="ZobrazeneVysledky[0].ID" value="1" /></td>
+<td><table><tr><td>právní věta</td></tr></table></td>
+<td><a title="Citace: usnesení Nejvyššího správního soudu ze dne 2. 1. 2026, čj. 1 As 1/2026 - 10">1 As 1/2026</a></td></tr></tbody>`;
+    expect(parseNssResults(fragment).hits[0]).toMatchObject({ id: "1", caseNumber: "1 As 1/2026 - 10", date: "2026-01-02" });
+  });
+
+  it("never lends one row's citation to another when rows share a tbody", () => {
+    // Bare <tr> rows in table context land in ONE implied tbody.
+    const rows = `
+<tr><td><input type="hidden" name="ZobrazeneVysledky[0].ID" value="1" /></td>
+<td><a title="Citace: usnesení Nejvyššího správního soudu ze dne 2. 1. 2026, čj. 1 As 1/2026 - 10">1 As 1/2026</a></td></tr>
+<tr><td><input type="hidden" name="ZobrazeneVysledky[1].ID" value="2" /></td>
+<td><a title="Citace: rozsudek Nejvyššího správního soudu ze dne 3. 1. 2026, čj. 2 As 2/2026 - 20">2 As 2/2026</a></td></tr>`;
+    const page = parseNssResults(rows);
+    expect(page.hits.map((hit) => [hit.id, hit.caseNumber])).toEqual([
+      ["1", "1 As 1/2026 - 10"],
+      ["2", "2 As 2/2026 - 20"],
+    ]);
+  });
+
+  it("keeps an empty court for citations that name none (kárné soudy, Ds)", () => {
+    const page = parseNssResults(`<tbody><tr><td><input type="hidden" name="ZobrazeneVysledky[0].ID" value="784720" /></td>
+<td><a title="Citace: rozsudek  ze dne 7. 8. 2026, čj. 1 Ds 1/2026-83">1 Ds 1/2026</a></td></tr></tbody>`);
+    expect(page.hits[0]).toMatchObject({ court: "", form: "rozsudek", caseNumber: "1 Ds 1/2026-83", date: "2026-08-07" });
+  });
+
+  it("drops a pagination context that does not decode to JSON", () => {
+    const page = parseNssResults(RESULTS_HTML.replace("var currParams = '[{", "var currParams = '[{{"));
+    expect(page.pagination).toBeNull();
+    expect(page.hits).toHaveLength(2);
+  });
+
   it("flags the blank form (expired session) instead of reporting zero hits", () => {
     const page = parseNssResults(
       "<html><form><input name='__RequestVerificationToken' value='t'/></form></html>",
     );
     expect(page.blankForm).toBe(true);
     expect(page.total).toBeNull();
+  });
+});
+
+describe("decodeNssScriptLiteral", () => {
+  // The live currParams of a soudsenat + case-number search: 82 `\\` pairs,
+  // every codebook title JSON-quoted inside a JSON string.
+  const script = readFileSync(path.join(__dirname, "fixtures", "nss-search-form.html"), "utf8");
+  const rawParams = /var\s+currParams\s*=\s*'([^']*)'/.exec(script)![1];
+  const rawSort = /var\s+currSort\s*=\s*'([^']*)'/.exec(script)![1];
+
+  it("decodes the live currParams exactly as the browser's JS engine does", () => {
+    const engine = (raw: string) => new Function(`return '${raw}'`)() as string;
+    expect(decodeNssScriptLiteral(rawParams)).toBe(engine(rawParams));
+    expect(decodeNssScriptLiteral(rawSort)).toBe(engine(rawSort));
+    const conditions = JSON.parse(decodeNssScriptLiteral(rawParams)) as Array<{
+      TechnickyNazev: string;
+      vyhledavaciPodminkaHodnota: Array<{ ciselnikTreeData: string | null }>;
+    }>;
+    const court = conditions.find((condition) => condition.TechnickyNazev === "soudsenat");
+    expect(court?.vyhledavaciPodminkaHodnota[0].ciselnikTreeData).toContain('title:"kárné soudy"');
+  });
+
+  it("parseNssResults hands out a currParams that parses as JSON", () => {
+    const page = parseNssResults(script);
+    expect(() => JSON.parse(page.pagination!.currParams)).not.toThrow();
+    expect(page.pagination!.currParams).toContain('title:\\"kárné soudy\\"');
+  });
+
+  it("consumes an escaped backslash before a following escape (phrase queries)", () => {
+    // What JavaScriptEncoder writes for the JSON [{"HodnotaText":"\"dobré mravy\" a\/b"}]
+    const raw =
+      "[{\\u0022HodnotaText\\u0022:\\u0022\\\\\\u0022dobr\\u00E9 mravy\\\\\\u0022 a\\\\/b\\u0022}]";
+    const decoded = decodeNssScriptLiteral(raw);
+    expect(decoded).toBe('[{"HodnotaText":"\\"dobré mravy\\" a\\/b"}]');
+    expect(JSON.parse(decoded)).toEqual([{ HodnotaText: '"dobré mravy" a/b' }]);
   });
 });
 
@@ -268,6 +358,28 @@ describe("buildNssSearchForm (live-captured form)", () => {
       "8147,276,314,274,275,315,270,319,269,264,271,318,280",
     );
     expect(param(form, /^soudsenat$/, ".HodnotaCiselnikPolozky")).toContain("krajské soudy");
+  });
+
+  it("court: karne selects the kárné soudy AND the NSS kárný senát", () => {
+    const form = buildNssSearchForm(SEARCH_FORM.fields, { court: "karne" });
+    expect(param(form, /^soudsenat$/, ".HodnotaCiselnikPolozkySelected")).toBe("10747,10750,10749,10748,8156");
+    expect(param(form, /^soudsenat$/, ".HodnotaCiselnikPolozky")).toContain("kárný senát");
+  });
+
+  it("court: a group that lost one of its nodes drifts loudly", () => {
+    const pruned = SEARCH_FORM.fields.map((field) =>
+      field.name.endsWith(".ciselnikTreeData") && field.value.includes("kárný senát")
+        ? { ...field, value: field.value.replace(/\{id:8156,title:"kárný senát"\},?/, "") }
+        : field,
+    );
+    expect(pruned.some((field) => field.value.includes("kárný senát"))).toBe(false);
+    try {
+      buildNssSearchForm(pruned, { court: "karne" });
+      expect.unreachable();
+    } catch (error) {
+      expect((error as SourceError).kind).toBe("PARSE_DRIFT");
+      expect((error as SourceError).message).toContain("kárný senát");
+    }
   });
 
   it("court: rozsireny-senat selects the grand-chamber subtree", () => {
@@ -444,6 +556,24 @@ describe("buildNssSearchForm (live-captured form)", () => {
     expect(param(form, /^textDokumentu$/i, ".HodnotaText")).toBe("nezákonný zásah");
     expect(param(form, /^oznacenivecivcelku$/, ".HodnotaText")).toBe("1 Afs 25/2024");
   });
+
+  it("drops '§' from the full text only — NSS answers 0 for any query holding it", () => {
+    expect(nssFullText("náhrada nemajetkové újmy § 2958")).toBe("náhrada nemajetkové újmy 2958");
+    expect(nssFullText("§§ 12  a §13")).toBe("12 a 13");
+    const form = buildNssSearchForm(SEARCH_FORM.fields, {
+      query: "náhrada § 2958",
+      appliesAct: "89/2012",
+      appliesProvision: "§ 2958",
+    });
+    expect(param(form, /^textDokumentu$/i, ".HodnotaText")).toBe("náhrada 2958");
+    // The applied-provision row parses its own '§' and is untouched.
+    expect(param(form, /^aplikovanepravnipredpisysb§$/, ".HodnotaText")).toBe("2958");
+    // A query of nothing but '§' sets no full-text criterion at all: the
+    // field keeps the harvested form's own value.
+    const bare = buildNssSearchForm(SEARCH_FORM.fields, { query: "§", court: "nss" });
+    const none = buildNssSearchForm(SEARCH_FORM.fields, { court: "nss" });
+    expect(param(bare, /^textDokumentu$/i, ".HodnotaText")).toBe(param(none, /^textDokumentu$/i, ".HodnotaText"));
+  });
 });
 
 describe("isNssMissingBody", () => {
@@ -451,5 +581,59 @@ describe("isNssMissingBody", () => {
     expect(isNssMissingBody("<html><body>\n    N/A\n</body></html>")).toBe(true);
     expect(isNssMissingBody("N/A")).toBe(true);
     expect(isNssMissingBody("ROZSUDEK JMÉNEM REPUBLIKY " + "x".repeat(300))).toBe(false);
+  });
+
+  it("detects the live UTF-16 N/A page even when it was read as UTF-8", () => {
+    // Live capture: /DokumentOriginal/Html/{missing id} is UTF-16LE with no
+    // charset — read as UTF-8 a NUL follows every character.
+    const page = readFileSync(path.join(__dirname, "fixtures", "nss-missing-document.html"), "utf8");
+    const utf16 = Buffer.from(`\ufeff${page}`, "utf16le");
+    const misread = new TextDecoder("utf-8").decode(utf16);
+    expect(misread.length).toBeGreaterThan(200);
+    expect(isNssMissingBody(misread)).toBe(true);
+    expect(isNssMissingBody(new TextDecoder("utf-8").decode(utf16.subarray(2)))).toBe(true);
+  });
+});
+
+describe("validateNssDates", () => {
+  const kindOf = (run: () => unknown) => {
+    try {
+      run();
+    } catch (error) {
+      return (error as SourceError).kind;
+    }
+    return "passed";
+  };
+
+  it("refuses impossible calendar days — NSS would silently drop the bound", () => {
+    expect(kindOf(() => validateNssDates({ dateFrom: "2026-02-30" }))).toBe("INPUT_INVALID");
+    expect(kindOf(() => validateNssDates({ dateTo: "2026-13-01" }))).toBe("INPUT_INVALID");
+    expect(kindOf(() => validateNssDates({ publishedTo: "2026-04-31" }))).toBe("INPUT_INVALID");
+    expect(kindOf(() => validateNssDates({ publishedFrom: "2026-01-00" }))).toBe("INPUT_INVALID");
+    expect(kindOf(() => buildNssSearchForm(SEARCH_FORM.fields, { dateFrom: "2026-02-30" }))).toBe("INPUT_INVALID");
+    try {
+      validateNssDates({ dateFrom: "2026-02-30" });
+    } catch (error) {
+      expect((error as SourceError).message).toBe('date_from "2026-02-30" is not a real date.');
+      expect((error as SourceError).hint).toContain("2026-02-28");
+    }
+  });
+
+  it("accepts a leap day and posts it zero-padded", () => {
+    expect(kindOf(() => validateNssDates({ dateFrom: "2024-02-29", dateTo: "2024-03-01" }))).toBe("passed");
+    const form = buildNssSearchForm(SEARCH_FORM.fields, { dateFrom: "2024-02-29" });
+    expect(param(form, /^datumvydanirozhodnuti$/, ".HodnotaDatumACasOd")).toBe("29.02.2024");
+    expect(kindOf(() => validateNssDates({ dateFrom: "2025-02-29" }))).toBe("INPUT_INVALID");
+  });
+
+  it("refuses inverted ranges by name", () => {
+    try {
+      validateNssDates({ publishedFrom: "2026-05-01", publishedTo: "2026-04-01" });
+      expect.unreachable();
+    } catch (error) {
+      expect((error as SourceError).kind).toBe("INPUT_INVALID");
+      expect((error as SourceError).message).toContain("published_from 2026-05-01 is after published_to 2026-04-01");
+    }
+    expect(kindOf(() => validateNssDates({ dateFrom: "2026-04-01", dateTo: "2026-04-01" }))).toBe("passed");
   });
 });

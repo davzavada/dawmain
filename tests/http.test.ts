@@ -114,4 +114,53 @@ describe("fetchUpstream", () => {
     expect(response.status).toBe(404);
     expect(health("NotFound-src")).toMatchObject({ ok: false, detail: "HTTP 404" });
   });
+  it("makes at most two attempts: a network error then a 503 is not retried again", async () => {
+    let calls = 0;
+    vi.stubGlobal("fetch", async () => {
+      calls++;
+      if (calls === 1) throw new TypeError("fetch failed");
+      return new Response("busy", { status: 503 });
+    });
+    const error = await settle(fetchUpstream("TwoAttempts-src", "https://example.test/")).catch((e) => e);
+    expect(calls).toBe(2);
+    expect(error).toBeInstanceOf(SourceError);
+    expect(error.kind).toBe("UPSTREAM_ERROR");
+    expect(error.message).toContain("HTTP 503 even after a retry");
+  });
+
+  it("says 'even after a retry' only when a retry was made", async () => {
+    vi.stubGlobal("fetch", async () => new Response("boom", { status: 500 }));
+    const error = await settle(
+      fetchUpstream("NoRetry-src", "https://example.test/", { method: "POST" }),
+    ).catch((e) => e);
+    expect(error.message).toBe("NoRetry-src answered HTTP 500.");
+  });
+
+  it("passStatus hands the status back unretried, unthrown and not recorded as an outage", async () => {
+    let calls = 0;
+    vi.stubGlobal("fetch", async () => {
+      calls++;
+      return new Response("Virtuoso 37000 Error SP030", { status: 500 });
+    });
+    const response = await settle(
+      fetchUpstream("Pass-src", "https://example.test/", { passStatus: (status) => status === 500 }),
+    );
+    expect(calls).toBe(1);
+    expect(response.status).toBe(500);
+    expect(await response.text()).toContain("SP030");
+    expect(health("Pass-src")?.ok).toBe(true);
+  });
+
+  it("passStatus still lets other statuses take the usual retry", async () => {
+    let calls = 0;
+    vi.stubGlobal("fetch", async () => {
+      calls++;
+      return calls === 1 ? new Response("busy", { status: 503 }) : new Response("refused", { status: 500 });
+    });
+    const response = await settle(
+      fetchUpstream("PassRetry-src", "https://example.test/", { passStatus: (status) => status === 500 }),
+    );
+    expect(calls).toBe(2);
+    expect(response.status).toBe(500);
+  });
 });

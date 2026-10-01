@@ -1,6 +1,7 @@
 import { SourceError } from "./shared/errors";
 import { fetchUpstream } from "./shared/http";
-import { htmlToText, loadHtml } from "./shared/html";
+import type { CheerioAPI } from "cheerio";
+import { loadHtml } from "./shared/html";
 import { SEARCH_OPERATORS, czechToIso, parseCaseNumber } from "./shared/text";
 import { DOCUMENT_TTL_MS, SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
 
@@ -22,8 +23,17 @@ const BASE = "https://rozhodnuti.nsoud.cz/Judikatura/judikatura_ns.nsf";
 /** Result anchors: a.odk linking to /WebSearch/{32-hex UNID}?openDocument. */
 const UNID_HREF_RE = /\/WebSearch\/([0-9A-Fa-f]{32})\?openDocument/;
 const EMPTY_MARKER = "Nebyly nalezeny žádné výsledky";
-const TRUNCATED_RE = /Podmínce vyhovuje:\s*([\d\s]+)/;
-const COUNT_RE = /Výsledky\s+\d+\s*-\s*\d+\s+z\s+(\d[\d\s]*)/;
+/**
+ * Counts print thousands with a space ("50 454"). Only a space followed by
+ * three digits continues the number: "[\d\s]+" also swallowed the next line
+ * when nothing followed the count on its own ("… z 2" + "1 Cdo 1/2024" read
+ * as 21).
+ */
+const NS_COUNT = String.raw`(\d+(?:[ \u00a0]\d{3})*)(?!\d)`;
+const TRUNCATED_RE = new RegExp(String.raw`Podmínce vyhovuje:\s*${NS_COUNT}`);
+const COUNT_RE = new RegExp(String.raw`Výsledky\s+\d+\s*-\s*\d+\s+z\s+${NS_COUNT}`);
+/** Exactly one match gets its own banner (live, 2026-09) instead of "Výsledky 1 - 1 z 1". */
+const SINGLE_RE = /Byl nalezen jeden výsledek/;
 
 export interface NsSearchInput {
   query?: string;
@@ -54,11 +64,23 @@ export interface SpisovaZnacka {
 
 /**
  * Split "23 Cdo 116/2017" into the four fields Domino indexes separately.
- * Shares the parser with rozhodnuti.justice.cz; only the lowercasing is
- * ours — [spzn2] is indexed lowercase. Pure — unit-tested.
+ * Shares the parser with rozhodnuti.justice.cz; what is ours: [spzn2] is
+ * indexed lowercase, a leading "sp. zn." / "č. j." is dropped (the decision's
+ * own text never carries it), and a TWO-digit year is accepted — the 1990s
+ * značky ("20 Cdo 2018/98", many of them Sbírka [A] decisions) are indexed
+ * with the year as written: measured live, [spzn1]=20 AND [spzn2]=cdo AND
+ * [spzn3]=2018 AND [spzn4]=98 found exactly that decision, while the phrase
+ * fallback listed 251 decisions citing it without it. justice.cz keeps the
+ * shared four-digit rule. Pure — unit-tested.
  */
 export function parseSpisovaZnacka(raw: string): SpisovaZnacka | null {
-  const parts = parseCaseNumber(raw);
+  const bare = raw.replace(/^\s*(?:sp\.\s*zn\.|č\.\s*j\.)\s*/iu, "");
+  const parts =
+    parseCaseNumber(bare) ??
+    (() => {
+      const m = /^\s*(?:(\d{1,3})\s+)?(\p{L}+)\s+(\d+)\s*\/\s*(\d{2})(?!\d)/u.exec(bare);
+      return m ? { senate: m[1] ?? null, registry: m[2], number: m[3], year: m[4] } : null;
+    })();
   if (!parts) return null;
   return {
     senate: parts.senate,
@@ -86,30 +108,51 @@ const NS_CASE_MARK_RE =
  * measured live: `nájemce výpověď` matched 1 decision, `nájemce AND
  * výpověď` 1 501; `výpověď z nájmu bez výpovědní doby` 1 vs 409 with AND.
  * A research query written as plain words means "all of these words", so
- * bare words are joined with AND. Anything the caller composed — quotes,
- * parentheses, an operator — goes up untouched: they asked for exactly
- * that. Spisové značky stay phrases, tokens with inner punctuation
- * ("1945/2010", "89/2012") are quoted so Domino keeps them together, and
- * one-character words (z, v, a, o…) are dropped: as AND terms they only
- * cost time. Pure — unit-tested.
+ * bare words are joined with AND. So is a "quoted phrase" next to them: the
+ * same quirk read `"dobré mravy" nájem` as the one phrase "dobré mravy
+ * nájem" (live: 0 decisions, against 119 for `"dobré mravy" AND nájem`),
+ * so phrases are pulled out as units first. What the caller composed —
+ * parentheses, & | !, an operator word outside a phrase — goes up
+ * untouched: they asked for exactly that. Spisové značky stay phrases,
+ * tokens with inner punctuation ("1945/2010", "89/2012") are quoted so
+ * Domino keeps them together, and one-character words (z, v, a, o…) are
+ * dropped: as AND terms they only cost time. A word ending in "?" is asked
+ * both ways, `(platná OR platná?)`: the "?" of a question typed verbatim
+ * would otherwise demand one more character and zero the search (live:
+ * "je výpověď z nájmu platná?" 0 decisions, 255 without the "?"), while
+ * "nájm?" is a working one-letter wildcard (≥ 1 000 decisions, "nájm"
+ * alone 0) that must keep working. Pure — unit-tested.
  */
 export function nsFullText(raw: string): string {
   const text = sanitizeNsFullText(raw);
   if (!text) return text;
+  const units: string[] = [];
+  const addUnit = (unit: string) => {
+    if (!units.includes(unit)) units.push(unit);
+  };
+  // Phrases first — an operator word or a bracket INSIDE one is part of the
+  // phrase ("not guilty"), not a sign that the caller composed the query.
+  const unquoted = text.replace(/"[^"]+"/g, (phrase) => {
+    addUnit(phrase);
+    return " ";
+  });
   const composed =
-    /["()&|!]/.test(text) || text.split(" ").some((token) => SEARCH_OPERATORS.has(token.toUpperCase()));
+    /[()&|!]/.test(unquoted) ||
+    unquoted.split(" ").some((token) => SEARCH_OPERATORS.has(token.toUpperCase()));
   if (composed) return text;
 
-  const units: string[] = [];
-  const rest = text.replace(NS_CASE_MARK_RE, (mark) => {
-    units.push(`"${mark.replace(/\s*\/\s*/, "/").replace(/\s+/g, " ")}"`);
+  const rest = unquoted.replace(NS_CASE_MARK_RE, (mark) => {
+    addUnit(`"${mark.replace(/\s*\/\s*/, "/").replace(/\s+/g, " ")}"`);
     return " ";
   });
   for (const token of rest.split(/\s+/)) {
     const word = token.replace(/^[^\p{L}\p{N}*?]+|[^\p{L}\p{N}*?]+$/gu, "");
     if ([...word.replace(/[*?]/g, "")].length < 2) continue;
-    const unit = /[^\p{L}\p{N}*?]/u.test(word) ? `"${word}"` : word;
-    if (!units.includes(unit)) units.push(unit);
+    const stem = word.replace(/\?+$/u, "");
+    // A wildcard inside a quoted token is meaningless — the "?" just goes.
+    if (/[^\p{L}\p{N}*?]/u.test(stem)) addUnit(`"${stem}"`);
+    else if (stem !== word) addUnit(`(${stem} OR ${word})`);
+    else addUnit(word);
   }
   return units.length ? units.join(" AND ") : text;
 }
@@ -131,12 +174,17 @@ function balancedParens(text: string): boolean {
  * Square brackets and braces go unconditionally: they are how Domino names
  * fields, and a caller who could write them would own the whole query.
  * Unbalanced quotes or parentheses are dropped rather than passed on —
- * Domino answers those with a syntax error, not with results. Pure.
+ * Domino answers those with a syntax error, not with results. Czech
+ * typographic quotes („…“) are the same phrase marks as "…". "§" goes
+ * everywhere, operator expressions included: Domino never indexes it, so
+ * it matches nothing. Pure.
  */
 export function sanitizeNsFullText(raw: string): string {
-  let text = raw.replace(/[[\]{}\\]/g, " ");
+  let text = raw.replace(/[[\]{}\\]/g, " ").replace(/§+/g, " ").replace(/[„“”]/g, '"');
   if ((text.match(/"/g)?.length ?? 0) % 2 === 1) text = text.replace(/"/g, " ");
   if (!balancedParens(text)) text = text.replace(/[()]/g, " ");
+  // A phrase that held only "§" (or blanks) would reach Domino as "".
+  text = text.replace(/"([^"]*)"/g, (_, inner: string) => (inner.trim() ? `"${inner.trim()}"` : " "));
   return text.replace(/\s+/g, " ").trim();
 }
 
@@ -239,16 +287,44 @@ export interface NsSearchPage {
   empty: boolean;
 }
 
+/** htmlToText's whitespace rules, for text read off an already-parsed DOM. */
+function normalizeNsText(text: string): string {
+  return text
+    .replace(/ /g, " ")
+    .replace(/[ \t]+/g, " ")
+    .replace(/ ?\n ?/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/**
+ * htmlToText on a DOM we already hold: the same removals, the same line
+ * breaks after block elements, the same whitespace — without serialising
+ * and parsing the page again. A 900-row result page used to be parsed twice
+ * plus once per hit (measured 160 ms against 69 ms for one parse; a 224 kB
+ * decision 33 ms against 21 ms). Mutates `$`: block elements gain their
+ * "\n", which later reads of the same DOM rely on (stacked značky split at
+ * <br>).
+ */
+function nsDomText($: CheerioAPI): string {
+  $("script, style, noscript").remove();
+  $("p, div, br, tr, li, h1, h2, h3, h4, h5, h6").each((_, el) => {
+    $(el).append("\n");
+  });
+  return normalizeNsText($.root().text());
+}
+
 /** Parse a $$WebSearch1 result page. Pure — unit-tested against fixtures. */
 export function parseNsSearch(html: string): NsSearchPage {
   // Banners often arrive with Czech letters as HTML entities (V&yacute;sledky)
-  // — match the count markers against decoded text, the rows against raw HTML.
-  const decoded = htmlToText(html);
+  // — match the count markers against decoded text, the rows against the DOM.
+  const $ = loadHtml(html);
+  const decoded = nsDomText($);
   if (decoded.includes(EMPTY_MARKER)) {
     return { hits: [], total: 0, matched: 0, truncated: false, empty: true };
   }
   const hits: NsSearchHit[] = [];
-  const $ = loadHtml(html);
+  const seen = new Set<string>();
   $("a.odk").each((_, el) => {
     const href = $(el).attr("href") ?? "";
     const match = UNID_HREF_RE.exec(href);
@@ -256,9 +332,11 @@ export function parseNsSearch(html: string): NsSearchPage {
     const unid = match[1].toUpperCase();
     // A decision filed under two categories can come back as two rows
     // (seen with date ordering) — one hit per document.
-    if (hits.some((hit) => hit.unid === unid)) return;
-    // The anchor may stack several spisové značky separated by <br/>.
-    const caseNumbers = htmlToText($(el).html() ?? "")
+    if (seen.has(unid)) return;
+    seen.add(unid);
+    // The anchor may stack several spisové značky separated by <br/> — the
+    // "\n" nsDomText appended to each <br> splits them.
+    const caseNumbers = normalizeNsText($(el).text())
       .split("\n")
       .map((line) => line.trim())
       .filter(Boolean);
@@ -280,7 +358,7 @@ export function parseNsSearch(html: string): NsSearchPage {
   const countMatch = COUNT_RE.exec(decoded);
   const parseNumber = (raw: string) => Number(raw.replace(/\s+/g, ""));
   const matched = truncatedMatch ? parseNumber(truncatedMatch[1]) : null;
-  const total = countMatch ? parseNumber(countMatch[1]) : matched;
+  const total = countMatch ? parseNumber(countMatch[1]) : SINGLE_RE.test(decoded) ? 1 : matched;
 
   if (!hits.length && total === null) {
     throw new SourceError(
@@ -298,7 +376,21 @@ export interface NsDecision {
   metadata: Record<string, string>;
   text: string;
   url: string;
+  /**
+   * WebPrint carried no body and the WebSearch rendition could not be read
+   * (failed, or no time left in the call) — "no body" is unconfirmed. Such a
+   * result is never cached.
+   */
+  bodyUnverified?: true;
 }
+
+/**
+ * How far into the extracted text the judgment's opening may sit. What
+ * precedes it on either rendition — citation note, case-number line,
+ * headings — is ≈ 600 characters; a lower court's reasoning that quotes
+ * "Nejvyšší soud …" lies further in.
+ */
+const NS_OPENING_REACH = 2_000;
 
 /** Labels of the metadata table (both WebSearch and WebPrint variants). */
 const META_LABELS = [
@@ -345,14 +437,36 @@ export function parseNsDecision(html: string, unid: string): NsDecision {
 
   // Ústavní stížnost outcomes live in a table nested inside the metadata
   // table on both renditions — decisive "is this still good law" metadata.
+  // Its dates come as WebPrint's US 02/26/2014 or WebSearch's 26.2.2014 —
+  // both go out as ISO, like Datum rozhodnutí (03/04/2015 read the Czech way
+  // is 3 April), each labelled by its column so the filing date is not taken
+  // for the day ÚS decided.
   const usComplaints: string[] = [];
   $("table table tr").each((_, row) => {
-    const cells = $(row)
+    const raw = $(row)
       .find("td")
-      .toArray()
-      .map((cell) => $(cell).text().replace(/\s+/g, " ").trim())
-      .filter(Boolean);
-    if (cells.some((cell) => /ÚS\s*\d+\/\d+/u.test(cell))) usComplaints.push(cells.join(" | "));
+      .map((_, cell) => $(cell).text().replace(/\s+/g, " ").trim())
+      .get();
+    if (!raw.some((cell) => /ÚS\s*\d+\/\d+/u.test(cell))) return;
+    const header = $(row)
+      .closest("table")
+      .find("tr")
+      .first()
+      .find("td")
+      .map((_, cell) => $(cell).text().replace(/\s+/g, " ").trim())
+      .get();
+    const cells = raw.map((cell, i) => {
+      // Slashes are US, dots Czech — never the other way round.
+      const iso = /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(cell)
+        ? usToIso(cell)
+        : /^\d{1,2}\.\s*\d{1,2}\.\s*\d{4}$/.test(cell)
+          ? czechToIso(cell)
+          : null;
+      if (!iso) return cell;
+      const label = header[i]?.toLowerCase() ?? "";
+      return /datum/.test(label) ? `${label} ${iso}` : iso;
+    });
+    usComplaints.push(cells.filter(Boolean).join(" | "));
   });
   if (usComplaints.length) metadata["Ústavní stížnost"] = usComplaints.join("; ");
 
@@ -368,10 +482,25 @@ export function parseNsDecision(html: string, unid: string): NsDecision {
   $("table")
     .filter((_, table) => $(table).find("td.left-part").length > 0)
     .remove();
-  let text = htmlToText($.html());
-  // Older decisions (≲2013) open with "Nejvyšší soud České republiky rozhodl".
-  const start = text.search(/Nejvyšší soud(?: České republiky)? (?:rozhodl|jako soud)/);
-  if (start > 0) text = text.slice(start);
+  let text = nsDomText($);
+  // Cut what precedes the judgment's opening — on WebSearch the citation
+  // note and the headings, on WebPrint the case-number line and headings
+  // (≈ 600 characters at most). The opening is "Nejvyšší soud" + a lowercase
+  // word at the start of a line: "… rozhodl", "… jako soud dovolací", but
+  // also "… projednal v neveřejném zasedání … a rozhodl takto:" (criminal
+  // Tdo, ~5 % of the decisions of Q1 2025) and "… v senátě složeném".
+  // Looked for in the head only: searched over the whole text, the old
+  // verb list missed those openings and cut at point 16 of the reasoning
+  // ("Nejvyšší soud jako soud dovolací (§ 265c tr. řádu) zkoumal", live:
+  // 4 Tdo 466/2026) — výrok and history gone, the rest reported as no body.
+  // No opening in the head (a lower court's Sbírka decision), no cut — nor
+  // when a výrok ("… takto:") precedes the match: then the match is a short
+  // lower-court body quoting NS, and the cut would take its výrok.
+  const opening = /(?:^|\n)[ \t]*(Nejvyšší soud(?: České republiky| ČR)?,?\s+)\p{Ll}/u.exec(
+    text.slice(0, NS_OPENING_REACH),
+  );
+  const start = opening ? opening.index + opening[0].indexOf(opening[1]) : -1;
+  if (start > 0 && !/takto\s*:/iu.test(text.slice(0, start))) text = text.slice(start);
   // The citation-format note PRECEDES the body on WebSearch pages and closes
   // WebPrint pages — cut it only when it trails the text.
   const end = text.lastIndexOf("Citace rozhodnutí");
@@ -431,23 +560,117 @@ export function usToIso(raw: string): string | null {
  * oversized result set: HTTP 500, for minutes, even to a query that matches
  * three documents. Our own fan-out is the likeliest source of such a burst —
  * three `queries` variants plus `read_top` documents leave in the same tick —
- * so every NS request queues behind this gate. It bounds one invocation, which
- * is where the bursts come from; other warm instances are on their own.
+ * so every NS request queues behind this gate. It lives in module scope, so
+ * it bounds every call on this warm instance together; other instances are
+ * on their own.
+ *
+ * A freed slot passes straight to the next waiter: freed first and handed
+ * over a tick later, it could be taken by a newcomer in between, and a third
+ * request reached the box. A waiter leaves the queue when its call's
+ * deadline comes — a request nobody will wait for is never sent — and the
+ * retry back-off is slept outside the gate, so one refused request does not
+ * hold a slot idle for 2 s while others queue behind it.
  */
 const NS_CONCURRENCY = 2;
 let nsInFlight = 0;
 const nsWaiting: Array<() => void> = [];
 
-async function nsGate<T>(run: () => Promise<T>): Promise<T> {
-  if (nsInFlight >= NS_CONCURRENCY) {
-    await new Promise<void>((resolve) => nsWaiting.push(resolve));
-  }
-  nsInFlight += 1;
+/** One NS request never waits longer than this (the shared fetchUpstream default). */
+const NS_REQUEST_TIMEOUT_MS = 15_000;
+/** With less time than this left in the call, a request is not worth sending. */
+const NS_MIN_ATTEMPT_MS = 3_000;
+/**
+ * Deadline of a call that names none. Every caller runs inside the MCP
+ * route's 60 s maxDuration; without a deadline, three variants queued behind
+ * two slow 500s (attempt, back-off, retry) finished at ~60 s — measured with
+ * fake timers — and the platform killed the call together with the variants
+ * that had answered.
+ */
+export const NS_DEFAULT_BUDGET_MS = 45_000;
+
+export interface NsCallOptions {
+  /**
+   * Epoch ms by which NS must have answered. Queueing at the gate, every
+   * request and the retry all count against it.
+   */
+  deadlineAt?: number;
+}
+
+/** The call's deadline, not NS, ended this request — never retried. */
+class NsOutOfTime extends SourceError {}
+
+function nsOutOfTime(): NsOutOfTime {
+  return new NsOutOfTime(
+    SOURCE,
+    "UPSTREAM_UNREACHABLE",
+    "NS was not asked: this call's time ran out while earlier NS requests were being answered.",
+    "Ask again with fewer query variants or a smaller read_top, or in a minute; the other courts are unaffected.",
+  );
+}
+
+/** Wait for a gate slot until shortly before the deadline. */
+function nsQueue(deadlineAt: number): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const take = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(
+      () => {
+        const index = nsWaiting.indexOf(take);
+        if (index >= 0) nsWaiting.splice(index, 1);
+        reject(nsOutOfTime());
+      },
+      Math.max(0, deadlineAt - Date.now() - NS_MIN_ATTEMPT_MS),
+    );
+    nsWaiting.push(take);
+  });
+}
+
+async function nsGate<T>(deadlineAt: number, run: (timeoutMs: number) => Promise<T>): Promise<T> {
+  if (nsInFlight < NS_CONCURRENCY) nsInFlight += 1;
+  else await nsQueue(deadlineAt); // the releasing request handed its slot over
   try {
-    return await run();
+    const left = deadlineAt - Date.now();
+    if (left < NS_MIN_ATTEMPT_MS) throw nsOutOfTime();
+    return await run(Math.min(NS_REQUEST_TIMEOUT_MS, left));
   } finally {
-    nsInFlight -= 1;
-    nsWaiting.shift()?.();
+    const next = nsWaiting.shift();
+    if (next) next();
+    else nsInFlight -= 1;
+  }
+}
+
+/**
+ * One NS request through the gate, with one spaced retry, and no more:
+ * hammering a box that is already refusing is exactly what we should not do
+ * to a court that publishes its case law for free. fetchUpstream's own retry
+ * is off — it would sleep while holding the gate and knows nothing of the
+ * deadline. The retry goes out only while the call still has time for it.
+ * `retryUnreachable` also retries a network error or timeout (the document
+ * renditions, as fetchUpstream's GET retry did); a search that timed out is
+ * not re-sent, as before — the box is still busy with the first one.
+ */
+async function nsFetch(url: string, deadlineAt: number, retryUnreachable: boolean): Promise<Response> {
+  const send = () =>
+    nsGate(deadlineAt, (timeoutMs) =>
+      fetchUpstream(SOURCE, url, {
+        headers: { referer: "https://rozhodnuti.nsoud.cz/" },
+        retry: false,
+        timeoutMs,
+      }),
+    );
+  try {
+    return await send();
+  } catch (error) {
+    const retryable =
+      error instanceof SourceError &&
+      !(error instanceof NsOutOfTime) &&
+      (error.kind === "UPSTREAM_ERROR" || (retryUnreachable && error.kind === "UPSTREAM_UNREACHABLE"));
+    const backoff = 1500 + Math.random() * 1000;
+    if (!retryable || deadlineAt - Date.now() - backoff < NS_MIN_ATTEMPT_MS) throw error;
+    await new Promise((resolve) => setTimeout(resolve, backoff));
+    return send();
   }
 }
 
@@ -469,48 +692,66 @@ export function nsFetchCount(count: number): number {
 
 /** "Podmínce vyhovuje" never exceeds this under relevance order. */
 export const NS_SEARCH_MAX = 1000;
-/** Rows read from the top per relevance request (see nsRelevanceCount). */
+/** Rows 0–99 of a relevance list: the first block (see nsRelevanceCount). */
 const NS_RELEVANCE_BLOCK = 100;
+/** Everything deeper: one block over the whole 900-document window. */
+const NS_RELEVANCE_WINDOW = 900;
 
 /**
- * Rows to request for a relevance-ordered page. Domino's relevance order
+ * The deepest block a relevance-ordered page needs. Domino's relevance order
  * (SearchOrder=1) serves rows ONLY from the top of the list — measured live
  * 2026-09: Start=21, 101 and 401 each came back as an empty table under a
  * banner claiming that very range, while Start=0 with Count=900 returned the
  * rows. So every relevance page is read from the top and sliced here. The
- * count is bucketed to blocks of 100 so consecutive pages come from one and
- * the same ranking (the order shifted slightly between Count=20 and 900) and
- * share one cached upstream response. Pure — unit-tested.
+ * ranking itself depends on Count: rows 96–100 of "výpověď z nájmu" were five
+ * different decisions at Count=100 and at Count=200 (live, 2026-09), so a
+ * list read from blocks growing by 100 repeated hits across pages and never
+ * showed others. Two tiers instead: rows 0–99 always come from the Count=100
+ * block — pages 1–5 of every query, and the block caselaw_search's NS lane
+ * reads, share it — and anything deeper from ONE Count=900 block, the first
+ * block's documents taken out, cached for every deeper page. Pure —
+ * unit-tested.
  */
 export function nsRelevanceCount(start: number, count: number): number {
-  return Math.min(900, Math.ceil((start + count) / NS_RELEVANCE_BLOCK) * NS_RELEVANCE_BLOCK);
+  return start + count <= NS_RELEVANCE_BLOCK ? NS_RELEVANCE_BLOCK : NS_RELEVANCE_WINDOW;
 }
 
 /** Parsed result pages by exact upstream URL — relevance pages share blocks. */
 const upstreamCache = new TtlCache<NsSearchPage>(SEARCH_TTL_MS);
 
-async function fetchNsResults(url: string): Promise<NsSearchPage> {
-  // No automatic 5xx retry: NS 500s are deterministic for the given window
-  // (capacity, not flakiness) — re-sending the same query just hammers the box;
-  // the caller falls back to a narrower window instead.
-  // One spaced retry, and no more: hammering a box that is already refusing is
-  // exactly what we should not do to a court that publishes its case law for
-  // free. (The morning's flood of 500s was our own small Count — NS_MIN_COUNT
-  // — not the court's capacity; with a full page they have not recurred.)
-  const response = await nsGate(async () => {
-    const send = () =>
-      fetchUpstream(SOURCE, url, {
-        headers: { referer: "https://rozhodnuti.nsoud.cz/" },
-        retry: false,
-      });
-    try {
-      return await send();
-    } catch (error) {
-      if (!(error instanceof SourceError && error.kind === "UPSTREAM_ERROR")) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 1500 + Math.random() * 1000));
-      return send();
+const NS_REFUSED_HINT =
+  "The NS server refused this search and a retry did not help. Try a narrower query — add a term, a date range, type or category — or come back to it in a minute; the other courts are unaffected, so finish the rešerše there and say in the memo that NS did not answer.";
+
+async function fetchNsResults(url: string, deadlineAt: number): Promise<NsSearchPage> {
+  // (The morning's flood of 500s was our own small Count — NS_MIN_COUNT —
+  // not the court's capacity; with a full page they have not recurred.)
+  let response: Response;
+  try {
+    response = await nsFetch(url, deadlineAt, false);
+  } catch (error) {
+    if (error instanceof SourceError && error.kind === "UPSTREAM_ERROR") {
+      // Measured: a full-text term combined with a [datum_predani_na_web]
+      // range dies on windows the same query survives on [datum_rozhodnuti]
+      // ("31 Cdo 1945/2010" over 2016: 500 vs 22 hits). The publication date
+      // is for listing what NS put up lately, not for full-text research.
+      throw new SourceError(SOURCE, "UPSTREAM_ERROR", error.message, NS_REFUSED_HINT);
     }
-  });
+    throw error;
+  }
+  // fetchUpstream throws only on 429/5xx. Any other refusal parsed as a
+  // result page came out as PARSE_DRIFT — "the layout may have changed" —
+  // and sent the model after a layout change that never happened.
+  if (!response.ok) {
+    const tooLong = [400, 413, 414].includes(response.status);
+    throw new SourceError(
+      SOURCE,
+      tooLong ? "INPUT_INVALID" : "UPSTREAM_ERROR",
+      `NS refused the search (HTTP ${response.status}).`,
+      tooLong
+        ? "Shorten the query or split it into 'queries' variants, and check its quotes and operators."
+        : "Try again in a minute; the other courts are unaffected.",
+    );
+  }
   return parseNsSearch(await response.text());
 }
 
@@ -518,6 +759,7 @@ async function runNsSearch(
   input: NsSearchInput,
   start: number,
   count: number,
+  deadlineAt: number,
 ): Promise<NsSearchPage> {
   const query = buildNsQuery(input);
   // Full text is ordered by relevance. The view order (4) used before is the
@@ -526,20 +768,36 @@ async function runNsSearch(
   // A field-only listing has no ranking to offer, so it keeps the view order,
   // which pages with Start and reports the true count.
   const relevance = Boolean(input.query);
-  const url =
+  const urlFor = (first: number, rows: number) =>
     `${BASE}/$$WebSearch1?SearchView&Query=${encodeURIComponent(query)}` +
     // SearchMax must stay large: SearchMax=1 provokes HTTP 500 upstream.
-    `&SearchMax=${NS_SEARCH_MAX}&SearchOrder=${relevance ? 1 : 4}` +
-    `&Start=${relevance ? 0 : start}&Count=${relevance ? nsRelevanceCount(start, count) : nsFetchCount(count)}&pohled=1`;
-  const page = await upstreamCache.through(url, () => fetchNsResults(url));
-  // We asked for a full page (or block) even when the caller wanted three rows.
-  const hits = relevance ? page.hits.slice(start, start + count) : page.hits.slice(0, count);
+    `&SearchMax=${NS_SEARCH_MAX}&SearchOrder=${relevance ? 1 : 4}&Start=${first}&Count=${rows}&pohled=1`;
+  const fetchPage = (url: string) => upstreamCache.through(url, () => fetchNsResults(url, deadlineAt));
+
+  if (!relevance) {
+    // Domino's Start is 1-based (Start=0 reads as 1): offset 20 is Start=21.
+    // Start=offset repeated page 1's last hit at the top of page 2, and every
+    // later hit was numbered one too high (live, 2026-09).
+    const page = await fetchPage(urlFor(start + 1, nsFetchCount(count)));
+    // We asked for a full page even when the caller wanted three rows.
+    return { ...page, hits: page.hits.slice(0, count), matchedIsMinimum: false };
+  }
+
+  const top = await fetchPage(urlFor(0, NS_RELEVANCE_BLOCK));
+  let ranked = top.hits;
+  const moreThanBlock =
+    top.hits.length >= NS_RELEVANCE_BLOCK || (top.total ?? 0) > NS_RELEVANCE_BLOCK;
+  if (nsRelevanceCount(start, count) > NS_RELEVANCE_BLOCK && moreThanBlock) {
+    const deep = await fetchPage(urlFor(0, NS_RELEVANCE_WINDOW));
+    const shown = new Set(top.hits.map((hit) => hit.unid));
+    ranked = [...top.hits, ...deep.hits.filter((hit) => !shown.has(hit.unid))];
+  }
   // Under relevance the banner counts at most SearchMax matches. Hit URLs
   // stay plain: the highlighted link comes from ns_get_decision with `find`,
   // opening at the very passage a memo quotes — search-term highlights on
   // every hit cost ~80 characters apiece and were rarely the cited link.
-  const matchedIsMinimum = relevance && page.matched !== null && page.matched >= NS_SEARCH_MAX;
-  return { ...page, hits, matchedIsMinimum };
+  const matchedIsMinimum = top.matched !== null && top.matched >= NS_SEARCH_MAX;
+  return { ...top, hits: ranked.slice(start, start + count), matchedIsMinimum };
 }
 
 const searchCache = new TtlCache<NsSearchPage>(SEARCH_TTL_MS);
@@ -557,29 +815,15 @@ export async function searchNs(
   input: NsSearchInput,
   start: number,
   count: number,
+  options: NsCallOptions = {},
 ): Promise<NsSearchPage> {
-  return searchCache.through(memoKey("ns-search", [input, start, count]), async () => {
-    try {
-      return await runNsSearch(input, start, count);
-    } catch (error) {
-      if (error instanceof SourceError && error.kind === "UPSTREAM_ERROR") {
-        // Measured: a full-text term combined with a [datum_predani_na_web]
-        // range dies on windows the same query survives on [datum_rozhodnuti]
-        // ("31 Cdo 1945/2010" over 2016: 500 vs 22 hits). The publication date
-        // is for listing what NS put up lately, not for full-text research.
-        throw new SourceError(
-          SOURCE,
-          "UPSTREAM_ERROR",
-          error.message,
-          "The NS server refused this search and a retry did not help. Try a narrower query — add a term, a date range, type or category — or come back to it in a minute; the other courts are unaffected, so finish the rešerše there and say in the memo that NS did not answer.",
-        );
-      }
-      throw error;
-    }
-  });
+  const deadlineAt = options.deadlineAt ?? Date.now() + NS_DEFAULT_BUDGET_MS;
+  return searchCache.through(memoKey("ns-search", [input, start, count]), () =>
+    runNsSearch(input, start, count, deadlineAt),
+  );
 }
 
-export async function getNsDecision(unid: string): Promise<NsDecision> {
+export async function getNsDecision(unid: string, options: NsCallOptions = {}): Promise<NsDecision> {
   if (!/^[0-9A-Fa-f]{32}$/.test(unid)) {
     throw new SourceError(
       SOURCE,
@@ -588,28 +832,44 @@ export async function getNsDecision(unid: string): Promise<NsDecision> {
       "Pass the 32-character hexadecimal id returned by ns_search.",
     );
   }
-  return decisionCache.through(memoKey("ns-doc", [unid.toUpperCase()]), async () => {
+  const deadlineAt = options.deadlineAt ?? Date.now() + NS_DEFAULT_BUDGET_MS;
+  const key = memoKey("ns-doc", [unid.toUpperCase()]);
+  const decision = await decisionCache.through(key, async () => {
     // WebPrint yields the cleanest HTML. Should its markup ever defeat the
     // extraction (a metadata echo instead of a body), try the WebSearch
     // document view — the same page the hit URL points at — and keep the
     // longer text. A pure safety net; both renditions carry the body.
-    const webPrint = await fetchNsRendition(unid, "WebPrint");
+    const webPrint = await fetchNsRendition(unid, "WebPrint", deadlineAt);
     if (!nsBodyMissing(webPrint.text)) return webPrint;
-    const webSearch = await fetchNsRendition(unid, "WebSearch").catch(() => null);
-    if (webSearch && webSearch.text.length > webPrint.text.length) {
+    // Only a failure that may pass (refused, unreachable, out of time) leaves
+    // "no body" unverified. A WebSearch page that was read but carries
+    // nothing (PARSE_DRIFT, NOT_FOUND) confirms it — "call again in a
+    // minute" would only send the model back for the same answer.
+    const webSearch = await fetchNsRendition(unid, "WebSearch", deadlineAt).catch((error: unknown) => {
+      const read = error instanceof SourceError && (error.kind === "PARSE_DRIFT" || error.kind === "NOT_FOUND");
+      return read ? null : ("unread" as const);
+    });
+    if (webSearch === "unread") return { ...webPrint, bodyUnverified: true as const };
+    if (!webSearch) return webPrint;
+    if (webSearch.text.length > webPrint.text.length) {
       // Metadata from WebPrint wins where both renditions carry a field.
       return { ...webSearch, metadata: { ...webSearch.metadata, ...webPrint.metadata } };
     }
     return webPrint;
   });
+  // WebSearch was never read, so "no body" is a guess — cached, it was
+  // asserted as fact for ten minutes although the next call may well get
+  // the body.
+  if (decision.bodyUnverified) decisionCache.delete(key);
+  return decision;
 }
 
-async function fetchNsRendition(unid: string, rendition: "WebPrint" | "WebSearch"): Promise<NsDecision> {
-  const response = await nsGate(() =>
-    fetchUpstream(SOURCE, `${BASE}/${rendition}/${unid}?openDocument`, {
-      headers: { referer: "https://rozhodnuti.nsoud.cz/" },
-    }),
-  );
+async function fetchNsRendition(
+  unid: string,
+  rendition: "WebPrint" | "WebSearch",
+  deadlineAt: number,
+): Promise<NsDecision> {
+  const response = await nsFetch(`${BASE}/${rendition}/${unid}?openDocument`, deadlineAt, true);
   // fetchUpstream only throws on 429/5xx — a Domino "Entry not found" page
   // comes back as 404 HTML and would otherwise parse into a bogus decision.
   if (response.status === 404) {

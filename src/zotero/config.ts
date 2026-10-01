@@ -91,6 +91,13 @@ export const LIMITS = Object.freeze({
   exportPageItemsXml: 10,
   /** Libraries one search visits at most. */
   maxLibrariesPerSearch: 6,
+  /**
+   * Search pages kept for a conditional repeat (If-Modified-Since-Version):
+   * at most this many, each at most this big — pages carry whole items
+   * (note HTML too), and the cache is shared by every user of the instance.
+   */
+  searchCacheEntries: 40,
+  searchCacheMaxBytes: 256 * 1024,
   /** Tool calls per user per hour (own bucket, not the files_* one). */
   toolCallsPerHour: 120,
   /** Connect attempts per user per hour. */
@@ -104,6 +111,8 @@ export const CACHE_TTL_MS = Object.freeze({
   groups: 10 * 60 * 1000,
   text: 10 * 60 * 1000,
   caseScan: 10 * 60 * 1000,
+  /** A search page, revalidated by If-Modified-Since-Version on every reuse: the TTL bounds memory, not staleness. */
+  search: 5 * 60 * 1000,
   searches: 10 * 60 * 1000,
   settings: 10 * 60 * 1000,
   /** Item types and fields change with a Zotero schema release, not per library. */

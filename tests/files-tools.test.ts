@@ -1063,10 +1063,12 @@ describe("pure helpers", () => {
   it("mergeVariants: documents round-robin, chunks by best score; mergePassages: one entry per chunk", () => {
     const d = (docId: string, chunks: Array<[number, number]>, matchedBy: string[], moreInDoc = 0): FusedDoc => ({
       docId,
+      libraryId: null,
       score: chunks[0]?.[1] ?? 0,
-      chunks: chunks.map(([ord, score]) => ({ ord, score })),
+      chunks: chunks.map(([ord, score]) => ({ ord, score, matchedBy: matchedBy.filter((c) => c !== "meta") })),
       matchedBy,
       moreInDoc,
+      metaByKey: false,
     });
     const a = [d("A", [[1, 0.5], [2, 0.2]], ["and"], 3), d("B", [[7, 0.4]], ["or"])];
     const b = [d("C", [], ["meta"]), d("A", [[3, 0.9]], ["idn"])];

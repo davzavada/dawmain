@@ -1,5 +1,5 @@
 import { SourceError } from "./shared/errors";
-import { CookieSession, fetchUpstream } from "./shared/http";
+import { CookieSession, fetchUpstream, type UpstreamOptions } from "./shared/http";
 import { htmlToText, loadHtml } from "./shared/html";
 import { czechToIso, isoToCzech } from "./shared/text";
 import { DOCUMENT_TTL_MS, SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
@@ -11,8 +11,9 @@ import { DOCUMENT_TTL_MS, SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cach
  * stateless. Search is a 3-request dance that needs the ASP.NET session
  * cookie across its own steps only: GET the form (viewstate + cookies),
  * POST the criteria with redirect:"manual" (302 → results exist, 200 with
- * lbError → zero hits), then GET Results.aspx?page={N} with the cookies.
- * See docs/research/cz-sources.json.
+ * the zero-hits marker → none), then GET Results.aspx?page={N} with the
+ * cookies. A finished search's session is kept for its own criteria, so the
+ * next page of the same search is one GET. See docs/research/cz-sources.json.
  */
 
 const SOURCE = "Ústavní soud (NALUS)";
@@ -47,33 +48,47 @@ export interface NalusDecision {
   url: string;
 }
 
-/** Strip the RTF control words the court leaves in docContentHidden. */
+/**
+ * Strip the RTF control words the court leaves in docContentHidden. "\par "
+ * leaves "\n " behind, so the spaces around each break go too: otherwise
+ * every paragraph starts with a space and a blank line holds one, which
+ * kept runs of empty lines out of the \n{3,} collapse (live 2-1808-26_1:
+ * "V Brně 30. června 2026\n \n \n \n Veronika Křesťanová v. r.").
+ */
 export function stripRtfMarkers(raw: string): string {
   return raw
     .replace(/\\par\b/g, "\n")
     .replace(/\\b0?\b/g, "")
     .replace(/\\[a-z]+\d*\b/g, "")
     .replace(/[ \t]+/g, " ")
+    .replace(/ *\n */g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
 
-/** Parse a GetText.aspx page. Pure — unit-tested. */
+/**
+ * Parse a GetText.aspx page. Pure — unit-tested. The text is read FIRST: the
+ * page carries the whole decision twice, so a decision that merely quotes
+ * the word "nenalezeno" (a search protocol: "při prohlídce nic nenalezeno")
+ * must not read as NALUS's not-found page. The not-found markers decide only
+ * when the page has no text at all.
+ */
 export function parseNalusDecision(html: string, sz: string): NalusDecision {
-  if (html.includes("nenalezeno") || html.length < 6000) {
-    throw new SourceError(
+  const notFound = () =>
+    new SourceError(
       SOURCE,
       "NOT_FOUND",
       `NALUS has no document for sz=${sz}.`,
       "Check the identifier (e.g. '1-1169-26_1' for I.ÚS 1169/26 #1) or find it via us_search. A docket can hold several decisions — try counter suffixes _1, _2.",
     );
-  }
+  if (html.length < 6000) throw notFound();
   const $ = loadHtml(html);
   const hiddenContent = $("input#docContentHidden").attr("value");
   const text = hiddenContent
     ? stripRtfMarkers(hiddenContent)
     : htmlToText($("td.DocContent").html() ?? "");
   if (!text) {
+    if (html.includes("nenalezeno")) throw notFound();
     throw new SourceError(
       SOURCE,
       "PARSE_DRIFT",
@@ -91,23 +106,88 @@ export function parseNalusDecision(html: string, sz: string): NalusDecision {
   };
 }
 
+/**
+ * The decision's ECLI, rebuilt from its sz and the year in lblRegistrySign
+ * ("I.ÚS 1169/26 ze dne 7. 7. 2026") — the inverse of ecliToSz. GetText.aspx
+ * prints no ECLI, and clients read only the text, so without this a ÚS ECLI
+ * never reached the model. Undefined without a counter or a year. Pure.
+ */
+export function nalusEcli(sz: string, registrySign: string | undefined): string | undefined {
+  const m = /^(1|2|3|4|Pl|St)-(\d+)-(\d{2})_(\d+)$/.exec(sz);
+  const year = registrySign ? /ze dne\s+\d{1,2}\.\s*\d{1,2}\.\s*(\d{4})/.exec(registrySign)?.[1] : undefined;
+  if (!m || !year) return undefined;
+  const [, registry, num, yy, counter] = m;
+  const senate = registry === "St" ? "Pl.US-st" : `${registry}.US`;
+  return `ECLI:CZ:US:${year}:${senate}.${num}.${yy}.${counter}`;
+}
+
 export interface NalusAbstract {
   abstract?: string;
   legalSentence?: string;
 }
 
-/** Parse a GetAbstract.aspx page. Pure. */
+/** NALUS fills an empty slot with a placeholder sentence — not a holding. */
+const PLACEHOLDER = /^(?:Abstrakt|Právní věta) není k dispozici\.?$/i;
+
+/** Parse a GetAbstract.aspx page. Pure. Placeholders come back undefined. */
 export function parseNalusAbstract(html: string): NalusAbstract {
   const $ = loadHtml(html);
-  const abstract = htmlToText($("table.abstractContent td").html() ?? "") || undefined;
-  const legalSentence = htmlToText($("table.legalSentenceContent td").html() ?? "") || undefined;
-  return { abstract, legalSentence };
+  const read = (selector: string) => {
+    const value = htmlToText($(selector).html() ?? "");
+    return value && !PLACEHOLDER.test(value.trim()) ? value : undefined;
+  };
+  return { abstract: read("table.abstractContent td"), legalSentence: read("table.legalSentenceContent td") };
 }
 
-const decisionCache = new TtlCache<NalusDecision & NalusAbstract>(DOCUMENT_TTL_MS, 24);
+const decisionCache = new TtlCache<NalusDecision & NalusAbstract & { abstractUnavailable?: true }>(DOCUMENT_TTL_MS, 24);
 const searchCache = new TtlCache<NalusSearchPage>(SEARCH_TTL_MS);
 
-export async function getNalusDecision(sz: string): Promise<NalusDecision & NalusAbstract> {
+/** Options every NALUS call takes from a tool that answers within a budget. */
+export interface NalusCallOptions {
+  /** Epoch ms by which every request must have ended. Default: no budget
+   * beyond fetchUpstream's own per-request timeout and retry. */
+  deadlineAt?: number;
+}
+
+/** fetchUpstream's per-request timeout — never exceeded, only shortened. */
+const REQUEST_TIMEOUT_MS = 15_000;
+/** A request with less time than this left is not worth starting. */
+const MIN_ATTEMPT_MS = 2_000;
+/** fetchUpstream's longest back-off before its retry (2 s after a 429). */
+const RETRY_PAUSE_MS = 2_000;
+
+/**
+ * fetchUpstream bounded by the caller's deadline. Unbounded, a search's three
+ * steps (form GET with its retry, POST, results GET with its retry) reached
+ * ~78 s — past the route's 60 s maxDuration, where Vercel kills the call and
+ * the model gets a transport failure instead of an error it can act on. Each
+ * request gets at most the time left, and a GET retries only when the whole
+ * retry (attempt, back-off, attempt) still fits.
+ */
+async function nalusFetch(
+  url: string,
+  options: UpstreamOptions,
+  deadlineAt: number | undefined,
+): Promise<Response> {
+  if (deadlineAt === undefined) return fetchUpstream(SOURCE, url, options);
+  const left = deadlineAt - Date.now();
+  if (left < MIN_ATTEMPT_MS) {
+    throw new SourceError(
+      SOURCE,
+      "UPSTREAM_UNREACHABLE",
+      "NALUS did not finish within this call's time budget (timed out).",
+      "NALUS is answering slowly — try again in a minute, or narrow the search (a date range, types) so it answers faster.",
+    );
+  }
+  const timeoutMs = Math.min(REQUEST_TIMEOUT_MS, left);
+  const retry = (options.retry ?? (options.method ?? "GET") === "GET") && left >= 2 * timeoutMs + RETRY_PAUSE_MS;
+  return fetchUpstream(SOURCE, url, { ...options, timeoutMs, retry });
+}
+
+export async function getNalusDecision(
+  sz: string,
+  options: NalusCallOptions = {},
+): Promise<NalusDecision & NalusAbstract & { abstractUnavailable?: true }> {
   if (!isValidSz(sz)) {
     throw new SourceError(
       SOURCE,
@@ -116,15 +196,21 @@ export async function getNalusDecision(sz: string): Promise<NalusDecision & Nalu
       "Use '{senát}-{číslo}-{rok}[_{pořadí}]', e.g. '1-1169-26_1' (I.ÚS 1169/26) or 'Pl-24-10_1'. An ECLI works too — pass it as 'ecli'.",
     );
   }
-  return decisionCache.through(memoKey("nalus-doc", [sz]), async () => {
+  const key = memoKey("nalus-doc", [sz]);
+  const result = await decisionCache.through(key, async () => {
     const [decisionResponse, abstractResponse] = await Promise.all([
-      fetchUpstream(SOURCE, `${BASE}/GetText.aspx?sz=${sz}`),
-      fetchUpstream(SOURCE, `${BASE}/GetAbstract.aspx?sz=${sz}`).catch(() => null),
+      nalusFetch(`${BASE}/GetText.aspx?sz=${sz}`, {}, options.deadlineAt),
+      nalusFetch(`${BASE}/GetAbstract.aspx?sz=${sz}`, {}, options.deadlineAt).catch(() => null),
     ]);
     const decision = parseNalusDecision(await decisionResponse.text(), sz);
-    const extras = abstractResponse ? parseNalusAbstract(await abstractResponse.text()) : {};
-    return { ...decision, ...extras };
+    if (!abstractResponse) return { ...decision, abstractUnavailable: true as const };
+    return { ...decision, ...parseNalusAbstract(await abstractResponse.text()) };
   });
+  // A GetAbstract that failed (or was cut short by a preview's deadline) is
+  // not "no právní věta": the text is served, but not kept for 10 minutes
+  // without its právní věta — the next read asks again.
+  if (result.abstractUnavailable) decisionCache.delete(key);
+  return result;
 }
 
 // ---------- search (3-step viewstate dance) ----------
@@ -133,8 +219,6 @@ export interface NalusSearchInput {
   query?: string;
   citace?: string;
   ecli?: string;
-  judge?: string; // soudce zpravodaj (free text)
-  dissentingJudge?: string; // soudce s odlišným stanoviskem
   popularName?: string;
   dateFrom?: string; // ISO — datum rozhodnutí
   dateTo?: string; // ISO
@@ -145,21 +229,127 @@ export interface NalusSearchInput {
   onlyPublished?: boolean;
   /** Add odlišná stanoviska to the zones the full-text query searches. */
   includeDissents?: boolean;
-  outcome?: string[]; // výrok — validated against NALUS_OUTCOMES
-  petitioner?: string[]; // navrhovatel (typ) — NALUS_PETITIONERS
-  contestedOrganType?: string[]; // dotčený orgán (typ) — NALUS_ORGAN_TYPES
   contestedOrgan?: string; // dotčený orgán (specifikace, free text)
-  contestedActKind?: string[]; // napadený akt (druh) — NALUS_ACT_KINDS
   contestedActNumber?: string; // napadený akt (číslo), e.g. "106/1999"
   contestedActName?: string; // napadený akt (název), free text
   contestedActClause?: string; // napadený akt (ustanovení), e.g. "§ 17"
   sort?: "date" | "relevance";
+  // The six číselník pickers below are REJECTED (see NALUS_PICKERS): NALUS
+  // ignores whatever is posted into them. Kept in the type so a caller that
+  // passes one fails loudly instead of compiling into a silent no-op.
+  judge?: string; // soudce zpravodaj
+  dissentingJudge?: string; // soudce s odlišným stanoviskem
+  outcome?: string[]; // výrok — NALUS_OUTCOMES
+  petitioner?: string[]; // navrhovatel (typ) — NALUS_PETITIONERS
+  contestedOrganType?: string[]; // dotčený orgán (typ) — NALUS_ORGAN_TYPES
+  contestedActKind?: string[]; // napadený akt (druh) — NALUS_ACT_KINDS
+}
+
+/**
+ * The form's číselník fields — soudce zpravodaj, soudce s odlišným
+ * stanoviskem, výrok, navrhovatel, dotčený orgán (typ), napadený akt (druh).
+ * They are readonly TextBoxes (readonly="readonly" class="searchCiselnik")
+ * filled by the PopupCiselnik.aspx dialog, and ASP.NET's TextBox ignores a
+ * posted value when ReadOnly is set: the selection lives server-side. Live
+ * (2026-09, nálezy 2010-01-01..2010-03-31): no filter 71 hits; judge
+ * 'Wagnerová' (any name order), outcome ['zamítnuto'], petitioner ['SKUPINA
+ * POSLANCŮ'] + act kind ['zákon'] — each the byte-identical 71, senate cases
+ * of other rapporteurs included; dissenting_judge alone gave NALUS no
+ * criterion at all. The popup cannot be replayed without a captured browser
+ * flow (fetched sessionless, PopupCiselnik.aspx only bounces to the search
+ * form), so until it is, a picker is refused before any request — an
+ * unfiltered list presented as filtered is a wrong legal answer. Keys are the
+ * NalusSearchInput fields; values the us_search parameter names.
+ */
+export const NALUS_PICKERS = {
+  judge: "judge",
+  dissentingJudge: "dissenting_judge",
+  outcome: "outcome",
+  petitioner: "petitioner",
+  contestedOrganType: "contested_organ_type",
+  contestedActKind: "contested_act_kind",
+} as const;
+
+/** What still narrows a NALUS search — the hint whenever a picker is refused. */
+export const NALUS_WORKING_FILTERS =
+  "query (the soudce zpravodaj's name also stands in the decision text), case_number, ecli, popular_name, contested_act_number / contested_act_name / contested_act_clause, contested_organ, date_from/date_to, published_from/published_to, types, only_published, include_dissents (full-text zone) and sort";
+
+/** The picker parameters (us_search names) set in this input. */
+export function nalusPickersIn(input: Partial<Record<keyof typeof NALUS_PICKERS, unknown>>): string[] {
+  return (Object.keys(NALUS_PICKERS) as Array<keyof typeof NALUS_PICKERS>)
+    .filter((key) => {
+      const value = input[key];
+      return Array.isArray(value) ? value.length > 0 : typeof value === "string" ? value.trim() !== "" : false;
+    })
+    .map((key) => NALUS_PICKERS[key]);
+}
+
+export function nalusPickerError(pickers: string[]): SourceError {
+  return new SourceError(
+    SOURCE,
+    "INPUT_INVALID",
+    `NALUS ignores its číselník filters — ${pickers.join(", ")} would come back UNFILTERED (the same list and total as without ${pickers.length > 1 ? "them" : "it"}), so the call was refused.`,
+    `Drop ${pickers.join(", ")} and narrow with what works: ${NALUS_WORKING_FILTERS}. Each hit line names its soudce zpravodaj, so a judge can be screened from the list.`,
+  );
+}
+
+/**
+ * The full-text value NALUS can match: any token containing '§' makes it
+ * answer 0 (live 2026-09: the same variant 42 hits without '§ ', 0 with it),
+ * and '§' is never a searchable token. Pure.
+ */
+export function nalusQueryText(query: string): string {
+  return query.replace(/§+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * The criteria as NALUS sees them, in a fixed key order — the cache key.
+ * caselaw_search's ÚS lane passes {query, dateFrom, dateTo, sort} while
+ * us_search passes every field (false booleans, undefined…); hashed raw, the
+ * same effective search never shared its cached page. Drops blanks, false
+ * flags, includeDissents without a query and a types list naming all three
+ * (the default); trims; sorts types; folds sort undefined → "date". Refuses
+ * the pickers before any I/O. Pure — unit-tested.
+ */
+export function normalizeNalusInput(input: NalusSearchInput): NalusSearchInput {
+  const pickers = nalusPickersIn(input);
+  if (pickers.length) throw nalusPickerError(pickers);
+  const text = (value: string | undefined) => value?.trim() || undefined;
+  const query = input.query === undefined ? undefined : nalusQueryText(input.query) || undefined;
+  const order = ["nález", "usnesení", "stanovisko"] as const;
+  const types = order.filter((type) => input.types?.includes(type));
+  const normalized: NalusSearchInput = {
+    query,
+    citace: text(input.citace),
+    ecli: text(input.ecli),
+    popularName: text(input.popularName),
+    dateFrom: text(input.dateFrom),
+    dateTo: text(input.dateTo),
+    publishedFrom: text(input.publishedFrom),
+    publishedTo: text(input.publishedTo),
+    types: types.length && types.length < order.length ? [...types] : undefined,
+    onlyPublished: input.onlyPublished || undefined,
+    includeDissents: (query && input.includeDissents) || undefined,
+    contestedOrgan: text(input.contestedOrgan),
+    contestedActNumber: text(input.contestedActNumber),
+    contestedActName: text(input.contestedActName),
+    contestedActClause: text(input.contestedActClause),
+    sort: input.sort === "relevance" ? "relevance" : "date",
+  };
+  // JSON.stringify drops undefined fields; delete them all the same so the
+  // object is what it looks like to a caller that inspects it.
+  for (const key of Object.keys(normalized) as Array<keyof NalusSearchInput>) {
+    if (normalized[key] === undefined) delete normalized[key];
+  }
+  return normalized;
 }
 
 // Codebook values verbatim from a captured browser POST (2026-08) where every
 // picker item was selected — including oddities like the double space in
 // "procesní -  změna návrhu". Some titles contain ", " themselves; the wire
-// format joins selections with ", " all the same, mirroring the UI.
+// format joins selections with ", " all the same, mirroring the UI. Kept for
+// when the PopupCiselnik flow is replayed: posting them into the readonly
+// fields does nothing (see NALUS_PICKERS).
 
 export const NALUS_OUTCOMES = [
   "odmítnuto pro neodstraněné vady",
@@ -357,6 +547,11 @@ export function parseNalusResults(html: string): NalusSearchPage {
   const banner = /Výsledky\s+\d+\s*-\s*\d+\s+z\s+celkem\s+(\d+)/.exec(html);
   const total = banner ? Number(banner[1]) : null;
 
+  // Each hit is two rows: the data row holding the ResultDetail anchor, then
+  // its actions row, whose onclick handlers carry ShowLink("…GetText.aspx?sz=…",
+  // "Odkaz") and ShowLink("usnesení sp. zn. … ze dne …", "Citace"). Both are
+  // read from THAT row: zipped by position across the page, one row without a
+  // link moved every later sz onto the next decision — cite one, read another.
   const hits: NalusHit[] = [];
   $("a[href^='ResultDetail.aspx']").each((_, el) => {
     const $anchor = $(el);
@@ -367,24 +562,33 @@ export function parseNalusResults(html: string): NalusSearchPage {
     const lines = cellText.split("\n").map((line) => line.trim()).filter(Boolean);
     const ecli = lines.find((line) => line.startsWith("ECLI:"));
     const judge = lines.filter((line) => line !== caseNumber && !line.startsWith("ECLI:")).at(-1);
-    hits.push({ sz: null, caseNumber, ecli, judge, url: null });
-  });
-
-  // The actions row emits ShowLink("…GetText.aspx?sz=…") and the citation
-  // string ("usnesení sp. zn. I. ÚS 1169/26 ze dne 7. 7. 2026") in hit order.
-  const szList = [...html.matchAll(/GetText\.aspx\?sz=([^"&\s]+)/g)].map((m) => m[1]);
-  const citations = [...html.matchAll(/ShowLink\("((?:nález|usnesení|stanovisko)[^"]*)",\s*"Citace"/g)].map(
-    (m) => m[1],
-  );
-  hits.forEach((hit, index) => {
-    hit.sz = szList[index] ?? null;
-    hit.url = hit.sz ? `${BASE}/GetText.aspx?sz=${hit.sz}` : null;
-    const citation = citations[index];
+    const $dataRow = $anchor.closest("tr");
+    const handlers = $dataRow
+      .next("tr")
+      .find("[onclick]")
+      .map((_, node) => $(node).attr("onclick") ?? "")
+      .get()
+      .join("\n");
+    const sz = /GetText\.aspx\?sz=([^"&\s]+)/.exec(handlers)?.[1] ?? null;
+    const citation = /ShowLink\("((?:nález|usnesení|stanovisko)[^"]*)",\s*"Citace"/.exec(handlers)?.[1];
+    const hit: NalusHit = { sz, caseNumber, ecli, judge, url: sz ? `${BASE}/GetText.aspx?sz=${sz}` : null };
     if (citation) {
       hit.citation = citation;
       hit.form = citation.split(" ")[0];
       hit.date = nalusCitationDate(citation);
+    } else {
+      // No citation to read them from: the data row's own cells — the bold
+      // decision date and the "Forma rozhodnutí" cell ("Usnesení<br/>4").
+      const cells = $dataRow.children("td");
+      const date = czechToIso(cells.find("b").first().text().trim());
+      if (date) hit.date = date;
+      const formCell = cells
+        .map((_, cell) => htmlToText($(cell).html() ?? "").split("\n")[0]?.trim() ?? "")
+        .get()
+        .find((line) => /^(nález|usnesení|stanovisko)$/i.test(line));
+      if (formCell) hit.form = formCell.toLowerCase();
     }
+    hits.push(hit);
   });
 
   if (!hits.length && total === null) {
@@ -448,8 +652,9 @@ export function buildNalusForm(
   if (types.includes("usnesení")) form.set(`${MC}usneseni`, "on");
   if (types.includes("stanovisko")) form.set(`${MC}stanoviska_plena`, "on");
 
-  if (input.query) {
-    form.set(`${MC}text`, input.query);
+  const query = input.query ? nalusQueryText(input.query) : "";
+  if (query) {
+    form.set(`${MC}text`, query);
     // Search the operative scopes; odlišné stanovisko joins only on request.
     const scopes = ["pravni_veta", "abstrakt", "naveti", "vyrok", "oduvodneni"];
     if (input.includeDissents) scopes.push("odlisne_stanovisko");
@@ -459,36 +664,15 @@ export function buildNalusForm(
   }
   if (input.citace) form.set(`${MC}citace`, input.citace);
   if (input.ecli) form.set(`${MC}ecli`, input.ecli);
-  if (input.judge) form.set(`${MC}soudce_zpravodaj`, input.judge);
-  if (input.dissentingJudge) form.set(`${MC}soudce_stanovisko`, input.dissentingJudge);
   if (input.popularName) form.set(`${MC}popularni_nazev`, input.popularName);
   if (input.dateFrom) form.set(`${MC}decidedFrom`, isoToCzech(input.dateFrom));
   if (input.dateTo) form.set(`${MC}decidedTo`, isoToCzech(input.dateTo));
   if (input.publishedFrom) form.set(`${MC}availableFrom`, isoToCzech(input.publishedFrom));
   if (input.publishedTo) form.set(`${MC}availableTo`, isoToCzech(input.publishedTo));
   if (input.onlyPublished) form.set(`${MC}jen_publikovana`, "on");
-  if (input.outcome?.length) {
-    form.set(`${MC}vyrok_multi`, resolveNalusValues(input.outcome, NALUS_OUTCOMES, "výrok").join(", "));
-  }
-  if (input.petitioner?.length) {
-    form.set(
-      `${MC}navrhovatel`,
-      resolveNalusValues(input.petitioner, NALUS_PETITIONERS, "navrhovatel").join(", "),
-    );
-  }
-  if (input.contestedOrganType?.length) {
-    form.set(
-      `${MC}affected_organ_type`,
-      resolveNalusValues(input.contestedOrganType, NALUS_ORGAN_TYPES, "dotčený orgán").join(", "),
-    );
-  }
+  // The číselník pickers are never posted: NALUS ignores them (NALUS_PICKERS),
+  // and searchNalus refuses an input that sets one.
   if (input.contestedOrgan) form.set(`${MC}affected_organ_spec`, input.contestedOrgan);
-  if (input.contestedActKind?.length) {
-    form.set(
-      `${MC}actkind`,
-      resolveNalusValues(input.contestedActKind, NALUS_ACT_KINDS, "napadený akt").join(", "),
-    );
-  }
   if (input.contestedActNumber) form.set(`${MC}actkindnumber_txt`, input.contestedActNumber);
   if (input.contestedActName) form.set(`${MC}actkindname_txt`, input.contestedActName);
   if (input.contestedActClause) form.set(`${MC}actkindclause_txt`, input.contestedActClause);
@@ -500,17 +684,92 @@ export function buildNalusForm(
   return form;
 }
 
+/**
+ * What a 200 answer to the criteria POST means (a 302 means hits). NALUS
+ * re-renders its form in two cases: zero hits (the marker), or a search it
+ * refused — and then any message it printed (lbError, a visible validator)
+ * is the answer, not a layout change. Live 2026-09, swapped dates and a
+ * citace failing the form's own pattern both came back as ordinary zero-hit
+ * answers, so only a message actually printed is classified: an input
+ * complaint as INPUT_INVALID, anything else as UPSTREAM_ERROR. PARSE_DRIFT
+ * (and the probe hint) is left for a body that is not the form at all, or a
+ * form that says nothing. Pure — unit-tested.
+ */
+export function classifyNalusPostBody(body: string): "zero-hits" {
+  if (body.toLowerCase().includes(ZERO_HITS_MARKER)) return "zero-hits";
+  const isForm = body.includes("__VIEWSTATE") && body.includes(`name="${MC}but_search"`);
+  if (isForm) {
+    const $ = loadHtml(body);
+    const messages = $("[id$='lbError'], span[id*='Validator']")
+      .filter((_, el) => !/display\s*:\s*none/i.test($(el).attr("style") ?? ""))
+      .map((_, el) => $(el).text().replace(/\s+/g, " ").trim())
+      .get()
+      .filter(Boolean);
+    if (messages.length) {
+      const message = messages.join(" ");
+      if (/kritéri|zadejte|neplatn|vyberte/i.test(message)) {
+        throw new SourceError(
+          SOURCE,
+          "INPUT_INVALID",
+          `NALUS refused the search: "${message}".`,
+          "Give at least one searchable criterion: query, case_number, ecli, popular_name, contested_act_number/name/clause, contested_organ or a date range.",
+        );
+      }
+      throw new SourceError(
+        SOURCE,
+        "UPSTREAM_ERROR",
+        `NALUS answered the search with: "${message}".`,
+        "Try again in a minute; if the message repeats, change the criteria.",
+      );
+    }
+  }
+  throw new SourceError(
+    SOURCE,
+    "PARSE_DRIFT",
+    `NALUS search POST answered HTTP 200 without the zero-hits marker${isForm ? " or any message" : ""}.`,
+    "The form contract may have changed — run dawmain_probe_sources with include_raw.",
+  );
+}
+
+/**
+ * A finished search's session, kept for its own criteria only. NALUS pages a
+ * search by a plain GET of Results.aspx?page=N on the session that POSTed it,
+ * so the next page of the same criteria costs one request instead of the
+ * whole form GET + POST + GET. Keyed by the normalized criteria and page size
+ * (the POST fixes resultsPageSize), never shared across criteria — the
+ * session stores them server-side. Under the ASP.NET 20-min session timeout.
+ */
+interface KeptSession {
+  session: CookieSession;
+  total: number | null;
+}
+const sessionCache = new TtlCache<KeptSession>(SEARCH_TTL_MS, 50);
+
+/** Each criteria set's total, page-independent: what a multi-variant page
+ * needs to avoid asking for rows past a variant's end. */
+const totalCache = new TtlCache<number>(SEARCH_TTL_MS);
+
+/** The total of these criteria if a search answered it in the last 5 min. */
+export function knownNalusTotal(input: NalusSearchInput): number | undefined {
+  try {
+    return totalCache.get(memoKey("nalus-total", [normalizeNalusInput(input)]));
+  } catch {
+    return undefined;
+  }
+}
+
 export async function searchNalus(
   input: NalusSearchInput,
   page: number,
   pageSize: 10 | 20 | 40 | 80 = 20,
+  options: NalusCallOptions = {},
 ): Promise<NalusSearchPage> {
-  // The ASP.NET session stores the criteria server-side, so the 3-step dance
-  // must keep its own fresh cookies per search (sharing them across concurrent
-  // searches would cross-contaminate results) — but identical repeats within
-  // the TTL can skip all three requests.
-  return searchCache.through(memoKey("nalus-search", [input, page, pageSize]), () =>
-    runSearchNalus(input, page, pageSize),
+  // Normalized first: a refused picker costs no request, and the same
+  // effective search shares one cache entry whoever asks (caselaw_search's
+  // ÚS lane and a follow-up us_search sort=relevance alike).
+  const criteria = normalizeNalusInput(input);
+  return searchCache.through(memoKey("nalus-search", [criteria, page, pageSize]), () =>
+    runSearchNalus(criteria, page, pageSize, options.deadlineAt),
   );
 }
 
@@ -518,23 +777,18 @@ async function runSearchNalus(
   input: NalusSearchInput,
   page: number,
   pageSize: 10 | 20 | 40 | 80,
+  deadlineAt: number | undefined,
 ): Promise<NalusSearchPage> {
   const hasCriterion =
     input.query ||
     input.citace ||
     input.ecli ||
-    input.judge ||
-    input.dissentingJudge ||
     input.popularName ||
     input.dateFrom ||
     input.dateTo ||
     input.publishedFrom ||
     input.publishedTo ||
-    input.outcome?.length ||
-    input.petitioner?.length ||
-    input.contestedOrganType?.length ||
     input.contestedOrgan ||
-    input.contestedActKind?.length ||
     input.contestedActNumber ||
     input.contestedActName ||
     input.contestedActClause;
@@ -543,46 +797,101 @@ async function runSearchNalus(
       SOURCE,
       "INPUT_INVALID",
       "NALUS search needs at least one criterion.",
-      "Provide query (full-text), case_number (citace), ecli, judge, dissenting_judge, popular_name, a date range, outcome, petitioner, or a contested_act/organ filter.",
+      "Provide query (full-text), case_number (citace), ecli, popular_name, a date range (decision or publication), or a contested_act/contested_organ filter.",
     );
   }
+  const sessionKey = memoKey("nalus-session", [input, pageSize]);
+  const kept = sessionCache.get(sessionKey);
+  if (kept) {
+    const reused = await readKeptPage(kept, page, pageSize, deadlineAt).catch(() => null);
+    if (reused) return reused;
+    sessionCache.delete(sessionKey);
+  }
+
   const session = new CookieSession();
 
   // Step 1: the form — fresh viewstate every time (the tokens are per-GET).
-  const formResponse = await fetchUpstream(SOURCE, `${BASE}/Search.aspx`);
+  const formResponse = await nalusFetch(`${BASE}/Search.aspx`, {}, deadlineAt);
   session.absorb(formResponse);
   const state = parseFormState(await formResponse.text());
 
   // Step 2: the criteria POST. 302 → results in session; 200 → zero hits.
-  const postResponse = await fetchUpstream(SOURCE, `${BASE}/Search.aspx`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/x-www-form-urlencoded",
-      cookie: session.header(),
-      referer: `${BASE}/Search.aspx`,
+  const postResponse = await nalusFetch(
+    `${BASE}/Search.aspx`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: session.header(),
+        referer: `${BASE}/Search.aspx`,
+      },
+      body: buildNalusForm(state, input, pageSize).toString(),
+      redirect: "manual",
     },
-    body: buildNalusForm(state, input, pageSize).toString(),
-    redirect: "manual",
-  });
+    deadlineAt,
+  );
   session.absorb(postResponse);
   if (postResponse.status !== 302) {
-    const body = await postResponse.text();
-    if (body.toLowerCase().includes(ZERO_HITS_MARKER)) {
-      return { hits: [], total: 0, empty: true };
-    }
-    throw new SourceError(
-      SOURCE,
-      "PARSE_DRIFT",
-      `NALUS search POST answered HTTP ${postResponse.status} without the zero-hits marker.`,
-      "The form contract may have changed — run dawmain_probe_sources with include_raw.",
-    );
+    classifyNalusPostBody(await postResponse.text());
+    totalCache.set(memoKey("nalus-total", [input]), 0);
+    return { hits: [], total: 0, empty: true };
   }
+  await postResponse.body?.cancel().catch(() => undefined);
 
   // Step 3: the results page (0-indexed), same session.
-  const resultsResponse = await fetchUpstream(
-    SOURCE,
+  const resultsResponse = await nalusFetch(
     `${BASE}/Results.aspx${page > 0 ? `?page=${page}` : ""}`,
     { headers: { cookie: session.header(), referer: `${BASE}/Search.aspx` } },
+    deadlineAt,
   );
-  return parseNalusResults(await resultsResponse.text());
+  session.absorb(resultsResponse);
+  const parsed = parseNalusResults(await resultsResponse.text());
+  sessionCache.set(sessionKey, { session, total: parsed.total });
+  if (parsed.total !== null) totalCache.set(memoKey("nalus-total", [input]), parsed.total);
+  return parsed;
+}
+
+/**
+ * Page N from a kept session, or null when the session cannot be trusted.
+ * What NALUS renders for an expired session is unknown (a redirect to the
+ * form, an empty banner…), so a reply counts only when it is a 200 results
+ * page whose banner total equals the one this session found, with hits
+ * wherever the total says there are rows. No retry: the fallback is the full
+ * dance, which has its own.
+ */
+async function readKeptPage(
+  kept: KeptSession,
+  page: number,
+  pageSize: number,
+  deadlineAt: number | undefined,
+): Promise<NalusSearchPage | null> {
+  const response = await nalusFetch(
+    `${BASE}/Results.aspx${page > 0 ? `?page=${page}` : ""}`,
+    {
+      headers: { cookie: kept.session.header(), referer: `${BASE}/Results.aspx` },
+      redirect: "manual",
+      retry: false,
+    },
+    deadlineAt,
+  );
+  if (response.status !== 200) {
+    await response.body?.cancel().catch(() => undefined);
+    return null;
+  }
+  kept.session.absorb(response);
+  const body = await response.text();
+  let parsed: NalusSearchPage;
+  try {
+    parsed = parseNalusResults(body);
+  } catch {
+    return null;
+  }
+  if (kept.total === null || parsed.total !== kept.total) return null;
+  if (!parsed.hits.length && page * pageSize < kept.total) return null;
+  // The rows must be THIS page's: should the session remember the last page
+  // it served (Results.aspx without ?page= for page 0), the total and the
+  // hits would still look right — the banner's first row number does not.
+  const from = /Výsledky\s+(\d+)\s*-/.exec(body)?.[1];
+  if (parsed.hits.length && Number(from) !== page * pageSize + 1) return null;
+  return parsed;
 }

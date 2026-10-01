@@ -2,8 +2,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildCitationsMotif,
   buildCuriaBody,
+  bestCuriaDocument,
   caseNumberToCelex,
+  curiaDocKind,
+  mergeCuriaAffairs,
+  orderCuriaDocuments,
   parseCuriaSearch,
+  realLogicDocId,
+  refineCuriaAffairs,
   refineCuriaHits,
 } from "@/src/sources/curia";
 import {
@@ -30,6 +36,22 @@ describe("caseNumberToCelex", () => {
   it("rejects unparsable numbers", () => {
     expect(caseNumberToCelex("nonsense", "judgment")).toBeNull();
   });
+  it("accepts the appeal and PPU numbers InfoCuria prints — their CELEX is the plain number", () => {
+    expect(caseNumberToCelex("C-465/20 P", "judgment")).toBe("62020CJ0465");
+    expect(caseNumberToCelex("C-465/20P", "judgment")).toBe("62020CJ0465");
+    expect(caseNumberToCelex("C-216/18 PPU", "judgment")).toBe("62018CJ0216");
+    // Suffixes whose CELEX differs stay unmapped rather than name the wrong document.
+    expect(caseNumberToCelex("T-18/10 RENV", "judgment")).toBeNull();
+    expect(caseNumberToCelex("C-465/20 P(R)", "order")).toBeNull();
+    expect(caseNumberToCelex("C-1/20 P-DEP", "order")).toBeNull();
+  });
+  it("reads the non-breaking hyphen of copied citations", () => {
+    expect(caseNumberToCelex("C\u2011311/18", "judgment")).toBe("62018CJ0311");
+  });
+  it("maps a General Court opinion to TC, not to an order's TO", () => {
+    expect(caseNumberToCelex("T-1/89", "opinion")).toBe("61989TC0001");
+    expect(caseNumberToCelex("T-1/89", "order")).toBe("61989TO0001");
+  });
 });
 
 describe("buildCuriaBody", () => {
@@ -55,6 +77,18 @@ describe("buildCuriaBody", () => {
     expect(pending.filtersValue[0].values).toEqual(["ENC"]);
     const all = buildCuriaBody({ query: "x", state: "all" }, 0, 10) as { filtersValue: unknown[] };
     expect(all.filtersValue).toHaveLength(0);
+  });
+
+  it("sends an ECLI as the advanced eCli criterion — the top-level key alone returns the whole index", () => {
+    const eCli = { field: "eCli", values: ["ECLI:EU:C:2020:559"], valuesWithFullHierarchy: ["ECLI:EU:C:2020:559"] };
+    const alone = buildCuriaBody({ ecli: "ECLI:EU:C:2020:559" }, 0, 10) as Record<string, unknown>;
+    expect(alone.searchTerm).toBe("");
+    expect(alone.ecli).toBe("");
+    expect(alone.advancedFiltersValue).toEqual([eCli]);
+    const withQuery = buildCuriaBody({ query: "adequacy", ecli: "ECLI:EU:C:2020:559" }, 0, 10) as {
+      advancedFiltersValue: Array<{ field: string }>;
+    };
+    expect(withQuery.advancedFiltersValue.map((f) => f.field)).toEqual(["text", "allLang", "eCli"]);
   });
 
   it("keyword queries search non-exact; identifier searches stay exact", () => {
@@ -284,6 +318,70 @@ describe("parseCuriaSearch", () => {
   });
 });
 
+describe("parseCuriaSearch: cases", () => {
+  it("groups the documents by case and treats 'null' ids as missing", () => {
+    const page = parseCuriaSearch({
+      totalHits: 7,
+      searchHits: [
+        {
+          content: { publishedId: "T-70/23", usualNameML: [{ en: "Data Protection" }] },
+          innerHits: {
+            document: {
+              searchHits: [
+                { document: { docTypeCode: "REQ_COMM", logicDocId: "id_null", ecli: "" } },
+                { document: { docTypeCode: "ARRET", logicDocId: "id_295001", ecli: "ECLI:EU:T:2025:116" } },
+              ],
+            },
+          },
+        },
+        { content: { publishedId: "T-183/23" }, innerHits: { document: { searchHits: [{ document: { docTypeCode: "RES" } }] } } },
+      ],
+    });
+    expect(page.affairs.map((a) => [a.key, a.docs.length])).toEqual([["T-70/23", 2], ["T-183/23", 1]]);
+    expect(page.hits).toHaveLength(3);
+    expect(page.affairs[0].docs[0].logicDocId).toBeUndefined();
+    expect(page.affairs[0].docs[0].ecli).toBeUndefined();
+    expect(page.affairs[0].caseName).toBe("Data Protection");
+  });
+
+  it("knows the document kinds and puts decisions first", () => {
+    expect(curiaDocKind("ARR_COMM")).toBe("OJ notice");
+    expect(curiaDocKind("ARRET")).toBe("judgment");
+    expect(curiaDocKind("CONCL")).toBe("AG opinion");
+    expect(curiaDocKind("RES")).toBe("summary");
+    expect(curiaDocKind("DDP")).toBe("request for a preliminary ruling");
+    const docs = [
+      { docType: "REQ_COMM", logicDocId: "id_1", url: null },
+      { docType: "RES", ecli: "ECLI:EU:C:2020:559", url: null },
+      { docType: "CONCL", ecli: "ECLI:EU:C:2019:1145", url: null },
+      { docType: "ARRET", ecli: "ECLI:EU:C:2020:559", url: null },
+    ];
+    expect(orderCuriaDocuments(docs).map((d) => d.docType)).toEqual(["ARRET", "CONCL", "RES", "REQ_COMM"]);
+    expect(bestCuriaDocument(docs)?.docType).toBe("ARRET");
+    expect(bestCuriaDocument([{ docType: "REQ_COMM", url: null }])).toBeUndefined();
+    expect(realLogicDocId("id_null")).toBeUndefined();
+    expect(realLogicDocId("")).toBeUndefined();
+    expect(realLogicDocId("id_228677")).toBe("id_228677");
+  });
+
+  it("merges variants round-robin by case, uniting their documents", () => {
+    const doc = (docType: string, logicDocId: string, ecli?: string) => ({ docType, logicDocId, ecli, url: null });
+    const a = [
+      { key: "C-1/20", docs: [doc("ARRET", "id_11", "ECLI:1")] },
+      { key: "C-2/20", docs: [doc("ARRET", "id_21")] },
+    ];
+    const b = [
+      { key: "C-3/20", docs: [doc("ARRET", "id_31")] },
+      { key: "C-1/20", docs: [doc("RES", "id_12", "ECLI:1"), doc("ARRET", "id_11", "ECLI:1")] },
+    ];
+    const merged = mergeCuriaAffairs([a, b]);
+    expect(merged.map((m) => m.key)).toEqual(["C-1/20", "C-3/20", "C-2/20"]);
+    expect(merged[0].docs.map((d) => d.logicDocId)).toEqual(["id_11", "id_12"]);
+    // The inputs are not mutated (they live in the search cache).
+    expect(a[0].docs).toHaveLength(1);
+  });
+});
+
 describe("refineCuriaHits", () => {
   const hits = parseCuriaSearch({
     totalHits: 1,
@@ -319,6 +417,17 @@ describe("refineCuriaHits", () => {
     expect(refineCuriaHits(extra, { docType: "avis" }).map((h) => h.docType)).toEqual(["AVIS"]);
   });
 
+  it("refines inside each case, drops emptied cases and counts what it removed", () => {
+    const affairs = [
+      { key: "C-201/22", docs: hits },
+      { key: "C-9/24", docs: [{ ...hits[0], docType: "REQ_COMM" }] },
+    ];
+    const refined = refineCuriaAffairs(affairs, { docType: "judgment" });
+    expect(refined.affairs.map((a) => a.key)).toEqual(["C-201/22"]);
+    expect(refined.affairs[0].docs).toHaveLength(1);
+    expect(refined.filtered).toBe(3);
+  });
+
   it("filters by document dates and state guard", () => {
     expect(refineCuriaHits(hits, { dateFrom: "2023-01-01" })).toHaveLength(2);
     expect(refineCuriaHits(hits, { state: "pending" })).toHaveLength(0);
@@ -330,7 +439,7 @@ describe("refineCuriaHits", () => {
 
 
 describe("parseJusticeDecision", () => {
-  it("prefers verdictText + justificationText", () => {
+  it("falls back to verdictText + justificationText when the paragraph arrays are absent", () => {
     const decision = parseJusticeDecision(
       { verdictText: "Soud rozhodl takto.", justificationText: "Odůvodnění věci.", metadata: { type: "JUDGEMENT" } },
       "1d6380c9-0364-498a-b494-d162a90121cb",
@@ -339,7 +448,7 @@ describe("parseJusticeDecision", () => {
     expect(decision.url).toContain("?id=1d6380c9");
   });
 
-  it("falls back to paragraph joining and tolerates drifted metadata", () => {
+  it("joins the paragraph arrays when the flat fields are empty, and tolerates drifted metadata", () => {
     const decision = parseJusticeDecision(
       {
         verdictText: null,

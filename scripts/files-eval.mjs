@@ -27,13 +27,14 @@
  *   separated ids). Prefer a local Postgres with a copy of the texts: every
  *   run against Neon wakes it and costs compute hours of the free plan.
  *
- * Each query runs the way files_search runs it (src/mcp/tools/files.ts,
- * searchVariant + mergeVariants): identifiers of the query, buildTsQuery
- * over the rest (weights for in_footnotes), the act filter (explicit or
- * implied by "§ N <act>"), the channels, RRF fusion, variants merged
- * round-robin, 2 passages per document. Not evaluated: `section`, `doc`,
- * and the note-only passage filter of in_footnotes: false (those run after
- * the channels, in files.ts itself).
+ * Each query runs the way files_search runs it (src/mcp/tools/files.ts:
+ * planVariant — the very function the tool uses — then the channels, RRF
+ * fusion, mergeVariants): identifiers of the query, buildTsQuery over the
+ * rest (weights for in_footnotes), the act filter (explicit or implied by
+ * "§ N <act>"), the case_number and section filters inside SQL, variants
+ * merged round-robin, 2 passages per document. Not evaluated: `doc`, and
+ * the note-only passage filter of in_footnotes: false (it runs after the
+ * channels, in files.ts itself).
  *
  * Query file (JSON):
  *
@@ -48,7 +49,7 @@
  *     "queries": [
  *       { "id": "q01",
  *         "query": "odpovednost za skodu",         // or "queries": [up to 3 variants]
- *         "act": "OZ", "doc_type": ["komentar"], "case_number": "25 Cdo 1234/2019",
+ *         "act": "OZ", "doc_type": ["komentar"], "case_number": "25 Cdo 1234/2019", "section": "§ 2913",
  *         "in_footnotes": true, "year_from": 2010, "year_to": 2020,   // all optional, as in files_search
  *         "relevant": [                            // what a good answer shows
  *           "oz6",                                 // any passage of the document (or its metadata)
@@ -81,12 +82,10 @@ import { gzipSync } from "node:zlib";
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LIBRARY = "user_eval";
 const UPLOADER = "user_eval";
-/** files.ts: CHANNEL_DEPTH, the per-document SQL cap outside doc/section mode, CHUNKS_PER_DOC. */
-const CHANNEL_DEPTH = 60;
-const PER_DOC_SQL = 3;
+/** files.ts: CHUNKS_PER_DOC (the channel depth and the per-document SQL cap come with planVariant). */
 const CHUNKS_PER_DOC = 2;
 const QUERY_KEYS = new Set([
-  "id", "query", "queries", "act", "doc_type", "case_number", "in_footnotes", "year_from", "year_to", "relevant", "note",
+  "id", "query", "queries", "act", "doc_type", "case_number", "section", "in_footnotes", "year_from", "year_to", "relevant", "note",
 ]);
 
 function usage(message) {
@@ -143,7 +142,7 @@ function readQueryFile(file) {
   data.queries.forEach((q, i) => {
     const where = `${file}: queries[${i}]`;
     for (const key of Object.keys(q)) if (!QUERY_KEYS.has(key)) usage(`${where}: "${key}" is not evaluated (supported: ${[...QUERY_KEYS].join(", ")})`);
-    if (!q.query && !q.queries?.length && !q.case_number) usage(`${where}: needs query, queries or case_number`);
+    if (!q.query && !q.queries?.length && !q.case_number && !q.section) usage(`${where}: needs query, queries, case_number or section`);
     if (q.queries && (!Array.isArray(q.queries) || q.queries.length > 3)) usage(`${where}: "queries" takes up to 3 strings`);
     if (!Array.isArray(q.relevant) || !q.relevant.length) usage(`${where}: "relevant" must be a non-empty array`);
     q.id = String(q.id ?? `q${i + 1}`);
@@ -301,47 +300,35 @@ async function ingestEntry(m, entry, baseDir) {
 // ---------------------------------------------------------------------------
 // Search (files.ts searchVariant + mergeVariants, without the rendering)
 
-function parzKeys(act, sections) {
-  if (!act?.startsWith("zak:")) return [];
-  const num = act.slice(4);
-  return sections.flatMap((s) => {
-    const hit = /^par:(\d+[a-z]?)$/.exec(s);
-    return hit ? [`parz:${num}/${hit[1]}`] : [];
-  });
-}
-
 async function runQuery(m, libs, q) {
   const act = q.act ? m.files.resolveActFilter(q.act) : null;
   if (q.act && !act) throw new Error(`query ${q.id}: unknown act "${q.act}"`);
   const caseKeys = q.case_number ? m.files.caseNumberKeys(q.case_number) : [];
   if (q.case_number && !caseKeys.length) throw new Error(`query ${q.id}: "${q.case_number}" is not a spisová značka`);
-  const weights = q.in_footnotes === true ? "D" : q.in_footnotes === false ? "ABC" : undefined;
+  const sectionKey = q.section ? m.files.searchSectionKey(q.section) : null;
+  if (q.section && !sectionKey) throw new Error(`query ${q.id}: section "${q.section}" is not a § or článek`);
+  const plan = {
+    libraryIds: libs,
+    weights: q.in_footnotes === true ? "D" : q.in_footnotes === false ? "ABC" : undefined,
+    inFootnotes: q.in_footnotes,
+    docTypes: q.doc_type?.length ? q.doc_type : null,
+    yearFrom: q.year_from ?? null,
+    yearTo: q.year_to ?? null,
+    act: act?.act ?? null,
+    sectionKey,
+    caseKeys,
+    docId: null,
+  };
   const variants = [...new Set([q.query, ...(q.queries ?? [])].filter((v) => typeof v === "string" && v.trim()))];
   const lists = [];
   for (const variant of variants.length ? variants : [undefined]) {
-    const ids = variant ? m.queryIdentKeys(variant) : { keys: [], act: null, sections: [] };
-    const ts = variant ? m.buildTsQuery(m.stripIdentifiers(variant), { weights }) : { and: null, or: null };
-    const actId = act?.act ?? m.files.implicitAct(ids);
-    const identKeys = [...new Set([...ids.keys, ...parzKeys(actId, ids.sections), ...caseKeys])];
-    const hits = await m.withScope(libs, (db) =>
-      m.searchChannels(db, {
-        libraryIds: libs,
-        tsAnd: ts.and,
-        tsOr: ts.or,
-        identKeys,
-        docTypes: q.doc_type?.length ? q.doc_type : null,
-        yearFrom: q.year_from ?? null,
-        yearTo: q.year_to ?? null,
-        act: actId,
-        docId: null,
-        perDoc: PER_DOC_SQL,
-        limit: CHANNEL_DEPTH,
-      }),
-    );
+    const planned = m.files.planVariant(plan, variant);
+    if (!planned) continue; // nothing searchable — files_search skips such a variant too
+    const hits = await m.withScope(libs, (db) => m.searchChannels(db, planned.params));
     lists.push(m.fuse(hits, { perDoc: CHUNKS_PER_DOC }));
   }
   let entries = m.files.mergeVariants(lists, { perDoc: CHUNKS_PER_DOC });
-  if (q.in_footnotes === true) entries = entries.filter((e) => e.chunks.length > 0);
+  if (q.in_footnotes === true || sectionKey || caseKeys.length) entries = entries.filter((e) => e.chunks.length > 0);
   return entries;
 }
 
@@ -470,7 +457,7 @@ async function main() {
       const r = judge(m, q, entries, slots, docIds, args.k);
       results.push(r);
       if (!args.json) {
-        const label = q.query ?? q.queries?.[0] ?? q.case_number;
+        const label = q.query ?? q.queries?.[0] ?? q.case_number ?? q.section;
         console.log(
           `${r.passageRecall === 1 ? "✓" : r.passageRecall > 0 ? "~" : "✗"} ${q.id.padEnd(6)} recall@${args.k} ${r.passageRecall.toFixed(2)}  ` +
             `first relevant: ${r.passageRank ?? "—"}  ${JSON.stringify(label)}`,

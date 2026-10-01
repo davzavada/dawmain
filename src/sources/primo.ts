@@ -1,5 +1,6 @@
 import { SourceError } from "./shared/errors";
-import { fetchUpstream } from "./shared/http";
+import { callDeadline } from "./shared/clock";
+import { fetchUpstream, type UpstreamOptions } from "./shared/http";
 import { SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
 import { snippet } from "./shared/text";
 import type { BibHit } from "./shared/bib";
@@ -24,6 +25,9 @@ import type { BibHit } from "./shared/bib";
  * The guest-token fallback stays for the day Primo starts demanding one:
  * on 401/403 the client asks the guest-token endpoint the SPA uses (from
  * memory, not from a capture) and retries once; a refusal is reported.
+ * (Live 2026-10: that endpoint answers 404 — and the one 401/403 seen in
+ * practice was the paging cap below, which is now checked before the
+ * network, so the fallback is never reached by paging.)
  */
 
 export const SOURCE = "UKAŽ (Univerzita Karlova, Primo)";
@@ -34,6 +38,69 @@ const LANG = "cs";
 
 /** Records per request. The SPA asks for 10; that is the verified value. */
 export const PRIMO_PAGE_SIZE = 10;
+
+/**
+ * Primo pages a guest through the first 500 records of a list only.
+ * Measured live (2026-10, query "genocida", 10811 records): offset 490
+ * answers, offset 500 — and 990, 1990, 2000 — is refused with 401/403. A
+ * request past the cap is refused here, before the network, with the advice
+ * that helps: narrow the search.
+ */
+export const PRIMO_MAX_RESULTS = 500;
+
+/**
+ * Default bounds of the date range. Primo does NOT read a lone bound as
+ * open-ended — measured live (2026-10, "genocida", cze): dr_s 2015 alone
+ * returned only 2015 (8 records against 107 for 2015–2026), dr_e 2010
+ * alone was ignored (266, the unfiltered total). So the pair always travels
+ * together, as in the capture; 1500 and 2100 (the schema's own bounds) were
+ * both accepted live (1500–2010 → 116, 2015–2100 → 107).
+ */
+export const PRIMO_YEAR_MIN = 1500;
+export const PRIMO_YEAR_MAX = 2100;
+
+/**
+ * Primo indexes the MARC (ISO 639-2/B) language codes — cze, ger, fre,
+ * slo. The equally standard terminology codes (ces, deu, fra, slk) and the
+ * two-letter ISO 639-1 codes match nothing: live, language "ces" returned
+ * 0 records where "cze" returned 266. Mapped to what Primo indexes; an
+ * unknown code passes through.
+ */
+const LANGUAGE_CODES: Record<string, string> = {
+  ces: "cze",
+  cs: "cze",
+  slk: "slo",
+  sk: "slo",
+  deu: "ger",
+  de: "ger",
+  fra: "fre",
+  fr: "fre",
+  nld: "dut",
+  nl: "dut",
+  ell: "gre",
+  el: "gre",
+  ron: "rum",
+  ro: "rum",
+  sqi: "alb",
+  hye: "arm",
+  zho: "chi",
+  zh: "chi",
+  en: "eng",
+  pl: "pol",
+  ru: "rus",
+  it: "ita",
+  es: "spa",
+  hu: "hun",
+  uk: "ukr",
+  pt: "por",
+  la: "lat",
+};
+
+/** A language code as Primo indexes it. Pure — unit-tested. */
+export function primoLanguage(code: string): string {
+  const lower = code.trim().toLowerCase();
+  return LANGUAGE_CODES[lower] ?? lower;
+}
 
 export interface PrimoSearchInput {
   /** Keywords in any field (`any,contains`). */
@@ -60,7 +127,9 @@ function clauseValue(value: string): string {
  * The `q` parameter: one clause per criterion, each with a trailing boolean
  * (`title,contains,x,AND;`), then the pre-filters the form appends in the
  * same syntax — `lang,exact,cze,AND`, `dr_s,exact,YYYY0101,AND`,
- * `dr_e,exact,YYYY1231,AND`. Verbatim shape of the capture. Pure — unit-tested.
+ * `dr_e,exact,YYYY1231,AND`. Verbatim shape of the capture; the two date
+ * clauses always go together (a lone one is misread — PRIMO_YEAR_MIN).
+ * Pure — unit-tested.
  */
 export function buildPrimoQuery(input: PrimoSearchInput): string {
   const clauses: string[] = [];
@@ -68,9 +137,11 @@ export function buildPrimoQuery(input: PrimoSearchInput): string {
   if (input.title?.trim()) clauses.push(`title,contains,${clauseValue(input.title)},AND`);
   if (input.author?.trim()) clauses.push(`creator,contains,${clauseValue(input.author)},AND`);
   if (input.subject?.trim()) clauses.push(`sub,contains,${clauseValue(input.subject)},AND`);
-  if (input.language?.trim()) clauses.push(`lang,exact,${input.language.trim().toLowerCase()},AND`);
-  if (input.yearFrom) clauses.push(`dr_s,exact,${input.yearFrom}0101,AND`);
-  if (input.yearTo) clauses.push(`dr_e,exact,${input.yearTo}1231,AND`);
+  if (input.language?.trim()) clauses.push(`lang,exact,${primoLanguage(input.language)},AND`);
+  if (input.yearFrom || input.yearTo) {
+    clauses.push(`dr_s,exact,${input.yearFrom ?? PRIMO_YEAR_MIN}0101,AND`);
+    clauses.push(`dr_e,exact,${input.yearTo ?? PRIMO_YEAR_MAX}1231,AND`);
+  }
   return clauses.join(";");
 }
 
@@ -153,6 +224,12 @@ export function primoLinkUrl(value: string): string | undefined {
 export const FULL_ABSTRACT_CHARS = 4_000;
 export const FULL_CONTENTS_CHARS = 6_000;
 
+/** List caps keep a page of 10–20 hits small; the record view is one record
+ * and shows everything it carries (the pinned book has 8 subject headings;
+ * a commentary easily has more than 6 authors). */
+const LIST_CAPS = { authors: 6, subjects: 6, links: 2, isbn: 4, issn: 2, doi: 2 };
+const FULL_CAPS = { authors: 50, subjects: 40, links: 10, isbn: 10, issn: 4, doi: 4 };
+
 export function mapPrimoDoc(doc: Rec, full = false): BibHit {
   const pnx = obj(doc.pnx);
   const display = obj(pnx.display);
@@ -160,31 +237,34 @@ export function mapPrimoDoc(doc: Rec, full = false): BibHit {
   const control = obj(pnx.control);
   const id = first(control.recordid) ?? (typeof doc["@id"] === "string" ? doc["@id"].split("/").pop() ?? "" : "");
   const context = typeof doc.context === "string" ? doc.context : undefined;
+  const caps = full ? FULL_CAPS : LIST_CAPS;
 
   const authors: string[] = [];
   for (const raw of [...strings(display.creator), ...strings(display.contributor)]) {
     const name = stripPrimoMarkers(raw);
     if (name && !authors.includes(name)) authors.push(name);
-    if (authors.length >= 6) break;
+    if (authors.length >= caps.authors) break;
   }
   const subjects: string[] = [];
   for (const raw of strings(display.subject)) {
     for (const part of stripPrimoMarkers(raw).split(/\s*;\s*/)) {
       if (part && !subjects.includes(part)) subjects.push(part);
-      if (subjects.length >= 6) break;
+      if (subjects.length >= caps.subjects) break;
     }
-    if (subjects.length >= 6) break;
+    if (subjects.length >= caps.subjects) break;
   }
   const links: string[] = [];
   const pnxLinks = obj(pnx.links);
   for (const raw of [...strings(pnxLinks.linktorsrc), ...strings(pnxLinks.openurlfulltext)]) {
     const url = primoLinkUrl(raw);
     if (url && !links.includes(url)) links.push(url);
-    if (links.length >= 2) break;
+    if (links.length >= caps.links) break;
   }
   const delivery = obj(doc.delivery);
   if (Array.isArray(delivery.link)) {
     for (const raw of delivery.link) {
+      // Checked before the push: the pnx links may already fill the cap.
+      if (links.length >= caps.links) break;
       const link = obj(raw);
       // Display-only link types (the cover image) are not a way to the
       // work.
@@ -195,7 +275,6 @@ export function mapPrimoDoc(doc: Rec, full = false): BibHit {
       const url = typeof link.linkURL === "string" ? link.linkURL : undefined;
       if (!url || !/^https?:\/\//.test(url) || /\.(jpe?g|png|gif|webp)(\?|$)/i.test(url)) continue;
       if (!links.includes(url)) links.push(url);
-      if (links.length >= 2) break;
     }
   }
 
@@ -212,14 +291,21 @@ export function mapPrimoDoc(doc: Rec, full = false): BibHit {
       })
       .filter((value): value is string => Boolean(value));
   const year = first(display.creationdate) ?? first(addata.date);
+  // Catalogue chapters and articles carry "$$Q<title>$$9<year>$$Z<mms id>"
+  // tails in ispartof (live: "Gosudarstvo i pravo Roč. -, č. 5 (2008), s.
+  // 64-72$$QGosudarstvo i pravo$$92008$$Z990005235240106986"); the citation
+  // is the part before the first marker.
+  const ispartof = first(display.ispartof);
   const container =
-    first(display.ispartof) ??
+    (ispartof && stripPrimoMarkers(ispartof)) ||
     (first(addata.jtitle)
       ? [first(addata.jtitle), first(addata.volume) && `vol. ${first(addata.volume)}`, first(addata.issue) && `no. ${first(addata.issue)}`, first(addata.spage) && `p. ${first(addata.spage)}`]
           .filter(Boolean)
           .join(", ")
       : undefined);
-  const description = first(display.description) ?? first(addata.abstract);
+  // The record view joins every entry; the list's snippet needs only the first.
+  const description = (full ? strings(display.description).join(" ") : first(display.description)) || first(addata.abstract);
+  const contents = full ? strings(display.contents).join(" -- ") : first(display.contents);
   const availability = strings(obj(delivery).availability);
   const openAccess = availability.some((a) => /open_access|free/i.test(a)) || strings(addata.oa).length > 0;
 
@@ -232,14 +318,14 @@ export function mapPrimoDoc(doc: Rec, full = false): BibHit {
     publisher: first(display.publisher) ? stripPrimoMarkers(first(display.publisher) as string) : undefined,
     type: first(display.type),
     language: first(display.language),
-    isbn: (strings(addata.isbn).length ? strings(addata.isbn) : identifier(/^ISBN$/i)).slice(0, 4),
-    issn: (strings(addata.issn).length ? strings(addata.issn) : identifier(/^E?ISSN$/i)).slice(0, 2),
-    doi: (strings(addata.doi).length ? strings(addata.doi) : identifier(/^DOI$/i)).slice(0, 2),
+    isbn: (strings(addata.isbn).length ? strings(addata.isbn) : identifier(/^ISBN$/i)).slice(0, caps.isbn),
+    issn: (strings(addata.issn).length ? strings(addata.issn) : identifier(/^E?ISSN$/i)).slice(0, caps.issn),
+    doi: (strings(addata.doi).length ? strings(addata.doi) : identifier(/^DOI$/i)).slice(0, caps.doi),
     container,
     subjects,
     abstract: description ? snippet(description, full ? FULL_ABSTRACT_CHARS : 300) : undefined,
     // Catalogue books carry their table of contents in display.contents.
-    contents: first(display.contents) ? snippet(first(display.contents) as string, full ? FULL_CONTENTS_CHARS : 250) : undefined,
+    contents: contents ? snippet(contents, full ? FULL_CONTENTS_CHARS : 250) : undefined,
     open_access: openAccess || undefined,
     // The record's own page in UKAŽ; context (L = catalogue, PC = Central
     // Discovery Index) is part of the full-display route.
@@ -297,11 +383,16 @@ export async function getPrimoRecord(id: string): Promise<BibHit> {
     const context = primoContext(recordId);
     const url = `${BASE}/primaws/rest/pub/pnxs/${context}/${encodeURIComponent(recordId)}?vid=${encodeURIComponent(PRIMO_VID)}&lang=${LANG}&search_scope=MyInst_and_CI`;
     const response = await fetchPrimo(url);
-    if (response.status === 404) {
-      throw new SourceError(SOURCE, "NOT_FOUND", `Primo has no record ${recordId} in context ${context}.`, "Take the id from a doctrine_search hit; if it came from there, the full-display endpoint (unverified against a capture) may differ — the search results already carry the record's main fields.");
-    }
+    const missing = () =>
+      new SourceError(
+        SOURCE,
+        "NOT_FOUND",
+        `Primo has no record ${recordId} (context ${context}).`,
+        "Take the id from a doctrine_search hit (alma… / cdi_…). If an id taken from a hit fails this way, the record endpoint may have changed — run dawmain_probe_sources (canary 'primo'); the search hit already carries the record's main fields.",
+      );
+    if (response.status === 404 || response.status === 400) throw missing();
     if (!response.ok) {
-      throw new SourceError(SOURCE, "UPSTREAM_ERROR", `Primo answered HTTP ${response.status} for the record.`, "The full-display endpoint is from memory, not from the capture — a HAR of opening one record in UKAŽ would pin it. The search results already carry the record's main fields.");
+      throw new SourceError(SOURCE, "UPSTREAM_ERROR", `Primo answered HTTP ${response.status} for the record.`, "Try again in a minute; if it persists run dawmain_probe_sources (canary 'primo'). The search hit already carries the record's main fields.");
     }
     let json: unknown;
     try {
@@ -310,8 +401,13 @@ export async function getPrimoRecord(id: string): Promise<BibHit> {
       throw new SourceError(SOURCE, "PARSE_DRIFT", "Primo answered the record request with a non-JSON body.", "Run dawmain_probe_sources (canary 'primo') with include_raw.");
     }
     const doc = obj(json);
-    if (!obj(doc.pnx).display) {
-      throw new SourceError(SOURCE, "PARSE_DRIFT", "Primo's record response carries no pnx.display.", "The full-display endpoint is from memory — a HAR of opening one record in UKAŽ would pin it.");
+    const pnx = obj(doc.pnx);
+    // A well-formed id Primo does not hold answers 200 with a body without
+    // the record (live 2026-10: alma990000000000000000 → no pnx.display).
+    // Only a record that is there but lacks its display section is drift.
+    if (!pnx.display && !first(obj(pnx.control).recordid)) throw missing();
+    if (!pnx.display) {
+      throw new SourceError(SOURCE, "PARSE_DRIFT", "Primo's record response carries no pnx.display.", "The full-display layout may have changed — run dawmain_probe_sources (canary 'primo') with include_raw.");
     }
     const hit = mapPrimoDoc(doc, true);
     return hit.id ? hit : { ...hit, id: recordId };
@@ -325,16 +421,18 @@ const GUEST_TOKEN_TTL_MS = 30 * 60 * 1000;
 const guestToken = new TtlCache<string>(GUEST_TOKEN_TTL_MS, 1);
 const GUEST_TOKEN_KEY = "primo-guest-jwt";
 
-async function fetchGuestToken(): Promise<string> {
+async function fetchGuestToken(deadline: number): Promise<string> {
   return guestToken.through(GUEST_TOKEN_KEY, async () => {
     // From memory of the Primo VE SPA, not from the capture (which was
     // exported without Authorization headers): the institution's guest-JWT
     // endpoint. Only ever called after an unsigned search was refused.
     const target = `${BASE}/discovery/search?vid=${encodeURIComponent(PRIMO_VID)}`;
     const url = `${BASE}/primaws/rest/pub/institution/${INST}/jwt?isGuest=true&lang=${LANG}&targetUrl=${encodeURIComponent(target)}&viewId=${encodeURIComponent(PRIMO_VID)}`;
-    const response = await fetchUpstream(SOURCE, url, {
-      headers: { accept: "application/json, text/plain, */*", referer: `${BASE}/discovery/search?vid=${PRIMO_VID}` },
-    });
+    const response = await primoRequest(
+      url,
+      { headers: { accept: "application/json, text/plain, */*", referer: `${BASE}/discovery/search?vid=${PRIMO_VID}` } },
+      deadline,
+    );
     const text = (await response.text()).trim().replace(/^"|"$/g, "");
     if (!response.ok || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(text)) {
       throw new SourceError(
@@ -348,18 +446,48 @@ async function fetchGuestToken(): Promise<string> {
   });
 }
 
+/**
+ * Every Primo request of one call ends by one deadline. The plain path (a
+ * 20 s attempt, back-off, a 20 s retry ≈ 41.5 s) fits as before; the rare
+ * guest-token path (refused unsigned call, token fetch, signed call with its
+ * own retry) could otherwise run past the route's 60 s and lose the answer.
+ */
+const PRIMO_CALL_BUDGET_MS = 48_000;
+const PRIMO_TIMEOUT_MS = 20_000;
+/** Less than this left: a request could only time out, so it is not sent. */
+const PRIMO_MIN_ATTEMPT_MS = 3_000;
+/** fetchUpstream's longest back-off before its retry (2 s after a 429). */
+const PRIMO_RETRY_PAUSE_MS = 2_000;
+
+/** fetchUpstream cut to what is left of the deadline; its one retry only
+ * while a second attempt still fits. */
+async function primoRequest(url: string, options: UpstreamOptions, deadline: number): Promise<Response> {
+  const left = deadline - Date.now();
+  if (left < PRIMO_MIN_ATTEMPT_MS) {
+    throw new SourceError(
+      SOURCE,
+      "UPSTREAM_ERROR",
+      `${SOURCE} answered too slowly: the call's time budget ran out.`,
+      "Try again in a minute; if it keeps failing run dawmain_probe_sources (canary 'primo').",
+    );
+  }
+  const timeoutMs = Math.min(options.timeoutMs ?? PRIMO_TIMEOUT_MS, left);
+  return fetchUpstream(SOURCE, url, { ...options, timeoutMs, retry: left >= 2 * timeoutMs + PRIMO_RETRY_PAUSE_MS });
+}
+
 /** One Primo REST call: unsigned first, once more with the guest JWT when
  * the unsigned call is refused. */
 async function fetchPrimo(url: string): Promise<Response> {
+  const deadline = callDeadline(PRIMO_CALL_BUDGET_MS);
   const headers: Record<string, string> = {
     accept: "application/json, text/plain, */*",
     "accept-language": "cs,en;q=0.8",
     referer: `${BASE}/discovery/search?vid=${PRIMO_VID}&lang=${LANG}&mode=advanced`,
   };
-  const response = await fetchUpstream(SOURCE, url, { headers, timeoutMs: 20_000 });
+  const response = await primoRequest(url, { headers, timeoutMs: PRIMO_TIMEOUT_MS }, deadline);
   if (response.status !== 401 && response.status !== 403) return response;
-  const token = await fetchGuestToken();
-  const signed = await fetchUpstream(SOURCE, url, { headers: { ...headers, authorization: `Bearer ${token}` }, timeoutMs: 20_000 });
+  const token = await fetchGuestToken(deadline);
+  const signed = await primoRequest(url, { headers: { ...headers, authorization: `Bearer ${token}` }, timeoutMs: PRIMO_TIMEOUT_MS }, deadline);
   if (signed.status === 401 || signed.status === 403) {
     // A replayed dead token must not stick for its whole TTL.
     guestToken.delete(GUEST_TOKEN_KEY);
@@ -375,9 +503,19 @@ async function fetchPrimo(url: string): Promise<Response> {
 
 const searchCache = new TtlCache<PrimoSearchPage>(SEARCH_TTL_MS);
 
-/** One results page: `offset` records in, `limit` records (≤ PRIMO_PAGE_SIZE). */
+/** One results page: `offset` records in, `limit` records (≤ PRIMO_PAGE_SIZE).
+ * Cached under the request URL itself, so inputs that normalise to the same
+ * request ("CZE"/"cze", "a, b"/"a b") share one entry. */
 export async function searchPrimo(input: PrimoSearchInput, offset: number, limit = PRIMO_PAGE_SIZE): Promise<PrimoSearchPage> {
-  return searchCache.through(memoKey("primo-search", [input, offset, limit]), () => runSearchPrimo(input, offset, limit));
+  if (offset >= PRIMO_MAX_RESULTS) {
+    throw new SourceError(
+      SOURCE,
+      "INPUT_INVALID",
+      `UKAŽ lets a guest page through only the first ${PRIMO_MAX_RESULTS} records of a list; record ${offset + 1} lies beyond.`,
+      "Narrow the search — title, author, subject, language, years or a more specific query — to bring the rest within reach.",
+    );
+  }
+  return searchCache.through(buildPrimoUrl(input, offset, limit), () => runSearchPrimo(input, offset, limit));
 }
 
 async function runSearchPrimo(input: PrimoSearchInput, offset: number, limit: number): Promise<PrimoSearchPage> {

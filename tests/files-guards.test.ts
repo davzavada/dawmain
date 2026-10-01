@@ -7,6 +7,7 @@ import {
   __resetGuardsForTests,
   allowToolCall,
   autoMode,
+  cachedMode,
   effectiveMode,
   envOnlyMode,
   MODE_OVERRIDE_KEY,
@@ -228,6 +229,44 @@ describe("effectiveMode", () => {
     setScopeRunner(t.runner);
     await t.owner.query("INSERT INTO system_state (key, value) VALUES ($1, $2::jsonb)", [MODE_OVERRIDE_KEY, JSON.stringify("off")]);
     expect(await effectiveMode()).toBe("off");
+  });
+
+  it("concurrent callers on a cold cache share one measurement (parallel files_* calls at expiry)", async () => {
+    const runner = vi.fn(t.runner);
+    setScopeRunner(runner as never);
+    expect(await Promise.all([effectiveMode(), effectiveMode(), effectiveMode()])).toEqual(["on", "on", "on"]);
+    expect(runner).toHaveBeenCalledTimes(1);
+    // Cached now: no scope at all.
+    expect(await effectiveMode()).toBe("on");
+    expect(runner).toHaveBeenCalledTimes(1);
+  });
+
+  it("a failed shared measurement leaves neither a cache nor a pending promise behind", async () => {
+    let fail = true;
+    const runner = vi.fn((libs: string[], fn: never, options: never) =>
+      fail ? Promise.reject(new FilesUnavailableError("down", "unreachable")) : t.runner(libs, fn, options),
+    );
+    setScopeRunner(runner as never);
+    process.env.FILES_MODE = "readonly";
+    expect(await Promise.all([effectiveMode(), effectiveMode()])).toEqual(["readonly", "readonly"]);
+    expect(runner).toHaveBeenCalledTimes(1);
+    fail = false;
+    await t.owner.query("INSERT INTO system_state (key, value) VALUES ($1, $2::jsonb)", [MODE_OVERRIDE_KEY, JSON.stringify("off")]);
+    expect(await effectiveMode()).toBe("off");
+    expect(runner).toHaveBeenCalledTimes(2);
+  });
+
+  it("cachedMode: known without I/O (env, a valid cache), else null", async () => {
+    const runner = vi.fn(t.runner);
+    setScopeRunner(runner as never);
+    expect(cachedMode()).toBeNull();
+    expect(await effectiveMode()).toBe("on");
+    expect(cachedMode()).toBe("on");
+    process.env.FILES_MODE = "readonly";
+    expect(cachedMode()).toBe("readonly");
+    process.env.FILES_MODE = "off";
+    expect(cachedMode()).toBe("off");
+    expect(runner).toHaveBeenCalledTimes(1);
   });
 });
 

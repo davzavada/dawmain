@@ -19,8 +19,9 @@ vi.mock("@/src/zotero/client", async (importOriginal) => ({
   getDeleted: vi.fn(),
   getFulltextIndex: vi.fn(),
   countFulltext: vi.fn(),
-  // Pure: the real one.
+  // Pure: the real ones.
   tagColorsOf: (await importOriginal<typeof import("@/src/zotero/client")>()).tagColorsOf,
+  zoteroQuery: (await importOriginal<typeof import("@/src/zotero/client")>()).zoteroQuery,
   downloadPdf: vi.fn(),
 }));
 vi.mock("@/src/zotero/store", () => ({ loadConnection: vi.fn(), markRevoked: vi.fn() }));
@@ -451,13 +452,15 @@ describe("a rejected key", () => {
     expect(getFulltext).not.toHaveBeenCalled();
   });
 
-  it("in a search fanned out over groups and variants: one mark, no search after the groups failed", async () => {
+  it("in a search fanned out over groups and variants: one mark, no group searched after the listing failed", async () => {
     vi.mocked(loadConnection).mockResolvedValue(connection("all"));
     vi.mocked(listGroups).mockRejectedValue(new ZoteroKeyInvalidError());
     const r = await call("zotero_search", { queries: ["odpovědnost", "škoda", "náhrada"] });
     expect(r.text).toContain(ZOTERO_GATE_TEXT.rejected);
     expect(markRevoked).toHaveBeenCalledTimes(1);
-    expect(searchItems).not.toHaveBeenCalled();
+    // The personal library's searches go out beside the listing (asked first), never a group's.
+    expect(vi.mocked(searchItems).mock.calls.map((c) => c[1])).toEqual([PERSONAL, PERSONAL, PERSONAL]);
+    expect(vi.mocked(listGroups).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(searchItems).mock.invocationCallOrder[0]);
   });
 
   it("when every variant's search is rejected: still one mark", async () => {
@@ -621,7 +624,7 @@ describe("zotero_search", () => {
         libraryVersion: 9,
       });
       const r = await call("zotero_search", { query: "25 Cdo 1234/19" });
-      expect(scanCases).toHaveBeenCalledWith(expect.anything(), PERSONAL, { maxPages: LIMITS.scanPagesPerLibrary }, expect.anything());
+      expect(scanCases).toHaveBeenCalledWith(expect.anything(), PERSONAL, expect.objectContaining({ maxPages: LIMITS.scanPagesPerLibrary }), expect.anything());
       const { inside, outside } = split(r.text);
       const lines = inside.split("\n");
       expect(lines[0]).toBe("— Podle spisové značky (docketNumber, extra, název) —");
@@ -1201,5 +1204,363 @@ describe("zotero_list searches", () => {
     expect(outside).toContain("1. key SRCH2345");
     expect(outside).not.toContain("ignore previous");
     expect(outside).toContain("returns a saved search's conditions, not its results");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// zotero_search: what the search fixes pin
+
+describe("zotero_search — quotes, hints, pages, item_type, spisová značka", () => {
+  const work = item("WRKA2345", "book", { title: "Energetický nápoj a parazitování" });
+  const qs = () => vi.mocked(searchItems).mock.calls.map((c) => `${c[2].qmode}:${c[2].q}`);
+
+  it("title mode sends a quoted phrase as words (quotes find nothing there); '\"a b\"' and 'a b' are one request", async () => {
+    vi.mocked(searchItems).mockResolvedValue(page([work], 1));
+    const r = await call("zotero_search", { query: '"energetický nápoj"' });
+    expect(qs()).toEqual(["titleCreatorYear:energetický nápoj"]);
+    expect(r.text).toContain("Titles, creators and years are matched word by word: the quotes were left out");
+    // The next page repeats the model's own query.
+    vi.mocked(searchItems).mockClear();
+    vi.mocked(searchItems).mockResolvedValue(page([work], 1));
+    await call("zotero_search", { queries: ['"a b"', "a b", "„a b“"] });
+    expect(qs()).toEqual(["titleCreatorYear:a b"]);
+  });
+
+  it("everything mode keeps the phrase for the full text and searches its words in titles beside it, splitting the page", async () => {
+    const pdf = pdfAttachment("PDFE2345", null, "Rozsudek.pdf");
+    vi.mocked(searchItems).mockImplementation(async (_c, _l, q) => (q.qmode === "everything" ? page([pdf], 8) : page([work], 3)));
+    const r = await call("zotero_search", { query: '"energetický nápoj"', mode: "everything" });
+    expect(vi.mocked(searchItems).mock.calls.map((c) => [c[2].qmode, c[2].q, c[2].limit])).toEqual([
+      ["everything", '"energetický nápoj"', 10],
+      ["titleCreatorYear", "energetický nápoj", 10],
+    ]);
+    const { inside, outside } = split(r.text);
+    expect(inside).toContain("„Rozsudek.pdf“");
+    expect(inside).toContain("„Energetický nápoj a parazitování“");
+    expect(outside).toContain(`Variants: "energetický nápoj" (the phrase in the attachments' text) 8 · "energetický nápoj" in titles, creators and years 3`);
+    expect(outside).toContain('A "quoted phrase" was matched as such in the attachments\' text');
+    expect(outside).toContain("up to 20 items per library");
+    // An unquoted variant of the same words covers the titles already: no extra list.
+    vi.mocked(searchItems).mockClear();
+    await call("zotero_search", { queries: ['"energetický nápoj"', "energetický nápoj"], mode: "everything" });
+    expect(qs()).toEqual(['everything:"energetický nápoj"', "everything:energetický nápoj"]);
+  });
+
+  it("the automatic everything round reuses the empty title list instead of asking again", async () => {
+    vi.mocked(searchItems).mockImplementation(async (_c, _l, q) => (q.qmode === "everything" ? page([work], 30) : page([], 0)));
+    const r = await call("zotero_search", { query: '"energetický nápoj"' });
+    expect(qs()).toEqual(["titleCreatorYear:energetický nápoj", 'everything:"energetický nápoj"']);
+    expect(r.text).toContain("repeated automatically in everything mode");
+    expect(r.text).toContain('More: zotero_search {query: "\\"energetický nápoj\\"", mode: "everything", page: 2}');
+  });
+
+  it("the automatic everything round asks a title list that FAILED again instead of replaying its failure", async () => {
+    let failed = false;
+    vi.mocked(searchItems).mockImplementation(async (_c, _l, q) => {
+      if (q.qmode === "titleCreatorYear" && q.q === "energetický nápoj" && !failed) {
+        failed = true;
+        throw new Error("socket hang up");
+      }
+      return q.qmode === "titleCreatorYear" && q.q === "energetický nápoj" ? page([work], 1) : page([], 0);
+    });
+    const r = await call("zotero_search", { queries: ['"energetický nápoj"', "tržnice"] });
+    // Round 1: both title lists; round 2: the everything lists, the failed
+    // title list asked again (the answered empty one is reused).
+    expect(qs().filter((q) => q === "titleCreatorYear:energetický nápoj")).toHaveLength(2);
+    expect(qs().filter((q) => q === "titleCreatorYear:tržnice")).toHaveLength(1);
+    expect(r.text).toContain("„Energetický nápoj a parazitování“");
+  });
+
+  it("the find hint is one word of the list that returned the attachment — never variant 1 by default, never quotes", async () => {
+    const parent = item("WRKD2345", "book", { title: "Delta Center" });
+    const pdf = pdfAttachment("PDFD2345", "WRKD2345", "Delta.pdf");
+    vi.mocked(searchItems).mockImplementation(async (_c, _l, q) => (q.q === "náhrada škody" ? page([pdf], 1) : page([work], 1)));
+    vi.mocked(getItemsByKeys).mockResolvedValue([parent]);
+    const r = await call("zotero_search", { queries: ["odpovědnost", "náhrada škody"], mode: "everything" });
+    const { outside } = split(r.text);
+    expect(outside).toContain('text of the matching attachment → zotero_get_text {key: "PDFD2345", library: "personal", find: "náhrada"}');
+    expect(outside).not.toContain('find: "odpovědnost"');
+
+    vi.mocked(searchItems).mockResolvedValue(page([pdf], 1));
+    const quoted = await call("zotero_search", { query: '"energetický nápoj" tržnice', mode: "everything" });
+    expect(quoted.text).toContain('find: "energetický"}');
+    expect(quoted.text).not.toMatch(/find: "[^"]*\\"/);
+    const docket = await call("zotero_search", { query: "23 Cdo 1411/2021", mode: "everything" });
+    expect(docket.text).toContain('find: "1411/2021"}');
+  });
+
+  it("a file saved without a parent gets its own text call; a link does not", async () => {
+    const lone = pdfAttachment("PDFL2345", null, "3Co_54_2023_37.pdf");
+    const link = item("LNKA2345", "attachment", { title: "Odkaz escrow", linkMode: "linked_url" });
+    vi.mocked(searchItems).mockResolvedValue(page([lone, link], 2));
+    const r = await call("zotero_search", { query: "escrow", mode: "everything" });
+    const { outside } = split(r.text);
+    expect(outside).toContain('1. key PDFL2345 · library: "personal" → zotero_get_item {key: "PDFL2345", library: "personal"}\n   text of the matching attachment → zotero_get_text {key: "PDFL2345", library: "personal", find: "escrow"}');
+    expect(outside).not.toContain('zotero_get_text {key: "LNKA2345"');
+  });
+
+  it("a page past the end says so, with the totals and the last page — not 'no match, drop a filter'", async () => {
+    vi.mocked(searchItems).mockResolvedValue(page([], 28));
+    const r = await call("zotero_search", { query: "smlouv", library: "personal", limit: 5, page: 7 });
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain("page 7 is past the end of this search (matching items per library: personal 28; 5 per page) — the last page with hits is 6.");
+    expect(r.text).toContain('zotero_search {query: "smlouv", library: "personal", limit: 5, page: 6}');
+    expect(r.text).not.toContain("No match in Zotero");
+    expect(searchItems).toHaveBeenCalledTimes(1);
+    // With nothing at all the answer stays "no match".
+    vi.mocked(searchItems).mockResolvedValue(page([], 0));
+    expect((await call("zotero_search", { query: "smlouv", library: "personal", page: 2 })).text).toContain("No match in Zotero");
+  });
+
+  it("item_type without attachments: no everything round (it could add nothing), and the answer says where the full text is", async () => {
+    vi.mocked(searchItems).mockResolvedValue(page([], 0));
+    const r = await call("zotero_search", { query: "dovolatel", item_type: ["case"] });
+    expect(qs()).toEqual(["titleCreatorYear:dovolatel"]);
+    expect(r.text).not.toContain("still nothing");
+    expect(r.text).toContain("The attachments' full text was not searched: its matches are attachment items, which item_type leaves out");
+    expect(r.text).toContain('zotero_search {query: "dovolatel", mode: "everything"} looks into the PDFs');
+    for (const [args, rounds] of [
+      [{ item_type: ["case", "attachment"] }, 2],
+      [{ exclude_item_type: ["note"] }, 2],
+      [{ exclude_item_type: ["attachment"] }, 1],
+      [{ item_type: ["note"] }, 1],
+    ] as const) {
+      vi.mocked(searchItems).mockClear();
+      await call("zotero_search", { query: "dovolatel", ...args });
+      expect(searchItems, JSON.stringify(args)).toHaveBeenCalledTimes(rounds);
+    }
+    // Asked for everything mode under such a filter: a warning beside the hits.
+    vi.mocked(searchItems).mockResolvedValue(page([item("CASE2345", "case", { caseName: "Dovolatel" })], 1));
+    const explicit = await call("zotero_search", { query: "dovolatel", item_type: ["case"], mode: "everything" });
+    expect(explicit.text).toContain("⚠ The attachments' full text was not searched");
+  });
+
+  it("a short spisová značka is searched written out too; an ÚS one as it is; the next page rebuilds the same lists", async () => {
+    vi.mocked(searchItems).mockResolvedValue(page([work], 60));
+    const r = await call("zotero_search", { query: "23 Cdo 1411/21" });
+    expect(qs()).toEqual(["titleCreatorYear:23 Cdo 1411/21", "titleCreatorYear:23 Cdo 1411/2021"]);
+    expect(r.text).toContain('"23 Cdo 1411/2021" (the spisová značka written out)');
+    // The More call echoes the model's query, and page 2 reads the same two lists from the same offset.
+    expect(r.text).toContain('More: zotero_search {query: "23 Cdo 1411/21", page: 2}');
+    vi.mocked(searchItems).mockClear();
+    await call("zotero_search", { query: "23 Cdo 1411/21", page: 2 });
+    expect(vi.mocked(searchItems).mock.calls.map((c) => [c[2].q, c[2].start])).toEqual([
+      ["23 Cdo 1411/21", 10],
+      ["23 Cdo 1411/2021", 10],
+    ]);
+    vi.mocked(searchItems).mockClear();
+    await call("zotero_search", { query: "IV. ÚS 732/18" });
+    expect(qs()).toEqual(["titleCreatorYear:IV. ÚS 732/18"]);
+    // No room for a fourth list: the written-out form takes the short one's place.
+    vi.mocked(searchItems).mockClear();
+    await call("zotero_search", { queries: ["23 Cdo 1411/21", "dovolání", "škoda"] });
+    expect(qs()).toEqual(["titleCreatorYear:23 Cdo 1411/2021", "titleCreatorYear:dovolání", "titleCreatorYear:škoda"]);
+    // Nothing found: the no-match line names the written-out form too.
+    vi.mocked(searchItems).mockResolvedValue(page([], 0));
+    const none = await call("zotero_search", { query: "23 Cdo 1411/21" });
+    expect(none.text).toContain('No match in Zotero for "23 Cdo 1411/21" (the spisová značka also searched written out: "23 Cdo 1411/2021")');
+  });
+
+  it("a blank query is invalid (it would list the whole library as 'matching'); so is one of quotes alone", async () => {
+    const schema = tools.zotero_search.config.inputSchema as { safeParse: (v: unknown) => { success: boolean; data?: Record<string, unknown> } };
+    expect(schema.safeParse({ query: "   " }).success).toBe(false);
+    expect(schema.safeParse({ queries: ["ab", "  "] }).success).toBe(false);
+    expect(schema.safeParse({ query: " ab " }).data?.query).toBe("ab");
+    expect(schema.safeParse({}).success).toBe(true);
+    const r = await call("zotero_search", { query: '""' });
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain("has no word to search for");
+    expect(searchItems).not.toHaveBeenCalled();
+  });
+
+  it("groupHits asks for a missing parent once, not again in the second hop", async () => {
+    const orphan = item("NTEA2345", "note", { parentItem: "GONE2345", note: "<p>poznámka</p>" }, { title: "poznámka" });
+    vi.mocked(searchItems).mockResolvedValue(page([orphan], 1));
+    vi.mocked(getItemsByKeys).mockResolvedValue([]);
+    const r = await call("zotero_search", { query: "poznámka" });
+    expect(vi.mocked(getItemsByKeys).mock.calls.map((c) => c[2])).toEqual([["GONE2345"]]);
+    expect(split(r.text).inside).toContain("[note] „poznámka“");
+  });
+});
+
+describe("zotero_search — the docket scan beside the search", () => {
+  const scanEntry = (key: string, docketNumber: string): CaseScanEntry => ({ key, title: "Rozsudek", docketNumber, extra: "", date: "2021-05-04", court: "Nejvyšší soud", version: 3 });
+  const deferred = <T,>() => {
+    let resolve: (v: T) => void = () => undefined;
+    const promise = new Promise<T>((r) => (resolve = r));
+    return { promise, resolve };
+  };
+  const scanOf = (entries: CaseScanEntry[], pages = 1) => ({ items: entries, scannedPages: pages, total: entries.length, libraryVersion: 9 });
+
+  it("the libraries are scanned side by side, and the personal one does not wait for the group listing", async () => {
+    vi.mocked(loadConnection).mockResolvedValue(connection("all"));
+    const listing = deferred<Array<{ id: number; name: string; numItems: number }>>();
+    vi.mocked(listGroups).mockReturnValue(listing.promise as never);
+    const scans: Array<ReturnType<typeof deferred<ReturnType<typeof scanOf>>>> = [];
+    vi.mocked(scanCases).mockImplementation(() => {
+      const d = deferred<ReturnType<typeof scanOf>>();
+      scans.push(d);
+      return d.promise;
+    });
+    vi.mocked(searchItems).mockResolvedValue(page([], 0));
+    const pending = call("zotero_search", { query: "23 Cdo 1411/2021" });
+    await vi.waitFor(() => expect(scanCases).toHaveBeenCalledTimes(1));
+    // Before the listing is in: the personal scan and the personal search are out; the listing was asked first.
+    expect(vi.mocked(scanCases).mock.calls[0][1]).toEqual(PERSONAL);
+    expect(vi.mocked(searchItems).mock.calls.map((c) => c[1])).toEqual([PERSONAL]);
+    expect(vi.mocked(listGroups).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(scanCases).mock.invocationCallOrder[0]);
+    listing.resolve([{ id: 100, name: "A", numItems: 1 }]);
+    // The group's scan starts while the personal one is still running.
+    await vi.waitFor(() => expect(scanCases).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(scanCases).mock.calls.map((c) => c[2].maxPages)).toEqual([5, 5]);
+    scans[1].resolve(scanOf([scanEntry("CASG2345", "23 Cdo 1411/2021")]));
+    scans[0].resolve(scanOf([scanEntry("CASE2345", "23 Cdo 1411/2021")]));
+    const r = await pending;
+    expect(r.text).toContain("scanned 2 of 2 case items (personal 1 of 1 · 100 1 of 1)");
+    // Listed in library order, whichever scan finished first.
+    expect(split(r.text).inside.indexOf("osobní knihovna")).toBeLessThan(split(r.text).inside.indexOf("skupina"));
+  });
+
+  it("a third library starts as soon as the pages of the first two are known, with the share it would get after them", async () => {
+    vi.mocked(loadConnection).mockResolvedValue(connection("all"));
+    vi.mocked(listGroups).mockResolvedValue([
+      { id: 100, name: "A", numItems: 1 },
+      { id: 101, name: "B", numItems: 1 },
+      { id: 102, name: "C", numItems: 1 },
+    ]);
+    vi.mocked(searchItems).mockResolvedValue(page([], 0));
+    const hold = deferred<void>();
+    const pagesOf: Record<string, number> = { user: 1, "100": 4, "101": 5, "102": 5 };
+    vi.mocked(scanCases).mockImplementation(async (_c, lib, opts) => {
+      const pages = Math.min(opts.maxPages, pagesOf[lib.type === "user" ? "user" : String(lib.id)]);
+      opts.onPages?.(pages);
+      await hold.promise;
+      return scanOf([], pages);
+    });
+    const pending = call("zotero_search", { query: "23 Cdo 1411/2021" });
+    // personal 1 + group 100 4 pages leave 5: group 101 starts before any scan has finished; 102 gets nothing.
+    await vi.waitFor(() => expect(scanCases).toHaveBeenCalledTimes(3));
+    hold.resolve();
+    const r = await pending;
+    expect(vi.mocked(scanCases).mock.calls.map((c) => c[2].maxPages)).toEqual([5, 5, 5]);
+    expect(r.text).toContain("102 not scanned (scan budget spent)");
+  });
+
+  it("parents are read while the scan still runs; a decision both found is shown once, with what matched in it", async () => {
+    const scanDone = deferred<ReturnType<typeof scanOf>>();
+    vi.mocked(scanCases).mockReturnValue(scanDone.promise);
+    const decision = item("CASE2345", "case", { caseName: "Rozsudek", court: "Nejvyšší soud", docketNumber: "23 Cdo 1411/2021" });
+    const pdf = pdfAttachment("CPDF2345", "CASE2345", "23Cdo1411-2021.pdf");
+    vi.mocked(searchItems).mockImplementation(async (_c, _l, q) => (q.qmode === "everything" ? page([pdf], 1) : page([], 0)));
+    vi.mocked(getItemsByKeys).mockResolvedValue([decision]);
+    const pending = call("zotero_search", { query: "23 Cdo 1411/2021", mode: "everything" });
+    await vi.waitFor(() => expect(getItemsByKeys).toHaveBeenCalled());
+    scanDone.resolve(scanOf([scanEntry("CASE2345", "23 Cdo 1411/2021")]));
+    const r = await pending;
+    const { inside, outside } = split(r.text);
+    expect(inside.match(/^\d+\. /gm)).toHaveLength(1);
+    expect(inside).toContain("1. [case] „Rozsudek“ · Nejvyšší soud · 23 Cdo 1411/2021 · 2021-05-04\n   matched in: PDF text „23Cdo1411-2021.pdf“");
+    expect(outside).toContain('text of the matching attachment → zotero_get_text {key: "CPDF2345", library: "personal", find: "1411/2021"}');
+    expect(outside).toContain("The docket-number scan found one decision, listed first; it is among these search hits too (shown once, with what matched).");
+    expect(outside).not.toContain("Plus one decision");
+  });
+
+  it("a scanned entry's keys are computed once, however often the cached scan is matched", async () => {
+    let reads = 0;
+    const entry = scanEntry("CASE2345", "23 Cdo 1411/2021");
+    const extra = entry.extra;
+    Object.defineProperty(entry, "extra", {
+      get: () => {
+        reads++;
+        return extra;
+      },
+    });
+    vi.mocked(scanCases).mockResolvedValue(scanOf([entry]));
+    for (let i = 0; i < 3; i++) {
+      const r = await call("zotero_search", { query: "23 Cdo 1411/21" });
+      expect(r.text).toContain("1 match by docket number");
+    }
+    expect(reads).toBe(1);
+  });
+});
+
+describe("the gate and the budget", () => {
+  it("with Clerk's access not cached, the connection is read alongside it, not after it", async () => {
+    const delay = <T,>(ms: number, v: T) => new Promise<T>((r) => setTimeout(() => r(v), ms));
+    loader.mockImplementation(() => delay(100, PRO_ACCESS));
+    vi.mocked(loadConnection).mockImplementation(() => delay(100, connection()));
+    const at = Date.now();
+    const r = await call("zotero_list", { list: "libraries" });
+    expect(r.isError).toBe(false);
+    expect(Date.now() - at).toBeLessThan(180);
+    expect(loadConnection).toHaveBeenCalledTimes(1);
+    // Cached access (the next call): nothing is read early — a refused caller costs no Clerk read.
+    vi.mocked(loadConnection).mockClear();
+    for (let i = 0; i < LIMITS.toolCallsPerHour; i++) allowToolCall(`zotero:${USER}`, undefined, LIMITS.toolCallsPerHour);
+    expect((await call("zotero_list", { list: "libraries" })).text).toContain(ZOTERO_GATE_TEXT.rateLimited);
+    expect(loadConnection).not.toHaveBeenCalled();
+  });
+
+  it("an early connection read that fails does not change a refusal's text", async () => {
+    loader.mockImplementation(() => new Promise((r) => setTimeout(() => r(NON_PRO_ACCESS), 30)));
+    vi.mocked(loadConnection).mockRejectedValue(new Error("clerk down"));
+    const r = await call("zotero_search", { query: "škoda" });
+    expect(r.text).toContain(ZOTERO_GATE_TEXT.noPro);
+    expectNoZoteroRequest();
+  });
+
+  it("the budget starts with the call: a slow gate leaves the Zotero requests the rest of it; a hung one answers at the budget", async () => {
+    vi.useFakeTimers();
+    const logs = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      loader.mockImplementation(() => new Promise((r) => setTimeout(() => r(PRO_ACCESS), 40_000)));
+      let signal: AbortSignal | undefined;
+      vi.mocked(searchItems).mockImplementation((_c, _l, _q, io) => {
+        signal = io?.signal;
+        return new Promise((_, reject) => io?.signal?.addEventListener("abort", () => reject(new Error("cancelled"))));
+      });
+      const pending = call("zotero_search", { query: "škoda", library: "personal" });
+      await vi.advanceTimersByTimeAsync(40_000);
+      expect(signal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(4_900);
+      expect(signal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(200);
+      expect(signal?.aborted).toBe(true);
+      await pending;
+
+      // Clerk hangs (the access cache emptied): the fixed text at the budget, not the platform's kill at 60 s.
+      loader.mockImplementation(() => new Promise(() => undefined));
+      __setAccessLoaderForTests(loader);
+      const hung = call("zotero_search", { query: "škoda" });
+      await vi.advanceTimersByTimeAsync(LIMITS.toolBudgetMs);
+      const r = await hung;
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain("could not be verified right now");
+      expect(logs.mock.calls.flat().join(" ")).toContain("access-timeout");
+    } finally {
+      logs.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("zotero_list libraries", () => {
+  it("counts the personal library beside the group listing, which is asked first", async () => {
+    vi.mocked(loadConnection).mockResolvedValue(connection("all"));
+    let answer: (v: Array<{ id: number; name: string; numItems: number }>) => void = () => undefined;
+    vi.mocked(listGroups).mockReturnValue(new Promise((r) => (answer = r)) as never);
+    vi.mocked(searchItems).mockResolvedValue(page([], 12));
+    const pending = call("zotero_list", { list: "libraries" });
+    await vi.waitFor(() => expect(searchItems).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(listGroups).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(searchItems).mock.invocationCallOrder[0]);
+    answer([{ id: 123, name: "AK", numItems: 5 }]);
+    const r = await pending;
+    expect(split(r.text).inside).toContain("osobní knihovna uživatele „zuser“ · 12 hlavních záznamů");
+    expect(searchItems).toHaveBeenCalledTimes(1);
+    // A query that leaves the personal library out: no count.
+    vi.mocked(searchItems).mockClear();
+    vi.mocked(listGroups).mockResolvedValue([{ id: 123, name: "AK", numItems: 5 }]);
+    await call("zotero_list", { list: "libraries", query: "AK" });
+    expect(searchItems).not.toHaveBeenCalled();
   });
 });

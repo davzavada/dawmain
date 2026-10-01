@@ -19,8 +19,9 @@ vi.mock("@/src/zotero/client", async (importOriginal) => ({
   getDeleted: vi.fn(),
   getFulltextIndex: vi.fn(),
   countFulltext: vi.fn(),
-  // Pure: the real one.
+  // Pure: the real ones.
   tagColorsOf: (await importOriginal<typeof import("@/src/zotero/client")>()).tagColorsOf,
+  zoteroQuery: (await importOriginal<typeof import("@/src/zotero/client")>()).zoteroQuery,
   downloadPdf: vi.fn(),
 }));
 vi.mock("@/src/zotero/store", () => ({ loadConnection: vi.fn(), markRevoked: vi.fn() }));

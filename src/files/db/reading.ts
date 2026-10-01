@@ -324,3 +324,233 @@ export async function pagesAround(db: Queryable, docId: string, libraryId: strin
   );
   return rows.map((r) => ({ ord: Number(r.ord), label: String(r.label), start: Number(r.char_start), end: Number(r.char_end), flags: Number(r.flags) }));
 }
+
+// ---------------------------------------------------------------------------
+// Batched lookups for a page of search hits: one statement per kind, however
+// many passages the page shows (node-postgres sends one statement per round
+// trip; a page of 10 documents × 2 passages ran ~73 of them one by one).
+// Each returns, per requested span, exactly what the single-span function
+// above returns for it.
+
+/** One passage of a search hit: its document, library and [from, to) span; its page ords when known. */
+export interface HitSpan {
+  docId: string;
+  libraryId: string;
+  from: number;
+  to: number;
+  /** The chunk's first / last page ord (chunks.page_from / page_to); null: unknown, test every page. */
+  pageFrom?: number | null;
+  pageTo?: number | null;
+}
+
+function bounds(s: HitSpan): { lo: number; hi: number } {
+  const lo = Number.isFinite(s.from) ? Math.max(0, Math.floor(s.from)) : 0;
+  const hi = Number.isFinite(s.to) ? Math.floor(s.to) : lo;
+  return { lo, hi };
+}
+
+/**
+ * loadText for every span in ONE statement. A storage block shared by two
+ * spans is fetched and inflated once. The same checks as loadText, per
+ * span: an empty source for an invalid id, an empty range or no blocks, and
+ * an error for a gap between blocks or a block whose inflated length
+ * differs from its offsets.
+ */
+export async function loadTexts(db: Queryable, spans: readonly HitSpan[]): Promise<TextSource[]> {
+  const asked = spans.map((s) => ({ ...bounds(s), doc: s.docId.toLowerCase(), lib: s.libraryId, ok: isUuid(s.docId) }));
+  const live = asked.filter((a) => a.ok && a.hi > a.lo);
+  const byDoc = new Map<string, Array<{ ord: number; start: number; end: number; body: Uint8Array }>>();
+  if (live.length) {
+    const { rows } = await db.query(
+      `SELECT b.doc_id, b.ord, b.char_start, b.char_end, b.body FROM doc_blocks b
+        WHERE b.doc_id = ANY($1::uuid[]) AND b.library_id = ANY($2::text[])
+          AND EXISTS (SELECT 1 FROM unnest($1::uuid[], $2::text[], $3::int[], $4::int[]) r(doc, lib, lo, hi)
+                       WHERE r.doc = b.doc_id AND r.lib = b.library_id AND b.char_end > r.lo AND b.char_start < r.hi)
+        ORDER BY b.doc_id, b.ord`,
+      [live.map((a) => a.doc), live.map((a) => a.lib), live.map((a) => a.lo), live.map((a) => a.hi)],
+    );
+    for (const r of rows) {
+      const doc = String(r.doc_id);
+      const list = byDoc.get(doc) ?? [];
+      list.push({ ord: num(r.ord), start: num(r.char_start), end: num(r.char_end), body: r.body as Uint8Array });
+      byDoc.set(doc, list);
+    }
+  }
+  const inflated = new Map<string, string>();
+  return asked.map((a) => {
+    if (!a.ok || !(a.hi > a.lo)) return emptySource(a.lo);
+    const blocks = (byDoc.get(a.doc) ?? []).filter((b) => b.end > a.lo && b.start < a.hi);
+    if (blocks.length === 0) return emptySource(a.lo);
+    let at = blocks[0].start;
+    const parts: string[] = [];
+    for (const b of blocks) {
+      if (b.start !== at) throw new Error("stored text is incomplete (gap between blocks)");
+      const key = `${a.doc}:${b.ord}`;
+      let text = inflated.get(key);
+      if (text === undefined) {
+        text = inflateText(b.body);
+        inflated.set(key, text);
+      }
+      if (text.length !== b.end - b.start) throw new Error("stored text block does not match its offsets");
+      parts.push(text);
+      at = b.end;
+    }
+    return textSource(blocks[0].start, parts.join(""));
+  });
+}
+
+/**
+ * pagesAround for every span in ONE statement. A span with its chunk's page
+ * ords reads only pages page_from … page_to + 1 by the primary key (the page
+ * starting exactly at the span's end is the one after page_to — no page is
+ * empty, each starts at its own marker line, so no second page can start
+ * there); without them, every page of the document is tested, as
+ * pagesAround does. The ord bounds are always sent (the whole int range
+ * when unknown), so they stay an index condition on the primary key — an
+ * `IS NULL OR …` would leave them a filter and walk every page of the
+ * document for each span.
+ */
+export async function pagesAroundMany(db: Queryable, spans: readonly HitSpan[]): Promise<PageLite[][]> {
+  const out: PageLite[][] = spans.map(() => []);
+  const live = spans.map((s, i) => ({ s, i })).filter(({ s }) => isUuid(s.docId));
+  if (!live.length) return out;
+  const ord = (v: number | null | undefined) => (typeof v === "number" && Number.isInteger(v) ? v : null);
+  const INT_MIN = -2_147_483_648;
+  const INT_MAX = 2_147_483_647;
+  const pageBounds = (s: HitSpan): [number, number] => {
+    const from = ord(s.pageFrom);
+    const to = ord(s.pageTo);
+    return from !== null && to !== null ? [Math.max(INT_MIN, from), Math.min(INT_MAX, to + 1)] : [INT_MIN, INT_MAX];
+  };
+  const { rows } = await db.query(
+    `SELECT r.n, p.ord, p.label, p.char_start, p.char_end, p.flags
+       FROM unnest($1::uuid[], $2::text[], $3::int[], $4::int[], $5::int[], $6::int[]) WITH ORDINALITY AS r(doc, lib, lo, hi, pf, pt, n)
+       JOIN doc_pages p ON p.doc_id = r.doc AND p.library_id = r.lib
+        AND p.ord BETWEEN r.pf AND r.pt
+        AND p.char_end > r.lo AND p.char_start <= r.hi
+      ORDER BY r.n, p.ord`,
+    [
+      live.map(({ s }) => s.docId.toLowerCase()),
+      live.map(({ s }) => s.libraryId),
+      live.map(({ s }) => s.from),
+      live.map(({ s }) => s.to),
+      live.map(({ s }) => pageBounds(s)[0]),
+      live.map(({ s }) => pageBounds(s)[1]),
+    ],
+  );
+  for (const r of rows) {
+    out[live[num(r.n) - 1].i].push({ ord: Number(r.ord), label: String(r.label), start: Number(r.char_start), end: Number(r.char_end), flags: Number(r.flags) });
+  }
+  return out;
+}
+
+/**
+ * loadFootnotes(…, { from, to }) for every span in ONE statement: each
+ * document's notes are walked once (not once per passage — offsets have no
+ * index, and a commentary has thousands of notes), then handed to every
+ * span they belong to by the same test.
+ */
+export async function loadFootnotesMany(db: Queryable, spans: readonly HitSpan[]): Promise<LoadedFootnote[][]> {
+  const out: LoadedFootnote[][] = spans.map(() => []);
+  const live = spans
+    .map((s, i) => ({ doc: s.docId.toLowerCase(), lib: s.libraryId, lo: Math.floor(s.from), hi: Math.floor(s.to), i, ok: isUuid(s.docId) }))
+    .filter((a) => a.ok && Number.isFinite(a.lo) && Number.isFinite(a.hi));
+  if (!live.length) return out;
+  const { rows } = await db.query(
+    `SELECT f.doc_id, f.library_id, f.seq, f.label, f.kind, f.ref_at, f.def_start, f.def_end, f.page_ord, f.section_ord, f.anchor,
+            coalesce(pr.label, pd.label) AS page_label
+       FROM doc_footnotes f
+       LEFT JOIN doc_pages pr
+         ON pr.doc_id = f.doc_id AND pr.library_id = f.library_id AND pr.ord = f.page_ord AND f.kind <> 'e'
+       LEFT JOIN LATERAL (
+         SELECT label FROM doc_pages p
+          WHERE (f.kind = 'e' OR f.page_ord IS NULL)
+            AND p.doc_id = f.doc_id AND p.library_id = f.library_id AND p.char_start <= f.def_start
+          ORDER BY p.char_start DESC LIMIT 1
+       ) pd ON true
+      WHERE f.doc_id = ANY($1::uuid[]) AND f.library_id = ANY($2::text[])
+        AND EXISTS (SELECT 1 FROM unnest($1::uuid[], $2::text[], $3::int[], $4::int[]) r(doc, lib, lo, hi)
+                     WHERE r.doc = f.doc_id AND r.lib = f.library_id
+                       AND ((f.def_start < r.hi AND f.def_end > r.lo) OR (f.ref_at >= r.lo AND f.ref_at < r.hi)))
+      ORDER BY f.doc_id, f.seq`,
+    [live.map((a) => a.doc), live.map((a) => a.lib), live.map((a) => a.lo), live.map((a) => a.hi)],
+  );
+  for (const r of rows) {
+    const note: LoadedFootnote = {
+      seq: num(r.seq),
+      label: String(r.label),
+      kind: r.kind === "e" ? "e" : "f",
+      refAt: numOrNull(r.ref_at),
+      defStart: num(r.def_start),
+      defEnd: num(r.def_end),
+      pageLabel: (r.page_label as string | null) ?? null,
+      page: numOrNull(r.page_ord),
+      sectionOrd: numOrNull(r.section_ord),
+      anchor: (r.anchor as string | null) ?? null,
+    };
+    const doc = String(r.doc_id);
+    const lib = String(r.library_id);
+    for (const a of live) {
+      if (a.doc !== doc || a.lib !== lib) continue;
+      const def = note.defStart < a.hi && note.defEnd > a.lo;
+      const ref = note.refAt !== null && note.refAt >= a.lo && note.refAt < a.hi;
+      if (def || ref) out[a.i].push({ ...note });
+    }
+  }
+  return out;
+}
+
+/** sectionChains for sections of several documents in ONE statement: docId → leaf ord → root-to-leaf chain. */
+export async function sectionChainsMany(
+  db: Queryable,
+  leaves: ReadonlyArray<{ docId: string; libraryId: string; ord: number }>,
+): Promise<Map<string, Map<number, SectionLite[]>>> {
+  const out = new Map<string, Map<number, SectionLite[]>>();
+  const seen = new Set<string>();
+  const wanted = leaves.filter((l) => {
+    if (!isUuid(l.docId) || !Number.isInteger(l.ord) || l.ord < 0) return false;
+    const key = `${l.docId.toLowerCase()}:${l.libraryId}:${l.ord}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (!wanted.length) return out;
+  const { rows } = await db.query(
+    `WITH RECURSIVE up AS (
+       SELECT r.doc, r.lib, s.ord AS leaf, s.ord, s.parent_ord, 0 AS depth
+         FROM unnest($1::uuid[], $2::text[], $3::int[]) r(doc, lib, ord)
+         JOIN doc_sections s ON s.doc_id = r.doc AND s.library_id = r.lib AND s.ord = r.ord
+       UNION ALL
+       SELECT up.doc, up.lib, up.leaf, p.ord, p.parent_ord, up.depth + 1
+         FROM up JOIN doc_sections p ON p.doc_id = up.doc AND p.library_id = up.lib AND p.ord = up.parent_ord
+        WHERE up.depth < 32
+     )
+     SELECT up.doc, up.leaf, up.depth, s.ord, s.parent_ord, s.level, s.kind, s.key, s.heading, s.author,
+            s.char_start, s.char_end, s.page_from, s.page_to
+       FROM up JOIN doc_sections s ON s.doc_id = up.doc AND s.library_id = up.lib AND s.ord = up.ord
+      ORDER BY up.doc, up.leaf, up.depth DESC`,
+    [wanted.map((l) => l.docId.toLowerCase()), wanted.map((l) => l.libraryId), wanted.map((l) => l.ord)],
+  );
+  for (const r of rows) {
+    const doc = String(r.doc);
+    const leaf = Number(r.leaf);
+    const chains = out.get(doc) ?? new Map<number, SectionLite[]>();
+    const list = chains.get(leaf) ?? [];
+    list.push({
+      ord: Number(r.ord),
+      parent: r.parent_ord === null ? null : Number(r.parent_ord),
+      level: Number(r.level),
+      kind: r.kind as SectionKind,
+      key: (r.key as string | null) ?? null,
+      heading: String(r.heading),
+      author: (r.author as string | null) ?? null,
+      start: Number(r.char_start),
+      end: Number(r.char_end),
+      pageFrom: r.page_from === null ? null : Number(r.page_from),
+      pageTo: r.page_to === null ? null : Number(r.page_to),
+    });
+    chains.set(leaf, list);
+    out.set(doc, chains);
+  }
+  return out;
+}

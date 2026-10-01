@@ -245,8 +245,13 @@ const articleDoc = (fixture("primo/search-cdi-article.json") as { docs: Array<Re
 function primoPage(offset: number, count: number, total = 10789, tag = ""): string {
   const docs = Array.from({ length: count }, (_, i) => {
     const n = offset + i;
-    const base = JSON.parse(JSON.stringify(n % 2 === 0 ? bookDoc : articleDoc)) as { pnx: { control: Record<string, unknown> } };
+    const base = JSON.parse(JSON.stringify(n % 2 === 0 ? bookDoc : articleDoc)) as {
+      pnx: { control: Record<string, unknown>; addata?: Record<string, unknown> };
+    };
     base.pnx.control.recordid = [`${n % 2 === 0 ? "alma" : "cdi_"}${tag}${n}`];
+    // Distinct works carry distinct DOIs — the same DOI and title on one
+    // page is one work, which the page merges.
+    if (base.pnx.addata?.doi) base.pnx.addata.doi = [`10.9999/${tag}${n}`];
     return base;
   });
   return JSON.stringify({ info: { totalResultsLocal: 443, totalResultsPC: total - 443, total, first: offset + 1, last: offset + count }, docs });
@@ -322,12 +327,12 @@ describe("doctrine_search (stubbed catalogue)", () => {
 
   it("does not advertise a next page when the catalogue returned nothing for this one", async () => {
     stubCatalogue(10, 2);
-    const result = await doctrineHandler()({ query: "genocida D", limit: 10, page: 900 });
+    const result = await doctrineHandler()({ query: "genocida D", limit: 10, page: 4 });
     const out = result.structuredContent as { total: number; has_more: boolean; items: BibHit[] };
     expect(out).toMatchObject({ total: 10789, has_more: false });
     expect(out.items).toHaveLength(0);
     expect(result.content[0].text).toContain("no records on this page");
-    expect(result.content[0].text).not.toContain("more: page 901");
+    expect(result.content[0].text).not.toContain("more: page 5");
   });
 
   it("reports the catalogue's failure as a tool error", async () => {

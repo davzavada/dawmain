@@ -9,12 +9,29 @@ import {
   readTopSchema,
   toolFailure,
 } from "./shared";
-import { getNssDecision, searchNss } from "@/src/sources/nss";
+import { getNssDecision, getNssDecisionText, searchNss } from "@/src/sources/nss";
 import { interleave, maxTotal, pageOrExcerpt, uniqueQueries } from "@/src/sources/shared/text";
-import { buildPreviews, renderPreviews } from "./previews";
+import { buildPreviews, noTermsNote, renderPreviews } from "./previews";
 import { failureLines, runVariants, variantFailureSchema, variantTotalsSchema } from "./variants";
 
 const fail = toolFailure("Nejvyšší správní soud");
+
+/** Last page holding the `count`-th hit: page 1 carries 40, every later page 20. */
+function lastPage(count: number): number {
+  return count <= 40 ? 1 : 1 + Math.ceil((count - 40) / 20);
+}
+
+/**
+ * The court worth printing on a hit line. NSS's own goes without saying. The
+ * kárné soudy's citations name no court at all (live 2026-09: "1 Ds
+ * 1/2026-83" is Vrchní soud v Praze, its citation says only "rozsudek ze
+ * dne …") — printed as nothing, such a hit read as an NSS decision.
+ */
+function courtNote(court: string | undefined): string {
+  if (court === "") return " — court not named in the citation (not necessarily NSS; nss_get_decision names it)";
+  if (!court || /^Nejvyššího správního soudu$/i.test(court)) return "";
+  return ` — ${court}`;
+}
 
 export function registerNss(server: McpServer): void {
   server.registerTool(
@@ -43,7 +60,7 @@ export function registerNss(server: McpServer): void {
           .enum(["nss", "rozsireny-senat", "krajske", "karne"])
           .optional()
           .describe(
-            "nss = NSS (all senates), rozsireny-senat = grand chamber (most authoritative), krajske = regional administrative courts incl. Městský soud v Praze, karne = disciplinary courts.",
+            "nss = NSS (all senates), rozsireny-senat = grand chamber (most authoritative), krajske = regional administrative courts incl. Městský soud v Praze, karne = disciplinary courts: the NSS kárný senát (Kss/Ksz/Kse…, until 2025) and the kárné soudy at the vrchní soudy / NS (Ds, from 2025).",
           ),
         registry: z
           .string()
@@ -145,8 +162,17 @@ export function registerNss(server: McpServer): void {
         const end = page === 1 ? 40 : start + 20;
         const { values, failures } = await runVariants(keyed, async (variant) => {
           if (!multi) return [await searchNss(inputFor(variant), page)];
-          const upstream = Array.from({ length: page }, (_, i) => i + 1);
-          return Promise.all(upstream.map((p) => searchNss(inputFor(variant), p)));
+          // Page 1 first: it carries the pagination context every later page
+          // is rebuilt from, so the later pages then cost one row fragment
+          // each (and none past the variant's total) instead of re-running
+          // the full-text search per page. `since` lets them budget their
+          // fragment against the time page 1 already took.
+          const since = Date.now();
+          const first = await searchNss(inputFor(variant), 1);
+          const later = await Promise.all(
+            Array.from({ length: page - 1 }, (_, i) => searchNss(inputFor(variant), i + 2, { since })),
+          );
+          return [first, ...later];
         });
         const answered = values.filter((value): value is NonNullable<typeof value> => value !== null);
         const listOf = (pages: typeof answered[number]) => pages.flatMap((p) => p.hits);
@@ -159,7 +185,7 @@ export function registerNss(server: McpServer): void {
           : total !== null && end < total;
         const previews = await buildPreviews(
           hits.slice(0, read_top).map((hit) => ({ id: hit.id, caseNumber: hit.caseNumber ?? "?" })),
-          ({ id }) => getNssDecision(id).then((d) => d.text),
+          ({ id }) => getNssDecisionText(id),
           variants,
         );
         const variantTotals = multi ? values.map((value) => (value ? totalOf(value) : null)) : undefined;
@@ -175,22 +201,33 @@ export function registerNss(server: McpServer): void {
         };
         const lines = hits.map(
           (hit, i) =>
-            `${start + i + 1}. ${hit.caseNumber ?? "?"}${hit.form ? ` (${hit.form})` : ""}${hit.date ? ` ${hit.date}` : ""}${hit.court && !/^Nejvyššího správního soudu$/i.test(hit.court) ? ` — ${hit.court}` : ""} — id ${hit.id}\n   ${hit.url}`,
+            `${start + i + 1}. ${hit.caseNumber ?? "?"}${hit.form ? ` (${hit.form})` : ""}${hit.date ? ` ${hit.date}` : ""}${courtNote(hit.court)} — id ${hit.id}\n   ${hit.url}`,
         );
         const variantLine = variantTotals
           ? `Variants: ${keyed.map((v, i) => `"${v}" ${variantTotals[i] ?? "✗"}`).join(" · ")} (merged round-robin)`
           : null;
-        const text =
-          total === 0 || (!hits.length && total === null)
-            ? ["No NSS decisions matched. Broaden the query or the date range.", ...failureLines(failures)].join("\n")
-            : [
-                ...failureLines(failures),
-                ...(variantLine ? [variantLine] : []),
-                `${total ?? "?"} decisions${multi ? " (best variant)" : ""}, newest first (page ${page}):`,
-                ...lines,
-                "Full text: nss_get_decision {document_id}.",
-                ...renderPreviews(previews, "nss_get_decision"),
-              ].join("\n");
+        // Past the end is not "no match": say where the results end.
+        const listed = multi ? merged.length : total;
+        const text = !hits.length
+          ? [
+              page === 1 || listed === 0
+                ? "No NSS decisions matched. Broaden the query or the date range."
+                : listed === null
+                  ? `No hits on page ${page}, and NSS stated no total — the results end before it.`
+                  : `No hits on page ${page}: the ${listed} decisions${multi ? " of the merged variants" : ""} end on page ${lastPage(listed)}.`,
+              // What each formulation found — a real zero per variant.
+              ...(variantLine ? [variantLine] : []),
+              ...failureLines(failures),
+            ].join("\n")
+          : [
+              ...failureLines(failures),
+              ...(variantLine ? [variantLine] : []),
+              `${total ?? "?"} decisions${multi ? " (best variant)" : ""}, newest first (page ${page}):`,
+              ...lines,
+              "Full text: nss_get_decision {document_id}.",
+              ...renderPreviews(previews, "nss_get_decision"),
+              ...noTermsNote(read_top, variants, "nss_get_decision"),
+            ].join("\n");
         return { content: [{ type: "text", text }], structuredContent: output };
       } catch (error) {
         return fail(error);
@@ -238,6 +275,9 @@ export function registerNss(server: McpServer): void {
         // The link to cite rides in the text: clients read nothing else.
         const meta = [
           ...Object.entries(decision.metadata).map(([key, value]) => `${key}: ${value}`),
+          ...(decision.metadataUnavailable
+            ? ["(The NSS metadata page did not answer — ECLI, spisová značka and soud are missing from this answer, not from the decision; call nss_get_decision again to retry.)"]
+            : []),
           decision.url,
         ].join("\n");
         return {

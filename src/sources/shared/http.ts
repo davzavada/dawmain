@@ -25,6 +25,13 @@ export interface UpstreamOptions {
   retry?: boolean;
   /** Reject bodies larger than this (default 12 MB). */
   maxBytes?: number;
+  /**
+   * Statuses (429/5xx) the caller reads itself: returned at once — no retry,
+   * no throw, and not recorded as the source being down. For upstreams whose
+   * error body names the cause: a Virtuoso HTTP 500 says whether the query
+   * was refused (the caller's fault) or the store hiccupped.
+   */
+  passStatus?: (status: number) => boolean;
 }
 
 async function delay(ms: number): Promise<void> {
@@ -50,6 +57,9 @@ export async function fetchUpstream(
     });
 
   let response: Response;
+  // One retry in total: a network failure followed by a 429/5xx must not
+  // buy a third attempt — the bound callers budget for is two.
+  let retried = false;
   try {
     response = await attempt();
   } catch (error) {
@@ -58,6 +68,7 @@ export async function fetchUpstream(
       throw asSourceError(source, error);
     }
     await delay(500 + Math.random() * 1000);
+    retried = true;
     try {
       response = await attempt();
     } catch (secondError) {
@@ -66,13 +77,25 @@ export async function fetchUpstream(
     }
   }
 
-  if (retry && (response.status === 429 || response.status >= 500)) {
+  // The caller reads this status's body itself (see passStatus): the source
+  // answered, so it counts as up.
+  if (options.passStatus?.(response.status)) {
+    recordSourceResult(source, true);
+    return response;
+  }
+
+  if (retry && !retried && (response.status === 429 || response.status >= 500)) {
     await delay(response.status === 429 ? 2000 : 500 + Math.random() * 1000);
+    retried = true;
     try {
       response = await attempt();
     } catch (error) {
       recordSourceResult(source, false, errorLabel(error));
       throw asSourceError(source, error);
+    }
+    if (options.passStatus?.(response.status)) {
+      recordSourceResult(source, true);
+      return response;
     }
   }
 
@@ -81,7 +104,7 @@ export async function fetchUpstream(
     throw new SourceError(
       source,
       "UPSTREAM_ERROR",
-      `${source} answered HTTP ${response.status}${retry ? " even after a retry" : ""}.`,
+      `${source} answered HTTP ${response.status}${retried ? " even after a retry" : ""}.`,
       "The service is overloaded or down. Wait a minute and try again with a narrower query.",
     );
   }

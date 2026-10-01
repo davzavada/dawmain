@@ -20,7 +20,7 @@ import { createTestDb, type TestDb } from "./helpers/pglite";
 let t: TestDb;
 const A = "user_gin";
 const B = "org_gin";
-const INDEXES = ["chunks_tsv", "chunks_ident", "chunks_lib_doc"] as const;
+const INDEXES = ["chunks_tsv", "chunks_ident", "chunks_lib_doc", "documents_ident"] as const;
 type Scans = Record<(typeof INDEXES)[number] | "detoast", number>;
 
 const params = (p: Partial<SearchParams>): SearchParams => ({
@@ -116,8 +116,23 @@ beforeAll(async () => {
       [lib, big],
     );
   }
+  // 0005's section filter: one keyed section per document covering all its chunks (all start at 0).
+  await t.owner.query(
+    `INSERT INTO doc_sections (doc_id, library_id, ord, parent_ord, level, kind, key, heading, char_start, char_end)
+     SELECT d.id, d.library_id, 0, NULL, 1, 'par', 'par:5', '§ 5', 0, 1 FROM documents d`,
+  );
+  // 0005's document keys: a library of 3,000 documents, each with its own ISBN.
+  await t.owner.query("INSERT INTO libraries (id) VALUES ('org_ginbulk')");
+  await t.owner.query(
+    `INSERT INTO documents (library_id, status, uploaded_by, file_kind, file_name, file_sha256, content_sha256, converter,
+       rights, billable_pages, char_count, page_label_source, doc_type, year, title, ident_keys)
+     SELECT 'org_ginbulk', 'ready', 'user_u1', 'pdf', 'f.pdf', h, h, 'pdf@1', 'vlastni', 1, 100, 'physical', 'kniha', 2020, 'T',
+            ARRAY['isbn:97880' || lpad(n::text, 8, '0'), 'zak:89/2012']
+       FROM generate_series(1, 3000) n, LATERAL (SELECT md5('bulk' || n) || md5(n || 'bulk') AS h) x`,
+  );
   await t.owner.query("ANALYZE documents");
   await t.owner.query("ANALYZE chunks");
+  await t.owner.query("ANALYZE doc_sections");
   toastIndex = (
     await t.owner.query<{ i: string }>(
       "SELECT i.indexrelid::text AS i FROM pg_class c JOIN pg_index i ON i.indrelid = c.reltoastrelid WHERE c.oid = 'chunks'::regclass",
@@ -200,6 +215,38 @@ describe("0004_search: the GIN indexes under RLS", () => {
     }
   });
 
+  it("0005's case_number and section filters keep the plan: chunks_tsv / chunks_ident, nothing outside the scope detoasted", async () => {
+    const filters: Array<Partial<SearchParams>> = [{ section: "par:5" }, { require: ["sz:25cdo1234-2019"] }, { section: "par:5", require: ["sz:25cdo1234-2019"] }];
+    for (const filter of filters) {
+      for (const q of ["'vzacnyterm':*", "'spolecne':*ABC", "( 'spolecne' <-> 'vzacnyterm' )"]) {
+        const { result, used } = await measured([A], (db) => searchChannels(db, params({ tsAnd: q, tsMeta: null, ...filter })));
+        const label = `${JSON.stringify(filter)} ${q}`;
+        expect(used.chunks_tsv, label).toBeGreaterThanOrEqual(1);
+        expect(result.map((h) => h.docId).sort(), label).toEqual(docs);
+        expect(used.detoast, label).toBeLessThanOrEqual(2 * docs.length + 10);
+      }
+      const idn = await measured([A], (db) => searchChannels(db, params({ identKeys: ["sz:25cdo1234-2019"], ...filter })));
+      expect(idn.used.chunks_ident).toBeGreaterThanOrEqual(1);
+      expect(idn.used.chunks_lib_doc).toBe(0);
+      expect(idn.result.map((h) => h.docId).sort()).toEqual(docs);
+    }
+    // A section no document has, or a key no chunk carries: nothing.
+    expect(await withScope([A], (db) => searchChannels(db, params({ tsAnd: "'vzacnyterm':*", tsMeta: null, section: "par:6" })))).toEqual([]);
+    expect(await withScope([A], (db) => searchChannels(db, params({ tsAnd: "'vzacnyterm':*", tsMeta: null, require: ["sz:1cdo1-2020"] })))).toEqual([]);
+  });
+
+  it("0005's document keys (ISBN / DOI) go through documents_ident, in scope only", async () => {
+    const BULK = "org_ginbulk";
+    const key = ["isbn:9788000000042"];
+    const { result, used } = await measured([BULK], (db) => searchChannels(db, params({ libraryIds: [BULK], tsMeta: null, metaKeys: key })));
+    expect(used.documents_ident).toBeGreaterThanOrEqual(1);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ channel: "meta", byKey: true, libraryId: BULK, rank: 1 });
+    // Another scope, or the bulk library asked for outside the transaction's scope: nothing.
+    expect(await withScope([A], (db) => searchChannels(db, params({ libraryIds: [A], tsMeta: null, metaKeys: key })))).toEqual([]);
+    expect(await withScope([A], (db) => searchChannels(db, params({ libraryIds: [BULK], tsMeta: null, metaKeys: key })))).toEqual([]);
+  });
+
   it("both paths return exactly the query's matches (weights, phrases, prefixes)", async () => {
     const queries = [
       "'spolecne':*C & 'vzacnyterm'",
@@ -254,16 +301,22 @@ describe("0004_search: the functions see no more than RLS would", () => {
   });
 
   it("SECURITY DEFINER with a pinned search_path; EXECUTE for dawmain_app only", async () => {
-    const { rows } = await t.owner.query<{ proname: string; prosecdef: boolean; proconfig: string[] }>(
-      "SELECT proname, prosecdef, proconfig FROM pg_proc WHERE proname IN ('files_search_chunks', 'files_search_meta') ORDER BY proname",
+    const { rows } = await t.owner.query<{ proname: string; nargs: number; prosecdef: boolean; proconfig: string[] }>(
+      "SELECT proname, pronargs::int AS nargs, prosecdef, proconfig FROM pg_proc WHERE proname IN ('files_search_chunks', 'files_search_meta') ORDER BY proname, pronargs",
     );
-    expect(rows.map((r) => r.proname)).toEqual(["files_search_chunks", "files_search_meta"]);
+    // 0004's signatures (the build deployed before 0005 still calls them) and 0005's overloads.
+    expect(rows.map((r) => `${r.proname}/${r.nargs}`)).toEqual([
+      "files_search_chunks/13",
+      "files_search_chunks/15",
+      "files_search_meta/10",
+      "files_search_meta/11",
+    ]);
     for (const r of rows) {
       expect(r.prosecdef).toBe(true);
       expect(r.proconfig).toContain("search_path=pg_catalog, public");
+      // The chunk scan is pinned to an index (see the migrations).
+      if (r.proname === "files_search_chunks") expect(r.proconfig).toContain("enable_seqscan=off");
     }
-    // The chunk scan is pinned to an index (see the migration).
-    expect(rows[0].proconfig).toContain("enable_seqscan=off");
     await t.owner.query("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'files_gin_other') THEN CREATE ROLE files_gin_other; END IF; END $$");
     const grants = await t.owner.query<{ app: boolean; other: boolean }>(
       `SELECT bool_and(has_function_privilege('dawmain_app', p.oid, 'EXECUTE')) AS app,

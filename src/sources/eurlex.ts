@@ -1,6 +1,16 @@
 import { SourceError } from "./shared/errors";
-import { fetchUpstream } from "./shared/http";
-import { CELLAR_LANGS, fetchCellarText } from "./cellar";
+import { recordSourceResult } from "./shared/health";
+import {
+  budgetSpent,
+  cellarDeadline,
+  fetchCellarDocument,
+  fetchWithinDeadline,
+  hasBudget,
+  isTimeoutError,
+  normalizeCelex,
+  normalizeEcli,
+  requireCellarLanguage,
+} from "./cellar";
 import { SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
 
 /**
@@ -21,7 +31,9 @@ import { SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
  * and adopted/pending/withdrawn state.
  *
  * Virtuoso quirks handled (documented by production clients): errors arrive
- * as HTTP 200 with an error text or an HTML page; duplicate rows per work.
+ * as HTTP 200 with an error text or an HTML page, and — measured live
+ * 2026-09 — as HTTP 500 for a query it refuses (a wildcard on a short stem);
+ * several rows per work (types, titles, ECLIs), so the search groups by work.
  */
 
 const SOURCE = "EUR-Lex (Cellar)";
@@ -29,12 +41,19 @@ const SPARQL_ENDPOINT = "https://publications.europa.eu/webapi/rdf/sparql";
 const CDM = "http://publications.europa.eu/ontology/cdm#";
 const AUTHORITY = "http://publications.europa.eu/resource/authority";
 
-/** Tool-facing type → Cellar resource-type authority codes (all verified
- * against live data; unknown codes in an IN() filter simply match nothing). */
+/** Tool-facing type → Cellar resource-type authority codes (unknown codes in
+ * an IN() filter simply match nothing). Commission implementing and
+ * delegated acts carry their own codes — seen live 2026-09: REG_IMPL,
+ * REG_DEL, DIR_DEL, DEC_IMPL (adequacy decisions), DEC_FRAMW (JHA framework
+ * decisions); DIR_IMPL, DEC_DEL, DEC_ENTSCHEID and REG_FINANC complete the
+ * authority table. With the bare REG/DIR/DEC, types ['regulation'] silently
+ * dropped most recent regulations and decisions. */
 export const EURLEX_TYPES: Record<string, string[]> = {
-  regulation: ["REG"],
-  directive: ["DIR"],
-  decision: ["DEC"],
+  regulation: ["REG", "REG_IMPL", "REG_DEL", "REG_FINANC"],
+  directive: ["DIR", "DIR_IMPL", "DIR_DEL"],
+  decision: ["DEC", "DEC_IMPL", "DEC_DEL", "DEC_ENTSCHEID", "DEC_FRAMW"],
+  implementing_act: ["REG_IMPL", "DIR_IMPL", "DEC_IMPL"],
+  delegated_act: ["REG_DEL", "DIR_DEL", "DEC_DEL"],
   judgment: ["JUDG"],
   order: ["ORDER"],
   ag_opinion: ["OPIN_AG"],
@@ -60,32 +79,108 @@ export interface EurlexSearchInput {
   language?: string;
 }
 
-/** Keyword sanitizer: Virtuoso bif:contains gets quoted terms joined by AND. */
+/** Virtuoso refuses a wildcard word with fewer leading characters — and
+ * refuses the whole query, as HTTP 500 (live 2026-09: 'da*', 'dat*' → 500;
+ * 'protect*' fine). */
+const WILDCARD_MIN_STEM = 4;
+
+/** Keyword sanitizer: Virtuoso bif:contains gets quoted terms joined by AND.
+ * Every character outside the word class SEPARATES words, as in Virtuoso's
+ * own title index ('2016/679' is indexed as '2016' '679'): deleting it
+ * instead glued act and case numbers into '2016679' or 'C-31118', which no
+ * title contains. Quotes and backslashes never survive into a term, so the
+ * literal stays injection-safe. NFC first, or decomposed input would lose
+ * its diacritics with the combining marks. Pure — unit-tested. */
 export function buildContainsExpression(query: string): string | null {
   const terms = query
-    .split(/\s+/)
-    .map((term) => term.replace(/[^0-9A-Za-zÀ-žƀ-ɏ*-]/gu, ""))
+    .normalize("NFC")
+    .split(/[^0-9A-Za-zÀ-žƀ-ɏ*-]+/u)
+    // An inner '*' separates too; only a trailing one is a wildcard.
+    .flatMap((token) => token.split(/\*+(?=[^*])/u))
+    .map((token) => {
+      const wildcard = token.endsWith("*");
+      const word = token.replace(/^[-*]+/u, "").replace(/[-*]+$/u, "");
+      // The stem Virtuoso counts is the last hyphen-separated word ('C-311*' → '311').
+      const stem = word.split("-").pop() ?? "";
+      return wildcard && stem.length >= WILDCARD_MIN_STEM ? `${word}*` : word;
+    })
     .filter((term) => term.length >= 2 && /[0-9A-Za-zÀ-žƀ-ɏ]/u.test(term))
     .slice(0, 8);
   if (!terms.length) return null;
   return terms.map((term) => `'${term}'`).join(" AND ");
 }
 
-/** Build the SELECT query. Pure — unit-tested. */
+/** A real calendar day: the schema checks only the shape, and Virtuoso
+ * compares against "2024-02-30"^^xsd:date as false without an error — the
+ * search then answered "no documents matched" for a typo in the date. */
+function calendarDate(value: string | undefined, field: string): string | undefined {
+  if (value === undefined) return undefined;
+  const day = new Date(`${value}T00:00:00Z`);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(+day) && day.toISOString().startsWith(value)) {
+    return value;
+  }
+  throw new SourceError(
+    SOURCE,
+    "INPUT_INVALID",
+    `${field} "${value}" is not a real calendar date.`,
+    "Use an existing day as YYYY-MM-DD (the last day of February 2024 is 2024-02-29).",
+  );
+}
+
+/** Strip what could close the SPARQL string literal. */
+const literal = (value: string) => value.replace(/["\\]/g, "");
+
+/** Build the SELECT query. Validates and normalises the input (language,
+ * identifiers, dates) — equal requests build the same text, which is also
+ * the cache key. One row per WORK (GROUP BY ?celex): LIMIT/OFFSET used to
+ * page raw rows that were deduplicated afterwards, so a page came back short,
+ * a work straddling the boundary showed on two pages and "a full page means
+ * more" failed. One row beyond the page tells whether more exist. ?celex
+ * breaks date ties, so pages are deterministic and a judgment (62024CJ0474)
+ * lists before its _RES/_SUM siblings. Pure — unit-tested. */
 export function buildEurlexSparql(input: EurlexSearchInput, limit: number, offset: number): string {
-  const language = (CELLAR_LANGS[(input.language ?? "en").toLowerCase()] ?? "eng").toUpperCase();
+  const language = requireCellarLanguage(SOURCE, input.language ?? "en").iso3.toUpperCase();
+  const celex = input.celex ? literal(normalizeCelex(input.celex)) : "";
+  const ecli = input.ecli ? literal(normalizeEcli(input.ecli)) : "";
+  const query = input.query?.trim() ?? "";
+  if (!query && !celex && !ecli) {
+    throw new SourceError(
+      SOURCE,
+      "INPUT_INVALID",
+      "EUR-Lex search needs at least one criterion.",
+      "Provide query (title keywords), celex, or ecli — optionally narrowed by types and dates.",
+    );
+  }
+  const dateFrom = calendarDate(input.dateFrom, "date_from");
+  const dateTo = calendarDate(input.dateTo, "date_to");
+  if (dateFrom && dateTo && dateFrom > dateTo) {
+    throw new SourceError(
+      SOURCE,
+      "INPUT_INVALID",
+      `date_from ${dateFrom} is after date_to ${dateTo}.`,
+      "The range is inverted — swap the two dates.",
+    );
+  }
+
+  const titleIn = (lang: string, expr: string, title: string) =>
+    `?${expr} cdm:expression_belongs_to_work ?work ; cdm:expression_uses_language <${AUTHORITY}/language/${lang}> ; cdm:expression_title ?${title} .`;
   const clauses: string[] = [
     `?work cdm:resource_legal_id_celex ?celex .`,
     `?work cdm:work_date_document ?date .`,
     `?work cdm:work_has_resource-type ?type .`,
-    `OPTIONAL { ?work cdm:case-law_ecli ?ecli . }`,
-    `?expr cdm:expression_belongs_to_work ?work ;`,
-    `      cdm:expression_uses_language <${AUTHORITY}/language/${language}> ;`,
-    `      cdm:expression_title ?title .`,
+    ecli ? `?work cdm:case-law_ecli ?ecli .` : `OPTIONAL { ?work cdm:case-law_ecli ?ecli . }`,
+    // The identifiers next to the triples they bind, ahead of the title
+    // OPTIONALs: the lookup narrows to its one work before any title joins.
+    ...(celex ? [`FILTER(STR(?celex) = "${celex}")`] : []),
+    ...(ecli ? [`FILTER(STR(?ecli) = "${ecli}")`] : []),
   ];
+  // The matched title, or for an identifier lookup its fallback chain —
+  // taken inside the aggregate rather than by a BIND in the pattern, which
+  // would wrap the pattern before the group's filters can narrow it.
+  let titleExpression = "?title";
 
-  if (input.query) {
-    const contains = buildContainsExpression(input.query);
+  if (query) {
+    const contains = buildContainsExpression(query);
     if (!contains) {
       throw new SourceError(
         SOURCE,
@@ -94,31 +189,40 @@ export function buildEurlexSparql(input: EurlexSearchInput, limit: number, offse
         "Use at least one word of 2+ letters; operators and punctuation are stripped.",
       );
     }
-    clauses.push(`?title bif:contains "${contains}" .`);
-  }
-  if (input.celex) {
-    clauses.push(`FILTER(STR(?celex) = "${input.celex.replace(/["\\]/g, "")}")`);
-  }
-  if (input.ecli) {
-    clauses.push(`FILTER(STR(?ecli) = "${input.ecli.replace(/["\\]/g, "")}")`);
+    // The title search needs the title in the requested language.
+    clauses.push(titleIn(language, "expr", "title"), `?title bif:contains "${contains}" .`);
+  } else {
+    // An identifier lookup asks "which document is this", not "has it a
+    // title in cs": a General Court order in the language of the case and
+    // French only, or a pre-accession act (31983R1983 has no Czech version),
+    // used to answer "no documents matched". The title falls back to English,
+    // then to any language (one work — the fan-out is grouped away).
+    clauses.push(
+      `OPTIONAL { ${titleIn(language, "expr", "titleLang")} }`,
+      ...(language !== "ENG" ? [`OPTIONAL { ${titleIn("ENG", "exprEn", "titleEn")} }`] : []),
+      `OPTIONAL { ?exprAny cdm:expression_belongs_to_work ?work ; cdm:expression_title ?titleAny . }`,
+    );
+    titleExpression = `COALESCE(?titleLang, ${language !== "ENG" ? "?titleEn, " : ""}?titleAny)`;
   }
   if (input.types?.length) {
-    const uris = input.types
-      .flatMap((type) => EURLEX_TYPES[type] ?? [])
-      .map((code) => `<${AUTHORITY}/resource-type/${code}>`);
+    const codes = new Set(
+      input.types.flatMap((type) => (Object.hasOwn(EURLEX_TYPES, type) ? EURLEX_TYPES[type] : [])),
+    );
+    const uris = [...codes].map((code) => `<${AUTHORITY}/resource-type/${code}>`);
     if (uris.length) clauses.push(`FILTER(?type IN (${uris.join(", ")}))`);
   }
-  if (input.dateFrom) clauses.push(`FILTER(?date >= "${input.dateFrom}"^^xsd:date)`);
-  if (input.dateTo) clauses.push(`FILTER(?date <= "${input.dateTo}"^^xsd:date)`);
+  if (dateFrom) clauses.push(`FILTER(?date >= "${dateFrom}"^^xsd:date)`);
+  if (dateTo) clauses.push(`FILTER(?date <= "${dateTo}"^^xsd:date)`);
 
   return [
     `PREFIX cdm: <${CDM}>`,
     `PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>`,
-    `SELECT DISTINCT ?celex ?date ?title ?ecli ?type WHERE {`,
+    `SELECT ?celex (MAX(?date) AS ?d) (SAMPLE(${titleExpression}) AS ?t) (SAMPLE(?ecli) AS ?e) (SAMPLE(?type) AS ?ty) WHERE {`,
     ...clauses.map((clause) => `  ${clause}`),
     `}`,
-    `ORDER BY DESC(?date)`,
-    `LIMIT ${limit} OFFSET ${offset}`,
+    `GROUP BY ?celex`,
+    `ORDER BY DESC(?d) ?celex`,
+    `LIMIT ${limit + 1} OFFSET ${offset}`,
   ].join("\n");
 }
 
@@ -131,11 +235,16 @@ export interface EurlexHit {
   url: string;
 }
 
-/** Parse SPARQL JSON results; dedupe (Cellar yields duplicate rows). Pure. */
-export function parseEurlexResults(json: unknown): EurlexHit[] {
-  const bindings = (
-    json as { results?: { bindings?: Array<Record<string, { value?: string }>> } }
-  ).results?.bindings;
+export interface EurlexSearchPage {
+  hits: EurlexHit[];
+  /** Cellar holds more works past this page (the query asked one row beyond it). */
+  hasMore: boolean;
+}
+
+type SparqlBindings = Array<Record<string, { value?: string } | undefined>>;
+
+function bindingsOf(json: unknown): SparqlBindings {
+  const bindings = (json as { results?: { bindings?: SparqlBindings } }).results?.bindings;
   if (!Array.isArray(bindings)) {
     throw new SourceError(
       SOURCE,
@@ -144,78 +253,189 @@ export function parseEurlexResults(json: unknown): EurlexHit[] {
       "The endpoint may be rate-limiting (it then returns HTML) — wait a minute and retry.",
     );
   }
+  return bindings;
+}
+
+function hitsOf(bindings: SparqlBindings): EurlexHit[] {
   const seen = new Set<string>();
   const hits: EurlexHit[] = [];
   for (const binding of bindings) {
     const celex = binding.celex?.value ?? "";
-    if (!celex) continue;
-    const key = binding.ecli?.value || celex;
-    if (seen.has(key)) continue;
-    seen.add(key);
+    // One CELEX is one work. Keyed on the ECLI instead, a judgment and its
+    // case-law abstract (62024CJ0474 and 62024CJ0474_RES share it) collapsed
+    // into whichever row came first — live, often the abstract, so the
+    // judgment itself vanished from the list.
+    if (!celex || seen.has(celex)) continue;
+    seen.add(celex);
+    const date = binding.d?.value ?? binding.date?.value;
+    const ecli = binding.e?.value ?? binding.ecli?.value;
+    const type = (binding.ty?.value ?? binding.type?.value)?.split("/").pop();
     hits.push({
       celex,
-      title: binding.title?.value ?? "",
-      date: binding.date?.value,
-      ecli: binding.ecli?.value,
-      type: binding.type?.value?.split("/").pop(),
+      title: binding.t?.value ?? binding.title?.value ?? "",
+      ...(date ? { date } : {}),
+      ...(ecli ? { ecli } : {}),
+      ...(type ? { type } : {}),
       url: `https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:${celex}`,
     });
   }
   return hits;
 }
 
-const VIRTUOSO_ERROR_RE = /Virtuoso\s+\S*\s*Error|SP031|query execution timed out/i;
+/** Parse SPARQL JSON results (grouped ?d/?t/?e/?ty or plain columns); one
+ * hit per CELEX — a safety net under the GROUP BY. Pure. */
+export function parseEurlexResults(json: unknown): EurlexHit[] {
+  return hitsOf(bindingsOf(json));
+}
 
-const searchCache = new TtlCache<EurlexHit[]>(SEARCH_TTL_MS);
+/** A page of `limit` hits from a query that asked limit + 1 rows. Pure. */
+export function parseEurlexPage(json: unknown, limit: number): EurlexSearchPage {
+  const bindings = bindingsOf(json);
+  return { hits: hitsOf(bindings.slice(0, limit)), hasMore: bindings.length > limit };
+}
+
+const searchCache = new TtlCache<EurlexSearchPage>(SEARCH_TTL_MS);
 
 export async function searchEurlex(
   input: EurlexSearchInput,
   limit: number,
   offset: number,
-): Promise<EurlexHit[]> {
-  return searchCache.through(memoKey("eurlex-search", [input, limit, offset]), () =>
-    runSearchEurlex(input, limit, offset),
+  options: { deadline?: number } = {},
+): Promise<EurlexSearchPage> {
+  // Keyed on the query built, not the raw input: 'cs' and 'cz', 'CELEX:32016r0679'
+  // and '32016R0679', 'data, protection' and 'data protection' send the same
+  // SPARQL. An input error throws here, before the cache is touched.
+  const sparql = buildEurlexSparql(input, limit, offset);
+  const deadline = options.deadline ?? cellarDeadline();
+  return searchCache.through(memoKey("eurlex-search", sparql), async () =>
+    parseEurlexPage(await runSparql(sparql, deadline), limit),
   );
 }
 
-async function runSearchEurlex(
-  input: EurlexSearchInput,
-  limit: number,
-  offset: number,
-): Promise<EurlexHit[]> {
-  if (!input.query && !input.celex && !input.ecli) {
-    throw new SourceError(
+const VIRTUOSO_ERROR_RE = /Virtuoso\s+\S*\s*Error|SP031|query execution timed out/i;
+/** Virtuoso gave up on the run time: estimated or actual. */
+const VIRTUOSO_TIMEOUT_RE = /S1T00|SR171|timed out|exceeds the limit|estimated execution time/i;
+/** Virtuoso refused the query text itself: SPARQL compiler, free-text expression. */
+const VIRTUOSO_QUERY_RE = /\b(?:SP\d{3}|FT\d{3}|XM\d{3})\b|SPARQL compiler|free-text|wildcard/i;
+
+/** Slow-query advice — the endpoint is slow on broad title terms, not down. */
+const NARROW_HINT =
+  "Simplify the keywords or narrow the date range or types; the endpoint times out on broad title queries (a few common words over all years) and rate-limits bursts. Identifier lookups (celex, ecli) stay fast.";
+
+/**
+ * The error a Virtuoso answer carries, or null for a usable one. Its body
+ * names the cause: a query it refuses is the caller's to rephrase (and says
+ * nothing about the endpoint's health); a run-time limit calls for a narrower
+ * query. Pure — unit-tested.
+ */
+export function virtuosoFailure(status: number, text: string): SourceError | null {
+  const flagged = VIRTUOSO_ERROR_RE.test(text);
+  if (status >= 200 && status < 300 && !flagged) return null;
+  if (flagged && VIRTUOSO_TIMEOUT_RE.test(text)) {
+    return new SourceError(SOURCE, "UPSTREAM_ERROR", "Cellar SPARQL gave up on the query: it runs too long.", NARROW_HINT);
+  }
+  if (flagged && VIRTUOSO_QUERY_RE.test(text)) {
+    const detail = /Error\s+([^\n]{1,200})/.exec(text)?.[1]?.trim();
+    return new SourceError(
       SOURCE,
       "INPUT_INVALID",
-      "EUR-Lex search needs at least one criterion.",
-      "Provide query (title keywords), celex, or ecli — optionally narrowed by types and dates.",
+      `Cellar SPARQL refused the query${detail ? `: ${detail}` : "."}`,
+      `Rephrase the title keywords as plain words; a trailing * works only after ${WILDCARD_MIN_STEM}+ letters (protect*, not da*).`,
     );
   }
-  return parseEurlexResults(await runSparql(buildEurlexSparql(input, limit, offset)));
+  return new SourceError(
+    SOURCE,
+    "UPSTREAM_ERROR",
+    `Cellar SPARQL rejected the query (HTTP ${status}).`,
+    NARROW_HINT,
+  );
 }
+
+/**
+ * One SPARQL request gets 45 s — within the call's budget, and past
+ * Virtuoso's usual answer time by far; a timed-out query is never sent again
+ * (it would only time out again and cost the endpoint a second run). A fast
+ * 429/502/503/504 or dropped connection gets one retry while the budget
+ * allows. A 500 is read, not thrown: Virtuoso answers a query it refuses
+ * with 500 as well (live 2026-09), and only the body tells the two apart —
+ * a refused query is the caller's to rephrase and is never resent, a query
+ * past its run-time limit gets the narrowing hint, and any other 500 is a
+ * transient store error worth the one retry.
+ */
+const SPARQL_TIMEOUT_MS = 45_000;
+/** A retry of a bare Virtuoso 500 is started only with this much budget left. */
+const SPARQL_RETRY_MIN_LEFT_MS = 10_000;
 
 /** POST a SELECT to the Cellar endpoint. One home for the Virtuoso error
  * lore, shared by the search and legislative-history queries. */
-async function runSparql(sparql: string): Promise<unknown> {
+async function runSparql(sparql: string, deadline: number): Promise<unknown> {
   const body = new URLSearchParams({ query: sparql, format: "application/sparql-results+json" });
-  const response = await fetchUpstream(SOURCE, SPARQL_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "content-type": "application/x-www-form-urlencoded",
-      accept: "application/sparql-results+json",
-    },
-    body: body.toString(),
-    timeoutMs: 30_000,
-    retry: true,
-  });
-  const text = await response.text();
-  if (!response.ok || VIRTUOSO_ERROR_RE.test(text)) {
-    throw new SourceError(
-      SOURCE,
-      "UPSTREAM_ERROR",
-      `Cellar SPARQL rejected the query (HTTP ${response.status}).`,
-      "Simplify the keywords or narrow the date range; the endpoint times out on broad queries (~100 s server limit) and rate-limits bursts.",
-    );
+  const started = Date.now();
+  const failure = (error: unknown): unknown => {
+    if (isTimeoutError(error)) {
+      return new SourceError(
+        SOURCE,
+        "UPSTREAM_ERROR",
+        `Cellar SPARQL did not answer within ${Math.round((Date.now() - started) / 1000)} s.`,
+        `${NARROW_HINT} If a narrow query times out too, the endpoint is overloaded — run dawmain_probe_sources.`,
+      );
+    }
+    return error;
+  };
+  // `again`: this is already the one retry — no second one inside it.
+  const post = async (again = false): Promise<{ response: Response; text: string }> => {
+    try {
+      const response = await fetchWithinDeadline(
+        SOURCE,
+        SPARQL_ENDPOINT,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            accept: "application/sparql-results+json",
+          },
+          body: body.toString(),
+        },
+        {
+          deadline,
+          timeoutMs: SPARQL_TIMEOUT_MS,
+          retryOnTimeout: false,
+          retryStatus: (status) => !again && (status === 429 || status === 502 || status === 503 || status === 504),
+          passStatus: (status) => status === 500,
+          what: "running the SPARQL query",
+        },
+      );
+      return { response, text: await response.text() };
+    } catch (error) {
+      throw failure(error);
+    }
+  };
+  let { response, text } = await post();
+  let rejected = virtuosoFailure(response.status, text);
+  // A bare 500 whose body names no refusal and no run-time limit: the store
+  // itself failed (a deadlock, a restart) — one retry while the budget lasts.
+  const bare = (error: SourceError | null, status: number) =>
+    status === 500 && error !== null && error.kind === "UPSTREAM_ERROR" && !VIRTUOSO_TIMEOUT_RE.test(text);
+  if (bare(rejected, response.status) && deadline - Date.now() >= SPARQL_RETRY_MIN_LEFT_MS) {
+    await new Promise((resolve) => setTimeout(resolve, 500 + Math.random() * 1000));
+    ({ response, text } = await post(true));
+    rejected = virtuosoFailure(response.status, text);
+  }
+  if (rejected) {
+    // passStatus counted a 500 as an answer; only a bare one (no refusal,
+    // no run-time limit in its body) says the endpoint is unwell.
+    if (bare(rejected, response.status)) recordSourceResult(SOURCE, false, "HTTP 500");
+    // A refused query is the caller's, not an outage: the endpoint answered.
+    if (rejected.kind === "INPUT_INVALID") recordSourceResult(SOURCE, true);
+    if (bare(rejected, response.status)) {
+      throw new SourceError(
+        SOURCE,
+        "UPSTREAM_ERROR",
+        "Cellar SPARQL answered HTTP 500.",
+        "The endpoint failed on its side, not on the query — wait a minute and retry; if a simple lookup (celex: '32016R0679') fails too, the endpoint is down — run dawmain_probe_sources.",
+      );
+    }
+    throw rejected;
   }
   try {
     return JSON.parse(text);
@@ -285,17 +505,18 @@ const HISTORY_ROW_CAP = 500;
 
 /** Build the dossier query. Pure — unit-tested. */
 export function buildLegislativeHistorySparql(input: LegislativeHistoryInput): string {
-  const language = (input.language ?? "en").toLowerCase();
-  const lang3 = (CELLAR_LANGS[language] ?? "eng").toUpperCase();
+  const resolved = requireCellarLanguage(SOURCE, input.language ?? "en");
+  const lang3 = resolved.iso3.toUpperCase();
   // Dossier titles carry 2-letter language tags; expressions use authority
-  // URIs. English doubles as the fallback, fetched alongside unless it IS
-  // the requested language.
-  const lang2 = lang3 === "ENG" ? "en" : language;
+  // URIs. Both come from the resolved language — the tag taken from the raw
+  // input ('ces', 'cs-CZ') would match no title. English doubles as the
+  // fallback, fetched alongside unless it IS the requested language.
+  const lang2 = resolved.iso2;
   const withEnglishFallback = lang3 !== "ENG";
 
   const anchor: string[] = [];
-  if (input.celex) {
-    const celex = input.celex.replace(/["\\]/g, "").trim();
+  const celex = input.celex ? literal(normalizeCelex(input.celex)) : "";
+  if (celex) {
     anchor.push(
       `?work cdm:resource_legal_id_celex "${celex}"^^xsd:string .`,
       `?dossier cdm:dossier_contains_work ?work .`,
@@ -454,27 +675,56 @@ const historyCache = new TtlCache<LegislativeHistoryResult>(SEARCH_TTL_MS);
 
 export async function getLegislativeHistory(
   input: LegislativeHistoryInput,
+  options: { deadline?: number } = {},
 ): Promise<LegislativeHistoryResult> {
-  return historyCache.through(memoKey("eurlex-history", [input]), async () =>
-    parseLegislativeHistoryResults(await runSparql(buildLegislativeHistorySparql(input))),
+  // Keyed on the query built: equivalent spellings of one anchor share it.
+  const sparql = buildLegislativeHistorySparql(input);
+  const deadline = options.deadline ?? cellarDeadline();
+  return historyCache.through(memoKey("eurlex-history", sparql), async () =>
+    parseLegislativeHistoryResults(await runSparql(sparql, deadline)),
   );
+}
+
+export interface EurlexDocument {
+  text: string;
+  url: string;
+  /** ISO 639-1 of the text served. */
+  language: string;
+  /** The requested language had no text; `language` is the English fallback. */
+  fallback: boolean;
 }
 
 export async function getEurlexDocument(options: {
   celex?: string;
   ecli?: string;
   language?: string;
-}): Promise<{ text: string; url: string }> {
-  const language = options.language ?? "en";
-  if (options.celex) {
-    const text = await fetchCellarText(SOURCE, `/celex/${encodeURIComponent(options.celex)}`, language);
-    if (text) {
-      return { text, url: `https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:${options.celex}` };
-    }
+  deadline?: number;
+}): Promise<EurlexDocument> {
+  const requested = requireCellarLanguage(SOURCE, options.language ?? "en");
+  // One deadline for every step: the celex path (listing, parts, English
+  // fallback) and then the ECLI path run in sequence.
+  const deadline = options.deadline ?? cellarDeadline();
+  const celex = options.celex ? normalizeCelex(options.celex) : "";
+  const ecli = options.ecli ? normalizeEcli(options.ecli) : "";
+  const found = (document: { text: string; language: string }, url: string): EurlexDocument => ({
+    ...document,
+    url,
+    fallback: document.language !== requested.iso2,
+  });
+  if (celex) {
+    const document = await fetchCellarDocument(SOURCE, `/celex/${encodeURIComponent(celex)}`, requested.iso2, { deadline });
+    if (document) return found(document, `https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:${celex}`);
   }
-  if (options.ecli) {
-    const text = await fetchCellarText(SOURCE, `/ecli/${encodeURIComponent(options.ecli)}`, language);
-    if (text) return { text, url: `https://publications.europa.eu/resource/ecli/${options.ecli}` };
+  if (ecli) {
+    if (celex && !hasBudget(deadline)) {
+      throw budgetSpent(
+        SOURCE,
+        `trying the ECLI (the CELEX ${celex} gave no text)`,
+        "Call again with the ecli alone.",
+      );
+    }
+    const document = await fetchCellarDocument(SOURCE, `/ecli/${encodeURIComponent(ecli)}`, requested.iso2, { deadline });
+    if (document) return found(document, `https://publications.europa.eu/resource/ecli/${ecli}`);
   }
   throw new SourceError(
     SOURCE,

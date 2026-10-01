@@ -86,3 +86,74 @@ export function pageWindow(page: number, limit: number, pageSize: number): PageW
 export function sliceWindow<T>(concatenated: T[], window: PageWindow): T[] {
   return concatenated.slice(window.start - window.firstOffset, window.end - window.firstOffset);
 }
+
+/** Title for comparison: lowercase, punctuation and spacing folded. */
+function titleKey(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+/** How much citation data a record carries — the richer copy is kept. */
+function richness(hit: BibHit): number {
+  return [hit.authors.length > 0, hit.year, hit.abstract, hit.container, hit.subjects?.length].filter(Boolean).length;
+}
+
+/** Access links a merged copy contributes: its own, then its record page. */
+const MERGED_LINKS_CAP = 3;
+
+/**
+ * Same-page duplicates under different record ids. The Central Discovery
+ * Index serves one article from several collections — live, "genocide"
+ * (cze) put cdi_unpaywall_…_cl_2024_1_03 (no author, no year, an OA PDF
+ * link) and cdi_crossref_…_CL_2024_1_03 (full metadata and abstract) on one
+ * page, DOIs differing only in case. Two hits merge only when the DOI
+ * matches case-insensitively AND the titles agree (equal, or one a prefix
+ * of the other) — a chapter may repeat its book's DOI. The richer copy is
+ * kept with its id and url (so doctrine_get_record opens the full record),
+ * at the rank of the group's first occurrence; the other fills what it
+ * lacks and contributes its access links and record page. Pure.
+ */
+export function mergeDoiDuplicates(hits: BibHit[]): BibHit[] {
+  const out: BibHit[] = [];
+  for (const hit of hits) {
+    const doi = hit.doi?.[0]?.toLowerCase();
+    const title = titleKey(hit.title);
+    const at = doi
+      ? out.findIndex((kept) => {
+          if (kept.doi?.[0]?.toLowerCase() !== doi) return false;
+          const other = titleKey(kept.title);
+          return Boolean(title && other) && (title.startsWith(other) || other.startsWith(title));
+        })
+      : -1;
+    if (at < 0) {
+      out.push(hit);
+      continue;
+    }
+    const kept = out[at];
+    const [primary, secondary] = richness(hit) > richness(kept) ? [hit, kept] : [kept, hit];
+    const links = [...(primary.links ?? [])];
+    for (const url of [...(secondary.links ?? []), ...(secondary.url ? [secondary.url] : [])]) {
+      if (links.length >= (primary.links?.length ?? 0) + MERGED_LINKS_CAP) break;
+      if (!links.includes(url)) links.push(url);
+    }
+    out[at] = {
+      ...primary,
+      authors: primary.authors.length ? primary.authors : secondary.authors,
+      year: primary.year ?? secondary.year,
+      publisher: primary.publisher ?? secondary.publisher,
+      type: primary.type ?? secondary.type,
+      language: primary.language ?? secondary.language,
+      isbn: primary.isbn?.length ? primary.isbn : secondary.isbn,
+      issn: primary.issn?.length ? primary.issn : secondary.issn,
+      container: primary.container ?? secondary.container,
+      subjects: primary.subjects?.length ? primary.subjects : secondary.subjects,
+      abstract: primary.abstract ?? secondary.abstract,
+      contents: primary.contents ?? secondary.contents,
+      open_access: primary.open_access || secondary.open_access || undefined,
+      links: links.length ? links : undefined,
+    };
+  }
+  return out;
+}

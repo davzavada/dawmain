@@ -124,7 +124,9 @@ describe("searchChannels — lexical AND/OR", () => {
     const hits = await scoped([A], (db) => searchChannels(db, params({ tsAnd: "'nahrad':* & 'skod':*", tsOr: "'nahrad':* | 'skod':*" })));
     expect(docsOf(hits, "or")).toContain(citing);
     expect(docsOf(hits, "and")).not.toContain(citing);
-    expect(hits.filter((h) => h.channel === "meta")).toEqual([{ channel: "meta", docId: metaOnly, chunkOrd: null, rank: 1, perDocTotal: 1 }]);
+    expect(hits.filter((h) => h.channel === "meta")).toEqual([
+      { channel: "meta", docId: metaOnly, libraryId: A, chunkOrd: null, rank: 1, perDocTotal: 1, byKey: false },
+    ]);
   });
 
   it("filters: doc types, year range, docId", async () => {
@@ -155,7 +157,17 @@ describe("searchChannels — lexical AND/OR", () => {
     const d = await t.owner.query("SELECT 1 FROM chunks WHERE tsv @@ to_tsquery('simple', $1)", ["'nahrad':*D"]);
     expect(d.rows).toHaveLength(0);
     const hits = await scoped([A], (db) => searchChannels(db, params({ tsAnd: "'nahrad':*D" })));
-    expect(hits).toEqual([]);
+    expect(hits.filter((h) => h.channel !== "meta")).toEqual([]);
+    // files_search passes no meta query for a footnotes-only search.
+    expect(await scoped([A], (db) => searchChannels(db, params({ tsAnd: "'nahrad':*D", tsMeta: null })))).toEqual([]);
+  });
+
+  it("the meta channel ignores the chunk weights: in meta_tsv they mean title / authors / outline, not body / notes", async () => {
+    // The same document for the unweighted, the body-only (ABC) and the footnotes-only (D) query.
+    for (const tsAnd of ["'nahrad':*", "'nahrad':*ABC", "'nahrad':*D"]) {
+      const hits = await scoped([A], (db) => searchChannels(db, params({ tsAnd })));
+      expect(docsOf(hits, "meta"), tsAnd).toEqual([metaOnly]);
+    }
   });
 });
 
@@ -244,6 +256,91 @@ describe("searchChannels — act filter without a § (files_search: \"commentari
   it("another act keeps only its own citations; an EU act matches commentaries (and chunks keyed with it)", async () => {
     expect(docsOf(await run({ tsAnd: "'porusen':*", act: "zak:99/1963" })).sort()).toEqual([otherAct, metaOther].sort());
     expect(await run({ tsAnd: "'porusen':*", act: "eu:32016R0679" })).toEqual([]);
+  });
+});
+
+describe("searchChannels — case_number, section and document keys inside SQL (0005)", () => {
+  // Their own library, so the counts above stay as they are.
+  const L = "user_filters";
+  let doc: string;
+  let other: string;
+  let isbnDoc: string;
+  let titled: string;
+  // The chunk channels only (tsMeta: null), unless a test asks for the meta channel.
+  const run = (p: Partial<SearchParams>) => scoped([L], (db) => searchChannels(db, params({ libraryIds: [L], tsMeta: null, ...p })));
+
+  beforeAll(async () => {
+    await t.owner.query("INSERT INTO libraries (id) VALUES ($1)", [L]);
+    // 30 chunks, 10 characters each: § 1 = chunks 0–14, § 2 = chunks 15–29, both inside čl. II.
+    // "retence" is strong (own heading, A) in every chunk of § 2, weak (body, C) in chunk 14 of § 1 only;
+    // chunks 20 and 21 cite 25 Cdo 1234/2019.
+    doc = await seed({
+      lib: L,
+      docType: "komentar",
+      chunks: Array.from({ length: 30 }, (_, i) => ({
+        tsv: i >= 15 ? "'retenc':1A 'slov':2C" : i === 14 ? "'slov':1C 'retenc':9C" : "'slov':1C",
+        keys: [i < 15 ? "sec:par:1" : "sec:par:2", ...(i === 20 || i === 21 ? ["sz:25cdo1234-2019"] : [])],
+      })),
+    });
+    await t.owner.query(
+      `INSERT INTO doc_sections (doc_id, library_id, ord, parent_ord, level, kind, key, heading, char_start, char_end) VALUES
+         ($1, $2, 0, NULL, 1, 'cl', 'cl:II', 'Čl. II', 0, 300),
+         ($1, $2, 1, 0, 2, 'par', 'par:1', '§ 1', 0, 150),
+         ($1, $2, 2, 0, 2, 'par', 'par:2', '§ 2', 150, 300)`,
+      [doc, L],
+    );
+    // Another document citing the decision, whose sections know no § 1.
+    other = await seed({ lib: L, chunks: [{ tsv: "'retenc':1C", keys: ["sz:25cdo1234-2019"] }, { tsv: "'retenc':1C" }] });
+    // A book known by its ISBN only in its metadata; a document whose title has the word.
+    isbnDoc = await seed({ lib: L, metaTsv: "'kupn':1A", docKeys: ["isbn:9788075022745", "sz:25cdo1234-2019"], chunks: [{ tsv: "'kupn':1C" }] });
+    titled = await seed({ lib: L, metaTsv: "'retenc':1A", chunks: [] });
+  });
+
+  it("section: the lexical channels rank only chunks inside the §, before the per-document cap", async () => {
+    // Without the filter the three slots of the document all go to § 2.
+    const all = await run({ tsAnd: "'retenc':*", perDoc: 3 });
+    expect(all.filter((h) => h.channel === "and" && h.docId === doc).map((h) => h.chunkOrd)).not.toContain(14);
+    const inside = await run({ tsAnd: "'retenc':*", section: "par:1", perDoc: 3 });
+    expect(inside.map((h) => [h.channel, h.docId, h.chunkOrd, h.perDocTotal])).toEqual([["and", doc, 14, 1]]);
+    // The identifier channel obeys it too; the per-document count is the section's.
+    const idn = await run({ identKeys: ["sec:par:1", "sec:par:2"], section: "par:2", perDoc: 3 });
+    expect(idn.every((h) => h.docId === doc && h.chunkOrd! >= 15)).toBe(true);
+    expect(idn[0].perDocTotal).toBe(15);
+  });
+
+  it("section: a § nested in the článek counts (ancestors included); an unknown or malformed key matches nothing", async () => {
+    const cl = await run({ tsAnd: "'retenc':*", section: "cl:II", perDoc: 200, limit: 200 });
+    expect(cl.filter((h) => h.docId === doc)).toHaveLength(16);
+    expect(cl.some((h) => h.docId === other)).toBe(false);
+    expect(await run({ tsAnd: "'retenc':*", section: "par:99" })).toEqual([]);
+    expect(await run({ tsAnd: "'retenc':*", section: "par:1' OR '1'='1" })).toEqual([]);
+  });
+
+  it("require (case_number): only chunks carrying one of the keys, counted and capped after the test", async () => {
+    const hits = await run({ tsAnd: "'retenc':*", require: ["sz:25cdo1234-2019"], perDoc: 1 });
+    const and = hits.filter((h) => h.channel === "and");
+    expect(and.map((h) => h.docId).sort()).toEqual([doc, other].sort());
+    expect(and.find((h) => h.docId === doc)).toMatchObject({ perDocTotal: 2 });
+    expect([20, 21]).toContain(and.find((h) => h.docId === doc)!.chunkOrd);
+    expect(and.find((h) => h.docId === other)).toMatchObject({ chunkOrd: 0, perDocTotal: 1 });
+    // An empty requirement is none.
+    expect((await run({ tsAnd: "'retenc':*", require: [] })).some((h) => h.docId === doc && h.chunkOrd === 15)).toBe(true);
+  });
+
+  it("inside one document the per-document cap reaches 200", async () => {
+    const hits = await run({ tsAnd: "'slov':*", docId: doc, perDoc: 200, limit: 200 });
+    expect(hits.filter((h) => h.channel === "and")).toHaveLength(30);
+  });
+
+  it("meta: isbn: / doi: keys match the documents' own keys (first, flagged byKey); sz: keys are not taken", async () => {
+    const byIsbn = await run({ tsMeta: null, metaKeys: ["isbn:9788075022745"] });
+    expect(byIsbn).toEqual([{ channel: "meta", docId: isbnDoc, libraryId: L, chunkOrd: null, rank: 1, perDocTotal: 1, byKey: true }]);
+    const both = await run({ tsMeta: "'retenc':*", metaKeys: ["isbn:9788075022745"] });
+    expect(both.map((h) => [h.docId, h.byKey])).toEqual([
+      [isbnDoc, true],
+      [titled, false],
+    ]);
+    expect(await run({ tsMeta: null, metaKeys: ["sz:25cdo1234-2019"] })).toEqual([]);
   });
 });
 
@@ -345,8 +442,8 @@ describe("fuse", () => {
     const best = 1.0 / 61 + 1.5 / 61;
     expect(fused[0].score).toBeCloseTo(best + 0.8 / 61, 12);
     expect(fused[0].chunks).toEqual([
-      { ord: 0, score: best },
-      { ord: 3, score: 0.5 / 62 },
+      { ord: 0, score: best, matchedBy: ["and", "idn"] },
+      { ord: 3, score: 0.5 / 62, matchedBy: ["or"] },
     ]);
     expect(fused[0].matchedBy).toEqual(["and", "or", "idn", "meta"]);
   });

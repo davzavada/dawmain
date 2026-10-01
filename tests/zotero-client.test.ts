@@ -38,6 +38,7 @@ import {
   scanCases,
   searchItems,
   tagColorsOf,
+  zoteroQuery,
 } from "@/src/zotero/client";
 import { API_ORIGIN, LIMITS, ZOTERO_UA, isAllowedStorageHost } from "@/src/zotero/config";
 import { __resetZoteroHttpForTests } from "@/src/zotero/http";
@@ -1060,5 +1061,256 @@ describe("downloadPdf", () => {
   it("an attachment the key may not download (403) is NOT_ENTITLED", async () => {
     stubFetch(() => new Response("File access denied", { status: 403 }));
     expect((await rejection(downloadPdf(CREDS, ME, parsedItem("PDFA2345")))).kind).toBe("NOT_ENTITLED");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Search fixes: quotes, parallel pages, loads shared in flight, conditional search pages
+
+describe("the q Zotero is sent", () => {
+  const q = (path: string) => new URL(path, API_ORIGIN).searchParams;
+
+  it("title mode takes no quotes (Zotero's title part then finds nothing); everything mode keeps ASCII ones (a phrase in the full text)", () => {
+    const title = q(buildItemsPath(ME, { q: '"energetický nápoj"', qmode: "titleCreatorYear", limit: 20, start: 0 }));
+    expect(title.get("q")).toBe("energetický nápoj");
+    expect(buildItemsPath(ME, { q: '"energetický nápoj"', qmode: "titleCreatorYear", limit: 20, start: 0 })).not.toContain("%22");
+    // No qmode is Zotero's default, titleCreatorYear.
+    expect(q(buildItemsPath(ME, { q: '"a b" c', limit: 20, start: 0 })).get("q")).toBe("a b c");
+    const everything = buildItemsPath(ME, { q: '"energetický nápoj"', qmode: "everything", limit: 20, start: 0 });
+    expect(q(everything).get("q")).toBe('"energetický nápoj"');
+    expect(everything).toContain("%22");
+  });
+
+  it("typographic quotes are no operator anywhere: dropped in both modes", () => {
+    expect(zoteroQuery("„Obchodní smlouvy“", "everything")).toBe("Obchodní smlouvy");
+    expect(zoteroQuery("„Obchodní  smlouvy“ Dohnal", "titleCreatorYear")).toBe("Obchodní smlouvy Dohnal");
+    expect(zoteroQuery('»a« "b c"', "everything")).toBe('a "b c"');
+    expect(zoteroQuery("  25 Cdo 1234/2019 ", "titleCreatorYear")).toBe("25 Cdo 1234/2019");
+  });
+
+  it("a q of quotes alone is refused — sent without q it would list the whole library", () => {
+    for (const bad of ['""', "„“", '" "']) {
+      let error: unknown;
+      try {
+        buildItemsPath(ME, { q: bad, qmode: "titleCreatorYear", limit: 20, start: 0 });
+      } catch (e) {
+        error = e;
+      }
+      expect((error as SourceError).kind, bad).toBe("INPUT_INVALID");
+    }
+  });
+
+  it("a tag listing's items_query follows the same rule", () => {
+    const u = (qmode: "titleCreatorYear" | "everything") => q(buildTagsPath(ME, { items: { q: '"náhrada škody"', qmode }, limit: 50, start: 0 }));
+    expect(u("titleCreatorYear").get("itemQ")).toBe("náhrada škody");
+    expect(u("everything").get("itemQ")).toBe('"náhrada škody"');
+  });
+});
+
+/** A fetch stub answering after `ms`, counting the requests in flight at once. */
+function stubSlowFetch(ms: number, answer: (call: Call) => Response): { calls: Call[]; peak: () => number } {
+  const calls: Call[] = [];
+  let open = 0;
+  let peak = 0;
+  vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+    const call = { url: String(url), init };
+    calls.push(call);
+    open++;
+    peak = Math.max(peak, open);
+    await new Promise((r) => setTimeout(r, ms));
+    open--;
+    return answer(call);
+  });
+  return { calls, peak: () => peak };
+}
+
+const caseRaw = (n: number) => ({
+  key: `CAS${"23456789ABCDEFGHJKMNPQRSTUVWXYZ"[n % 31]}${"23456789ABCDEFGHJKMNPQRSTUVWXYZ"[Math.floor(n / 31) % 31]}222`,
+  version: 1000 + n,
+  library: { type: "user", id: 475425 },
+  data: { itemType: "case", caseName: `Věc ${n}`, docketNumber: `25 Cdo ${n}/2019`, court: "Nejvyšší soud", dateDecided: "2019-11-26", extra: "" },
+});
+
+/** The case items of a library of `total` cases at `version`: Total-Results on every page, 304 for the current version. */
+function caseLibrary(total: number, version: number, opts: { totalHeader?: boolean } = {}) {
+  return ({ url, init }: Call): Response => {
+    if (new Headers(init.headers).get("if-modified-since-version") === String(version)) return new Response(null, { status: 304 });
+    const start = Number(new URL(url).searchParams.get("start"));
+    const body = Array.from({ length: Math.max(0, Math.min(100, total - start)) }, (_, i) => caseRaw(start + i));
+    const headers: Record<string, string> = { "Last-Modified-Version": String(version) };
+    if (opts.totalHeader !== false) headers["Total-Results"] = String(total);
+    if (start + 100 < total) headers.Link = `<https://api.zotero.org/users/475425/items?itemType=case&limit=100&start=${start + 100}>; rel="next"`;
+    return json(body, headers);
+  };
+}
+
+describe("scanCases: pages together, one scan per library in flight", () => {
+  it("reads pages 2..k together once page 1 names the total, keeps their order, and says how many pages first", async () => {
+    const { calls, peak } = stubSlowFetch(20, caseLibrary(350, 1201));
+    const seen: number[] = [];
+    const scan = await scanCases(CREDS, ME, { maxPages: 5, onPages: (p) => seen.push(p) });
+    expect(calls.map((c) => new URL(c.url).searchParams.get("start"))).toEqual(["0", "100", "200", "300"]);
+    expect(peak()).toBeGreaterThanOrEqual(2);
+    expect(peak()).toBeLessThanOrEqual(LIMITS.concurrencyPerUser);
+    expect(scan.items.map((e) => e.title)).toEqual(Array.from({ length: 350 }, (_, i) => `Věc ${i}`));
+    expect(scan).toMatchObject({ scannedPages: 4, total: 350 });
+    expect(seen).toEqual([4]);
+    // Complete: a repeat with a bigger budget is revalidated, not rescanned.
+    const again = await scanCases(CREDS, ME, { maxPages: 10 });
+    expect(calls).toHaveLength(5);
+    expect(headerOf(calls[4], "if-modified-since-version")).toBe("1201");
+    expect(again.items).toHaveLength(350);
+  });
+
+  it("follows Link rel=next one page at a time when page 1 has no total", async () => {
+    const { calls, peak } = stubSlowFetch(5, caseLibrary(250, 1201, { totalHeader: false }));
+    const seen: number[] = [];
+    const scan = await scanCases(CREDS, ME, { maxPages: 2, onPages: (p) => seen.push(p) });
+    expect(calls).toHaveLength(2);
+    expect(peak()).toBe(1);
+    expect(scan.items).toHaveLength(200);
+    expect(seen).toEqual([2]);
+  });
+
+  it("concurrent scans of one library share one set of pages; a smaller one joins a bigger one, not the other way round", async () => {
+    const { calls } = stubSlowFetch(20, caseLibrary(350, 1201));
+    const [a, b, c] = await Promise.all([scanCases(CREDS, ME, { maxPages: 5 }), scanCases(CREDS, ME, { maxPages: 5 }), scanCases(CREDS, ME, { maxPages: 2 })]);
+    expect(calls).toHaveLength(4);
+    expect(b).toEqual(a);
+    expect(c.scannedPages).toBe(2);
+    expect(c.items).toHaveLength(200);
+    __resetZoteroClientForTests();
+    const bigger = stubSlowFetch(20, caseLibrary(350, 1201));
+    await Promise.all([scanCases(CREDS, ME, { maxPages: 1 }), scanCases(CREDS, ME, { maxPages: 3 })]);
+    // The one-page scan cannot serve three pages: 1 + 3 requests.
+    expect(bigger.calls).toHaveLength(4);
+  });
+
+  it("a failure reaches every joined caller and is not kept: the next call scans again", async () => {
+    stubSlowFetch(10, () => new Response("down", { status: 500 }));
+    const both = await Promise.all([rejection(scanCases(CREDS, ME, { maxPages: 5 })), rejection(scanCases(CREDS, ME, { maxPages: 5 }))]);
+    expect(both.every((e) => e instanceof SourceError && e.kind === "UPSTREAM_ERROR")).toBe(true);
+    const { calls } = stubSlowFetch(1, caseLibrary(50, 1201));
+    expect((await scanCases(CREDS, ME, { maxPages: 5 })).items).toHaveLength(50);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("one caller giving up does not cut the others off; when all have, the shared requests are cancelled", async () => {
+    const aborted: boolean[] = [];
+    vi.stubGlobal("fetch", (_url: string, init: RequestInit) =>
+      new Promise<Response>((resolve, reject) => {
+        const timer = setTimeout(() => resolve(caseLibrary(50, 1201)({ url: String(_url), init })), 40);
+        init.signal?.addEventListener("abort", () => {
+          clearTimeout(timer);
+          aborted.push(true);
+          reject(init.signal?.reason);
+        });
+      }),
+    );
+    const quitter = new AbortController();
+    const stays = scanCases(CREDS, ME, { maxPages: 5 });
+    const leaves = rejection(scanCases(CREDS, ME, { maxPages: 5 }, { signal: quitter.signal }));
+    quitter.abort();
+    expect(((await leaves) as SourceError).message).toContain("cancelled");
+    expect((await stays).items).toHaveLength(50);
+    expect(aborted).toHaveLength(0);
+
+    __resetZoteroClientForTests();
+    const one = new AbortController();
+    const two = new AbortController();
+    const first = rejection(scanCases(CREDS, ME, { maxPages: 5 }, { signal: one.signal }));
+    const second = rejection(scanCases(CREDS, ME, { maxPages: 5 }, { signal: two.signal }));
+    one.abort();
+    await new Promise((r) => setTimeout(r, 5));
+    expect(aborted).toHaveLength(0);
+    two.abort();
+    await Promise.all([first, second]);
+    await vi.waitFor(() => expect(aborted).toHaveLength(1));
+  });
+});
+
+describe("lists read in full: pages together, one load in flight", () => {
+  it("listCollections reads the pages after the first together when Total-Results names them", async () => {
+    const col = (n: number) => ({ key: `CL${"23456789ABCDEFGHJKMNPQRSTUVWXYZ"[n % 31]}${"23456789ABCDEFGHJKMNPQRSTUVWXYZ"[Math.floor(n / 31) % 31]}2222`, data: { name: `Sbírka ${n}`, parentCollection: false } });
+    const { calls, peak } = stubSlowFetch(20, ({ url }) => {
+      const start = Number(new URL(url).searchParams.get("start"));
+      return json(Array.from({ length: Math.min(100, 250 - start) }, (_, i) => col(start + i)), { "Total-Results": "250" });
+    });
+    const cols = await listCollections(CREDS, ME);
+    expect(calls.map((c) => new URL(c.url).searchParams.get("start"))).toEqual(["0", "100", "200"]);
+    expect(peak()).toBe(2);
+    expect(cols.map((c) => c.name)).toEqual(Array.from({ length: 250 }, (_, i) => `Sbírka ${i}`));
+  });
+
+  it("concurrent calls share one groups listing, one collections listing, one settings read", async () => {
+    const [g1] = fixture("groups.json") as unknown[];
+    const { calls } = stubSlowFetch(20, ({ url }) => {
+      const path = new URL(url).pathname;
+      if (path.endsWith("/groups")) return json([g1]);
+      if (path.endsWith("/settings")) return json({ tagColors: { value: [], version: 1 } });
+      return json(fixture("collections.json"));
+    });
+    const groups = await Promise.all([listGroups(CREDS, "all"), listGroups(CREDS, "all"), listGroups(CREDS, [111111])]);
+    expect(groups.map((l) => l.map((g) => g.id))).toEqual([[111111], [111111], [111111]]);
+    await Promise.all([listCollections(CREDS, ME), listCollections(CREDS, ME), getSettings(CREDS, ME), getSettings(CREDS, ME), listSearches(CREDS, GROUP)]);
+    expect(calls.map((c) => new URL(c.url).pathname)).toEqual(["/users/475425/groups", "/users/475425/collections", "/users/475425/settings", "/groups/111111/searches"]);
+    // Another key of the same user shares nothing.
+    await listGroups({ ...CREDS, key: "AnotherKeyOfTheSameUser0" }, "all");
+    expect(calls).toHaveLength(5);
+  });
+
+  it("a shared listing that fails fails every caller, and the next call asks again", async () => {
+    stubSlowFetch(10, () => new Response("down", { status: 502 }));
+    const both = await Promise.all([rejection(listGroups(CREDS, "all")), rejection(listGroups(CREDS, "all"))]);
+    expect(both.every((e) => e instanceof SourceError)).toBe(true);
+    const { calls } = stubSlowFetch(1, () => json(fixture("groups.json")));
+    expect(await listGroups(CREDS, "all")).toHaveLength(2);
+    expect(calls).toHaveLength(1);
+  });
+});
+
+describe("searchItems: a repeated page is revalidated, not re-run", () => {
+  const page = (version: string, extra: Record<string, string> = {}) => json(fixture("items-search.json"), { "Total-Results": "5", "Last-Modified-Version": version, ...extra });
+
+  it("asks again with If-Modified-Since-Version and reuses the page on 304", async () => {
+    const calls = stubFetch(({ init }) => (new Headers(init.headers).get("if-modified-since-version") === "1201" ? new Response(null, { status: 304 }) : page("1201")));
+    const params = { q: "náhrada", qmode: "everything" as const, limit: 25, start: 0 };
+    const first = await searchItems(CREDS, ME, params);
+    const again = await searchItems(CREDS, ME, params);
+    expect(headerOf(calls[0], "if-modified-since-version")).toBeNull();
+    expect(headerOf(calls[1], "if-modified-since-version")).toBe("1201");
+    expect(again).toEqual(first);
+    // Another page, another library, another key: nothing to revalidate.
+    await searchItems(CREDS, ME, { ...params, start: 25 });
+    await searchItems(CREDS, GROUP, params);
+    await searchItems({ ...CREDS, key: "AnotherKeyOfTheSameUser0" }, ME, params);
+    expect(calls.slice(2).map((c) => headerOf(c, "if-modified-since-version"))).toEqual([null, null, null]);
+  });
+
+  it("a changed library answers 200: that page is used and kept", async () => {
+    let version = "1201";
+    const calls = stubFetch(({ init }) => (new Headers(init.headers).get("if-modified-since-version") === version ? new Response(null, { status: 304 }) : page(version)));
+    const params = { q: "náhrada", limit: 25, start: 0 };
+    await searchItems(CREDS, ME, params);
+    version = "1300";
+    const changed = await searchItems(CREDS, ME, params);
+    expect(changed.paging.libraryVersion).toBe(1300);
+    await searchItems(CREDS, ME, params);
+    expect(headerOf(calls[2], "if-modified-since-version")).toBe("1300");
+  });
+
+  it("keeps no page of an index being rebuilt, none without a version and none too big", async () => {
+    const params = { q: "náhrada", qmode: "everything" as const, limit: 25, start: 0 };
+    for (const answer of [
+      () => page("1201", { "Zotero-Full-Text-Reindexing": "1" }),
+      () => json(fixture("items-search.json")),
+      () => json([...Array(400)].map(() => items().CASE2345), { "Last-Modified-Version": "1201" }),
+    ]) {
+      __resetZoteroClientForTests();
+      const calls = stubFetch(answer);
+      await searchItems(CREDS, ME, params);
+      await searchItems(CREDS, ME, params);
+      expect(headerOf(calls[1], "if-modified-since-version")).toBeNull();
+    }
   });
 });

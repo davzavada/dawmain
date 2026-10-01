@@ -360,29 +360,25 @@ právní věta (and the abstract, where NALUS has one).
 |---|---|
 | to konkrétní rozhodnutí | `case_number: "Pl. ÚS 24/10"` / `ecli` |
 | jen nálezy (meritum) | `types: ["nález"]` |
-| přezkum zákona č. X | `contested_act_kind: ["zákon"], contested_act_number: "106/1999"` (+ `contested_act_clause: "§ 17"`) |
-| jak dopadly stížnosti proti rozhodnutím FÚ | `contested_organ_type: ["FINANČNÍ ÚŘAD / ŘEDITELSTVÍ"]` + `outcome: ["vyhověno"]` |
-| co soudce X napsal v disentu k Y | `dissenting_judge: "Fiala", query: "Y", include_dissents: true` |
-| abstraktní kontrolu od politických aktérů | `petitioner: ["SKUPINA POSLANCŮ", "SKUPINA SENÁTORŮ"]` |
+| přezkum zákona č. X | `contested_act_number: "106/1999"` (+ `contested_act_clause: "§ 17"`) |
+| stížnosti proti rozhodnutím konkrétního soudu či úřadu | `contested_organ: "Nejvyšší soud"` |
+| co soudce X napsal v disentu k Y | `query: "Y X", include_dissents: true` |
 | jen judikaturu ze Sbírky / SbNU | `only_published: true` |
 | co NALUS zpřístupnil za poslední týden | `published_from` / `published_to` |
 | nejrelevantnější k tématu | `query` + `sort: "relevance"` |
-| soudce zpravodaj / populární název | `judge` / `popular_name` |
+| populární název | `popular_name` |
 
-**`contested_act_*` is the abstract-review lookup**: kind `zákon` + number
-`106/1999` lists the decisions reviewing that act — no keywords needed. Kind
-`rozhodnutí soudu` + `contested_organ: "Nejvyšší soud"` turns it around: stížnosti
-proti rozhodnutím konkrétního soudu.
+**`contested_act_*` is the abstract-review lookup**: number `106/1999` lists the
+decisions reviewing that act — no keywords needed.
 
-**`outcome` reads the operative part**: `vyhověno`/`zamítnuto` are the merits;
-`odmítnuto pro zjevnou neopodstatněnost` is the mass of rejected complaints —
-filtering to `vyhověno` on a fact pattern is the fastest way to the successful
-constitutional arguments. An invalid value returns the complete menu of outcomes.
-
-**Dissents are a search space of their own**: `dissenting_judge` filters decisions
-where the judge dissented; `include_dissents: true` extends the full-text query into
-the dissents' text. Combined, they answer "kde soudce X nesouhlasil a proč". A
-dissent is not the law — cite it as argument, never as authority.
+**NALUS ignores its číselník filters** — soudce zpravodaj, disentující soudce,
+výrok, navrhovatel, druh napadeného aktu, typ dotčeného orgánu come back
+unfiltered, so `us_search` refuses them. Every hit line names its soudce
+zpravodaj: screen the list by it. For a judge's dissents, put the name and the
+topic into `query` with `include_dissents: true` (the full text then reaches into
+the dissents) and read the hits. For outcomes, judge each hit by its citation
+(nález vs usnesení) and its výrok. A dissent is not the law — cite it as
+argument, never as authority.
 
 **`types: ["nález"]`** still cuts the mass of odmítavá usnesení; a nález binds
 (čl. 89 odst. 2 Ústavy), an usnesení mostly does not.

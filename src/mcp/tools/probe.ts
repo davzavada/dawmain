@@ -267,87 +267,96 @@ export async function runCanary(canary: Canary, includeRaw = false): Promise<Pro
   }
 }
 
-/** discover mode: hunt for endpoints the research could not verify. */
+/**
+ * discover mode: hunt for endpoints the research could not verify. The
+ * justice.cz scan and the NSS form dump are independent requests to different
+ * hosts, so they run side by side (one request more to each at a time — not
+ * impolite): in sequence their worst case was 12 + 12 + 12 s on top of the
+ * canaries'. Keys are assigned after both finish, in the original order, so
+ * the Discoveries JSON reads the same whichever answered first.
+ */
 async function discover(): Promise<Record<string, unknown>> {
-  const out: Record<string, unknown> = {};
-
-  // rozhodnuti.justice.cz — scan the SPA bundles for /api/ paths (the search
-  // endpoint the open-data API lacks must be in there).
-  try {
-    const home = await fetch("https://rozhodnuti.justice.cz/", {
-      headers: { "user-agent": USER_AGENT },
-      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-    });
-    const html = await home.text();
-    // Absolute src values survive new URL() unchanged, so a script tag could
-    // otherwise point this scan at any address — keep it on allowed hosts.
-    const scripts = [...html.matchAll(/src="([^"]+\.js[^"]*)"/g)]
-      .map((m) => new URL(m[1], "https://rozhodnuti.justice.cz/"))
-      .filter((url) => url.protocol === "https:" && ALLOWED_FETCH_HOSTS.includes(url.hostname))
-      .map((url) => url.href)
-      .slice(0, 6);
-    const apiPaths = new Set<string>();
-    // In parallel: serially these six 12 s fetches alone could outlast the
-    // function's 60 s budget and get the whole invocation killed.
-    const sources = await Promise.all(
-      scripts.map(async (script) => {
-        const response = await fetch(script, {
+  const [justice, nss] = await Promise.all([
+    (async (): Promise<unknown> => {
+      // rozhodnuti.justice.cz — scan the SPA bundles for /api/ paths (the search
+      // endpoint the open-data API lacks must be in there).
+      try {
+        const home = await fetch("https://rozhodnuti.justice.cz/", {
           headers: { "user-agent": USER_AGENT },
           signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
         });
-        return response.text();
-      }),
-    );
-    for (const source of sources) {
-      for (const m of source.matchAll(/["'`]\/?((?:api|opendata|finaldoc)\/[a-zA-Z0-9/_${}.-]{2,80})["'`]/g)) {
-        apiPaths.add("/" + m[1]);
+        const html = await home.text();
+        // Absolute src values survive new URL() unchanged, so a script tag could
+        // otherwise point this scan at any address — keep it on allowed hosts.
+        const scripts = [...html.matchAll(/src="([^"]+\.js[^"]*)"/g)]
+          .map((m) => new URL(m[1], "https://rozhodnuti.justice.cz/"))
+          .filter((url) => url.protocol === "https:" && ALLOWED_FETCH_HOSTS.includes(url.hostname))
+          .map((url) => url.href)
+          .slice(0, 6);
+        const apiPaths = new Set<string>();
+        // In parallel: serially these six 12 s fetches alone could outlast the
+        // function's 60 s budget and get the whole invocation killed.
+        const sources = await Promise.all(
+          scripts.map(async (script) => {
+            const response = await fetch(script, {
+              headers: { "user-agent": USER_AGENT },
+              signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+            });
+            return response.text();
+          }),
+        );
+        for (const source of sources) {
+          for (const m of source.matchAll(/["'`]\/?((?:api|opendata|finaldoc)\/[a-zA-Z0-9/_${}.-]{2,80})["'`]/g)) {
+            apiPaths.add("/" + m[1]);
+          }
+        }
+        return { scripts_scanned: scripts.length, api_paths: [...apiPaths].sort() };
+      } catch (error) {
+        return { error: error instanceof Error ? error.message : String(error) };
       }
-    }
-    out.justice = { scripts_scanned: scripts.length, api_paths: [...apiPaths].sort() };
-  } catch (error) {
-    out.justice = { error: error instanceof Error ? error.message : String(error) };
-  }
-
-  // NSS — dump the search form's fields (name + type + surrounding label) so
-  // the adapter's criteria mapping can be finalized against reality.
-  try {
-    const { loadHtml } = await import("@/src/sources/shared/html");
-    const response = await fetch("https://vyhledavac.nssoud.cz/", {
-      headers: { "user-agent": USER_AGENT },
-      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-    });
-    const $ = loadHtml(await response.text());
-    // Group by condition: the hidden TechnickyNazev/ZobrazovanyNazev VALUES
-    // identify each criterion; the value inputs sharing the prefix carry it.
-    const conditions = new Map<
-      string,
-      { technicky?: string; zobrazovany?: string; inputs: string[] }
-    >();
-    $("form")
-      .first()
-      .find("input, select, textarea")
-      .each((_, el) => {
-        const $el = $(el);
-        const name = $el.attr("name");
-        if (!name || !name.includes("vyhledavaciPodminka")) return;
-        const prefixMatch = /^(.*vyhledavaciPodminka(?:Hodnota)?\[\d+\])\./.exec(name);
-        if (!prefixMatch) return;
-        const prefix = prefixMatch[1];
-        const entry = conditions.get(prefix) ?? { inputs: [] };
-        const value = $el.attr("value") ?? "";
-        if (name.endsWith(".TechnickyNazev") && value) entry.technicky = value.slice(0, 60);
-        else if (name.endsWith(".ZobrazovanyNazev") && value) entry.zobrazovany = value.slice(0, 80);
-        else if (/\.Hodnota[A-Za-z]*$/.test(name)) entry.inputs.push(name.slice(name.lastIndexOf(".") + 1));
-        conditions.set(prefix, entry);
-      });
-    out.nss = {
-      conditions: [...conditions.entries()].map(([prefix, entry]) => ({ prefix, ...entry })).slice(0, 80),
-    };
-  } catch (error) {
-    out.nss = { error: error instanceof Error ? error.message : String(error) };
-  }
-
-  return out;
+    })(),
+    (async (): Promise<unknown> => {
+      // NSS — dump the search form's fields (name + type + surrounding label) so
+      // the adapter's criteria mapping can be finalized against reality.
+      try {
+        const { loadHtml } = await import("@/src/sources/shared/html");
+        const response = await fetch("https://vyhledavac.nssoud.cz/", {
+          headers: { "user-agent": USER_AGENT },
+          signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+        });
+        const $ = loadHtml(await response.text());
+        // Group by condition: the hidden TechnickyNazev/ZobrazovanyNazev VALUES
+        // identify each criterion; the value inputs sharing the prefix carry it.
+        const conditions = new Map<
+          string,
+          { technicky?: string; zobrazovany?: string; inputs: string[] }
+        >();
+        $("form")
+          .first()
+          .find("input, select, textarea")
+          .each((_, el) => {
+            const $el = $(el);
+            const name = $el.attr("name");
+            if (!name || !name.includes("vyhledavaciPodminka")) return;
+            const prefixMatch = /^(.*vyhledavaciPodminka(?:Hodnota)?\[\d+\])\./.exec(name);
+            if (!prefixMatch) return;
+            const prefix = prefixMatch[1];
+            const entry = conditions.get(prefix) ?? { inputs: [] };
+            const value = $el.attr("value") ?? "";
+            if (name.endsWith(".TechnickyNazev") && value) entry.technicky = value.slice(0, 60);
+            else if (name.endsWith(".ZobrazovanyNazev") && value) entry.zobrazovany = value.slice(0, 80);
+            else if (/\.Hodnota[A-Za-z]*$/.test(name)) entry.inputs.push(name.slice(name.lastIndexOf(".") + 1));
+            conditions.set(prefix, entry);
+          });
+        return {
+          conditions: [...conditions.entries()].map(([prefix, entry]) => ({ prefix, ...entry })).slice(0, 80),
+        };
+      } catch (error) {
+        return { error: error instanceof Error ? error.message : String(error) };
+      }
+    })(),
+  ]);
+  return { justice, nss };
 }
 
 /** fetch_url is restricted to the upstream hosts this server scrapes. */
@@ -411,7 +420,9 @@ const inputSchema = z.object({
   sources: z
     .array(z.string())
     .optional()
-    .describe("Limit to these canary ids (e.g. ['esbirka-api','ns']). Default: all."),
+    .describe(
+      "Limit to these canary ids: esbirka-api, esbirka-cache, ns, nalus, nss, justice, curia, cellar-sparql, cellar, primo (zotero where configured). Default: all.",
+    ),
   include_raw: z
     .boolean()
     .default(false)
@@ -463,9 +474,27 @@ export function registerProbe(server: McpServer): void {
         }
       }
 
-      const selected = canaries().filter((c) => !sources?.length || sources.includes(c.id));
-      const probes = await Promise.all(selected.map((c) => runCanary(c, include_raw)));
-      const discoveries = discoverMode ? await discover() : undefined;
+      // `sources` is a free string array: a plausible id that is no canary
+      // ("eurlex", "cellar_sparql", "zotero" where unconfigured) used to select
+      // nothing and answer "0/0 sources healthy" — a clean bill of health for
+      // a probe that made no request. Name the unknown ids and the valid ones
+      // (from canaries(): zotero exists only where configured).
+      const all = canaries();
+      const ids = all.map((c) => c.id);
+      const unknown = (sources ?? []).filter((id) => !ids.includes(id));
+      const unknownLine = unknown.length
+        ? `Unknown source id(s): ${unknown.join(", ")} — valid ids: ${ids.join(", ")}`
+        : "";
+      const selected = all.filter((c) => !sources?.length || sources.includes(c.id));
+      if (!selected.length && !discoverMode) {
+        return { isError: true as const, content: [{ type: "text" as const, text: unknownLine }] };
+      }
+      // Canaries and discover side by side: independent requests, and in
+      // sequence discover waited up to 12 s for the slowest canary first.
+      const [probes, discoveries] = await Promise.all([
+        Promise.all(selected.map((c) => runCanary(c, include_raw))),
+        discoverMode ? discover() : Promise.resolve(undefined),
+      ]);
 
       const lines = probes.map(
         (p) =>
@@ -507,6 +536,7 @@ export function registerProbe(server: McpServer): void {
             type: "text",
             text: [
               summary,
+              ...(unknownLine ? [unknownLine] : []),
               "",
               ...lines,
               ...(rawBlocks.length ? ["", ...rawBlocks] : []),

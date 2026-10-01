@@ -38,13 +38,20 @@ export async function buildPreviews<T extends { id: string; caseNumber: string }
   terms: string[],
 ): Promise<Array<T & { matches: number; excerpt: string }> | undefined> {
   if (!targets.length) return undefined;
+  // The caller's terms are search expressions, not document text — a quoted
+  // phrase or a wildcard would match nothing verbatim.
+  const needles = excerptTerms(terms);
+  // Nothing to excerpt around (a case-number, date or filter-only search):
+  // fetching the texts only to print "the query terms do not occur" for
+  // every hit cost a document request each and told the reader nothing.
+  // The caller says so instead (noTermsNote); ns_search and us_search show
+  // their own query-less previews (výrok, právní věta).
+  if (!needles.length) return undefined;
   const settled = await Promise.all(
     targets.map(async (target) => {
       try {
         const text = await withDeadline(getText(target), PREVIEW_DEADLINE_MS);
-        // The caller's terms are search expressions, not document text —
-        // a quoted phrase or a wildcard would match nothing verbatim.
-        return { ...target, ...previewExcerpt(text, excerptTerms(terms)) };
+        return { ...target, ...previewExcerpt(text, needles) };
       } catch {
         return null;
       }
@@ -53,6 +60,13 @@ export async function buildPreviews<T extends { id: string; caseNumber: string }
   const previews: Array<T & { matches: number; excerpt: string }> = [];
   for (const preview of settled) if (preview) previews.push(preview);
   return previews.length ? previews : undefined;
+}
+
+/** The line a search answer carries when read_top was asked for but there
+ * were no query terms to excerpt around (buildPreviews fetched nothing). */
+export function noTermsNote(readTop: number, terms: string[], detailTool: string): string[] {
+  if (!readTop || excerptTerms(terms).length) return [];
+  return ["", `(read_top previews need query/queries — they are excerpts around the query terms; skipped. Read the hits via ${detailTool}.)`];
 }
 
 export function renderPreviews(

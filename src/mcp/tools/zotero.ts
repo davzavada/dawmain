@@ -5,6 +5,7 @@ import { fence, newNonce } from "@/src/files/dmd/render";
 import { errorCode } from "@/src/files/errors";
 import { allowToolCall } from "@/src/files/guards";
 import { canonicalCaseNumber, findIdentSpans } from "@/src/files/index/identifiers";
+import { callerFromCtx } from "@/src/mcp/caller";
 import { personalProCaller, type ProCaller } from "@/src/mcp/pro-caller";
 import { TtlCache } from "@/src/sources/shared/cache";
 import { SourceError, toToolError, type SourceErrorKind } from "@/src/sources/shared/errors";
@@ -31,12 +32,14 @@ import {
   tagColorsOf,
   scanCases,
   searchItems,
+  type CaseScan,
   type CaseScanEntry,
   type CiteTarget,
   type IoOptions,
   type TagsQuery,
   type ItemsQuery,
   type PdfUnavailable,
+  zoteroQuery,
 } from "@/src/zotero/client";
 import {
   CACHE_TTL_MS,
@@ -57,6 +60,7 @@ import {
   type ConnectionState,
   type Fulltext,
   type Library,
+  type Paging,
   type TagColor,
   type ZoteroCollection,
   type ZoteroItem,
@@ -225,7 +229,7 @@ const EVERYTHING_MODE = "everything mode: titles, creators, years, a note's firs
 
 /** How Zotero's q matches (dataserver Items::search, Utilities::parseSearchString, FullText::searchInLibrary). */
 const QUERY_RULES =
-  'How Zotero matches: the query is split at spaces ("double quotes" keep a phrase together) and every word must occur — as a substring, case- and diacritics-insensitive, so a stem („smlouv“) finds every form; a year matches only whole. Words matching two different creators do not combine. The full-text part of everything mode matches word beginnings.';
+  'How Zotero matches: the query is split at spaces and every word must occur — as a substring, case- and diacritics-insensitive, so a stem („smlouv“) finds every form; a year matches only whole. Words matching two different creators do not combine. Titles, creators and years take no phrase: quotes are left out there. The full-text part of everything mode matches word beginnings, and "double quotes" make it match the exact phrase (its words are then matched in titles on their own).';
 
 /** zotero_cite: characters of an export one answer carries. */
 const EXPORT_CHARS = DOC_PAGE_CHARS;
@@ -355,9 +359,21 @@ export async function zoteroGate(ctx: unknown): Promise<ZoteroGate> {
   if (!zoteroConfigured()) {
     return refuse("NOT_ENTITLED", ZOTERO_GATE_TEXT.unavailable, `${STOP}. (Where it is enabled, the user connects Zotero at ${connect}.)`);
   }
+  const who = callerFromCtx(ctx);
+  const access = personalProCaller(ctx, "zotero");
+  // Step 5 reads Clerk too (the same user's metadata). When the account's access is not cached (60 s,
+  // src/files/access.ts), getAccess is a Clerk round trip, and the connection read would only start after it: it
+  // starts alongside instead. A cached access settles within microtasks, before setImmediate fires — then
+  // nothing is read early, and a caller refused at steps 2–4 costs no Clerk read at all (at most one per access
+  // miss). The early result is only looked at in step 5, so the order and texts of the refusals stay the same.
+  let early: Promise<ConnectionState> | null = null;
+  if (who.kind === "user" && !(await settlesAtOnce(access))) {
+    early = loadConnection(who.userId);
+    early.catch(() => undefined);
+  }
   let caller: ProCaller;
   try {
-    caller = await personalProCaller(ctx, "zotero");
+    caller = await access;
   } catch (error) {
     return { ok: false, result: accessFailure(error, "access") };
   }
@@ -388,7 +404,7 @@ export async function zoteroGate(ctx: unknown): Promise<ZoteroGate> {
   }
   let state: ConnectionState;
   try {
-    state = await loadConnection(caller.userId);
+    state = await (early && who.kind === "user" && who.userId === caller.userId ? early : loadConnection(caller.userId));
   } catch (error) {
     return { ok: false, result: accessFailure(error, "connection") };
   }
@@ -434,15 +450,48 @@ async function zoteroFailure(error: unknown, g: ZoteroCaller, where: string): Pr
   );
 }
 
-/** Gate, then the body under the tool's time budget; every failure becomes a fixed text. */
+/** Whether a promise settles before the event loop's next turn (a cached value does; a network round trip does not). */
+function settlesAtOnce(promise: Promise<unknown>): Promise<boolean> {
+  return Promise.race([
+    promise.then(
+      () => true,
+      () => true,
+    ),
+    new Promise<boolean>((resolve) => setImmediate(() => resolve(false))),
+  ]);
+}
+
+/**
+ * Gate, then the body — both under the tool's time budget, which starts
+ * with the call: toolBudgetMs is the WHOLE call (the MCP route is killed at
+ * 60 s), and Clerk's requests have no timeout of their own. A gate still
+ * waiting for Clerk when the budget ends answers the fixed "could not be
+ * verified" text (a late gate only reads and takes a rate-limit token);
+ * the Zotero requests get what is left of it. When the call returns, what
+ * it started and no longer waits for (a scan left behind by a failed
+ * search) is cancelled with it. Every failure becomes a fixed text.
+ */
 async function runTool(ctx: unknown, where: string, body: (g: ZoteroCaller, io: IoOptions) => Promise<ToolResult>): Promise<ToolResult> {
-  const g = await zoteroGate(ctx);
-  if (!g.ok) return g.result;
-  const io: IoOptions = { signal: AbortSignal.timeout(LIMITS.toolBudgetMs) };
+  const budget = new AbortController();
+  const timer = setTimeout(() => budget.abort(new DOMException("The Zotero tool budget ran out", "TimeoutError")), LIMITS.toolBudgetMs);
+  let onExpiry = () => undefined as void;
+  const expired = new Promise<ZoteroGate>((resolve) => {
+    onExpiry = () => resolve({ ok: false, result: accessFailure(budget.signal.reason, "access-timeout") });
+    budget.signal.addEventListener("abort", onExpiry, { once: true });
+  });
   try {
-    return await body(g, io);
-  } catch (error) {
-    return zoteroFailure(error, g, where);
+    const g = await Promise.race([zoteroGate(ctx), expired]);
+    budget.signal.removeEventListener("abort", onExpiry);
+    if (!g.ok) return g.result;
+    try {
+      return await body(g, { signal: budget.signal });
+    } catch (error) {
+      return zoteroFailure(error, g, where);
+    }
+  } finally {
+    clearTimeout(timer);
+    budget.signal.removeEventListener("abort", onExpiry);
+    budget.abort(new DOMException("The Zotero tool call has ended", "AbortError"));
   }
 }
 
@@ -586,12 +635,24 @@ function noteText(item: ZoteroItem): string {
   return tidy(htmlToText(html.slice(0, NOTE_HTML_CHARS)));
 }
 
+/**
+ * The keys of each scanned entry, computed once per entry object: a cached
+ * scan hands back the same entry objects after every 304, and parsing up
+ * to 1 000 of them again cost 20–90 ms of CPU per docket search (measured).
+ * A rescan makes new objects; the memo goes with the scan cache.
+ */
+const scanEntryKeys = new WeakMap<CaseScanEntry, ReadonlySet<string>>();
+
 /** Identifier keys of a scanned case item: its docket number, extra and title. */
-function caseEntryKeys(entry: CaseScanEntry): Set<string> {
+function caseEntryKeys(entry: CaseScanEntry): ReadonlySet<string> {
+  const known = scanEntryKeys.get(entry);
+  if (known) return known;
   const text = [entry.docketNumber, entry.extra, entry.title].join("\n");
-  return new Set(
+  const keys = new Set(
     [...caseNumberKeys(entry.docketNumber), ...findIdentSpans(text).flatMap((span) => span.keys)].filter((k) => CASE_KEY_RE.test(k)),
   );
+  scanEntryKeys.set(entry, keys);
+  return keys;
 }
 
 /** Canonical displays of the spisové značky among `keys` (rebuilt from the parsed parts — safe to echo). */
@@ -665,15 +726,131 @@ function tagsAnyParam(tags: string[]): string {
   return ordered.map((t, i) => (i === 0 ? literalTag(t) : orSafe(t))).join(" || ");
 }
 
+/** Variants zotero_search takes (query + queries) — and searches at most. */
+const MAX_VARIANTS = 3;
+
+/** A variant as searched: the model's own, or one with its spisová značka written out by Dawmain. */
+interface Variant {
+  text: string;
+  /** Dawmain wrote the spisová značka out in full ("23 Cdo 1411/21" → "23 Cdo 1411/2021"). */
+  written: boolean;
+}
+
+/** One list a search reads per library and page: a variant's q in one of Zotero's modes. */
+interface SearchSpec {
+  /** The q Zotero is sent (zoteroQuery of the variant for this mode). */
+  q: string;
+  qmode: "titleCreatorYear" | "everything";
+  /** The variant it stands for. */
+  variant: number;
+  /** A quoted variant's words matched in titles, beside its phrase search in everything mode. */
+  titles: boolean;
+}
+
+/**
+ * Every spisová značka of a variant written out as Zotero's records and the
+ * decisions' texts have it ("23 Cdo 1411/21" → "23 Cdo 1411/2021", rebuilt
+ * from its parsed parts). Zotero's q matches substrings of titles and word
+ * beginnings of the full text, and "1411/21" is neither of "1411/2021":
+ * live, "23 Cdo 1411/21" found nothing in either mode, the full form the
+ * decision's PDF. Pure.
+ */
+function docketsWrittenOut(text: string): string {
+  let out = text;
+  let end = Infinity;
+  const spans = findIdentSpans(text)
+    .filter((s) => s.keys.some((k) => k.startsWith("sz:")))
+    .sort((a, b) => b.start - a.start);
+  for (const span of spans) {
+    if (span.end > end) continue;
+    const c = canonicalCaseNumber(span.keys.find((k) => k.startsWith("sz:"))!);
+    if (!c) continue;
+    out = `${out.slice(0, span.start)}${c.display}${out.slice(span.end)}`;
+    end = span.start;
+  }
+  return out;
+}
+
+/**
+ * The variants searched: the model's, and for one whose spisová značka is
+ * written short or run together, that form written out — beside it while
+ * there is room (MAX_VARIANTS: a text may cite "1411/21" too), else in its
+ * place (NS, NSS and lower-court značky are written with the four-digit year
+ * in decisions and literature; an ÚS one comes out unchanged). Derived from
+ * the query alone, so the next page rebuilds the same lists. Pure.
+ */
+function searchedVariants(typed: string[]): Variant[] {
+  const out: Variant[] = typed.map((text) => ({ text, written: false }));
+  typed.forEach((text, i) => {
+    const full = docketsWrittenOut(text);
+    if (full === text || out.some((v) => v.text.toLowerCase() === full.toLowerCase())) return;
+    if (out.length < MAX_VARIANTS) out.push({ text: full, written: true });
+    else out[i] = { text: full, written: true };
+  });
+  return out;
+}
+
+/**
+ * The lists one page of a search reads per library. Title mode: each
+ * variant's words — Zotero's title part takes no quotes (zoteroQuery drops
+ * them), so '"a b"' and 'a b' are one list. Everything mode: each variant as
+ * typed — ASCII quotes make the full-text part match the phrase — and, for a
+ * quoted one, its words in title mode as a list of its own: with the quotes
+ * Zotero's title part matches nothing (live: the book titled exactly
+ * „Obchodní smlouvy“ was not among the 8 phrase hits), unless an unquoted
+ * variant of the same words covers the titles already. Pure.
+ */
+function planLists(variants: Variant[], mode: SearchMode): SearchSpec[] {
+  const specs: SearchSpec[] = [];
+  const seen = new Set<string>();
+  const add = (q: string, qmode: SearchSpec["qmode"], variant: number, titles: boolean) => {
+    const id = `${qmode}|${q.toLowerCase()}`;
+    if (!q || seen.has(id)) return;
+    seen.add(id);
+    specs.push({ q, qmode, variant, titles });
+  };
+  if (mode === "title") {
+    variants.forEach((v, i) => add(zoteroQuery(v.text, "titleCreatorYear"), "titleCreatorYear", i, false));
+    return specs;
+  }
+  variants.forEach((v, i) => add(zoteroQuery(v.text, "everything"), "everything", i, false));
+  variants.forEach((v, i) => {
+    const words = zoteroQuery(v.text, "titleCreatorYear");
+    if (zoteroQuery(v.text, "everything") !== words && !seen.has(`everything|${words.toLowerCase()}`)) add(words, "titleCreatorYear", i, true);
+  });
+  return specs;
+}
+
+/**
+ * The zotero_get_text find term for a hit of the list with `q`: its longest
+ * word, quotes and edge punctuation off. findExcerpts looks for ONE
+ * contiguous string, while Zotero matched every word on its own (in
+ * everything mode as a word beginning anywhere in the text): the whole
+ * variant — or a quoted phrase the text breaks across a line — answered
+ * "no match" live, in a text Zotero had just matched. Each word of the list
+ * that returned the hit occurs in it; the longest tells most ("1411/2021"
+ * of a spisová značka). Pure.
+ */
+function findTerm(q: string): string | null {
+  let best = "";
+  for (const part of q.split(/\s+/)) {
+    const word = part.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+    if (word.length > best.length) best = word;
+  }
+  return best.length >= 2 ? best : null;
+}
+
 interface LibraryHits {
   ref: LibRef;
-  /** At least one variant answered. */
+  /** At least one list answered. */
   ok: boolean;
-  /** The variants' pages merged round-robin (first occurrence wins). */
+  /** The lists' pages merged round-robin (first occurrence wins). */
   items: ZoteroItem[];
-  /** Total-Results per variant, in variant order (null: failed or unknown). */
+  /** Total-Results per list, in list order (null: failed or unknown). */
   totals: Array<number | null>;
-  /** Some variant has items past this page. */
+  /** The list each item came from first (its q gives the item's zotero_get_text find term). */
+  from: Map<string, number>;
+  /** Some list has items past this page. */
   more: boolean;
   failures: string[];
   /** Zotero-Full-Text-Reindexing: the library's full-text index is being rebuilt. */
@@ -682,50 +859,75 @@ interface LibraryHits {
   libraryVersion: number | null;
 }
 
-/** One page of every (library × variant) search, in parallel; a rejected key fails the whole call. */
-async function searchLibraries(
-  g: ZoteroCaller,
-  libs: LibRef[],
-  variants: string[],
-  base: Omit<ItemsQuery, "q" | "qmode">,
-  mode: SearchMode,
-  io: IoOptions,
-): Promise<LibraryHits[]> {
-  const keyed: Array<string | undefined> = variants.length ? variants : [undefined];
-  const tasks = libs.flatMap((ref) => keyed.map((variant) => ({ ref, variant })));
-  const settled = await Promise.allSettled(
-    tasks.map((t) =>
-      searchItems(g.conn.creds, t.ref.lib, { ...base, q: t.variant, qmode: mode === "everything" ? "everything" : "titleCreatorYear" }, io),
-    ),
+type PageSettled = PromiseSettledResult<{ items: ZoteroItem[]; paging: Paging }>;
+/** A list's page already answered (the title round's, reused by the everything round), or undefined. */
+type KnownPage = (ref: LibRef, spec: SearchSpec) => PageSettled | undefined;
+
+/** One page of every list of one library, in parallel, each settled on its own (no q: one list of the whole library). */
+function searchLibrary(g: ZoteroCaller, ref: LibRef, lists: Array<SearchSpec | null>, base: Omit<ItemsQuery, "q" | "qmode">, io: IoOptions, known?: KnownPage): Promise<PageSettled[]> {
+  return Promise.allSettled(
+    lists.map((spec) => {
+      const page = spec ? known?.(ref, spec) : undefined;
+      if (page) return page.status === "fulfilled" ? Promise.resolve(page.value) : Promise.reject(page.reason);
+      return searchItems(g.conn.creds, ref.lib, { ...base, q: spec?.q, qmode: spec?.qmode }, io);
+    }),
   );
-  for (const s of settled) if (s.status === "rejected" && s.reason instanceof ZoteroKeyInvalidError) throw s.reason;
-  if (settled.every((s) => s.status === "rejected")) throw (settled[0] as PromiseRejectedResult).reason;
-  return libs.map((ref) => {
-    const lists: ZoteroItem[][] = [];
-    const totals: Array<number | null> = [];
-    const failures: string[] = [];
-    let more = false;
-    let ok = false;
-    let reindexing = false;
-    let libraryVersion: number | null = null;
-    tasks.forEach((t, i) => {
-      if (t.ref !== ref) return;
-      const s = settled[i];
-      if (s.status === "fulfilled") {
-        ok = true;
-        if (s.value.paging.fulltextReindexing) reindexing = true;
-        libraryVersion = s.value.paging.libraryVersion ?? libraryVersion;
-        lists.push(s.value.items);
-        totals.push(s.value.paging.total);
-        const seen = (base.start ?? 0) + s.value.items.length;
-        if (s.value.paging.nextStart !== null || (s.value.paging.total !== null && s.value.paging.total > seen)) more = true;
-      } else {
-        totals.push(null);
-        failures.push(`${t.variant !== undefined ? `variant "${sanitizeLine(t.variant, 60)}": ` : ""}${describeError(s.reason)}`);
-      }
-    });
-    return { ref, ok, items: interleave(lists, (item) => item.key), totals, more, failures, reindexing, libraryVersion };
+}
+
+function libraryHits(ref: LibRef, lists: Array<SearchSpec | null>, settled: PageSettled[], start: number): LibraryHits {
+  const pages: ZoteroItem[][] = [];
+  const totals: Array<number | null> = [];
+  const from = new Map<string, number>();
+  const failures: string[] = [];
+  let more = false;
+  let ok = false;
+  let reindexing = false;
+  let libraryVersion: number | null = null;
+  settled.forEach((s, i) => {
+    if (s.status === "fulfilled") {
+      ok = true;
+      if (s.value.paging.fulltextReindexing) reindexing = true;
+      libraryVersion = s.value.paging.libraryVersion ?? libraryVersion;
+      pages.push(s.value.items);
+      for (const item of s.value.items) if (!from.has(item.key)) from.set(item.key, i);
+      totals.push(s.value.paging.total);
+      const seen = start + s.value.items.length;
+      if (s.value.paging.nextStart !== null || (s.value.paging.total !== null && s.value.paging.total > seen)) more = true;
+    } else {
+      totals.push(null);
+      const spec = lists[i];
+      failures.push(`${spec ? `variant "${sanitizeLine(spec.q, 60)}": ` : ""}${describeError(s.reason)}`);
+    }
   });
+  return { ref, ok, items: interleave(pages, (item) => item.key), totals, from, more, failures, reindexing, libraryVersion };
+}
+
+/**
+ * One page of every list in every library; a rejected key fails the whole
+ * call, and so does a round where every request failed. The libraries
+ * known `now` start at once, the `later` ones (the groups, while their
+ * listing is still on its way) as soon as they are known: the personal
+ * library does not wait for the group listing.
+ */
+async function searchRound(
+  g: ZoteroCaller,
+  now: LibRef[],
+  later: Promise<LibRef[]>,
+  specs: SearchSpec[],
+  base: Omit<ItemsQuery, "q" | "qmode">,
+  io: IoOptions,
+  known?: KnownPage,
+): Promise<{ libs: LibRef[]; results: LibraryHits[]; settled: PageSettled[][] }> {
+  const lists: Array<SearchSpec | null> = specs.length ? specs : [null];
+  const runs = now.map((ref) => searchLibrary(g, ref, lists, base, io, known));
+  const rest = await later;
+  runs.push(...rest.map((ref) => searchLibrary(g, ref, lists, base, io, known)));
+  const settled = await Promise.all(runs);
+  const all = settled.flat();
+  for (const s of all) if (s.status === "rejected" && s.reason instanceof ZoteroKeyInvalidError) throw s.reason;
+  if (all.every((s) => s.status === "rejected")) throw (all[0] as PromiseRejectedResult).reason;
+  const libs = [...now, ...rest];
+  return { libs, results: libs.map((ref, i) => libraryHits(ref, lists, settled[i], base.start ?? 0)), settled };
 }
 
 interface Entry {
@@ -743,15 +945,18 @@ interface Entry {
  */
 async function groupHits(g: ZoteroCaller, ref: LibRef, items: ZoteroItem[], io: IoOptions, includeTrashed = false): Promise<Entry[]> {
   const known = new Map(items.map((item) => [item.key, item]));
+  // A parent asked for and not returned (trashed without includeTrashed, dangling, out of reach) is not asked again.
+  const asked = new Set<string>();
   for (let hop = 0; hop < 2; hop++) {
     const missing = [
       ...new Set(
         [...known.values()]
-          .filter((item) => CHILD_TYPES.has(item.itemType) && item.parentItem && !known.has(item.parentItem))
+          .filter((item) => CHILD_TYPES.has(item.itemType) && item.parentItem && !known.has(item.parentItem) && !asked.has(item.parentItem))
           .map((item) => item.parentItem!),
       ),
     ];
     if (!missing.length) break;
+    for (const key of missing) asked.add(key);
     // In the trash (or with it), a parent can be trashed too: itemKey finds it only with includeTrashed.
     const parents = await soft(getItemsByKeys(g.conn.creds, ref.lib, missing, io, includeTrashed ? { includeTrashed: true } : {}));
     if (!parents.ok) break;
@@ -806,27 +1011,83 @@ interface DocketScan {
  * pages each, LIMITS.scanPagesTotal in all), matched against the query's
  * case-number keys by docketNumber, extra and title — Zotero's q never
  * searches docketNumber, and "25 Cdo 1234/19" must find "25 Cdo 1234/2019".
+ *
+ * The page budget is handed out as if the libraries were scanned one after
+ * another: each gets min(pages per library, what the ones before it left).
+ * But a library starts as soon as its share is certain, not when the scans
+ * before it have finished: when the pages they read are known (their first
+ * answer fixes that — scanCases' onPages), or when even their full shares
+ * leave it a whole one (always the first two). Cold, the personal library
+ * and a group are scanned side by side; warm, their 304s go out together.
+ * A scan that failed after its first answer keeps its pages counted (they
+ * were requested); one that failed before reads none. The `later`
+ * libraries (the groups, still being listed) join when they are known.
  */
-async function docketScan(g: ZoteroCaller, libs: LibRef[], keys: string[], io: IoOptions): Promise<DocketScan> {
+async function docketScan(g: ZoteroCaller, now: LibRef[], later: Promise<LibRef[]>, keys: string[], io: IoOptions): Promise<DocketScan> {
   const wanted = new Set(keys);
-  const out: DocketScan = { matches: [], coverage: [], failures: [] };
-  let remaining = LIMITS.scanPagesTotal;
-  for (const ref of libs) {
-    if (remaining <= 0) {
-      out.coverage.push({ ref, skipped: true });
+  const libs = [...now];
+  let pending: Promise<LibRef[]> | null = later;
+  const shares: number[] = [];
+  /** Pages each started library reads (null: not known yet). */
+  const spent: Array<number | null> = [];
+  const runs: Array<ReturnType<typeof soft<CaseScan>> | null> = [];
+  let wake: () => void = () => undefined;
+  for (let i = 0; ; ) {
+    if (i >= libs.length) {
+      if (!pending) break;
+      libs.push(...(await pending));
+      pending = null;
       continue;
     }
-    const scan = await soft(scanCases(g.conn.creds, ref.lib, { maxPages: Math.min(LIMITS.scanPagesPerLibrary, remaining) }, io));
+    const before = spent.slice(0, i);
+    const left = LIMITS.scanPagesTotal - before.reduce<number>((s, pages, j) => s + (pages ?? shares[j]), 0);
+    if (left < LIMITS.scanPagesPerLibrary && before.some((pages) => pages === null)) {
+      await new Promise<void>((resolve) => (wake = resolve));
+      continue;
+    }
+    const share = Math.max(0, Math.min(LIMITS.scanPagesPerLibrary, left));
+    shares[i] = share;
+    if (!share) {
+      spent[i] = 0;
+      runs[i] = null;
+      i++;
+      continue;
+    }
+    spent[i] = null;
+    const at = i;
+    const learn = (pages: number) => {
+      if (spent[at] === null) spent[at] = pages;
+      wake();
+    };
+    const run = soft(scanCases(g.conn.creds, libs[at].lib, { maxPages: share, onPages: (pages) => learn(Math.max(1, pages)) }, io));
+    run.then(
+      (scan) => learn(scan.ok ? Math.max(1, scan.value.scannedPages) : 0),
+      () => learn(0),
+    );
+    runs[i] = run;
+    i++;
+  }
+  const scans = await Promise.all(runs.map((run) => run ?? Promise.resolve(null)));
+  const out: DocketScan = { matches: [], coverage: [], failures: [] };
+  libs.forEach((ref, i) => {
+    const scan = scans[i];
+    if (!scan) {
+      out.coverage.push({ ref, skipped: true });
+      return;
+    }
     if (!scan.ok) {
       out.failures.push(`${ref.id}: ${scan.error}`);
-      continue;
+      return;
     }
-    remaining -= Math.max(1, scan.value.scannedPages);
     out.coverage.push({ ref, scanned: scan.value.items.length, total: scan.value.total });
     for (const entry of scan.value.items) {
-      if ([...caseEntryKeys(entry)].some((k) => wanted.has(k))) out.matches.push({ ref, entry });
+      for (const key of caseEntryKeys(entry)) {
+        if (!wanted.has(key)) continue;
+        out.matches.push({ ref, entry });
+        break;
+      }
     }
-  }
+  });
   return out;
 }
 
@@ -835,8 +1096,20 @@ interface Block {
   tools: string[];
 }
 
+/** Double quotes of any kind in the model's query. */
+const ANY_QUOTE_RE = /["„“”«»]/;
+
 async function zoteroSearch(g: ZoteroCaller, args: SearchArgs, io: IoOptions): Promise<ToolResult> {
-  const variants = uniqueQueries(args.query, args.queries);
+  const variants = uniqueQueries(args.query, args.queries, MAX_VARIANTS);
+  const wordless = variants.find((v) => !/[\p{L}\p{N}]/u.test(v));
+  if (wordless !== undefined) {
+    return errorResult(
+      "INPUT_INVALID",
+      `The query ${JSON.stringify(sanitizeLine(wordless, 60))} has no word to search for.`,
+      "Pass the words or the spisová značka to find; to list the library by sort, leave query out.",
+    );
+  }
+  const searched = searchedVariants(variants);
   const caseKeys = [...new Set(variants.flatMap((v) => caseNumberKeys(v)))];
   const clean = (list: string[] | undefined) => [...new Set((list ?? []).map((t) => t.trim()).filter(Boolean))];
   const tags = clean(args.tags);
@@ -871,23 +1144,32 @@ async function zoteroSearch(g: ZoteroCaller, args: SearchArgs, io: IoOptions): P
   ];
 
   // Which libraries: the one named, the collection's (personal unless named), My Publications (personal), or every
-  // readable one up to the cap.
-  let libs: LibRef[];
-  let omitted: LibRef[] = [];
-  let groupsFailed: string | null = null;
-  if (args.library || args.collection || scope === "publications") {
-    libs = [oneLibrary(g, args.library)];
-  } else {
-    const readable = await readableLibraries(g, io);
-    libs = readable.all.slice(0, LIMITS.maxLibrariesPerSearch);
-    omitted = readable.all.slice(LIMITS.maxLibrariesPerSearch);
-    groupsFailed = readable.groupsFailed;
-  }
+  // readable one up to the cap. The group listing is asked for FIRST — on a cold cache it takes one of the user's
+  // slots ahead of the personal library's requests —, and the personal library's search and scan start at once
+  // instead of after it; the groups' follow when it is in.
+  const named = !!(args.library || args.collection || scope === "publications");
+  const first: LibRef[] = [named ? oneLibrary(g, args.library) : personalRef(g)];
+  const readable = named ? null : readableLibraries(g, io);
+  const groups: Promise<LibRef[]> = readable ? readable.then((r) => r.all.slice(1, LIMITS.maxLibrariesPerSearch)) : Promise.resolve([]);
+  groups.catch(() => undefined);
 
-  // Each variant takes an equal share of `limit` per library and page, so page N is the same slice of every list.
-  const perVariant = Math.max(1, Math.ceil(args.limit / Math.max(1, variants.length)));
-  const start = (args.page - 1) * perVariant;
-  const base: Omit<ItemsQuery, "q" | "qmode"> = {
+  // The scan belongs to page 1, where its matches are listed first (a later page would scan again and repeat
+  // them), only where a case item can match, and only over the live library (it reads /items, not the trash or
+  // My Publications).
+  const scanWanted =
+    caseKeys.length > 0 &&
+    (scope === "all" || scope === "top") &&
+    args.since === undefined &&
+    (!itemTypes.length || itemTypes.includes("case") || itemTypes.every((t) => t.startsWith("-") && t !== "-case"));
+  const scanning = scanWanted && args.page === 1 ? docketScan(g, first, groups, caseKeys, io) : Promise.resolve(null);
+  // A failed search must not leave the scan's rejection unobserved; it is awaited below otherwise.
+  scanning.catch(() => undefined);
+
+  // Everything mode adds only the attachments' full text, and those matches are attachment items: Zotero applies
+  // item_type to the matched items themselves (/items/top too — live, item_type ["case"] hid the decisions' own
+  // PDFs), so a type list without attachments leaves everything mode nothing to add.
+  const fulltextVisible = !itemTypes.length || (itemTypes[0].startsWith("-") ? !itemTypes.includes("-attachment") : itemTypes.includes("attachment"));
+  const base = (limit: number, start: number): Omit<ItemsQuery, "q" | "qmode"> => ({
     itemTypes: itemTypes.length ? itemTypes : undefined,
     tags: tagParams.length ? tagParams : undefined,
     collection: args.collection,
@@ -898,33 +1180,52 @@ async function zoteroSearch(g: ZoteroCaller, args: SearchArgs, io: IoOptions): P
     sort: args.sort,
     direction: args.direction,
     since: args.since,
-    limit: perVariant,
+    limit,
     start,
-  };
-
-  // The scan belongs to page 1, where its matches are listed first (a later page would scan again and repeat
-  // them), only where a case item can match, and only over the live library (it reads /items, not the trash or
-  // My Publications).
-  const scanWanted =
-    caseKeys.length > 0 &&
-    (scope === "all" || scope === "top") &&
-    args.since === undefined &&
-    (!itemTypes.length || itemTypes.includes("case") || itemTypes.every((t) => t.startsWith("-") && t !== "-case"));
-  const scanning = scanWanted && args.page === 1 ? docketScan(g, libs, caseKeys, io) : Promise.resolve(null);
-  // A failed search must not leave the scan's rejection unobserved; it is awaited below otherwise.
-  scanning.catch(() => undefined);
+  });
+  // Each list takes an equal share of `limit` per library and page, so page N is the same slice of every list.
+  const share = (specs: SearchSpec[]) => Math.max(1, Math.ceil(args.limit / Math.max(1, specs.length)));
   let mode: SearchMode = args.mode;
-  let results = await searchLibraries(g, libs, variants, base, mode, io);
+  let specs = planLists(searched, mode);
+  let perList = share(specs);
+  let start = (args.page - 1) * perList;
+  let round = await searchRound(g, first, groups, specs, base(perList, start), io);
+  const libs = round.libs;
+  let results = round.results;
   let widened = false;
-  if (mode === "title" && variants.length && args.page === 1 && results.every((r) => r.items.length === 0)) {
+  if (mode === "title" && specs.length && args.page === 1 && fulltextVisible && results.every((r) => r.items.length === 0)) {
+    // The title lists just answered empty: the everything round's title lists (a quoted variant's words) are those.
+    const titleSpecs = specs;
+    const titleSettled = round.settled;
+    const known: KnownPage = (ref, spec) => {
+      if (spec.qmode !== "titleCreatorYear") return undefined;
+      const k = titleSpecs.findIndex((s) => s.q.toLowerCase() === spec.q.toLowerCase());
+      const l = libs.indexOf(ref);
+      const page = k >= 0 && l >= 0 ? titleSettled[l][k] : undefined;
+      // Only an ANSWERED title list is reused. A failed one is asked again:
+      // replayed, its failure would stand for the widened search too, and
+      // the "nothing found" the widening concludes from would rest on a
+      // list that never answered.
+      return page?.status === "fulfilled" ? page : undefined;
+    };
     mode = "everything";
     widened = true;
-    results = await searchLibraries(g, libs, variants, base, mode, io);
+    specs = planLists(searched, mode);
+    perList = share(specs);
+    start = 0;
+    round = await searchRound(g, libs, Promise.resolve([]), specs, base(perList, start), io, known);
+    results = round.results;
   }
-  const scan = await scanning;
+  const listing = readable ? await readable : null;
+  const omitted = listing ? listing.all.slice(LIMITS.maxLibrariesPerSearch) : [];
+  const groupsFailed = listing?.groupsFailed ?? null;
 
   const withTrash = scope === "trash" || !!args.include_trashed;
-  const grouped = await Promise.all(results.map((r) => (r.items.length ? groupHits(g, r.ref, r.items, io, withTrash) : Promise.resolve([]))));
+  // Grouping does not need the scan: its parent reads overlap the scan's pages instead of following them.
+  const [scan, grouped] = await Promise.all([
+    scanning,
+    Promise.all(results.map((r) => (r.items.length ? groupHits(g, r.ref, r.items, io, withTrash) : Promise.resolve([])))),
+  ]);
   // A group's name comes with its items too (the named-library case skips listGroups).
   results.forEach((r) => {
     if (r.ref.name === null && r.ref.lib.type === "group") {
@@ -935,7 +1236,66 @@ async function zoteroSearch(g: ZoteroCaller, args: SearchArgs, io: IoOptions): P
 
   const caseMatches = scan?.matches ?? [];
   const caseKeysShown = new Set(caseMatches.map((m) => `${m.ref.id}:${m.entry.key}`));
+  // A search hit that is a decision the scan lists (its PDF matched, or its title) is shown once, in the scan's
+  // block — with what matched inside it.
+  const hitsByWork = new Map<string, { entry: Entry; r: LibraryHits }>();
+  results.forEach((r, i) => {
+    for (const entry of grouped[i]) hitsByWork.set(`${r.ref.id}:${entry.work.key}`, { entry, r });
+  });
   const modeLabel = mode === "title" ? TITLE_MODE : EVERYTHING_MODE;
+
+  // The query and filters as the next call repeats them (the model's own variants: the next page rebuilds the
+  // same lists from them).
+  const echoOf = (opts: { mode: SearchMode; itemTypes: boolean }) => [
+    variants.length > 1
+      ? `queries: ${JSON.stringify(variants.map((v) => sanitizeLine(v, 300)))}`
+      : variants[0]
+        ? `query: ${JSON.stringify(sanitizeLine(variants[0], 300))}`
+        : null,
+    opts.mode !== "title" ? `mode: "${opts.mode}"` : null,
+    scope !== "all" ? `scope: "${scope}"` : null,
+    args.include_trashed ? "include_trashed: true" : null,
+    args.library ? `library: "${libs[0].id}"` : null,
+    args.collection ? `collection: "${args.collection}"` : null,
+    tags.length ? `tags: ${JSON.stringify(tags.map((t) => sanitizeLine(t, 200)))}` : null,
+    tagsAny.length ? `tags_any: ${JSON.stringify(tagsAny.map((t) => sanitizeLine(t, 200)))}` : null,
+    excludeTags.length ? `exclude_tags: ${JSON.stringify(excludeTags.map((t) => sanitizeLine(t, 200)))}` : null,
+    opts.itemTypes && args.item_type?.length ? `item_type: ${JSON.stringify([...new Set(args.item_type)])}` : null,
+    opts.itemTypes && args.exclude_item_type?.length ? `exclude_item_type: ${JSON.stringify([...new Set(args.exclude_item_type)])}` : null,
+    args.sort !== "dateModified" ? `sort: "${args.sort}"` : null,
+    args.direction ? `direction: "${args.direction}"` : null,
+    args.since !== undefined ? `since: ${args.since}` : null,
+    args.limit !== 20 ? `limit: ${args.limit}` : null,
+  ];
+  const echo = echoOf({ mode, itemTypes: true });
+  const fulltextHidden =
+    !fulltextVisible && variants.length
+      ? `The attachments' full text was not searched: its matches are attachment items, which ${args.item_type?.length ? "item_type" : "exclude_item_type"} leaves out (Zotero filters the matched items themselves). ${toolCall("zotero_search", echoOf({ mode: "everything", itemTypes: false }))} looks into the PDFs — each hit shows its work's type.`
+      : null;
+
+  /** The "matched in" line and the text hints of a hit: a work, with what matched inside it. */
+  const extras = (entry: Entry, r: LibraryHits): Block => {
+    const data: string[] = [];
+    const tools: string[] = [];
+    if (entry.matched.length) {
+      const labels = entry.matched.slice(0, 5).map((c) => matchedLabel(c, mode));
+      const more = entry.matched.length > 5 ? ` (+${entry.matched.length - 5})` : "";
+      data.push(`   ${entry.direct ? "also matched in" : "matched in"}: ${labels.join("; ")}${more}`);
+    }
+    const hasText = (a: ZoteroItem) => a.itemType === "attachment" && field(a, "linkMode") !== "linked_url";
+    // A file saved without a parent is a hit of its own: it gets the text call a matching file of a work gets.
+    const texts = [...(hasText(entry.work) ? [entry.work] : []), ...entry.matched.filter((c) => hasText(c) && c.key !== entry.work.key).slice(0, 2)];
+    for (const att of texts) {
+      const list = r.from.get(att.key);
+      const term = list !== undefined && specs[list] ? findTerm(specs[list].q) : null;
+      tools.push(`   text of the matching attachment → ${toolCall("zotero_get_text", [...itemArgs(att.key, r.ref), term ? `find: ${JSON.stringify(sanitizeLine(term, 120))}` : null])}`);
+    }
+    // A trashed note or annotation is not among its work's children in zotero_get_item: name its own call.
+    for (const child of entry.matched.filter((c) => c.deleted && c.itemType !== "attachment").slice(0, 3)) {
+      tools.push(`   the trashed ${child.itemType === "note" ? "note" : "annotation"} itself → ${toolCall("zotero_get_item", itemArgs(child.key, r.ref))}`);
+    }
+    return { data, tools };
+  };
 
   // Hits → blocks (fenced data lines + the hint lines after the fence), within the answer budget.
   const data: string[] = [];
@@ -971,10 +1331,13 @@ async function zoteroSearch(g: ZoteroCaller, args: SearchArgs, io: IoOptions): P
     const e = m.entry;
     const bits = [`[case] „${sanitizeLine(e.title || "(bez názvu)", 200)}“`];
     for (const v of [e.court, e.docketNumber, e.date ?? ""]) if (sanitizeLine(v, 60)) bits.push(sanitizeLine(v, 60));
+    const hit = hitsByWork.get(`${m.ref.id}:${e.key}`);
+    const inside = hit ? extras(hit.entry, hit.r) : { data: [], tools: [] };
     const block: Block = {
-      data: [`${n}. ${bits.join(" · ")}${multi ? ` · ${libraryLabel(m.ref)}` : ""}`],
+      data: [`${n}. ${bits.join(" · ")}${multi ? ` · ${libraryLabel(m.ref)}` : ""}`, ...inside.data],
       tools: [
         `${n}. key ${safeKey(e.key)} · library: "${m.ref.id}" → ${toolCall("zotero_get_item", itemArgs(e.key, m.ref))}`,
+        ...inside.tools,
         ...officialTextLines([e.docketNumber, e.title].join("\n")).map((line) => `   ${line}`),
       ],
     };
@@ -986,22 +1349,8 @@ async function zoteroSearch(g: ZoteroCaller, args: SearchArgs, io: IoOptions): P
       if (cut) return;
       if (caseKeysShown.has(`${r.ref.id}:${entry.work.key}`)) continue;
       n++;
-      const lines = [`${n}. ${workLine(entry.work)}`];
-      if (entry.matched.length) {
-        const labels = entry.matched.slice(0, 5).map((c) => matchedLabel(c, mode));
-        const more = entry.matched.length > 5 ? ` (+${entry.matched.length - 5})` : "";
-        lines.push(`   ${entry.direct ? "also matched in" : "matched in"}: ${labels.join("; ")}${more}`);
-      }
-      const hints = [`${n}. key ${safeKey(entry.work.key)} · library: "${r.ref.id}" → ${toolCall("zotero_get_item", itemArgs(entry.work.key, r.ref))}`];
-      const texts = entry.matched.filter((c) => c.itemType === "attachment" && c.key !== entry.work.key).slice(0, 2);
-      for (const att of texts) {
-        const find = variants[0] ? `find: ${JSON.stringify(sanitizeLine(variants[0], 120))}` : null;
-        hints.push(`   text of the matching attachment → ${toolCall("zotero_get_text", [...itemArgs(att.key, r.ref), find])}`);
-      }
-      // A trashed note or annotation is not among its work's children in zotero_get_item: name its own call.
-      for (const child of entry.matched.filter((c) => c.deleted && c.itemType !== "attachment").slice(0, 3)) {
-        hints.push(`   the trashed ${child.itemType === "note" ? "note" : "annotation"} itself → ${toolCall("zotero_get_item", itemArgs(child.key, r.ref))}`);
-      }
+      const inside = extras(entry, r);
+      const hints = [`${n}. key ${safeKey(entry.work.key)} · library: "${r.ref.id}" → ${toolCall("zotero_get_item", itemArgs(entry.work.key, r.ref))}`, ...inside.tools];
       if (entry.work.itemType === "case") {
         hints.push(...officialTextLines([field(entry.work, "docketNumber"), entry.work.title].join("\n")).map((line) => `   ${line}`));
       }
@@ -1011,7 +1360,7 @@ async function zoteroSearch(g: ZoteroCaller, args: SearchArgs, io: IoOptions): P
         : caseMatches.length
           ? "— Další výsledky hledání —"
           : null;
-      if (!push({ data: lines, tools: hints }, heading ? sectionFor(heading) : null)) n--;
+      if (!push({ data: [`${n}. ${workLine(entry.work)}`, ...inside.data], tools: hints }, heading ? sectionFor(heading) : null)) n--;
     }
   });
 
@@ -1049,14 +1398,32 @@ async function zoteroSearch(g: ZoteroCaller, args: SearchArgs, io: IoOptions): P
     : scanWanted
       ? `Spisová značka ${caseDisplays(caseKeys).join(", ") || "in the query"}: the docket-number matches are listed on page 1 only.`
       : null;
+  const written = searched.filter((v) => v.written);
+  const writtenNote = written.length ? ` (the spisová značka also searched written out: ${written.map((v) => variantLabel(v.text)).join(", ")})` : "";
+  const lists = Math.max(1, specs.length);
 
   const noHits = n === 0 && !cut;
   if (noHits) {
+    // Past the last page: the query has hits, the page asked for is beyond them.
+    const most = Math.max(0, ...results.flatMap((r) => r.totals.map((t) => t ?? 0)));
+    if (args.page > 1 && most > 0) {
+      const last = Math.max(1, Math.ceil(most / perList));
+      const counts = results.flatMap((r) => {
+        const total = Math.max(0, ...r.totals.map((t) => t ?? 0));
+        return total ? [`${r.ref.id} ${formatCount(total)}`] : [];
+      });
+      return errorResult(
+        "INPUT_INVALID",
+        `page ${args.page} is past the end of this search (matching items per library${lists > 1 ? ", the most in one list" : ""}: ${counts.join(" · ")}; ${perList} per ${lists > 1 ? "list and " : ""}page) — the last page with hits is ${last}.`,
+        `${toolCall("zotero_search", [...echo, `page: ${last}`])} shows it; earlier pages hold the rest.`,
+      );
+    }
     const text = [
       ...(widened ? [`No match in ${TITLE_MODE}; the search was repeated in ${EVERYTHING_MODE} — still nothing.`] : []),
+      ...(fulltextHidden ? [fulltextHidden] : []),
       ...(scanLine ? [scanLine] : []),
       ...failures,
-      `No match in Zotero${variants.length ? ` for ${variants.map(variantLabel).join(", ")}` : ""} (${modeLabel}${filters.length ? `; ${filters.join(" · ")}` : ""}).`,
+      `No match in Zotero${variants.length ? ` for ${variants.map(variantLabel).join(", ")}${writtenNote}` : ""} (${modeLabel}${filters.length ? `; ${filters.join(" · ")}` : ""}).`,
       ...coverage,
       QUERY_RULES,
       "Drop a filter to widen it. This covers only the user's own Zotero library — the official sources are searched with the other tools.",
@@ -1064,46 +1431,43 @@ async function zoteroSearch(g: ZoteroCaller, args: SearchArgs, io: IoOptions): P
     return textResult(text);
   }
 
+  const typed = variants.join(" ");
+  const quoteNote = !ANY_QUOTE_RE.test(typed)
+    ? null
+    : mode === "title"
+      ? 'Titles, creators and years are matched word by word: the quotes were left out (with them Zotero finds nothing there). "Double quotes" make a phrase only in everything mode, in the attachments\' text.'
+      : typed.includes('"')
+        ? 'A "quoted phrase" was matched as such in the attachments\' text, and its words one by one in titles, creators and years (Zotero takes no quotes there).'
+        : 'Zotero reads no phrase from „…“: those quotes were left out (ASCII "double quotes" make one in the attachments\' text).';
   const totalItems = results.reduce((s, r) => s + Math.max(0, ...r.totals.map((t) => t ?? 0), r.items.length), 0);
   const libsWithHits = results.filter((r) => r.items.length > 0 || r.totals.some((t) => (t ?? 0) > 0)).length;
+  const decisions = (k: number) => (k === 1 ? "one decision" : `${k} decisions`);
+  const overlap = caseMatches.filter((m) => hitsByWork.has(`${m.ref.id}:${m.entry.key}`)).length;
+  const scanClause = !caseMatches.length
+    ? ""
+    : overlap
+      ? ` The docket-number scan found ${decisions(caseMatches.length)}, listed first; ${overlap === caseMatches.length ? (overlap === 1 ? "it is" : "all are") : `${overlap} of them ${overlap === 1 ? "is" : "are"}`} among these search hits too (shown once, with what matched).`
+      : ` Plus ${decisions(caseMatches.length)} found by the docket-number scan, listed first.`;
   const header = totalItems
-    ? `✓ Zotero: ${formatCount(totalItems)} matching ${totalItems === 1 ? "item" : "items"}${scope === "trash" ? " in the trash" : scope === "publications" ? " in My Publications" : scope === "top" ? " (top-level items)" : ""} in ${libsWithHits} of ${libs.length} searched ${libs.length === 1 ? "library" : "libraries"} (${modeLabel}); page ${args.page}, up to ${perVariant * Math.max(1, variants.length)} items per library — NOT ranked by relevance: Zotero lists them by ${args.sort}${args.direction ? ` ${args.direction}` : ""}.${caseMatches.length ? ` Plus ${caseMatches.length === 1 ? "one decision" : `${caseMatches.length} decisions`} found by the docket-number scan, listed first.` : ""}`
-    : `✓ Zotero: no item matches the query words (${modeLabel}); the docket-number scan found ${caseMatches.length === 1 ? "one decision" : `${caseMatches.length} decisions`}.`;
+    ? `✓ Zotero: ${formatCount(totalItems)} matching ${totalItems === 1 ? "item" : "items"}${scope === "trash" ? " in the trash" : scope === "publications" ? " in My Publications" : scope === "top" ? " (top-level items)" : ""} in ${libsWithHits} of ${libs.length} searched ${libs.length === 1 ? "library" : "libraries"} (${modeLabel}); page ${args.page}, up to ${perList * lists} items per library — NOT ranked by relevance: Zotero lists them by ${args.sort}${args.direction ? ` ${args.direction}` : ""}.${scanClause}`
+    : `✓ Zotero: no item matches the query words (${modeLabel}); the docket-number scan found ${decisions(caseMatches.length)}.`;
   // "first N of M" per library; a match inside a work (its PDF, a note) is an item of its own in Zotero's count.
   const perLibrary = results.map((r) => {
     if (!r.ok) return `${r.ref.id} failed`;
     const total = Math.max(0, ...r.totals.map((t) => t ?? 0));
     if (!r.items.length) return `${r.ref.id} ${total ? `nothing on this page (${formatCount(total)} in all)` : "0"}`;
-    return variants.length > 1
-      ? `${r.ref.id} ${r.items.length} on this page (items ${start + 1}–${start + perVariant} of each variant's list)`
+    return lists > 1
+      ? `${r.ref.id} ${r.items.length} on this page (items ${start + 1}–${start + perList} of each variant's list)`
       : `${r.ref.id} items ${start + 1}–${start + r.items.length} of ${formatCount(Math.max(total, start + r.items.length))}`;
   });
+  // A quoted q shows its own quotes; its list is the phrase in the text (Zotero's title part takes none).
+  const listLabel = (s: SearchSpec) =>
+    `${s.q.includes('"') ? `${sanitizeLine(s.q, 60)} (the phrase in the attachments' text)` : variantLabel(s.q)}${s.titles ? " in titles, creators and years" : ""}${searched[s.variant].written ? " (the spisová značka written out)" : ""}`;
   const variantLine =
-    variants.length > 1
-      ? `Variants: ${variants.map((v, k) => `${variantLabel(v)} ${formatCount(results.reduce((s, r) => s + (r.totals[k] ?? 0), 0))}`).join(" · ")} (merged round-robin, ${perVariant} per variant, library and page)`
+    specs.length > 1
+      ? `Variants: ${specs.map((s, k) => `${listLabel(s)} ${formatCount(results.reduce((sum, r) => sum + (r.totals[k] ?? 0), 0))}`).join(" · ")} (merged round-robin, ${perList} per variant, library and page)`
       : null;
   const more = results.some((r) => r.more);
-  const echo = [
-    variants.length > 1
-      ? `queries: ${JSON.stringify(variants.map((v) => sanitizeLine(v, 300)))}`
-      : variants[0]
-        ? `query: ${JSON.stringify(sanitizeLine(variants[0], 300))}`
-        : null,
-    mode !== "title" ? `mode: "${mode}"` : null,
-    scope !== "all" ? `scope: "${scope}"` : null,
-    args.include_trashed ? "include_trashed: true" : null,
-    args.library ? `library: "${libs[0].id}"` : null,
-    args.collection ? `collection: "${args.collection}"` : null,
-    tags.length ? `tags: ${JSON.stringify(tags.map((t) => sanitizeLine(t, 200)))}` : null,
-    tagsAny.length ? `tags_any: ${JSON.stringify(tagsAny.map((t) => sanitizeLine(t, 200)))}` : null,
-    excludeTags.length ? `exclude_tags: ${JSON.stringify(excludeTags.map((t) => sanitizeLine(t, 200)))}` : null,
-    args.item_type?.length ? `item_type: ${JSON.stringify([...new Set(args.item_type)])}` : null,
-    args.exclude_item_type?.length ? `exclude_item_type: ${JSON.stringify([...new Set(args.exclude_item_type)])}` : null,
-    args.sort !== "dateModified" ? `sort: "${args.sort}"` : null,
-    args.direction ? `direction: "${args.direction}"` : null,
-    args.since !== undefined ? `since: ${args.since}` : null,
-    args.limit !== 20 ? `limit: ${args.limit}` : null,
-  ];
   const versions = results.filter((r) => r.libraryVersion !== null).map((r) => `${r.ref.id} ${r.libraryVersion}`);
   const nonce = newNonce();
   const text = [
@@ -1112,6 +1476,8 @@ async function zoteroSearch(g: ZoteroCaller, args: SearchArgs, io: IoOptions): P
       ? [`No match in ${TITLE_MODE}, so the search was repeated automatically in ${EVERYTHING_MODE} (where Zotero desktop indexed it).`]
       : []),
     ...(variantLine ? [variantLine] : []),
+    ...(quoteNote ? [quoteNote] : []),
+    ...(fulltextHidden && mode === "everything" ? [`⚠ ${fulltextHidden}`] : []),
     ...(scanLine ? [scanLine] : []),
     ...failures,
     ...(filters.length ? [`Filters: ${filters.join(" · ")}`] : []),
@@ -2180,13 +2546,19 @@ async function zoteroList(g: ZoteroCaller, args: ListArgs, io: IoOptions): Promi
   const queryArg = args.query?.trim() ? `query: ${JSON.stringify(sanitizeLine(args.query, 100))}` : null;
 
   if (args.list === "libraries") {
-    const { all, groupsFailed } = await readableLibraries(g, io);
-    const named = all.filter((r) => !q || fold(r.lib.type === "user" ? `personal osobní ${g.conn.username}` : (r.name ?? "")).includes(q));
+    const personalLabel = fold(`personal osobní ${g.conn.username}`);
+    const readable = readableLibraries(g, io);
+    // The personal library comes first: on page 1 it is shown whenever its label matches, so its count goes out
+    // beside the group listing (asked first, so it keeps its slot) instead of after it.
+    const counting = args.page === 1 && (!q || personalLabel.includes(q)) ? soft(searchItems(g.conn.creds, personalRef(g).lib, { top: true, limit: 1, start: 0 }, io)) : null;
+    counting?.catch(() => undefined);
+    const { all, groupsFailed } = await readable;
+    const named = all.filter((r) => !q || (r.lib.type === "user" ? personalLabel : fold(r.name ?? "")).includes(q));
     const shown = named.slice(first, first + args.limit);
     const groups = g.conn.groups === "all" ? "all groups" : g.conn.groups === "none" ? "no groups" : `${g.conn.groups.length} chosen group(s)`;
     const personalShown = shown.some((r) => r.lib.type === "user");
     const [personalCount, groupDetails] = await Promise.all([
-      personalShown ? soft(searchItems(g.conn.creds, personalRef(g).lib, { top: true, limit: 1, start: 0 }, io)) : Promise.resolve(null),
+      personalShown ? (counting ?? soft(searchItems(g.conn.creds, personalRef(g).lib, { top: true, limit: 1, start: 0 }, io))) : Promise.resolve(null),
       shown.some((r) => r.lib.type === "group") ? soft(listGroups(g.conn.creds, g.conn.groups, io)) : Promise.resolve(null),
     ]);
     const detail = new Map(groupDetails?.ok ? groupDetails.value.map((gr) => [gr.id, gr]) : []);
@@ -2432,10 +2804,11 @@ export function registerZotero(server: McpServer): void {
     {
       title: "Zotero: search the user's own Zotero library",
       description:
-        "SEARCH the user's own Zotero library (cloud zotero.org, read-only; Pro, personal OAuth sign-in, and Zotero connected on the Dawmain website): the books, articles, commentaries, decisions (item type case) and statutes they collected, with their notes, PDF annotations and attachments. This is Zotero's own quick search: mode \"title\" (default) matches titles, creators, years and a note's first line; \"everything\" adds the attachments' full text (Zotero's index) — a title search without any hit is repeated in everything mode automatically. Zotero's search reads no other field and never the body of a note or the text of an annotation (item_type [\"note\"] or [\"annotation\"] lists them, zotero_get_item shows them whole). The query is split at spaces (\"double quotes\" keep a phrase) and EVERY word must occur as a substring, case- and diacritics-insensitive — a stem („smlouv“) finds every form; give up to 3 variants in queries. Zotero's search never looks into docket numbers, so a spisová značka in the query (\"25 Cdo 1234/19\") also scans the newest case items and lists matches first, saying how many were scanned. Default scope: the personal library and the group libraries (up to 6); library narrows it. scope: \"top\" = top-level items only, \"trash\" = the trash, \"publications\" = My Publications; include_trashed adds the trash. Filters: collection (key from zotero_list; its subcollections are not included), tags (all must match), tags_any (any), exclude_tags, item_type or exclude_item_type, since with library (only items changed after that library's version, which the answer names). With no query and no filter it lists the library by sort. Results are NOT ranked by relevance (sort, direction); a page holds up to limit items per library, and matches inside attachments and notes are grouped under their work (\"matched in: …\"). Each hit names its zotero_get_item call and, for a decision, the official-text search — cite the decision from there, never from Zotero. If the answer says Zotero is not connected or needs a personal sign-in, do not call zotero_* again.",
+        "SEARCH the user's own Zotero library (cloud zotero.org, read-only; Pro, personal OAuth sign-in, and Zotero connected on the Dawmain website): the books, articles, commentaries, decisions (item type case) and statutes they collected, with their notes, PDF annotations and attachments. This is Zotero's own quick search: mode \"title\" (default) matches titles, creators, years and a note's first line; \"everything\" adds the attachments' full text (Zotero's index) — a title search without any hit is repeated in everything mode automatically (not when item_type leaves out attachments: full-text matches are attachment items). Zotero's search reads no other field and never the body of a note or the text of an annotation (item_type [\"note\"] or [\"annotation\"] lists them, zotero_get_item shows them whole). The query is split at spaces and EVERY word must occur as a substring, case- and diacritics-insensitive — a stem („smlouv“) finds every form; titles take no phrase (quotes are left out there), while in everything mode \"double quotes\" make the attachments' text match the exact phrase; give up to 3 variants in queries. Zotero's search never looks into docket numbers, so a spisová značka in the query (\"25 Cdo 1234/19\") also scans the newest case items and lists matches first, saying how many were scanned; a short one is searched written out too (\"25 Cdo 1234/2019\"). Default scope: the personal library and the group libraries (up to 6); library narrows it. scope: \"top\" = top-level items only, \"trash\" = the trash, \"publications\" = My Publications; include_trashed adds the trash. Filters: collection (key from zotero_list; its subcollections are not included), tags (all must match), tags_any (any), exclude_tags, item_type or exclude_item_type, since with library (only items changed after that library's version, which the answer names). With no query and no filter it lists the library by sort. Results are NOT ranked by relevance (sort, direction); a page holds up to limit items per library, and matches inside attachments and notes are grouped under their work (\"matched in: …\"). Each hit names its zotero_get_item call and, for a decision, the official-text search — cite the decision from there, never from Zotero. If the answer says Zotero is not connected or needs a personal sign-in, do not call zotero_* again.",
       inputSchema: z.object({
-        query: z.string().min(2).max(300).optional().describe("Words that must all occur (titles, creators, years, a note's first line; with mode \"everything\" also the attachments' full text), or a spisová značka."),
-        queries: z.array(z.string().min(2).max(300)).max(3).optional().describe("Up to 3 query variants (other word forms, synonyms), merged round-robin."),
+        // Trimmed first: "   " would pass min(2) and silently list the whole library as "matching".
+        query: z.string().trim().min(2).max(300).optional().describe("Words that must all occur (titles, creators, years, a note's first line; with mode \"everything\" also the attachments' full text), or a spisová značka."),
+        queries: z.array(z.string().trim().min(2).max(300)).max(3).optional().describe("Up to 3 query variants (other word forms, synonyms), merged round-robin."),
         mode: z.enum(["title", "everything"]).default("title").describe("\"title\": titles, creators, years, a note's first line; \"everything\": also the attachments' full text."),
         scope: z.enum(SCOPES).default("all").describe('"all" (default): the library; "top": top-level items only (a matching note or file lists its parent); "trash": the items in the trash; "publications": My Publications (personal library).'),
         include_trashed: z.boolean().default(false).describe("Also items in the trash (they are marked [v koši])."),

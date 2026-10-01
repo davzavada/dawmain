@@ -232,22 +232,25 @@ function pause(scope: string, ms: number): void {
 /**
  * Wait out a short pause (the user's or the instance's, whichever ends
  * later); refuse a long one with the time left, so the model can tell the
- * user.
+ * user. Re-checked after every sleep: while this request slept, another one
+ * of the user's slot holders may have come back with a 429 (Retry-After 60)
+ * or a Backoff / 503 — going out then would walk straight into it.
  */
 async function honourPause(who: string, signal: AbortSignal | undefined): Promise<void> {
-  const now = Date.now();
-  const wait = Math.max(notBefore.get(who) ?? 0, notBefore.get(INSTANCE) ?? 0) - now;
-  if (wait <= 0) return;
-  if (wait > LIMITS.maxBackoffWaitMs) {
-    const seconds = Math.ceil(wait / 1000);
-    throw new SourceError(
-      SOURCE,
-      "UPSTREAM_ERROR",
-      `${SOURCE} asked this server to pause for another ${seconds} s (Backoff / Retry-After) — it is under load or got too many requests.`,
-      `Wait about ${seconds} s before calling zotero_* again, and make fewer calls; tell the user if they are waiting.`,
-    );
+  for (;;) {
+    const wait = Math.max(notBefore.get(who) ?? 0, notBefore.get(INSTANCE) ?? 0) - Date.now();
+    if (wait <= 0) return;
+    if (wait > LIMITS.maxBackoffWaitMs) {
+      const seconds = Math.ceil(wait / 1000);
+      throw new SourceError(
+        SOURCE,
+        "UPSTREAM_ERROR",
+        `${SOURCE} asked this server to pause for another ${seconds} s (Backoff / Retry-After) — it is under load or got too many requests.`,
+        `Wait about ${seconds} s before calling zotero_* again, and make fewer calls; tell the user if they are waiting.`,
+      );
+    }
+    await sleep(wait, signal);
   }
-  await sleep(wait, signal);
 }
 
 // ---------------------------------------------------------------------------
@@ -481,7 +484,8 @@ function breakerError(): SourceError {
   );
 }
 
-function cancelled(): SourceError {
+/** The caller's budget ran out — also what a caller gets that stops waiting for a load shared with other calls (./client.ts). */
+export function cancelled(): SourceError {
   return new SourceError(
     SOURCE,
     "UPSTREAM_UNREACHABLE",

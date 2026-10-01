@@ -157,6 +157,21 @@ describe("buildTsQuery", () => {
   });
   it("keeps stopwords when the query has nothing else", () => {
     expect(buildTsQuery("to je ono").and).toBe("'to' & 'je' & 'ono':*");
+    expect(buildTsQuery("to je ono", { loneStopwords: true }).and).toBe("'to' & 'je' & 'ono':*");
+  });
+  it("loneStopwords: false — next to a stripped identifier a lone stopword or citation cue searches nothing", () => {
+    // "k § 2913", "podle § 2913 OZ", "srov. 25 Cdo 1234/2019" after stripIdentifiers.
+    for (const rest of ["k", "podle", "dle", "srov.", "viz", "cit.", "k podle"]) {
+      expect(buildTsQuery(rest, { loneStopwords: false }), rest).toEqual({ and: null, or: null, terms: [], phrases: [] });
+    }
+    // Real words stay; the stopwords and cues next to them go, as without the option.
+    expect(buildTsQuery("srov. výpověď podle", { loneStopwords: false }).and).toBe(buildTsQuery("výpověď").and);
+    expect(buildTsQuery("gdpr", { loneStopwords: false }).and).toBe("'gdpr':*");
+    // Without the option a citation cue is an ordinary word.
+    expect(buildTsQuery("viz").and).toBe("'viz':*");
+    // A quoted phrase keeps its stopwords either way.
+    expect(buildTsQuery('"k tomu"', { loneStopwords: false }).and).toBe(buildTsQuery('"k tomu"').and);
+    expect(buildTsQuery('"k tomu"', { loneStopwords: false }).and).toMatch(/^\( 'k' <-> /);
   });
   it("matches digits exactly, never as prefixes", () => {
     expect(buildTsQuery("§ 29 odst. 2").and).toBe("'29' & 'odst':* & '2'");

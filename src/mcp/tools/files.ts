@@ -16,19 +16,20 @@ import { getLibraries } from "@/src/files/db/libraries";
 import {
   documentShapes,
   documentsByIds,
-  librariesOf,
   loadFootnotes,
+  loadFootnotesMany,
   loadReadDoc,
   loadText,
-  pagesAround,
-  sectionChains,
+  loadTexts,
+  pagesAroundMany,
+  sectionChainsMany,
   type DocumentShape,
   type LoadedFootnote,
   type PageLite,
   type ReadDoc,
   type SectionLite,
 } from "@/src/files/db/reading";
-import { fuse, loadChunks, searchChannels, type FusedDoc } from "@/src/files/db/search";
+import { fuse, loadChunks, searchChannels, sectionKeysFor, type FusedDoc, type SearchParams } from "@/src/files/db/search";
 import { bumpUsage, usageSum } from "@/src/files/db/usage";
 import { sanitizeLine } from "@/src/files/dmd/normalize";
 import { sectionKeyOf, stripMarkup } from "@/src/files/dmd/parse";
@@ -36,12 +37,12 @@ import { citationLine, formatPersonName, pinpoint } from "@/src/files/dmd/pinpoi
 import { fence, newNonce, renderRange } from "@/src/files/dmd/render";
 import { PAGE_FLAGS, type TextSource } from "@/src/files/dmd/types";
 import { errorCode, logFilesError } from "@/src/files/errors";
-import { allowToolCall, effectiveMode, envOnlyMode } from "@/src/files/guards";
+import { allowToolCall, cachedMode, effectiveMode, envOnlyMode } from "@/src/files/guards";
 import { actName, resolveAct, zakId } from "@/src/files/index/acts";
 import { bestWindow, findMatches } from "@/src/files/index/highlight";
-import { euActId, queryIdentKeys, stripIdentifiers } from "@/src/files/index/identifiers";
+import { euActId, pinpointOnly, queryIdentKeys, stripIdentifiers } from "@/src/files/index/identifiers";
 import { libraryHandle, readScope, safeLibraryName, type Scope } from "@/src/files/scope";
-import { buildTsQuery } from "@/src/files/text/analyze";
+import { buildTsQuery, MAX_QUERY_CHARS } from "@/src/files/text/analyze";
 import { DOC_TYPES, DOC_TYPE_LABELS, type AnchorLabel, type DocType, type PageLabelSource } from "@/src/files/types";
 import { SourceError, toToolError, type SourceErrorKind } from "@/src/sources/shared/errors";
 import { DOC_PAGE_CHARS, interleave, uniqueQueries } from "@/src/sources/shared/text";
@@ -111,6 +112,14 @@ const CITING_PARAGRAPH_CHARS = 3_000;
 const MAX_FIND_EXCERPTS = 8;
 /** Rows per search channel (see src/files/db/search.ts). */
 const CHANNEL_DEPTH = 60;
+/**
+ * Rows per channel inside ONE document (doc mode) — the functions' maximum.
+ * The chunk scan is the same as at 60 and only one document's matches are
+ * ranked, so 200 costs little more; the per-document count stays exact up to here and paging
+ * reaches every passage a channel returned (it stopped at 20 before, shown
+ * as the exact total).
+ */
+const DOC_DEPTH = 200;
 /** Chunks shown per document in a library-wide search. */
 const CHUNKS_PER_DOC = 2;
 /**
@@ -173,17 +182,34 @@ function uploadUrl(origin: string | null): string {
 }
 
 type Gate =
-  | { ok: true; userId: string; access: Access; mode: FilesMode; origin: string | null }
+  | {
+      ok: true;
+      userId: string;
+      access: Access;
+      /**
+       * Set only when the caller asked to overlap (files_search) and the guard
+       * mode was not cached: the measurement in flight, resolving to the
+       * guardOff answer or null. The caller awaits it before answering.
+       */
+      modeCheck: Promise<ToolResult | null> | null;
+      origin: string | null;
+    }
   | { ok: false; result: ToolResult };
+
+const guardOffResult = () => errorResult("NOT_ENTITLED", GATE_TEXT.guardOff, "Try files_* again later in the day.");
 
 /**
  * Steps 1–3 of the gating (see the module header). Nothing here touches the
  * database before the caller is known to hold a Pro library; the rate limit
  * is in memory; effectiveMode() is the first (cached) database access.
+ * A known mode (cached — "off" included, which must not wake the DB) is
+ * decided here. `overlap`: a cold cache's measurement wakes the DB anyway,
+ * so files_search runs its first queries next to it instead of after it
+ * (modeCheck) and still answers guardOff when the measurement says so.
  * Steps 2–3 are personalProCaller (src/mcp/pro-caller.ts), shared with
  * zotero_*; the env switch, the rate limit and the mode stay files-only.
  */
-async function gate(ctx: unknown): Promise<Gate> {
+async function gate(ctx: unknown, opts: { overlap?: boolean } = {}): Promise<Gate> {
   const origin = siteOrigin(ctx);
   const env = envOnlyMode();
   if (env === "off" || env === "unconfigured") {
@@ -234,11 +260,15 @@ async function gate(ctx: unknown): Promise<Gate> {
       ),
     };
   }
-  const mode = await effectiveMode();
-  if (mode === "off" || mode === "unconfigured") {
-    return { ok: false, result: errorResult("NOT_ENTITLED", GATE_TEXT.guardOff, "Try files_* again later in the day.") };
+  const blocks = (mode: FilesMode) => mode === "off" || mode === "unconfigured";
+  const known = cachedMode();
+  if (known === null && opts.overlap) {
+    const modeCheck = effectiveMode().then((mode) => (blocks(mode) ? guardOffResult() : null));
+    return { ok: true, userId: caller.userId, access: caller.access, modeCheck, origin };
   }
-  return { ok: true, userId: caller.userId, access: caller.access, mode, origin };
+  const mode = known ?? (await effectiveMode());
+  if (blocks(mode)) return { ok: false, result: guardOffResult() };
+  return { ok: true, userId: caller.userId, access: caller.access, modeCheck: null, origin };
 }
 
 // ---------------------------------------------------------------------------
@@ -897,12 +927,18 @@ interface VariantSearch {
   docs: FusedDoc[];
   terms: string[];
   identKeys: string[];
+  /**
+   * More matches exist than the channels returned: across the library, a
+   * channel filled its depth (more documents may match); inside one
+   * document, a channel's uncapped count exceeds the passages it returned.
+   */
   saturated: boolean;
 }
 
 interface SearchPlan {
   libraryIds: string[];
   weights: string | undefined;
+  inFootnotes: boolean | undefined;
   docTypes: DocType[] | null;
   yearFrom: number | null;
   yearTo: number | null;
@@ -932,12 +968,42 @@ export function implicitAct(ids: { act: string | null; sections: string[] }): st
   return parzKeys(ids.act, ids.sections).length ? ids.act : null;
 }
 
-/** One query variant: tsquery (+weights), identifier keys, the channels, RRF. Its own transaction. */
-async function searchVariant(plan: SearchPlan, variant: string | undefined): Promise<VariantSearch> {
-  const ids = variant ? queryIdentKeys(variant) : { keys: [], act: null, sections: [] };
-  const ts = variant ? buildTsQuery(stripIdentifiers(variant), { weights: plan.weights }) : { and: null, or: null, terms: [] };
+/** What one query variant searches: the channels' input, and what its excerpts highlight. */
+export interface VariantQuery {
+  params: SearchParams;
+  terms: string[];
+  identKeys: string[];
+}
+
+const NO_IDS = { keys: [] as string[], act: null as string | null, sections: [] as string[] };
+
+/**
+ * One query variant as the channels take it (plan §4). The lexical query is
+ * the variant minus its identifiers (stripIdentifiers); when identifiers or
+ * a filter carry the search, a remainder of stopwords or citation cues
+ * searches nothing ("k § 2913" = "§ 2913"). A variant that is ONLY an act
+ * ("GDPR", "OZ", "o. s. ř.") searches the act itself: its own letters when
+ * they make a word ("gdpr"), else the act's name, plus the act key (chunks
+ * citing it by number; an EU act also by name) — only then, so an act
+ * among other words still filters nothing and demands nothing. A remainder
+ * of pinpoint words into a § ("§ 52 písm. g)") ranks passages carrying the
+ * query's § keys only, not every "písm. g)" in the library. null: nothing
+ * searchable ("!!"). Pure — exported for scripts/files-eval.mjs.
+ */
+export function planVariant(plan: SearchPlan, variant: string | undefined): VariantQuery | null {
+  const text = variant?.slice(0, MAX_QUERY_CHARS);
+  const ids = text ? queryIdentKeys(text) : NO_IDS;
+  const stripped = text ? stripIdentifiers(text) : "";
+  const anchored = ids.keys.length > 0 || ids.act !== null || plan.sectionKey !== null || plan.caseKeys.length > 0;
+  const lone = !anchored;
+  let ts = buildTsQuery(stripped, { weights: plan.weights, loneStopwords: lone });
+  let meta = buildTsQuery(stripped, { loneStopwords: lone }).and;
   const act = plan.act ?? implicitAct(ids);
-  const sectionKeys = plan.sectionKey ? [plan.sectionKey] : [];
+  // With words to rank, `section` is only the filter (in SQL): as identifier keys it would hand
+  // every chunk of the § the same idn score, ordered by position, and the first chunks of the §
+  // (1.5 / 61) would outrank the passage that holds the words (1.0 / 61). Without words the
+  // section's keys ARE the search.
+  const sectionKeys = plan.sectionKey && !ts.and ? [plan.sectionKey] : [];
   const identKeys = [
     ...new Set([
       ...ids.keys,
@@ -946,30 +1012,66 @@ async function searchVariant(plan: SearchPlan, variant: string | undefined): Pro
       ...sectionKeys.map((k) => `sec:${k}`),
     ]),
   ];
+  if (text && !ts.and && identKeys.length === 0 && ids.act) {
+    const own = buildTsQuery(text, { loneStopwords: false });
+    const source = own.terms.some((t) => /^[a-z]{2}/.test(t)) ? text : (actName(ids.act) ?? "");
+    ts = buildTsQuery(source, { weights: plan.weights, loneStopwords: false });
+    meta = buildTsQuery(source, { loneStopwords: false }).and;
+    identKeys.push(ids.act);
+  }
+  if (!ts.and && identKeys.length === 0) return null;
+  const require = plan.caseKeys.length
+    ? plan.caseKeys
+    : ts.and && ids.keys.some((k) => k.startsWith("par:")) && pinpointOnly(stripped)
+      ? [...identKeys, ...sectionKeysFor(identKeys)]
+      : [];
+  // Metadata-only documents are never shown for footnotes-only or case_number searches: no meta channel.
+  const metaOn = plan.inFootnotes !== true && plan.caseKeys.length === 0;
+  return {
+    params: {
+      libraryIds: plan.libraryIds,
+      tsAnd: ts.and,
+      tsOr: ts.or,
+      identKeys,
+      tsMeta: metaOn ? meta : null,
+      metaKeys: metaOn ? ids.keys.filter((k) => /^(isbn|doi):/.test(k)) : [],
+      require,
+      section: plan.sectionKey,
+      docTypes: plan.docTypes,
+      yearFrom: plan.yearFrom,
+      yearTo: plan.yearTo,
+      act,
+      docId: plan.docId,
+      // Inside one document every passage a channel finds is listed (and paged); across the
+      // library the best 3 per document keep one long commentary from crowding out the rest.
+      perDoc: plan.docId !== null ? DOC_DEPTH : 3,
+      limit: plan.docId !== null ? DOC_DEPTH : CHANNEL_DEPTH,
+    },
+    terms: ts.terms,
+    identKeys,
+  };
+}
+
+/** One query variant: the channels (one statement, its own transaction) and RRF. */
+async function searchVariant(plan: SearchPlan, query: VariantQuery): Promise<VariantSearch> {
   const docMode = plan.docId !== null;
-  const perDocSql = docMode ? 20 : plan.sectionKey ? 10 : 3;
   try {
     return await withScope(plan.libraryIds, async (db) => {
-      const hits = await searchChannels(db, {
-        libraryIds: plan.libraryIds,
-        tsAnd: ts.and,
-        tsOr: ts.or,
-        identKeys,
-        docTypes: plan.docTypes,
-        yearFrom: plan.yearFrom,
-        yearTo: plan.yearTo,
-        act,
-        docId: plan.docId,
-        perDoc: perDocSql,
-        limit: CHANNEL_DEPTH,
-      });
-      const perChannel = new Map<string, number>();
-      for (const h of hits) perChannel.set(h.channel, (perChannel.get(h.channel) ?? 0) + 1);
+      const hits = await searchChannels(db, query.params);
+      const perChannel = new Map<string, { rows: number; total: number }>();
+      for (const h of hits) {
+        const c = perChannel.get(h.channel) ?? { rows: 0, total: 0 };
+        c.rows++;
+        c.total = Math.max(c.total, h.perDocTotal);
+        perChannel.set(h.channel, c);
+      }
+      const channels = [...perChannel].filter(([channel]) => channel !== "meta").map(([, c]) => c);
       return {
-        docs: fuse(hits, { perDoc: docMode || plan.sectionKey ? 50 : CHUNKS_PER_DOC }),
-        terms: ts.terms,
-        identKeys,
-        saturated: [...perChannel.values()].some((n) => n >= CHANNEL_DEPTH),
+        // Inside one document every returned passage stays (up to 3 channels × their depth).
+        docs: fuse(hits, { perDoc: docMode ? 3 * DOC_DEPTH : CHUNKS_PER_DOC }),
+        terms: query.terms,
+        identKeys: query.identKeys,
+        saturated: docMode ? channels.some((c) => c.total > c.rows) : [...perChannel.values()].some((c) => c.rows >= CHANNEL_DEPTH),
       };
     });
   } catch (error) {
@@ -1014,15 +1116,28 @@ export function mergeVariants(lists: FusedDoc[][], opts: { perDoc: number }): En
   });
 }
 
-/** Inside one document: every matching passage its own entry, round-robin across variants by score. Pure. */
+/**
+ * Inside one document: every matching passage its own entry, round-robin
+ * across variants by score, labelled with the channels that found THAT
+ * passage in any variant (not the whole document's). Pure.
+ */
 export function mergePassages(lists: FusedDoc[][]): Entry[] {
-  const perVariant = lists.map((list) =>
-    list.flatMap((d) => d.chunks.map((c) => ({ docId: d.docId, ord: c.ord, score: c.score, matchedBy: d.matchedBy }))),
-  );
+  const channels = new Map<string, Set<string>>();
+  for (const list of lists) {
+    for (const d of list) {
+      for (const c of d.chunks) {
+        const key = `${d.docId}:${c.ord}`;
+        const set = channels.get(key) ?? new Set<string>();
+        for (const ch of c.matchedBy) set.add(ch);
+        channels.set(key, set);
+      }
+    }
+  }
+  const perVariant = lists.map((list) => list.flatMap((d) => d.chunks.map((c) => ({ docId: d.docId, ord: c.ord }))));
   return interleave(perVariant, (p) => `${p.docId}:${p.ord}`).map((p) => ({
     docId: p.docId,
     chunks: [p.ord],
-    matchedBy: [...p.matchedBy],
+    matchedBy: ["and", "or", "idn", "meta"].filter((c) => channels.get(`${p.docId}:${p.ord}`)?.has(c)),
     moreInDoc: 0,
   }));
 }
@@ -1598,7 +1713,7 @@ export function registerFiles(server: McpServer): void {
     {
       title: "Vlastní zdroje: search the user's own documents",
       description:
-        "SEARCH the user's OWN uploaded documents (Vlastní zdroje — books, commentaries, articles, templates; Pro, personal OAuth sign-in only): Czech full text with stemming (inflected forms and words typed without diacritics match), identifiers (spisová značka incl. short years, ECLI, § with its act, ISBN, DOI) and the documents' metadata. 'queries' runs up to 3 variants and merges them round-robin. Filters: library (id, team slug or \"osobni\"), doc_type, act (\"OZ\", \"89/2012\", \"GDPR\" — commentaries on it or passages citing it; with a § in the query, passages citing that §; a § asked without its act over commentaries on several acts comes grouped by act), section (\"§ 2913\" — only passages inside that §), case_number, in_footnotes (true: footnotes only; false: without footnotes), year_from/year_to; doc (an id) ranks the passages INSIDE one document. Each hit: the reference line, the section path, a pinpoint computed from the match itself (\"§ 2913, m. č. 14, s. 1245\", \"s. 245, pozn. 12\"), an excerpt, which channel matched (and / or-fallback / identifiers / metadata), 'oficiální text: ns_search {case_number: …}' for every spisová značka the passage cites, and the files_get_document call that reads it. Own documents have no public URL: cite them as „vlastní dokument“ with the pinpoint, quote only from a files_get_document read, and cite a decision found in them from its official text. If the answer says the account has no library, do not call files_* again.",
+        "SEARCH the user's OWN uploaded documents (Vlastní zdroje — books, commentaries, articles, templates; Pro, personal OAuth sign-in only): Czech full text with stemming (inflected forms and words typed without diacritics match), identifiers (spisová značka incl. short years, ECLI, § with its act, ISBN, DOI) and the documents' metadata. A query that is only an act (\"GDPR\", \"OZ\") searches for that act. 'queries' runs up to 3 variants and merges them round-robin. Filters: library (id, team slug or \"osobni\"), doc_type, act (\"OZ\", \"89/2012\", \"GDPR\" — commentaries on it or passages citing it; with a § in the query, passages citing that §; a § asked without its act over commentaries on several acts comes grouped by act), section (\"§ 2913\" — only passages inside that §), case_number (only passages citing that decision; a query then ranks them), in_footnotes (true: footnotes only; false: without footnotes), year_from/year_to; doc (an id) ranks the passages INSIDE one document. Each hit: the reference line, the section path, a pinpoint computed from the match itself (\"§ 2913, m. č. 14, s. 1245\", \"s. 245, pozn. 12\"), an excerpt, which channel matched (and / or-fallback / identifiers / metadata), 'oficiální text: ns_search {case_number: …}' for every spisová značka the passage cites, and the files_get_document call that reads it. Own documents have no public URL: cite them as „vlastní dokument“ with the pinpoint, quote only from a files_get_document read, and cite a decision found in them from its official text. If the answer says the account has no library, do not call files_* again.",
       inputSchema: z.object({
         query: z.string().min(2).optional().describe("Czech words, a § (\"§ 2913 OZ\") or a spisová značka; \"quoted words\" are a phrase."),
         queries: z
@@ -1606,7 +1721,7 @@ export function registerFiles(server: McpServer): void {
           .max(3)
           .optional()
           .describe("Up to 3 query variants (other word forms, synonyms), merged round-robin."),
-        case_number: z.string().min(3).optional().describe("Passages citing this decision: spisová značka (\"25 Cdo 1234/2019\", short year \"/19\" too), ECLI or \"R 51/2011\"."),
+        case_number: z.string().min(3).max(200).optional().describe("Passages citing this decision: spisová značka (\"25 Cdo 1234/2019\", short year \"/19\" too), ECLI or \"R 51/2011\"."),
         library: z.string().min(1).optional().describe("Only this library: its id, a team slug, or \"osobni\" for the personal one (files_list names them)."),
         doc_type: z.array(docTypeSchema).max(7).optional().describe("Only these document types: kniha, kapitola, clanek, komentar, vzor, rozhodnuti, jine."),
         act: z.string().min(2).optional().describe("Only commentaries on this act or passages citing it (with a § in the query: citing that §): \"OZ\", \"o. s. ř.\", \"89/2012\", \"GDPR\", \"32016R0679\"."),
@@ -1621,7 +1736,7 @@ export function registerFiles(server: McpServer): void {
       annotations: PRIVATE_READ_ONLY,
     },
     async (args, ctx: unknown) => {
-      const g = await gate(ctx);
+      const g = await gate(ctx, { overlap: true });
       if (!g.ok) return g.result;
       try {
         return await filesSearch(g, args);
@@ -1715,7 +1830,8 @@ async function filesSearch(
 ): Promise<ToolResult> {
   const scope = scopeFor(g.access, args.library);
   const libs = [...scope.libraryIds];
-  const variants = uniqueQueries(args.query, args.queries);
+  // Parsed as far as buildTsQuery reads: identifier parsing of a longer string is wasted work.
+  const variants = uniqueQueries(args.query, args.queries).map((v) => v.slice(0, MAX_QUERY_CHARS));
   const actFilter = args.act ? resolveActFilter(args.act) : null;
   if (args.act && !actFilter) {
     invalid(`Unknown act "${sanitizeLine(args.act, 60)}".`, 'Pass its number ("89/2012"), an abbreviation ("OZ", "o. s. ř.", "ZOK") or a CELEX number ("32016R0679").');
@@ -1738,28 +1854,51 @@ async function filesSearch(
   if (args.year_from && args.year_to && args.year_from > args.year_to) {
     return errorResult("INPUT_INVALID", "year_from must not exceed year_to.", "Swap or drop one of them.");
   }
-  let docRow: DocumentRow | null = null;
-  if (args.doc) {
-    if (!isUuid(args.doc)) return notFound();
-    const id = args.doc;
-    docRow = await withScope(libs, (db) => getDocument(db, id, libs));
-    if (!docRow) return notFound();
-    if (docRow.status !== "ready" || !docRow.enabled) return notReady(docRow, g.origin);
-  }
-  const docMode = docRow !== null;
+  if (args.doc && !isUuid(args.doc)) return notFound();
+  const docId = args.doc ?? null;
   const plan: SearchPlan = {
     libraryIds: libs,
     weights: args.in_footnotes === true ? "D" : args.in_footnotes === false ? "ABC" : undefined,
+    inFootnotes: args.in_footnotes,
     docTypes: args.doc_type?.length ? args.doc_type : null,
     yearFrom: args.year_from ?? null,
     yearTo: args.year_to ?? null,
     act: actFilter?.act ?? null,
     sectionKey,
     caseKeys,
-    docId: docRow?.id ?? null,
+    docId,
   };
-  const keyed: Array<string | undefined> = variants.length ? variants : [undefined];
-  const { values, failures } = await runVariants(keyed, (variant) => searchVariant(plan, variant));
+  // What each variant searches is decided before any database work: a variant with nothing
+  // to search ("!!") is skipped and named, and a call left with none is refused outright.
+  const planned = (variants.length ? variants : [undefined]).map((v) => ({ v, q: planVariant(plan, v) }));
+  const keyed = planned.filter((p) => p.q !== null);
+  const skipped = planned.flatMap((p) => (p.q === null && p.v !== undefined ? [p.v] : []));
+  if (!keyed.length) {
+    return errorResult(
+      "INPUT_INVALID",
+      `Nothing searchable in ${skipped.map((v) => `"${sanitizeLine(v, 60)}"`).join(", ")}.`,
+      'Use one or two distinctive words, a § ("§ 2913 OZ"), a spisová značka or an act ("GDPR", "OZ").',
+    );
+  }
+
+  // The document of a doc search is looked up next to the variants, not before them: the
+  // channels only return passages of a ready, enabled document in scope anyway, and the
+  // lookup decides not-found / not-ready before any variant outcome is used.
+  const docLookup = docId ? withScope(libs, (db) => getDocument(db, docId, libs)) : Promise.resolve(null);
+  const queryOf = new Map(keyed.map((p) => [p.v, p.q!]));
+  const firstStep = Promise.allSettled([docLookup, runVariants(keyed.map((p) => p.v), (v) => searchVariant(plan, queryOf.get(v)!))]);
+  // A guard measurement started by the gate (cold cache) ran next to them; its verdict comes first.
+  const blocked = g.modeCheck ? await g.modeCheck : null;
+  if (blocked) return blocked;
+  const [docOutcome, variantOutcome] = await firstStep;
+  if (docOutcome.status === "rejected") throw docOutcome.reason;
+  const docRow = docOutcome.value;
+  if (docId && !docRow) return notFound();
+  if (docRow && (docRow.status !== "ready" || !docRow.enabled)) return notReady(docRow, g.origin);
+  if (variantOutcome.status === "rejected") throw variantOutcome.reason;
+  const { values, failures } = variantOutcome.value;
+  const docMode = docRow !== null;
+
   const answered = values.filter((v): v is VariantSearch => v !== null);
   const q: HighlightQuery = {
     terms: [...new Set(answered.flatMap((v) => v.terms))],
@@ -1767,50 +1906,72 @@ async function filesSearch(
     footnotes: args.in_footnotes,
   };
   const saturated = answered.some((v) => v.saturated);
-  const perDocShown = docMode ? 1 : CHUNKS_PER_DOC;
-  let entries = docMode ? mergePassages(answered.map((v) => v.docs)) : mergeVariants(answered.map((v) => v.docs), { perDoc: sectionKey ? 50 : perDocShown });
-
-  // A footnotes-only or section-bound search shows passages, never a metadata-only document.
-  if (args.in_footnotes === true || sectionKey) entries = entries.filter((e) => e.chunks.length > 0);
-  if (sectionKey) entries = await filterToSection(libs, entries, sectionKey, perDocShown);
+  const libOf = new Map<string, string>();
+  const byKey = new Set<string>();
+  for (const v of answered) {
+    for (const d of v.docs) {
+      if (d.libraryId && !libOf.has(d.docId)) libOf.set(d.docId, d.libraryId);
+      if (d.metaByKey) byKey.add(d.docId);
+    }
+  }
+  let entries = docMode ? mergePassages(answered.map((v) => v.docs)) : mergeVariants(answered.map((v) => v.docs), { perDoc: CHUNKS_PER_DOC });
+  // A footnotes-only, section-bound or case_number search shows passages, never a metadata-only document.
+  const passagesOnly = args.in_footnotes === true || sectionKey !== null || caseKeys.length > 0;
+  if (passagesOnly) entries = entries.filter((e) => e.chunks.length > 0);
+  // Inside one document: at least this many passages match (the channels' uncapped counts).
+  const knownInDoc = docMode ? Math.max(entries.length, ...answered.map((v) => (v.docs[0]?.chunks.length ?? 0) + (v.docs[0]?.moreInDoc ?? 0))) : 0;
 
   const first = (args.page - 1) * args.limit;
+  if (entries.length && first >= entries.length) {
+    const unit = docMode ? "passages" : "documents";
+    return errorResult(
+      "INPUT_INVALID",
+      `page ${args.page} is past the end: ${formatCount(docMode ? knownInDoc : entries.length)}${saturated ? "+" : ""} ${unit} (pages 1–${Math.ceil(entries.length / args.limit)} at limit ${args.limit}).`,
+      saturated
+        ? `Only the best-ranked ${formatCount(entries.length)} ${unit} are listed — narrow the search (section, act, library, doc_type, years or more distinctive words) to reach others.`
+        : `Every hit is on those pages — refine the query or drop a filter for others.`,
+    );
+  }
   let shown = entries.slice(first, first + args.limit);
   const hasMore = entries.length > first + args.limit;
   const nonce = newNonce();
 
+  if (!entries.length) {
+    const counts = docMode ? null : await withScope(libs, (db) => pendingCounts(db, libs));
+    const notes = [actFilterNote(actFilter, variants), sectionWordsNote(args.section, variants, args.act)].filter(Boolean);
+    return textResult(noHitsText(g, scope.libraries, counts, failures, variants, docRow, notes.join("\n") || null, skipped));
+  }
+
+  // The page's passages in a fixed handful of statements, however many are shown.
   const loaded = await withScope(libs, async (db) => {
-    const rows = await documentsByIds(db, [...new Set(shown.map((e) => e.docId))], libs);
-    const libOf = await librariesOf(db, [...new Set(entries.map((e) => e.docId))], libs);
+    const rows = docRow ? new Map([[docRow.id, docRow]]) : await documentsByIds(db, [...new Set(shown.map((e) => e.docId))], libs);
     const keys = shown.flatMap((e) => e.chunks.map((ord) => ({ docId: e.docId, ord })));
-    const chunkRows = await loadChunks(db, libs, keys);
-    const chains = new Map<string, Map<number, SectionLite[]>>();
-    for (const docId of new Set(chunkRows.map((c) => c.docId))) {
-      const row = rows.get(docId);
-      if (!row) continue;
-      const ords = chunkRows.filter((c) => c.docId === docId && c.sectionOrd !== null).map((c) => c.sectionOrd!);
-      chains.set(docId, await sectionChains(db, docId, row.library_id, ords));
-    }
+    const chunkRows = (await loadChunks(db, libs, keys)).filter((c) => rows.has(c.docId));
+    const libraryOf = (docId: string) => rows.get(docId)!.library_id;
+    const chains = await sectionChainsMany(
+      db,
+      chunkRows.flatMap((c) => (c.sectionOrd === null ? [] : [{ docId: c.docId, libraryId: libraryOf(c.docId), ord: c.sectionOrd }])),
+    );
+    const spans = chunkRows.map((c) => ({ docId: c.docId, libraryId: libraryOf(c.docId), from: c.start, to: c.end, pageFrom: c.pageFrom, pageTo: c.pageTo }));
+    const texts = await loadTexts(db, spans);
+    const pages = await pagesAroundMany(db, spans);
+    const notes = await loadFootnotesMany(db, spans);
     const chunks = new Map<string, HitChunk>();
-    for (const c of chunkRows) {
-      const row = rows.get(c.docId);
-      if (!row) continue;
-      const src = await loadText(db, c.docId, row.library_id, c.start, c.end);
+    chunkRows.forEach((c, i) => {
       chunks.set(`${c.docId}:${c.ord}`, {
         ord: c.ord,
         start: c.start,
         end: c.end,
         sectionOrd: c.sectionOrd,
         anchorFrom: c.anchorFrom,
-        raw: src.slice(c.start, c.end),
-        pages: await pagesAround(db, c.docId, row.library_id, c.start, c.end),
-        footnotes: await loadFootnotes(db, c.docId, row.library_id, { from: c.start, to: c.end }),
+        raw: texts[i].slice(c.start, c.end),
+        pages: pages[i],
+        footnotes: notes[i],
         chain: c.sectionOrd === null ? [] : (chains.get(c.docId)?.get(c.sectionOrd) ?? []),
       });
-    }
-    const counts = entries.length ? null : await pendingCounts(db, libs);
+    });
     const shapes = await documentShapes(db, [...new Set(chunkRows.filter((c) => c.sectionOrd === null).map((c) => c.docId))], libs);
-    return { rows, libOf, chunks, counts, shapes };
+    return { rows, chunks, shapes };
   });
 
   // in_footnotes: false — a passage whose only match sits inside a note definition (an identifier
@@ -1832,12 +1993,19 @@ async function filesSearch(
     if (dropped.size) entries = entries.filter((e) => !dropped.has(e));
   }
 
-  if (!entries.length) return textResult(noHitsText(g, scope.libraries, loaded.counts, failures, variants, docRow, actFilterNote(actFilter, variants)));
+  if (!entries.length) {
+    const counts = docMode ? null : await withScope(libs, (db) => pendingCounts(db, libs));
+    const notes = [actFilterNote(actFilter, variants), sectionWordsNote(args.section, variants, args.act)].filter(Boolean);
+    return textResult(noHitsText(g, scope.libraries, counts, failures, variants, docRow, notes.join("\n") || null, skipped));
+  }
 
-  const matchedLibraries = new Set(loaded.libOf.values());
+  const matchedLibraries = new Set(entries.flatMap((e) => (libOf.has(e.docId) ? [libOf.get(e.docId)!] : [])));
+  // Each variant's count in the header's unit, crediting a hit to every variant that found it.
+  const variantCount = (v: VariantSearch) =>
+    docMode ? v.docs.reduce((n, d) => n + d.chunks.length, 0) : passagesOnly ? v.docs.filter((d) => d.chunks.length > 0).length : v.docs.length;
   const variantLine =
     keyed.length > 1
-      ? `Variants: ${keyed.map((v, i) => `"${sanitizeLine(v ?? "", 60)}" ${values[i] ? values[i]!.docs.length : "✗"}`).join(" · ")} (merged round-robin)`
+      ? `Variants: ${keyed.map((p, i) => `"${sanitizeLine(p.v ?? "", 60)}" ${values[i] ? formatCount(variantCount(values[i]!)) : "✗"}`).join(" · ")} (merged round-robin)`
       : null;
   const filters = [
     args.library ? `library ${scope.libraries.map((l) => `„${safeLibraryName(l)}“`).join(", ")}` : null,
@@ -1850,11 +2018,12 @@ async function filesSearch(
   ].filter(Boolean);
   // The call that searches one hit's document further repeats everything that shaped this search
   // (library, doc_type and the years are implied by the document).
+  const echoed = keyed.flatMap((p) => (p.v === undefined ? [] : [p.v]));
   const echo = [
-    variants.length > 1
-      ? `queries: ${JSON.stringify(variants.map((v) => sanitizeLine(v, 120)))}`
-      : variants[0]
-        ? `query: ${JSON.stringify(sanitizeLine(variants[0], 120))}`
+    echoed.length > 1
+      ? `queries: ${JSON.stringify(echoed.map((v) => sanitizeLine(v, 120)))}`
+      : echoed[0]
+        ? `query: ${JSON.stringify(sanitizeLine(echoed[0], 120))}`
         : null,
     args.case_number ? `case_number: ${JSON.stringify(sanitizeLine(args.case_number, 60))}` : null,
     actFilter ? `act: ${JSON.stringify(actFilter.act)}` : null,
@@ -1884,7 +2053,13 @@ async function filesSearch(
     }
     const chunkEntries = entry.chunks.map((ord) => loaded.chunks.get(`${entry.docId}:${ord}`)).filter((c): c is HitChunk => !!c);
     if (!chunkEntries.length) {
-      data.push(docMode ? `${n}. (the passage could not be loaded)` : "   (matched by its title, authors or outline)");
+      data.push(
+        docMode
+          ? `${n}. (the passage could not be loaded)`
+          : byKey.has(entry.docId)
+            ? "   (matched by the ISBN / DOI in its metadata)"
+            : "   (matched by its title, authors or outline)",
+      );
       hitTools.push(`   → ${toolCall("files_get_document", [`id: ${JSON.stringify(row.id)}`, "toc: true"])}`);
     }
     // Several passages of one document are lettered, so each hint pairs with its passage.
@@ -1905,7 +2080,7 @@ async function filesSearch(
   const range = `${first + 1}–${first + (cut ? fit : shown.length)}`;
   const more = cut ? ` (more: limit: ${fit}, page: ${first / fit + 2})` : hasMore ? ` (more: page ${args.page + 1})` : "";
   const header = docMode
-    ? `✓ Vlastní zdroje — inside one document: ${formatCount(entries.length)}${saturated ? "+" : ""} matching ${entries.length === 1 ? "passage" : "passages"}; showing ${range}${more}`
+    ? `✓ Vlastní zdroje — inside one document: ${formatCount(knownInDoc)}${saturated ? "+" : ""} matching ${knownInDoc === 1 && !saturated ? "passage" : "passages"}; showing ${range}${more}`
     : `✓ Vlastní zdroje: ${formatCount(entries.length)}${saturated ? "+" : ""} ${entries.length === 1 && !saturated ? "document" : "documents"} in ${matchedLibraries.size} ${matchedLibraries.size === 1 ? "library" : "libraries"} (searched: ${scope.libraries.map((l) => `„${safeLibraryName(l)}“`).join(", ")}); showing ${range}${more}`;
 
   // Plan §4: a § asked without its act, answered from commentaries on several acts — hits grouped by act.
@@ -1937,10 +2112,19 @@ async function filesSearch(
   if (notesOnly) {
     tools.push(`(${formatCount(notesOnly)} ${notesOnly === 1 ? "passage" : "passages"} matched only inside a footnote and ${notesOnly === 1 ? "was" : "were"} left out — in_footnotes: false; this page may show fewer hits.)`);
   }
+  // "N+" with nothing further to page to: say where the list stops and how to reach the rest.
+  if (saturated && !hasMore && !cut) {
+    tools.push(
+      docMode
+        ? `(The best-ranked ${formatCount(entries.length)} of at least ${formatCount(knownInDoc)} matching passages are listed — narrow with section or more distinctive words for the rest.)`
+        : `(The list stops at the ${formatCount(entries.length)} best-ranked documents — more may match: narrow with act, library, doc_type, year_from/year_to, section or more distinctive words.)`,
+    );
+  }
 
   const text = [
     header,
     ...(variantLine ? [variantLine] : []),
+    ...skippedLines(skipped),
     ...failureLines(failures),
     ...(filters.length ? [`Filters: ${filters.join(" · ")}`] : []),
     "",
@@ -1952,6 +2136,11 @@ async function filesSearch(
     CITE_NOTE,
   ].join("\n");
   return textResult(text);
+}
+
+/** Variants that had nothing to search ("!!") — named, so the model knows they did not run. */
+function skippedLines(skipped: readonly string[]): string[] {
+  return skipped.map((v) => `⚠ Variant "${sanitizeLine(v, 60)}" has nothing to search (no word, §, spisová značka or act) — skipped.`);
 }
 
 /** Does the query name a § without its act ("§ 45", not "§ 45 OZ")? */
@@ -1998,34 +2187,6 @@ export function budgetHits(blocks: readonly HitBlock[], first: number, budget = 
   return fit;
 }
 
-/** Keep only chunks inside the § / čl. `key`, best `perDoc` per document. */
-async function filterToSection(libs: string[], entries: Entry[], key: string, perDoc: number): Promise<Entry[]> {
-  const wanted = key.toLowerCase();
-  const candidates = entries.flatMap((e) => e.chunks.map((ord) => ({ docId: e.docId, ord }))).slice(0, 500);
-  const keep = await withScope(libs, async (db) => {
-    const chunks = await loadChunks(db, libs, candidates);
-    const libOf = await librariesOf(db, [...new Set(chunks.map((c) => c.docId))], libs);
-    const inside = new Set<string>();
-    for (const docId of new Set(chunks.map((c) => c.docId))) {
-      const lib = libOf.get(docId);
-      if (!lib) continue;
-      const mine = chunks.filter((c) => c.docId === docId);
-      const chains = await sectionChains(db, docId, lib, mine.filter((c) => c.sectionOrd !== null).map((c) => c.sectionOrd!));
-      for (const c of mine) {
-        const chain = c.sectionOrd === null ? [] : (chains.get(c.sectionOrd) ?? []);
-        if (chain.some((s) => s.key?.toLowerCase() === wanted)) inside.add(`${docId}:${c.ord}`);
-      }
-    }
-    return inside;
-  });
-  return entries
-    .map((e) => {
-      const kept = e.chunks.filter((ord) => keep.has(`${e.docId}:${ord}`));
-      return { ...e, chunks: kept.slice(0, perDoc), moreInDoc: Math.max(0, kept.length - perDoc) };
-    })
-    .filter((e) => e.chunks.length > 0);
-}
-
 /**
  * The act filter a search without hits ran under, named so the model can
  * widen it: the act parameter, or the act a query variant named with its §
@@ -2042,6 +2203,20 @@ export function actFilterNote(actFilter: { act: string; name: string | null } | 
   return `The § with its act in the query limited the search to commentaries on ${implied.map((a) => label(a, actName(a))).join(", ")} and passages citing that § — ask for the § without its act (grouped by act) or with words only to search more widely.`;
 }
 
+/**
+ * A section-bound search with words that found nothing. With words, the §
+ * is only the filter — a § present in the documents whose passages hold none
+ * of the words is not listed (listing it outranked the passages that did
+ * hold them). That the § is there at all is still worth knowing: the
+ * section alone, without words, lists its passages. null otherwise. Pure.
+ */
+export function sectionWordsNote(section: string | undefined, variants: string[], act: string | undefined): string | null {
+  if (!section?.trim() || !variants.length) return null;
+  const label = sanitizeLine(section, 30);
+  const actArg = act?.trim() ? `, act: "${sanitizeLine(act, 30)}"` : "";
+  return `No passage inside ${label} holds these words — the § itself may still be in the documents: files_search {section: "${label}"${actArg}} without a query lists its passages.`;
+}
+
 /** No hits: an empty library says so (with the upload link); otherwise the usual re-aiming advice. */
 function noHitsText(
   g: Gated,
@@ -2051,6 +2226,7 @@ function noHitsText(
   variants: string[],
   docRow: DocumentRow | null,
   actNote: string | null = null,
+  skipped: readonly string[] = [],
 ): string {
   const ready = counts ? Object.values(counts).reduce((n, c) => n + c.ready, 0) : 1;
   if (!docRow && ready === 0) {
@@ -2068,9 +2244,11 @@ function noHitsText(
       "Continue with the official sources.",
     ].join("\n");
   }
+  const searched = variants.filter((v) => !skipped.includes(v));
   return [
+    ...skippedLines(skipped),
     ...failureLines(failures),
-    `No match in Vlastní zdroje${docRow ? " inside this document" : ""}${variants.length ? ` for ${variants.map((v) => `"${sanitizeLine(v, 60)}"`).join(", ")}` : ""}.`,
+    `No match in Vlastní zdroje${docRow ? " inside this document" : ""}${searched.length ? ` for ${searched.map((v) => `"${sanitizeLine(v, 60)}"`).join(", ")}` : ""}.`,
     ...(actNote ? [actNote] : []),
     "Try other word forms or synonyms (queries), fewer words, or drop a filter; in_footnotes: true searches the notes alone. This covers only the user's own uploads — the official sources are searched with the other tools.",
   ].join("\n");

@@ -64,7 +64,7 @@ const stemmer = new CzechStemmer();
 /** Longer tokens are not words (hashes, glued URLs): folded, never stemmed. */
 const MAX_STEM_LENGTH = 48;
 /** Query input beyond this is ignored — a query is a few words, not a page. */
-const MAX_QUERY_CHARS = 1_000;
+export const MAX_QUERY_CHARS = 1_000;
 /** Operands (words or phrases) per tsquery; more only slows the GIN scan. */
 const MAX_QUERY_OPERANDS = 16;
 /** Words per quoted phrase. */
@@ -328,16 +328,30 @@ function words(text: string): Word[] {
 }
 
 /**
+ * Words that only cite ("srov.", "viz", "cit.", "op. cit.", "dle" — Lucene
+ * lists "podle", not its short form) — searched like any word in free
+ * text, but dropped next to an identifier (loneStopwords: false), where
+ * "srov. 25 Cdo 1234/2019" must not demand "srov" of every chunk.
+ */
+const CITATION_CUES: ReadonlySet<string> = new Set(["srov", "srv", "viz", "cit", "op", "dle"]);
+
+/**
  * tsquery strings for to_tsquery('simple', …) from free user text. Only
  * [a-z0-9] lexemes, quoted, and the builder's own operators reach the
  * output — operators, quotes and brackets in the input are just separators.
- * Stopwords are dropped outside phrases unless that leaves nothing. Text in
- * double quotes („…“ too) is a phrase: its words joined by <->, stopwords
- * kept (positions must line up). `weights` restricts every lexeme ("D" =
- * footnotes only, "ABC" = everything but footnotes). Pure.
+ * Stopwords are dropped outside phrases unless that leaves nothing ("to je
+ * ono"). `loneStopwords: false` drops them even then, and citation cues
+ * too: the caller stripped identifiers that carry the query ("k § 2913",
+ * "podle § 2913 OZ", "srov. 25 Cdo 1234/2019"), and a lone "k" or "podle"
+ * would match nearly every chunk — the scope-wide ts_rank_cd 0004 measured
+ * at 0.6–0.8 s per 50k chunks — for passages the identifiers found anyway.
+ * Text in double quotes („…“ too) is a phrase: its words joined by <->,
+ * stopwords kept (positions must line up). `weights` restricts every
+ * lexeme ("D" = footnotes only, "ABC" = everything but footnotes). Pure.
  */
-export function buildTsQuery(input: string, opts?: { weights?: string }): TsQueryBuild {
+export function buildTsQuery(input: string, opts?: { weights?: string; loneStopwords?: boolean }): TsQueryBuild {
   const weights = sanitizeWeights(opts?.weights);
+  const lone = opts?.loneStopwords !== false;
   const text = input.normalize("NFC").slice(0, MAX_QUERY_CHARS).replace(QUOTES, '"');
   const segments = text.split('"');
   // An unmatched opening quote: the rest is plain words, not a phrase.
@@ -354,9 +368,10 @@ export function buildTsQuery(input: string, opts?: { weights?: string }): TsQuer
     }
   });
 
-  const isStop = (item: { phrase: boolean; words: Word[] }) => !item.phrase && STOPWORDS.has(item.words[0].folded);
-  // Stopwords go, unless nothing else is left ("to je ono").
-  const content = items.some((item) => !isStop(item)) ? items.filter((item) => !isStop(item)) : items;
+  const isStop = (item: { phrase: boolean; words: Word[] }) =>
+    !item.phrase && (STOPWORDS.has(item.words[0].folded) || (!lone && CITATION_CUES.has(item.words[0].folded)));
+  // Stopwords go, unless nothing else is left ("to je ono") and lone stopwords may stay.
+  const content = items.some((item) => !isStop(item)) || !lone ? items.filter((item) => !isStop(item)) : items;
   const seen = new Set<string>();
   const chosen = content
     .filter((item) => {

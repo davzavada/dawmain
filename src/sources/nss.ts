@@ -1,6 +1,6 @@
 import { SourceError } from "./shared/errors";
 import { CookieSession, fetchUpstream } from "./shared/http";
-import { decodeBody, decodeJsStringLiteral, htmlToText, loadHtml, looksLikeHtml } from "./shared/html";
+import { decodeBody, htmlToText, loadHtml, looksLikeHtml } from "./shared/html";
 import { czechToIso } from "./shared/text";
 import { DOCUMENT_TTL_MS, SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
 
@@ -305,19 +305,67 @@ export interface NssResultsPage {
 }
 
 const COUNT_RE = /Počet nalezených záznamů:\s*([\d\s]+)/;
+const RESULT_ID_INPUT = "input[name^='ZobrazeneVysledky'][name$='.ID']";
+
+/**
+ * Decode an inline <script> string literal the way the browser's JS engine
+ * does. NSS writes currParams through JavaScriptEncoder, and a quote INSIDE a
+ * JSON string value — every codebook criterion's ciselnikTreeData
+ * (`title:\"kárné soudy\"`), a quoted-phrase query — arrives as `\\\u0022`:
+ * an escaped backslash, then an escaped quote. Rewriting only \uXXXX leaves
+ * `\\"`, which is invalid JSON, and MyResTRowsCont answers that with no rows —
+ * page 2+ of every court/registry/area/phrase search came back empty
+ * (measured live 2026-09: court 'nss', "dobré mravy", page 2 = "719
+ * decisions", 0 rows). One pass over every escape consumes `\\` before a
+ * following `u` can be misread. Pure.
+ */
+export function decodeNssScriptLiteral(value: string): string {
+  const simple: Record<string, string> = { n: "\n", r: "\r", t: "\t", b: "\b", f: "\f", v: "\v", "0": "\0" };
+  return value.replace(
+    /\\(?:u([0-9a-fA-F]{4})|x([0-9a-fA-F]{2})|([\s\S]))/g,
+    (_, unicode: string | undefined, hex: string | undefined, char: string) =>
+      unicode
+        ? String.fromCharCode(parseInt(unicode, 16))
+        : hex
+          ? String.fromCharCode(parseInt(hex, 16))
+          : (simple[char] ?? char),
+  );
+}
+
+function isJson(text: string): boolean {
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** Parse the search response or a MyResTRowsCont fragment. Pure — unit-tested. */
 export function parseNssResults(html: string): NssResultsPage {
   const countMatch = COUNT_RE.exec(html);
-  const $ = loadHtml(html);
+  // MyResTRowsCont answers bare `<tbody><tr><td>…` rows. Outside a table the
+  // parser drops those start tags (the HTML spec's "in body" mode), so every
+  // row lost its citation and cells and page 2+ printed "? — id N" (measured
+  // live 2026-09). Parsed in table context they read exactly like page 1.
+  // A fragment is told by what it starts with, not by the absence of
+  // "<table" anywhere: a row whose cell holds a table of its own would
+  // otherwise be parsed out of context again.
+  const fragment =
+    !/<(?:html|body)[\s>]/i.test(html) &&
+    (/^\s*(?:<!--[\s\S]*?-->\s*)*<(?:tbody|tr)[\s>]/i.test(html) || !/<table[\s>]/i.test(html));
+  const $ = loadHtml(fragment ? `<table>${html}</table>` : html);
 
   const hits: NssHit[] = [];
-  $("input[name^='ZobrazeneVysledky']").each((_, el) => {
+  $(RESULT_ID_INPUT).each((_, el) => {
     const $input = $(el);
-    if (!/\.ID$/.test($input.attr("name") ?? "")) return;
     const id = $input.attr("value");
     if (!id) return;
-    const container = $input.closest("tbody").length ? $input.closest("tbody") : $input.closest("tr");
+    // A row's own <tbody> — but only while it holds this one result: bare <tr>
+    // rows in table context share ONE implied tbody, and reading the citation
+    // from there would lend the first row's case number to every hit.
+    const tbody = $input.closest("tbody");
+    const container = tbody.length && tbody.find(RESULT_ID_INPUT).length === 1 ? tbody : $input.closest("tr");
     const citationAnchor = container.find("a[title^='Citace']").first();
     const citation = citationAnchor.attr("title")?.replace(/^Citace:\s*/, "").trim();
     // "rozsudek {court} ze dne {date}, čj. {spisová značka}"
@@ -348,11 +396,16 @@ export function parseNssResults(html: string): NssResultsPage {
   const currViewId = /var\s+currViewId\s*=\s*'([^']*)'/.exec(html);
   const currSort = /var\s+currSort\s*=\s*'([^']*)'/.exec(html);
   if (currParams && currViewId && currSort) {
-    pagination = {
-      currParams: decodeJsStringLiteral(currParams[1]),
-      currViewId: currViewId[1],
-      currSort: decodeJsStringLiteral(currSort[1]),
-    };
+    const params = decodeNssScriptLiteral(currParams[1]);
+    // Undecodable conditions would come back from MyResTRowsCont as an empty
+    // page that reads like the end of the results — no context is honest.
+    if (isJson(params)) {
+      pagination = {
+        currParams: params,
+        currViewId: currViewId[1],
+        currSort: decodeNssScriptLiteral(currSort[1]),
+      };
+    }
   }
 
   const blankForm =
@@ -371,6 +424,8 @@ export function parseNssResults(html: string): NssResultsPage {
 export interface NssDecision {
   id: string;
   metadata: Record<string, string>;
+  /** The detail page failed this time (not cached) — the metadata is missing, not absent. */
+  metadataUnavailable?: boolean;
   text: string;
   url: string;
 }
@@ -420,9 +475,15 @@ export function parseNssDetail(html: string): Record<string, string> {
   return metadata;
 }
 
-/** The Text/Html endpoints signal a missing document with a tiny 'N/A' body. */
+/**
+ * The Text/Html endpoints signal a missing document with a tiny 'N/A' body.
+ * That page is UTF-16 without a charset (live 2026-09: "HTTP 200 text/html"),
+ * so read as UTF-8 it carries a NUL after every character (216 chars, the tag
+ * boundaries broken) — the NULs and BOM remnants are dropped before judging.
+ */
 export function isNssMissingBody(body: string): boolean {
-  return body.length < 200 && /(^|>)\s*N\/A\s*(<|$)/.test(body);
+  const clean = body.replace(/[\u0000\ufeff\ufffd]/g, "");
+  return clean.length < 200 && /(^|>)\s*N\/A\s*(<|$)/.test(clean);
 }
 
 // ---------- I/O ----------
@@ -434,17 +495,33 @@ interface NssSession {
 }
 
 let cachedSession: NssSession | null = null;
+/** The handshake under way — concurrent callers share it instead of each opening a session. */
+let pendingSession: Promise<NssSession> | null = null;
 
-async function handshake(force = false): Promise<NssSession> {
-  if (!force && cachedSession && Date.now() - cachedSession.fetchedAt < SESSION_TTL_MS) {
-    return cachedSession;
+/**
+ * The cached session, or a fresh one. Every search that starts while a
+ * handshake is under way awaits that same handshake: a cold caselaw_search
+ * with 3 variants used to open 3 sessions at once (a multi-variant page p up
+ * to 3·p) — the burst the rate limit above punishes. `stale` is the session a
+ * caller just saw rejected: a replacement is fetched only while it is still
+ * the cached one — a newer session another caller already fetched is reused,
+ * so N requests hitting one expiry cost one GET /, not N.
+ */
+function handshake(stale?: NssSession): Promise<NssSession> {
+  if (cachedSession && cachedSession !== stale && Date.now() - cachedSession.fetchedAt < SESSION_TTL_MS) {
+    return Promise.resolve(cachedSession);
   }
-  const cookies = new CookieSession();
-  const response = await fetchUpstream(SOURCE, `${BASE}/`);
-  cookies.absorb(response);
-  const { fields } = parseNssForm(await response.text());
-  cachedSession = { cookies, fields, fetchedAt: Date.now() };
-  return cachedSession;
+  pendingSession ??= (async () => {
+    const cookies = new CookieSession();
+    const response = await fetchUpstream(SOURCE, `${BASE}/`);
+    cookies.absorb(response);
+    const { fields } = parseNssForm(await response.text());
+    cachedSession = { cookies, fields, fetchedAt: Date.now() };
+    return cachedSession;
+  })().finally(() => {
+    pendingSession = null;
+  });
+  return pendingSession;
 }
 
 export interface NssSearchInput {
@@ -475,12 +552,78 @@ function isoToCzechPadded(iso: string): string {
   return `${day}.${month}.${year}`;
 }
 
-/** Codebook subtrees behind the `court` filter (titles verbatim from the live tree). */
-const NSS_COURT_GROUPS: Record<NonNullable<NssSearchInput["court"]>, string> = {
-  nss: "Nejvyšší správní soud",
-  "rozsireny-senat": "rozšířený senát NSS",
-  krajske: "krajské soudy",
-  karne: "kárné soudy",
+/**
+ * A bound NSS cannot bind is not an error there: "30.02.2026" is nulled by the
+ * model binder and the search runs WITHOUT it (measured live 2026-09:
+ * date_from 2026-02-30 answered the identical 719 hits, 2025 decisions
+ * included, as no date at all). Impossible days and inverted ranges are
+ * therefore refused here, before any request. Pure.
+ */
+export function validateNssDates(input: NssSearchInput): void {
+  const bounds: Array<[string, string | undefined]> = [
+    ["date_from", input.dateFrom],
+    ["date_to", input.dateTo],
+    ["published_from", input.publishedFrom],
+    ["published_to", input.publishedTo],
+  ];
+  for (const [label, value] of bounds) {
+    if (value === undefined) continue;
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    const date = m ? new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))) : null;
+    if (
+      !m ||
+      !date ||
+      date.getUTCFullYear() !== Number(m[1]) ||
+      date.getUTCMonth() !== Number(m[2]) - 1 ||
+      date.getUTCDate() !== Number(m[3])
+    ) {
+      throw new SourceError(
+        SOURCE,
+        "INPUT_INVALID",
+        `${label} "${value}" is not a real date.`,
+        "Use an existing day as YYYY-MM-DD, e.g. 2026-02-28 for the end of February.",
+      );
+    }
+  }
+  const ranges: Array<[string, string | undefined, string, string | undefined]> = [
+    ["date_from", input.dateFrom, "date_to", input.dateTo],
+    ["published_from", input.publishedFrom, "published_to", input.publishedTo],
+  ];
+  for (const [fromLabel, from, toLabel, to] of ranges) {
+    if (from && to && from > to) {
+      throw new SourceError(
+        SOURCE,
+        "INPUT_INVALID",
+        `${fromLabel} ${from} is after ${toLabel} ${to}.`,
+        `Swap them — ${fromLabel} is the earlier bound.`,
+      );
+    }
+  }
+}
+
+/**
+ * The full-text value as NSS can match it. The index has no '§' token: any
+ * query containing one answers 0 (measured live 2026-09: "náhrada nemajetkové
+ * újmy § 2958" = 0, the same words without '§' = 2), so it goes — the number
+ * after it still narrows. Pure.
+ */
+export function nssFullText(query: string): string {
+  return query.replace(/§+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Codebook nodes behind the `court` filter (titles verbatim from the live
+ * tree). "karne" is two nodes: the kárné soudy at NS and the vrchní soudy
+ * (Ds, since the 2025 reform) and the NSS's own kárný senát under the NSS
+ * node, which decided every disciplinary case of judges, prosecutors and
+ * executors until then (Kss, Ksz, Kse…; live 2026-09: 362 Kss decisions,
+ * none reachable through "kárné soudy" alone).
+ */
+const NSS_COURT_GROUPS: Record<NonNullable<NssSearchInput["court"]>, string[]> = {
+  nss: ["Nejvyšší správní soud"],
+  "rozsireny-senat": ["rozšířený senát NSS"],
+  krajske: ["krajské soudy"],
+  karne: ["kárné soudy", "kárný senát"],
 };
 
 /**
@@ -581,6 +724,7 @@ export function buildNssSearchForm(fields: NssFormField[], input: NssSearchInput
     claim(criterion, `${prefix}.HodnotaCiselnikPolozkySelected`, ids.join(","));
   };
 
+  validateNssDates(input);
   if (input.dateFrom) {
     setCriterion("date from", isoToCzechPadded(input.dateFrom), ".HodnotaDatumACasOd", null, /^datumvydanirozhodnuti$/);
   }
@@ -593,10 +737,11 @@ export function buildNssSearchForm(fields: NssFormField[], input: NssSearchInput
   if (input.publishedTo) {
     setStrict("published to", isoToCzechPadded(input.publishedTo), /^aktualizovano$/, ".HodnotaDatumACasDo");
   }
-  if (input.query) {
+  const fullText = input.query ? nssFullText(input.query) : "";
+  if (fullText) {
     setCriterion(
       "full text",
-      input.query,
+      fullText,
       ".HodnotaText",
       /pln[ýé]\s*text|fulltext|text\s+rozhodnutí|slova/i,
       /^textdokumentu$|fulltext|^text/i,
@@ -612,10 +757,15 @@ export function buildNssSearchForm(fields: NssFormField[], input: NssSearchInput
     );
   }
   if (input.court) {
-    const wanted = fold(NSS_COURT_GROUPS[input.court]);
+    const groups = NSS_COURT_GROUPS[input.court];
+    const wanted = groups.map(fold);
     setDial("court", /^soudsenat$/, (tree) => {
-      const selection = selectFromCiselnik(tree, (title) => fold(title) === wanted);
-      if (!selection.ids.length) drift(`court group "${NSS_COURT_GROUPS[input.court!]}"`);
+      const selection = selectFromCiselnik(tree, (title) => wanted.includes(fold(title)));
+      // Every node must be found: a group that silently lost half its nodes
+      // would answer a narrower question under the same name.
+      const found = new Set(selection.titles.map(fold));
+      const missing = groups.find((title) => !found.has(fold(title)));
+      if (missing) drift(`court group "${missing}"`);
       return selection;
     });
   }
@@ -709,7 +859,18 @@ export function buildNssSearchForm(fields: NssFormField[], input: NssSearchInput
   return form;
 }
 
-async function postSearch(session: NssSession, input: NssSearchInput): Promise<string> {
+interface NssAnswer {
+  status: number;
+  ok: boolean;
+  html: string;
+}
+
+/** Release a body nobody will read, so its connection is freed at once. */
+async function discard(response: Response): Promise<void> {
+  await response.body?.cancel().catch(() => {});
+}
+
+async function postSearch(session: NssSession, input: NssSearchInput): Promise<NssAnswer> {
   const form = buildNssSearchForm(session.fields, input);
 
   const response = await fetchUpstream(SOURCE, `${BASE}/Home/Index`, {
@@ -723,7 +884,11 @@ async function postSearch(session: NssSession, input: NssSearchInput): Promise<s
     timeoutMs: 25_000,
   });
   session.cookies.absorb(response);
-  return response.text();
+  if (!response.ok) {
+    await discard(response);
+    return { status: response.status, ok: false, html: "" };
+  }
+  return { status: response.status, ok: true, html: await response.text() };
 }
 
 export interface NssSearchResult extends NssResultsPage {
@@ -731,17 +896,58 @@ export interface NssSearchResult extends NssResultsPage {
   page: number;
 }
 
-const searchCache = new TtlCache<NssSearchResult>(SEARCH_TTL_MS);
-const decisionCache = new TtlCache<NssDecision>(DOCUMENT_TTL_MS, 24);
-
-export async function searchNss(input: NssSearchInput, page: number): Promise<NssSearchResult> {
-  return searchCache.through(memoKey("nss-search", [input, page]), () => runSearchNss(input, page));
+export interface NssSearchOptions {
+  /**
+   * When the caller's clock for this search started (Date.now()). A page > 1
+   * budgets its row fragment from here — pass it when the caller itself ran
+   * page 1 just before. Not part of the cache key.
+   */
+  since?: number;
 }
 
-async function runSearchNss(input: NssSearchInput, page: number): Promise<NssSearchResult> {
+const searchCache = new TtlCache<NssSearchResult>(SEARCH_TTL_MS);
+/** Decision texts are big — a couple of dozen at most; metadata is small. */
+const textCache = new TtlCache<string>(DOCUMENT_TTL_MS, 24);
+const metadataCache = new TtlCache<Record<string, string>>(DOCUMENT_TTL_MS);
+
+/** Rows on the inline first page; every MyResTRowsCont page carries 20. */
+const FIRST_PAGE_ROWS = 40;
+const LATER_PAGE_ROWS = 20;
+/**
+ * Page 1 (handshake included) plus one row fragment together. The fragment
+ * re-runs the same full-text search upstream, so it deserves the 25 s the
+ * Index POST gets — when page 1 came from the cache. A call that had to run
+ * page 1 first leaves the fragment only the rest (never under 10 s), so a
+ * slow search, its fragment and the 15 s read_top previews stay inside the
+ * 60 s function limit.
+ */
+const PAGING_BUDGET_MS = 40_000;
+const FRAGMENT_MAX_TIMEOUT_MS = 25_000;
+const FRAGMENT_MIN_TIMEOUT_MS = 10_000;
+
+/**
+ * Statuses an expired or rejected antiforgery session may answer with instead
+ * of the documented blank 200 form (ASP.NET Core's default rejection is 400).
+ * They get the same single re-handshake before the search is given up.
+ */
+const STALE_SESSION_STATUSES = new Set([400, 403, 419]);
+
+export async function searchNss(
+  input: NssSearchInput,
+  page: number,
+  options: NssSearchOptions = {},
+): Promise<NssSearchResult> {
+  return searchCache.through(memoKey("nss-search", [input, page]), () =>
+    page > 1 ? runLaterPage(input, page, options.since ?? Date.now()) : runFirstPage(input),
+  );
+}
+
+/** Everything that can be refused without asking NSS. */
+function validateNssSearch(input: NssSearchInput): void {
   validateNssApplies(input);
+  validateNssDates(input);
   const hasCriterion =
-    input.query ||
+    (input.query && nssFullText(input.query)) ||
     input.caseNumber ||
     input.dateFrom ||
     input.dateTo ||
@@ -762,16 +968,21 @@ async function runSearchNss(input: NssSearchInput, page: number): Promise<NssSea
       "Provide query (full-text), case_number, a date range, court, registry, area, or an applies_* filter.",
     );
   }
+}
+
+async function runFirstPage(input: NssSearchInput): Promise<NssSearchResult> {
+  validateNssSearch(input);
 
   let session = await handshake();
-  let html = await postSearch(session, input);
-  let results = parseNssResults(html);
-  if (results.blankForm) {
-    // Expired session → one forced re-handshake.
-    session = await handshake(true);
-    html = await postSearch(session, input);
-    results = parseNssResults(html);
-    if (results.blankForm) {
+  let answer = await postSearch(session, input);
+  let results = answer.ok ? parseNssResults(answer.html) : null;
+  if (results?.blankForm || STALE_SESSION_STATUSES.has(answer.status)) {
+    // Expired session → one forced re-handshake (shared with every search
+    // that hit the same expiry).
+    session = await handshake(session);
+    answer = await postSearch(session, input);
+    results = answer.ok ? parseNssResults(answer.html) : null;
+    if (results?.blankForm) {
       throw new SourceError(
         SOURCE,
         "SESSION_EXPIRED",
@@ -780,12 +991,51 @@ async function runSearchNss(input: NssSearchInput, page: number): Promise<NssSea
       );
     }
   }
+  if (!results) {
+    throw new SourceError(
+      SOURCE,
+      "UPSTREAM_ERROR",
+      `NSS answered the search with HTTP ${answer.status}.`,
+      "The portal refused the request — try again in a few minutes; if it persists, run dawmain_probe_sources (canary 'nss').",
+    );
+  }
+  // A genuine zero says "Počet nalezených záznamů: 0". A page with neither a
+  // count nor rows is something else — an error page, a redirect target, a
+  // redesign — and must not read (or be cached) as "no case law".
+  if (results.total === null && !results.hits.length) {
+    throw new SourceError(
+      SOURCE,
+      "PARSE_DRIFT",
+      "NSS answered without a result count.",
+      "The results page changed or an error page came back — run dawmain_probe_sources (canary 'nss') with include_raw.",
+    );
+  }
+  if (results.total && !results.hits.length) {
+    throw new SourceError(
+      SOURCE,
+      "PARSE_DRIFT",
+      `NSS reports ${results.total} decisions, but no result row could be read.`,
+      "The result rows changed — run dawmain_probe_sources (canary 'nss') with include_raw.",
+    );
+  }
+  return { ...results, page: 1 };
+}
 
-  if (page <= 1) return { ...results, page: 1 };
-
-  // Later pages come from the AJAX row endpoint, reconstructed from the
-  // pagination context (no server session needed for this endpoint).
-  if (!results.pagination) {
+/**
+ * Later pages come from the AJAX row endpoint, rebuilt from page 1's
+ * pagination context. Page 1 is taken through the cache: paging on (or
+ * several pages of one variant) costs one row fragment each instead of the
+ * slow full-text POST again — MyResTRowsCont re-runs the search from the
+ * posted conditions anyway.
+ */
+async function runLaterPage(input: NssSearchInput, page: number, since: number): Promise<NssSearchResult> {
+  const first = await searchNss(input, 1);
+  const offset = FIRST_PAGE_ROWS + (page - 2) * LATER_PAGE_ROWS;
+  if (first.total !== null && offset >= first.total) {
+    // Past the last hit — nothing to ask NSS for.
+    return { total: first.total, hits: [], pagination: null, blankForm: false, page };
+  }
+  if (!first.pagination) {
     throw new SourceError(
       SOURCE,
       "PARSE_DRIFT",
@@ -793,13 +1043,14 @@ async function runSearchNss(input: NssSearchInput, page: number): Promise<NssSea
       "Only the first page is available — narrow the query instead of paging.",
     );
   }
+  const session = await handshake();
   const body = new URLSearchParams({
-    vyhledavaciPodminky: results.pagination.currParams,
-    zobrazeniVysledkuId: results.pagination.currViewId,
+    vyhledavaciPodminky: first.pagination.currParams,
+    zobrazeniVysledkuId: first.pagination.currViewId,
     pageNum: String(page - 1),
-    resultOrder: results.pagination.currSort,
+    resultOrder: first.pagination.currSort,
   });
-  const fragmentResponse = await fetchUpstream(SOURCE, `${BASE}/Home/MyResTRowsCont`, {
+  const response = await fetchUpstream(SOURCE, `${BASE}/Home/MyResTRowsCont`, {
     method: "POST",
     headers: {
       "content-type": "application/x-www-form-urlencoded",
@@ -808,12 +1059,36 @@ async function runSearchNss(input: NssSearchInput, page: number): Promise<NssSea
       referer: `${BASE}/Home/Index`,
     },
     body: body.toString(),
+    timeoutMs: Math.min(
+      FRAGMENT_MAX_TIMEOUT_MS,
+      Math.max(FRAGMENT_MIN_TIMEOUT_MS, PAGING_BUDGET_MS - (Date.now() - since)),
+    ),
   });
-  const fragment = parseNssResults(await fragmentResponse.text());
-  return { ...fragment, total: fragment.total ?? results.total, page };
+  session.cookies.absorb(response);
+  if (!response.ok) {
+    await discard(response);
+    throw new SourceError(
+      SOURCE,
+      "UPSTREAM_ERROR",
+      `NSS answered page ${page} with HTTP ${response.status}.`,
+      "Try again in a minute, or narrow the query instead of paging.",
+    );
+  }
+  const fragment = parseNssResults(await response.text());
+  if (!fragment.hits.length && first.total !== null) {
+    // The offset is below the total here: the rows exist, NSS did not send
+    // them. An empty page would read as the end of the results.
+    throw new SourceError(
+      SOURCE,
+      "PARSE_DRIFT",
+      `NSS sent no rows for page ${page} although it reports ${first.total} decisions.`,
+      "Narrow the query (court, registry, dates) instead of paging; if page 2 of a small search fails too, run dawmain_probe_sources (canary 'nss').",
+    );
+  }
+  return { ...fragment, total: fragment.total ?? first.total, page };
 }
 
-export async function getNssDecision(id: string): Promise<NssDecision> {
+function assertNssId(id: string): void {
   if (!/^\d{1,10}$/.test(id)) {
     throw new SourceError(
       SOURCE,
@@ -822,39 +1097,133 @@ export async function getNssDecision(id: string): Promise<NssDecision> {
       "Pass the numeric id returned by nss_search.",
     );
   }
-  return decisionCache.through(memoKey("nss-doc", [id]), () => runGetNssDecision(id));
 }
 
-async function runGetNssDecision(id: string): Promise<NssDecision> {
-  const [detailResponse, textResponse] = await Promise.all([
-    fetchUpstream(SOURCE, `${BASE}/DokumentDetail/Index/${id}`).catch(() => null),
-    fetchUpstream(SOURCE, `${BASE}/DokumentOriginal/Text/${id}`),
-  ]);
+const detailUrl = (id: string) => `${BASE}/DokumentDetail/Index/${id}`;
 
-  // The plain-text endpoint is UTF-16 (BOM-detected in decodeBody); Aspose
-  // leaves control characters where dashes belong (\u001e in case numbers).
-  let text = (await decodeBody(textResponse, "utf-16le"))
-    .replace(/\u001e/g, "-")
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, " ")
-    .trim();
-  if (isNssMissingBody(text)) {
-    // Fall back to the HTML rendition before declaring the document missing.
-    const htmlResponse = await fetchUpstream(SOURCE, `${BASE}/DokumentOriginal/Html/${id}`);
-    const html = await htmlResponse.text();
-    if (isNssMissingBody(html)) {
-      throw new SourceError(
-        SOURCE,
-        "NOT_FOUND",
-        `NSS has no document text for id ${id}.`,
-        "The id may be stale — re-run nss_search and use a fresh id.",
-      );
-    }
-    text = htmlToText(html);
-  } else if (looksLikeHtml(text)) {
+/**
+ * Metadata and text are cached apart. A detail page that failed is not
+ * cached — the next call asks for it alone while the text stays cached; one
+ * failed request used to strip ECLI and spisová značka from every answer for
+ * that id for 10 minutes. The detail keeps the GET default timeout and retry:
+ * the citation fields are worth the wait.
+ */
+export async function getNssDecision(id: string): Promise<NssDecision> {
+  assertNssId(id);
+  const [metadata, text] = await Promise.all([
+    nssMetadata(id).catch(() => null),
+    nssText(id),
+  ]);
+  return {
+    id,
+    metadata: metadata ?? {},
+    ...(metadata ? {} : { metadataUnavailable: true }),
+    text,
+    url: detailUrl(id),
+  };
+}
+
+/**
+ * The decision text alone — for read_top previews, which must never wait on
+ * the detail page. The detail is still requested (not awaited), so the
+ * nss_get_decision a preview usually leads to finds its metadata cached.
+ */
+export async function getNssDecisionText(id: string): Promise<string> {
+  assertNssId(id);
+  void nssMetadata(id).catch(() => {});
+  return nssText(id);
+}
+
+function nssMetadata(id: string): Promise<Record<string, string>> {
+  return metadataCache.through(memoKey("nss-meta", [id]), () => loadNssMetadata(id));
+}
+
+function nssText(id: string): Promise<string> {
+  return textCache.through(memoKey("nss-text", [id]), () => loadNssText(id));
+}
+
+async function loadNssMetadata(id: string): Promise<Record<string, string>> {
+  const response = await fetchUpstream(SOURCE, detailUrl(id));
+  // 404 is definitive — the document has no detail page — and is cached so.
+  if (response.status === 404) {
+    await discard(response);
+    return {};
+  }
+  if (!response.ok) {
+    await discard(response);
+    throw new SourceError(
+      SOURCE,
+      "UPSTREAM_ERROR",
+      `NSS detail page answered HTTP ${response.status}.`,
+      "Call nss_get_decision again for the metadata.",
+    );
+  }
+  return parseNssDetail(await response.text());
+}
+
+function missingDocument(id: string): SourceError {
+  return new SourceError(
+    SOURCE,
+    "NOT_FOUND",
+    `NSS has no document text for id ${id}.`,
+    "The id may be stale — re-run nss_search and use a fresh id.",
+  );
+}
+
+/**
+ * The HTML rendition's charset varies: real decisions come as "text/html;
+ * charset=UTF-8", the missing-document page as UTF-16 with no charset at all
+ * (live 2026-09). Read as UTF-8, that page came back as its own markup — the
+ * NULs defeated the N/A test and the tags survived as text. Without a charset
+ * or BOM the bytes decide: UTF-8 markup never holds NUL bytes, UTF-16LE
+ * markup has one after nearly every character.
+ */
+async function decodeRendition(response: Response): Promise<string> {
+  const buffer = await response.arrayBuffer();
+  const head = new Uint8Array(buffer, 0, Math.min(buffer.byteLength, 512));
+  let nuls = 0;
+  for (let i = 1; i < head.length; i += 2) if (head[i] === 0) nuls++;
+  const fallback = nuls > head.length / 8 ? "utf-16le" : "utf-8";
+  const text = await decodeBody(new Response(buffer, { headers: response.headers }), fallback);
+  return text.replace(/\u0000/g, "");
+}
+
+async function loadNssText(id: string): Promise<string> {
+  const textResponse = await fetchUpstream(SOURCE, `${BASE}/DokumentOriginal/Text/${id}`);
+  let text = "";
+  if (textResponse.ok) {
+    // The plain-text endpoint is UTF-16 (BOM-detected in decodeBody); Aspose
+    // leaves control characters where dashes belong (\u001e in case numbers).
+    text = (await decodeBody(textResponse, "utf-16le"))
+      .replace(/\u001e/g, "-")
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, " ")
+      .trim();
+  } else {
+    // An error page is not the decision — never hand it out as the text.
+    await discard(textResponse);
+  }
+  if (text && !isNssMissingBody(text)) {
     // Residual tags in the text rendition — strip them.
-    text = htmlToText(text);
+    return looksLikeHtml(text) ? htmlToText(text) : text;
   }
 
-  const metadata = detailResponse?.ok ? parseNssDetail(await detailResponse.text()) : {};
-  return { id, metadata, text, url: `${BASE}/DokumentDetail/Index/${id}` };
+  // No usable text rendition: fall back to the HTML rendition before
+  // declaring the document missing.
+  const htmlResponse = await fetchUpstream(SOURCE, `${BASE}/DokumentOriginal/Html/${id}`);
+  if (!htmlResponse.ok) {
+    await discard(htmlResponse);
+    if (htmlResponse.status === 404 || htmlResponse.status === 410) throw missingDocument(id);
+    throw new SourceError(
+      SOURCE,
+      "UPSTREAM_ERROR",
+      `NSS answered HTTP ${htmlResponse.status} for the text of document ${id}.`,
+      "Try again in a minute; if it persists, run dawmain_probe_sources (canary 'nss').",
+    );
+  }
+  const html = await decodeRendition(htmlResponse);
+  const converted = isNssMissingBody(html) ? "" : htmlToText(html);
+  // htmlToText keeps the <title> ("N/A - text"): a page that says nothing
+  // else is the missing-document page in another shape.
+  if (!converted || /^\s*(?:N\/A(?:\s*-\s*text)?\s*)+$/i.test(converted)) throw missingDocument(id);
+  return converted;
 }

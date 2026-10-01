@@ -305,6 +305,26 @@ describe("zoteroFetch: Backoff and Retry-After", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("a request waiting out a short pause looks again before it goes: a 429 that came back meanwhile holds it", async () => {
+    let answerB: (res: Response) => void = () => undefined;
+    const calls = stubFetch((_, n) => (n === 1 ? new Promise<Response>((resolve) => (answerB = resolve)) : n === 2 ? json([], { Backoff: "2" }) : json([])));
+    // B is in flight; X brings a 2 s Backoff; A starts waiting it out.
+    const b = rejection(zoteroFetch(CREDS, PATH));
+    await vi.advanceTimersByTimeAsync(0);
+    await zoteroFetch(CREDS, PATH);
+    const a = rejection(zoteroFetch(CREDS, PATH));
+    await vi.advanceTimersByTimeAsync(1_000);
+    // Meanwhile B comes back: Zotero's rate limit for this user, for a minute.
+    answerB(new Response("slow down", { status: 429, headers: { "Retry-After": "60" } }));
+    await vi.advanceTimersByTimeAsync(1_100);
+    const e = (await a) as SourceError;
+    expect(e.kind).toBe("UPSTREAM_ERROR");
+    expect(e.message).toMatch(/pause for another (58|59) s/);
+    // A never went out.
+    expect(calls).toHaveLength(2);
+    expect(((await b) as SourceError).message).toContain("60 s");
+  });
+
   it("never retries a DELETE", async () => {
     const calls = stubFetch(() => new Response("busy", { status: 503, headers: { "Retry-After": "1" } }));
     const pending = rejection(zoteroFetch(CREDS, "/keys/current", { method: "DELETE" }));

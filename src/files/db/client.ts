@@ -163,9 +163,10 @@ export async function withScope<T>(
     }
     await markActivity(client);
     await client.query("BEGIN");
-    await client.query("SELECT set_config('app.library_ids', $1, true)", [libraryIds.join(",")]);
-    // Transaction-local, hence pooler-safe (a session SET would stick to the server connection).
-    await client.query("SELECT set_config('statement_timeout', $1, true)", [
+    // Both transaction-local, hence pooler-safe (a session SET would stick to the server
+    // connection); one statement, as every statement is a round trip to the pooler.
+    await client.query("SELECT set_config('app.library_ids', $1, true), set_config('statement_timeout', $2, true)", [
+      libraryIds.join(","),
       String(options.statementTimeoutMs ?? DEFAULT_STATEMENT_TIMEOUT_MS),
     ]);
     const result = await fn(client as unknown as Queryable);

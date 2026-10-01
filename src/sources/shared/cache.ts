@@ -26,6 +26,11 @@ export function memoKey(scope: string, parts: unknown): string {
 
 export class TtlCache<T> {
   private readonly store = new Map<string, Entry<T>>();
+  /** Loads still running, by key. Two identical calls arriving together (a
+   * caselaw_search lane and the court's own *_search, parallel § reads of
+   * one act) would otherwise each send the same upstream request — to
+   * sources that rate-limit (NSS, justice.cz) or queue us behind a gate (NS). */
+  private readonly pending = new Map<string, Promise<T>>();
 
   constructor(
     private readonly ttlMs: number,
@@ -43,7 +48,10 @@ export class TtlCache<T> {
   }
 
   set(key: string, value: T): void {
-    if (this.store.size >= this.maxEntries) {
+    // Re-setting a key must not evict an unrelated entry: it frees its own
+    // slot first, and moves to the end of the eviction order as fresh data.
+    if (this.store.has(key)) this.store.delete(key);
+    else if (this.store.size >= this.maxEntries) {
       // Drop the oldest entry — enough bookkeeping for a per-instance cache.
       const oldest = this.store.keys().next().value;
       if (oldest !== undefined) this.store.delete(oldest);
@@ -51,16 +59,44 @@ export class TtlCache<T> {
     this.store.set(key, { at: Date.now(), value });
   }
 
-  /** Evict one entry — for a cached value that turned out to be dead. */
+  /** Evict one entry — for a cached value that turned out to be dead. A load
+   * still running for the key is forgotten too, so its value is not stored
+   * when it lands and the next call loads afresh. */
   delete(key: string): void {
     this.store.delete(key);
+    this.pending.delete(key);
   }
 
-  async through(key: string, load: () => Promise<T>): Promise<T> {
+  /**
+   * Cached value, or one shared load per key: concurrent callers of a key
+   * that is still loading get the same promise. A rejection is never cached
+   * (every waiting caller sees it; the next call loads again). The loader's
+   * own bounds (timeouts, deadlines) are those of the caller that started
+   * it — the loads here take no per-caller signal, so sharing is safe.
+   */
+  through(key: string, load: () => Promise<T>): Promise<T> {
     const hit = this.get(key);
-    if (hit !== undefined) return hit;
-    const value = await load();
-    this.set(key, value);
-    return value;
+    if (hit !== undefined) return Promise.resolve(hit);
+    const running = this.pending.get(key);
+    if (running) return running;
+    let promise: Promise<T> | undefined;
+    const load$ = async (): Promise<T> => {
+      // Yield first, so `promise` is assigned and registered as pending
+      // before the loader runs — even a loader that throws synchronously.
+      await undefined;
+      try {
+        const value = await load();
+        // Stored only while this load is still the current one: a delete(key)
+        // in the meantime (a value found dead) must not be undone by it.
+        if (this.pending.get(key) === promise) this.set(key, value);
+        return value;
+      } finally {
+        if (this.pending.get(key) === promise) this.pending.delete(key);
+      }
+    };
+    const started = load$();
+    promise = started;
+    this.pending.set(key, started);
+    return started;
   }
 }

@@ -9,9 +9,11 @@ import {
   isbn10to13,
   MAX_IDENT_KEYS,
   normalizeIsbn,
+  pinpointOnly,
   queryIdentKeys,
   stripIdentifiers,
 } from "@/src/files/index/identifiers";
+import { buildTsQuery } from "@/src/files/text/analyze";
 
 const NBSP = " ";
 
@@ -294,6 +296,70 @@ describe("stripIdentifiers", () => {
     expect(stripIdentifiers("náhrada škody § 2913 odst. 2 OZ")).toBe("náhrada škody");
     expect(stripIdentifiers("výpověď zákoník práce")).toBe("výpověď zákoník práce");
     expect(stripIdentifiers("§ 2913 o. z.")).toBe("");
+  });
+
+  it("removes the citation furniture that comes with an identifier (every citing chunk has it)", () => {
+    const lexical = (q: string) => buildTsQuery(stripIdentifiers(q)).and;
+    for (const q of ["sp. zn. 25 Cdo 1234/2019", "Sp.zn. 25 Cdo 1234/19", "sen. zn. 25 Cdo 1234/2019", "č. j. 12 Co 45/2020", "čj. 12 Co 45/2020", "zákon č. 89/2012 Sb.", "zákona č. 89/2012 Sb"]) {
+      expect(lexical(q), q).toBeNull();
+    }
+    expect(lexical("zákona č. 262/2006 Sb. výpověď")).toBe(buildTsQuery("výpověď").and);
+    expect(stripIdentifiers("rozsudek sp. zn. 25 Cdo 1234/2019 náhrada škody")).toBe("rozsudek náhrada škody");
+    // Only right before / after the identifier: elsewhere the words stay searchable.
+    expect(stripIdentifiers("sp. zn. neuvedena, 25 Cdo 1234/2019")).toBe("sp. zn. neuvedena,");
+    // The NSS reports and treaties keep their own "Sb." forms.
+    expect(stripIdentifiers("zákon č. 89/2012 Sb. m. s.")).toContain("Sb. m. s.");
+    // Pinpoint words into a § stay: they rank the passages inside the §.
+    expect(stripIdentifiers("§ 52 písm. g) ZP")).toBe("písm. g)");
+  });
+});
+
+describe("pinpointOnly", () => {
+  it("a remainder of pinpoint words into a § (with letters, numbers, stopwords)", () => {
+    for (const rest of ["písm. g)", "pism. a) bod 3", "věta první", "odst. 2 věta druhá", "část věty za středníkem", "bod ii."]) {
+      expect(pinpointOnly(rest), rest).toBe(true);
+    }
+  });
+  it("not with a real word, and not without a pinpoint word", () => {
+    for (const rest of ["písm. g) výpověď", "g)", "první", "", "za", "náhrada škody"]) expect(pinpointOnly(rest), rest).toBe(false);
+  });
+});
+
+describe("query mode: a known registry typed in lowercase", () => {
+  it("case numbers: NS / NSS / lower-court registries, ÚS and CJEU — the same keys as the index", () => {
+    expect(queryIdentKeys("25 cdo 1234/19").keys).toEqual(["sz:25cdo1234-2019"]);
+    expect(queryIdentKeys("4 as 12/2019").keys).toEqual(["sz:4as12-2019"]);
+    expect(queryIdentKeys("29 nsčr 12/2019").keys).toEqual(["sz:29nscr12-2019"]);
+    expect(queryIdentKeys("12 co 45/2020").keys).toEqual(["sz:12co45-2020"]);
+    expect(queryIdentKeys("ii. ús 1234/20").keys).toEqual(["sz:2us1234-2020"]);
+    expect(queryIdentKeys("pl. ús 5/20").keys).toEqual(["sz:plus5-2020"]);
+    expect(queryIdentKeys("c-311/18").keys).toEqual(["sz:c-311-2018"]);
+    expect(stripIdentifiers("náhrada 25 cdo 1234/2019")).toBe("náhrada");
+    // Mixed case is unchanged: one key, one span.
+    expect(queryIdentKeys("25 Cdo 1234/2019 a 25 cdo 1234/2019").keys).toEqual(["sz:25cdo1234-2019"]);
+  });
+  it("not Czech words or single letters, and not in document text", () => {
+    for (const q of ["3 na 5/2020", "2 nad 7/2019", "5 to 12/2020", "4 c 12/2020", "4 t 12/2020", "5 xyz 12/2020"]) {
+      expect(queryIdentKeys(q).keys, q).toEqual([]);
+    }
+    // The index side stays case-sensitive (precision on real text).
+    expect(extractIdentKeys("viz 25 cdo 1234/2019")).toEqual([]);
+    expect(findIdentSpans("viz 25 cdo 1234/2019")).toEqual([]);
+    expect(findIdentSpans("viz 25 cdo 1234/2019", { query: true }).map((s) => s.keys)).toEqual([["sz:25cdo1234-2019"]]);
+  });
+});
+
+describe("DOI trimming is linear", () => {
+  it("a query of one DOI and 40,000 closers parses in well under a second", () => {
+    const q = `10.1234/${")".repeat(40_000)}`;
+    const t0 = performance.now();
+    const keys = queryIdentKeys(q).keys;
+    stripIdentifiers(q);
+    expect(performance.now() - t0).toBeLessThan(500);
+    expect(keys).toEqual(["doi:10.1234/"]);
+    // Balanced brackets inside stay; stray closers and sentence punctuation go.
+    expect(extractIdentKeys("(viz 10.1000/abc(1)2).")).toEqual(["doi:10.1000/abc(1)2"]);
+    expect(extractIdentKeys("[10.1000/x[y]]).")).toEqual(["doi:10.1000/x[y]"]);
   });
 });
 

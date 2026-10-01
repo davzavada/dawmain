@@ -70,11 +70,24 @@ describe("withScope on the pooled connection", () => {
     expect(pg.queries.some((q) => /^\s*SET\s/i.test(q))).toBe(false);
   });
 
+  it("sets the scope and the timeout in ONE statement right after BEGIN, both transaction-local", async () => {
+    await withScope(["user_a", "org_b"], async () => "ok");
+    const begin = pg.queries.indexOf("BEGIN");
+    const settings = pg.queries.filter((q) => q.includes("set_config("));
+    expect(settings).toHaveLength(1);
+    expect(pg.queries[begin + 1]).toBe(settings[0]);
+    expect(settings[0]).toContain("set_config('app.library_ids', $1, true)");
+    expect(settings[0]).toContain("set_config('statement_timeout', $2, true)");
+    expect(pg.params[begin + 1]).toEqual(["user_a,org_b", "10000"]);
+    // BEGIN, the settings, COMMIT: nothing else of our own around the work.
+    expect(pg.queries.slice(begin)).toEqual(["BEGIN", settings[0], "COMMIT"]);
+  });
+
   it("the default timeout is 10 s; a scope may ask for longer", async () => {
     await withScope([], async () => undefined);
     await withScope([], async () => undefined, { statementTimeoutMs: 60_000 });
-    const timeouts = pg.queries.flatMap((q, i) => (q.includes("set_config('statement_timeout'") ? [pg.params[i]] : []));
-    expect(timeouts).toEqual([["10000"], ["60000"]]);
+    const timeouts = pg.queries.flatMap((q, i) => (q.includes("set_config('statement_timeout'") ? [pg.params[i][1]] : []));
+    expect(timeouts).toEqual(["10000", "60000"]);
   });
 
   it("the activity minute is written before BEGIN, so a rolled-back transaction still counts it", async () => {

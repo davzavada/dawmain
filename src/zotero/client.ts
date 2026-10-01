@@ -4,7 +4,7 @@ import { TtlCache } from "@/src/sources/shared/cache";
 import { SourceError } from "@/src/sources/shared/errors";
 import { htmlToText, loadHtml } from "@/src/sources/shared/html";
 import { API_ORIGIN, CACHE_TTL_MS, EXPORT_FORMATS, ITEM_KEY_RE, LIMITS, LOCALE_RE, SOURCE, STYLE_RE, ZOTERO_UA, isAllowedStorageHost, type ExportFormat } from "./config";
-import { ZoteroBodyTooLargeError, ZoteroKeyInvalidError, readBody, zoteroFetch, type ZoteroResponse } from "./http";
+import { ZoteroBodyTooLargeError, ZoteroKeyInvalidError, cancelled, readBody, zoteroFetch, type ZoteroResponse } from "./http";
 import type {
   DeletedObjects,
   Fulltext,
@@ -32,10 +32,14 @@ import type {
  * the raw objects: a broken envelope (no key, no data, not an array) is
  * PARSE_DRIFT, a missing optional field is simply absent.
  *
- * Caches (per instance, TtlCache): groups, collections, saved searches and the case scan —
- * never searches. Every cache key carries the Zotero user id AND a hash of
- * the key, because two Dawmain accounts can connect the same Zotero user
- * with keys of different reach.
+ * Caches (per instance, TtlCache): groups, collections, saved searches,
+ * settings and the case scan; search pages only conditionally — a repeat is
+ * sent with If-Modified-Since-Version and reuses the page on a 304, so a
+ * search is never answered from memory without Zotero confirming that the
+ * library is unchanged. Every cache key carries the Zotero user id AND a
+ * hash of the key, because two Dawmain accounts can connect the same Zotero
+ * user with keys of different reach. Concurrent calls that miss the same
+ * cache share one load in flight (shared(), below).
  */
 
 export interface IoOptions {
@@ -121,6 +125,33 @@ const MAX_SETTINGS_BYTES = LIMITS.maxJsonBytes;
 // ---------------------------------------------------------------------------
 // Pure: paths
 
+/** Typographic double quotes — an operator nowhere in Zotero's quick search. */
+const TYPOGRAPHIC_QUOTES = /[„“”«»]/g;
+
+/**
+ * The q Zotero is sent for a quick search in `qmode` (absent: Zotero's
+ * default, titleCreatorYear). Measured on the live API: titleCreatorYear
+ * has no phrase search — `"Obchodní smlouvy"` matched nothing there, not
+ * even the book of exactly that title — so title mode gets the words
+ * without the quotes; everything mode keeps ASCII quotes, which make its
+ * full-text part match the phrase (8 items against 198 for the bare words).
+ * Typographic quotes („Obchodní smlouvy“) are no operator in either mode:
+ * the full-text part ignores them and the title part looks for them
+ * literally (197 items, the title hit lost), so they are dropped in both.
+ * Pure.
+ */
+export function zoteroQuery(q: string, qmode: ItemsQuery["qmode"]): string {
+  const bare = q.replace(TYPOGRAPHIC_QUOTES, " ");
+  return (qmode === "everything" ? bare : bare.replace(/"/g, " ")).replace(/\s+/g, " ").trim();
+}
+
+/** zoteroQuery, refusing a q that was only quotes (sending none would list the whole library instead). */
+function queryParam(raw: string, qmode: ItemsQuery["qmode"]): string {
+  const q = zoteroQuery(raw, qmode);
+  if (!q) throw invalid("the query has no words to search for (quotes alone are not a query)");
+  return q;
+}
+
 /** "/users/475425" or "/groups/123". */
 export function libraryPrefix(lib: Library): string {
   if (!Number.isSafeInteger(lib.id) || lib.id <= 0) throw new Error("A Zotero library id is a positive integer.");
@@ -137,7 +168,7 @@ export function buildItemsPath(lib: Library, p: ItemsQuery): string {
   const qs = new URLSearchParams();
   const q = p.q?.trim();
   if (q) {
-    qs.set("q", q);
+    qs.set("q", queryParam(q, p.qmode));
     if (p.qmode) qs.set("qmode", p.qmode);
   }
   if (p.itemTypes?.length) qs.set("itemType", itemTypeParam(p.itemTypes));
@@ -481,18 +512,117 @@ export async function revokeKey(creds: ZoteroCreds, io: IoOptions = {}): Promise
   }
 }
 
+type FullScan = CaseScan & { complete: boolean };
+type SearchPage = { items: ZoteroItem[]; paging: Paging };
+
 let groupsCache = new TtlCache<ZoteroGroup[]>(CACHE_TTL_MS.groups, 200);
 let collectionsCache = new TtlCache<ZoteroCollection[]>(CACHE_TTL_MS.collections, 400);
-let scanCache = new TtlCache<CaseScan & { complete: boolean }>(CACHE_TTL_MS.caseScan, 100);
+let scanCache = new TtlCache<FullScan>(CACHE_TTL_MS.caseScan, 100);
 let searchesCache = new TtlCache<SavedSearch[]>(CACHE_TTL_MS.searches, 200);
+let searchCache = new TtlCache<SearchPage>(CACHE_TTL_MS.search, LIMITS.searchCacheEntries);
 
 export function __resetZoteroClientForTests(): void {
   groupsCache = new TtlCache<ZoteroGroup[]>(CACHE_TTL_MS.groups, 200);
   collectionsCache = new TtlCache<ZoteroCollection[]>(CACHE_TTL_MS.collections, 400);
-  scanCache = new TtlCache<CaseScan & { complete: boolean }>(CACHE_TTL_MS.caseScan, 100);
+  scanCache = new TtlCache<FullScan>(CACHE_TTL_MS.caseScan, 100);
   searchesCache = new TtlCache<SavedSearch[]>(CACHE_TTL_MS.searches, 200);
+  searchCache = new TtlCache<SearchPage>(CACHE_TTL_MS.search, LIMITS.searchCacheEntries);
   settingsCache = new TtlCache<ZoteroSettings>(CACHE_TTL_MS.settings, 200);
   schemaCache = new TtlCache<LocalizedName[]>(CACHE_TTL_MS.schema, 200);
+  flights.clear();
+  scanRuns.clear();
+}
+
+// ---------------------------------------------------------------------------
+// Loads shared while in flight
+
+/**
+ * One load on behalf of every concurrent call that wants the same thing.
+ * Claude often fires several zotero_search calls at once and on Fluid they
+ * land on one instance: each would otherwise list the groups and scan the
+ * case items on its own (3 parallel docket searches: 15 scan pages where 5
+ * do), all queued behind the same 3 slots of the user. The load runs under
+ * its own signal, aborted only when EVERY joined caller has given up — no
+ * caller's budget cuts the others off, and nothing runs on once nobody
+ * waits. A caller that gives up gets the usual cancellation; a failure
+ * reaches every joined caller and is not kept (the next call loads again).
+ * Keys carry the user id and the key's hash (cacheKey), so a load — and a
+ * rejected key's error — is only ever shared by calls of the same key.
+ */
+interface Flight<T> {
+  promise: Promise<T>;
+  controller: AbortController;
+  /** Callers still waiting; one without a signal never leaves. */
+  waiting: number;
+}
+
+const flights = new Map<string, Flight<unknown>>();
+
+/** Start `load` (synchronously, so its first request takes its slot now) or join the one in flight. */
+function shared<T>(key: string, load: (signal: AbortSignal) => Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  let flight = flights.get(key) as Flight<T> | undefined;
+  if (!flight) {
+    const f: Flight<T> = { promise: Promise.resolve(undefined as T), controller: new AbortController(), waiting: 0 };
+    f.promise = load(f.controller.signal);
+    const done = () => {
+      if (flights.get(key) === f) flights.delete(key);
+    };
+    f.promise.then(done, done);
+    flights.set(key, f);
+    flight = f;
+  }
+  const f = flight;
+  return join(f, signal, () => {
+    if (flights.get(key) === f) flights.delete(key);
+  });
+}
+
+/** Wait for a flight under the caller's own signal; the last caller to give up aborts it (`gone` detaches it first). */
+function join<T>(flight: Flight<T>, signal: AbortSignal | undefined, gone: () => void): Promise<T> {
+  flight.waiting++;
+  if (!signal) return flight.promise;
+  return new Promise<T>((resolve, reject) => {
+    const leave = () => {
+      if (--flight.waiting > 0) return;
+      gone();
+      flight.controller.abort();
+    };
+    if (signal.aborted) {
+      leave();
+      reject(cancelled());
+      return;
+    }
+    const onAbort = () => {
+      leave();
+      reject(cancelled());
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    flight.promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
+/** A cached read: the cache, else one shared load (stored when it succeeds). */
+function cachedShared<T>(cache: TtlCache<T>, name: string, key: string, load: (io: IoOptions) => Promise<T>, io: IoOptions): Promise<T> {
+  const hit = cache.get(key);
+  if (hit !== undefined) return Promise.resolve(hit);
+  return shared(
+    `${name}|${key}`,
+    async (signal) => {
+      const value = await load({ signal });
+      cache.set(key, value);
+      return value;
+    },
+    io.signal,
+  );
 }
 
 /**
@@ -505,10 +635,13 @@ export function __resetZoteroClientForTests(): void {
  */
 export async function listGroups(creds: ZoteroCreds, access: KeyInfo["groups"], io: IoOptions = {}): Promise<ZoteroGroup[]> {
   if (access === "none" || (Array.isArray(access) && !access.length)) return [];
-  const groups = await groupsCache.through(cacheKey(creds, null), async () => {
-    const { items } = await allPages(creds, (start) => `/users/${userIdOf(creds)}/groups?${pageQuery(start)}`, parseGroup, MAX_GROUP_PAGES, "throw", io);
-    return items;
-  });
+  const groups = await cachedShared(
+    groupsCache,
+    "groups",
+    cacheKey(creds, null),
+    async (shared) => (await allPages(creds, (start) => `/users/${userIdOf(creds)}/groups?${pageQuery(start)}`, parseGroup, MAX_GROUP_PAGES, "throw", shared)).items,
+    io,
+  );
   return readableGroups(groups, access);
 }
 
@@ -520,14 +653,35 @@ export function readableGroups(groups: ZoteroGroup[], access: KeyInfo["groups"])
   return groups.filter((g) => ids.has(g.id));
 }
 
-/** One page of an items search. */
+/**
+ * One page of an items search. A page read before (the same key, library
+ * and path — agents re-run identical searches after reading a document) is
+ * asked for with If-Modified-Since-Version: an unchanged library answers an
+ * empty 304 before Zotero runs the query, and the kept page is returned.
+ * Not kept: a page without a library version, one from a full-text index
+ * being rebuilt (Zotero-Full-Text-Reindexing: its version would keep
+ * confirming a page that misses text matches), and a big one.
+ */
 export async function searchItems(
   creds: ZoteroCreds,
   lib: Library,
   params: ItemsQuery,
   io: IoOptions = {},
 ): Promise<{ items: ZoteroItem[]; paging: Paging }> {
-  const res = await zoteroFetch(creds, buildItemsPath(checkedLibrary(creds, lib), params), io);
+  const path = buildItemsPath(checkedLibrary(creds, lib), params);
+  const key = `${cacheKey(creds, lib)}|${path}`;
+  const kept = searchCache.get(key);
+  const res = await zoteroFetch(
+    creds,
+    path,
+    kept ? { headers: { "If-Modified-Since-Version": String(kept.paging.libraryVersion) }, signal: io.signal } : io,
+  );
+  if (kept && res.status === 304) {
+    // Re-inserted, so the most recently used pages are the last to be dropped.
+    searchCache.delete(key);
+    searchCache.set(key, kept);
+    return kept;
+  }
   if (res.status === 404) {
     throw new SourceError(
       SOURCE,
@@ -537,7 +691,12 @@ export async function searchItems(
     );
   }
   if (res.status !== 200) throw unexpected(res, "searching items");
-  return { items: array(res.json(), "an item list").map((x) => parseItem(x, lib)), paging: parsePaging(res.headers) };
+  const page: SearchPage = { items: array(res.json(), "an item list").map((x) => parseItem(x, lib)), paging: parsePaging(res.headers) };
+  searchCache.delete(key);
+  if (page.paging.libraryVersion !== null && !page.paging.fulltextReindexing && res.bytes.byteLength <= LIMITS.searchCacheMaxBytes) {
+    searchCache.set(key, page);
+  }
+  return page;
 }
 
 /** Items by key, in the order asked (missing ones left out), LIMITS.maxItemKeys per request. */
@@ -585,10 +744,13 @@ export async function getFulltext(creds: ZoteroCreds, lib: Library, key: string,
 /** Every collection of a library (all pages; cached). */
 export async function listCollections(creds: ZoteroCreds, lib: Library, io: IoOptions = {}): Promise<ZoteroCollection[]> {
   const prefix = libraryPrefix(checkedLibrary(creds, lib));
-  return collectionsCache.through(cacheKey(creds, lib), async () => {
-    const { items } = await allPages(creds, (start) => `${prefix}/collections?${pageQuery(start)}`, parseCollection, MAX_COLLECTION_PAGES, "throw", io);
-    return items;
-  });
+  return cachedShared(
+    collectionsCache,
+    "collections",
+    cacheKey(creds, lib),
+    async (shared) => (await allPages(creds, (start) => `${prefix}/collections?${pageQuery(start)}`, parseCollection, MAX_COLLECTION_PAGES, "throw", shared)).items,
+    io,
+  );
 }
 
 /** A tag listing: the library's tags, or those of the items in a scope (Zotero's /items/tags proxy parameters). */
@@ -627,7 +789,7 @@ export function buildTagsPath(lib: Library, p: TagsQuery): string {
     path = `${libraryPrefix(lib)}${collection ? `/collections/${collection}` : ""}/items${p.items.subset ? `/${p.items.subset}` : ""}/tags`;
     const q = p.items.q?.trim();
     if (q) {
-      qs.set("itemQ", q);
+      qs.set("itemQ", queryParam(q, p.items.qmode === "everything" ? "everything" : "titleCreatorYear"));
       // The proxy compares the mode exactly: lower case.
       if (p.items.qmode === "everything") qs.set("itemQMode", "everything");
     }
@@ -658,55 +820,122 @@ export async function listTags(creds: ZoteroCreds, lib: Library, params: TagsQue
   return { tags, paging: parsePaging(res.headers) };
 }
 
+/** A case scan in flight: how many pages it may read, and — once its first answer is in — how many it reads. */
+interface ScanRun {
+  maxPages: number;
+  flight: Flight<FullScan>;
+  plan: Promise<number>;
+}
+
+const scanRuns = new Map<string, ScanRun>();
+
 /**
  * The newest case items of a library, `maxPages` pages of 100, for a
  * docket-number lookup (Zotero's q never searches docketNumber). Cached;
  * a cached scan is revalidated with If-Modified-Since-Version on every
  * call, so an unchanged library costs one empty 304 and a changed one is
- * rescanned (a case added a minute ago is found).
+ * rescanned (a case added a minute ago is found). A scan of the same
+ * library already running for another call, over at least as many pages,
+ * serves this one too (the scan does not depend on the query).
+ * `onPages` learns how many pages this call's scan covers as soon as the
+ * first answer fixes it — before the other pages arrive — so a caller
+ * sharing a page budget among libraries can start the next one.
  */
-export async function scanCases(creds: ZoteroCreds, lib: Library, opts: { maxPages: number }, io: IoOptions = {}): Promise<CaseScan> {
+export async function scanCases(
+  creds: ZoteroCreds,
+  lib: Library,
+  opts: { maxPages: number; onPages?: (pages: number) => void },
+  io: IoOptions = {},
+): Promise<CaseScan> {
   checkedLibrary(creds, lib);
   const maxPages = clampInt(opts.maxPages, 1, LIMITS.scanPagesTotal);
   const key = cacheKey(creds, lib);
+  const running = scanRuns.get(key);
+  const run = running && running.maxPages >= maxPages ? running : startScan(creds, lib, key, maxPages);
+  if (opts.onPages) {
+    const onPages = opts.onPages;
+    run.plan.then((pages) => onPages(Math.min(pages, maxPages)), () => undefined);
+  }
+  const scan = await join(run.flight, io.signal, () => {
+    if (scanRuns.get(key) === run) scanRuns.delete(key);
+  });
+  return scanView(scan, maxPages);
+}
+
+function startScan(creds: ZoteroCreds, lib: Library, key: string, maxPages: number): ScanRun {
+  let fix: (pages: number) => void = () => undefined;
+  let fail: (error: unknown) => void = () => undefined;
+  const plan = new Promise<number>((resolve, reject) => {
+    fix = resolve;
+    fail = reject;
+  });
+  plan.catch(() => undefined);
+  const flight: Flight<FullScan> = { promise: Promise.resolve(undefined as unknown as FullScan), controller: new AbortController(), waiting: 0 };
+  const run: ScanRun = { maxPages, flight, plan };
+  flight.promise = readScan(creds, lib, key, maxPages, flight.controller.signal, fix);
+  const done = () => {
+    if (scanRuns.get(key) === run) scanRuns.delete(key);
+  };
+  flight.promise.then(done, (error: unknown) => {
+    fail(error);
+    done();
+  });
+  scanRuns.set(key, run);
+  return run;
+}
+
+async function readScan(creds: ZoteroCreds, lib: Library, key: string, maxPages: number, signal: AbortSignal, plan: (pages: number) => void): Promise<FullScan> {
   const path = (start: number) =>
     buildItemsPath(lib, { itemTypes: ["case"], sort: "dateModified", direction: "desc", limit: LIMITS.pageSize, start });
-
   const cached = scanCache.get(key);
   let first: ZoteroResponse;
   if (cached && cached.libraryVersion !== null && (cached.complete || cached.scannedPages >= maxPages)) {
-    first = await zoteroFetch(creds, path(0), { headers: { "If-Modified-Since-Version": String(cached.libraryVersion) }, signal: io.signal });
+    first = await zoteroFetch(creds, path(0), { headers: { "If-Modified-Since-Version": String(cached.libraryVersion) }, signal });
     if (first.status === 304) {
       scanCache.set(key, cached);
-      return scanView(cached, maxPages);
+      plan(Math.min(cached.scannedPages, maxPages));
+      return cached;
     }
   } else {
-    first = await zoteroFetch(creds, path(0), io);
+    first = await zoteroFetch(creds, path(0), { signal });
   }
-
-  const entries: CaseScanEntry[] = [];
-  const firstPaging = parsePaging(first.headers);
-  let res = first;
-  let paging = firstPaging;
-  let pages = 0;
-  for (;;) {
+  const page = (res: ZoteroResponse): unknown[] => {
     if (res.status !== 200) throw unexpected(res, "scanning case items");
-    pages++;
-    for (const raw of array(res.json(), "an item list")) entries.push(caseEntry(parseItem(raw, lib)));
-    if (paging.nextStart === null || pages >= maxPages) break;
-    res = await zoteroFetch(creds, path(paging.nextStart), io);
-    paging = parsePaging(res.headers);
+    return array(res.json(), "an item list");
+  };
+
+  const pages = [page(first)];
+  const firstPaging = parsePaging(first.headers);
+  let complete: boolean;
+  if (firstPaging.total !== null) {
+    // Page 1's Total-Results fixes every other start: they go out together, not one Link at a time (the user's
+    // slots keep it polite, the request count is the same). 350 cases were 4 round trips in a row, now 2.
+    const count = Math.min(maxPages, Math.max(1, Math.ceil(firstPaging.total / LIMITS.pageSize)));
+    plan(count);
+    const rest = await Promise.all(Array.from({ length: count - 1 }, async (_, i) => page(await zoteroFetch(creds, path((i + 1) * LIMITS.pageSize), { signal }))));
+    pages.push(...rest);
+    complete = count * LIMITS.pageSize >= firstPaging.total;
+  } else {
+    // No total: follow Link rel="next".
+    let next = firstPaging.nextStart;
+    while (next !== null && pages.length < maxPages) {
+      const res = await zoteroFetch(creds, path(next), { signal });
+      pages.push(page(res));
+      next = parsePaging(res.headers).nextStart;
+    }
+    complete = next === null;
+    plan(pages.length);
   }
-  const scan = {
-    items: entries,
-    scannedPages: pages,
+  const scan: FullScan = {
+    items: pages.flat().map((raw) => caseEntry(parseItem(raw, lib))),
+    scannedPages: pages.length,
     total: firstPaging.total,
     // Page 1's version: if the library changed mid-scan, the next revalidation sees it as changed and rescans.
     libraryVersion: firstPaging.libraryVersion,
-    complete: paging.nextStart === null,
+    complete,
   };
   scanCache.set(key, scan);
-  return scanView(scan, maxPages);
+  return scan;
 }
 
 function caseEntry(item: ZoteroItem): CaseScanEntry {
@@ -861,10 +1090,13 @@ export async function exportItems(
 /** The saved searches of a library (all pages; cached). */
 export async function listSearches(creds: ZoteroCreds, lib: Library, io: IoOptions = {}): Promise<SavedSearch[]> {
   const prefix = libraryPrefix(checkedLibrary(creds, lib));
-  return searchesCache.through(cacheKey(creds, lib), async () => {
-    const { items } = await allPages(creds, (start) => `${prefix}/searches?${pageQuery(start)}`, parseSavedSearch, MAX_SEARCH_PAGES, "throw", io);
-    return items;
-  });
+  return cachedShared(
+    searchesCache,
+    "searches",
+    cacheKey(creds, lib),
+    async (shared) => (await allPages(creds, (start) => `${prefix}/searches?${pageQuery(start)}`, parseSavedSearch, MAX_SEARCH_PAGES, "throw", shared)).items,
+    io,
+  );
 }
 
 let settingsCache = new TtlCache<ZoteroSettings>(CACHE_TTL_MS.settings, 200);
@@ -877,11 +1109,17 @@ let schemaCache = new TtlCache<LocalizedName[]>(CACHE_TTL_MS.schema, 200);
  */
 export async function getSettings(creds: ZoteroCreds, lib: Library, io: IoOptions = {}): Promise<ZoteroSettings> {
   const prefix = libraryPrefix(checkedLibrary(creds, lib));
-  return settingsCache.through(cacheKey(creds, lib), async () => {
-    const res = await zoteroFetch(creds, `${prefix}/settings`, { signal: io.signal, maxBytes: MAX_SETTINGS_BYTES });
-    if (res.status !== 200) throw unexpected(res, "reading the library settings");
-    return parseSettings(res.json());
-  });
+  return cachedShared(
+    settingsCache,
+    "settings",
+    cacheKey(creds, lib),
+    async (shared) => {
+      const res = await zoteroFetch(creds, `${prefix}/settings`, { signal: shared.signal, maxBytes: MAX_SETTINGS_BYTES });
+      if (res.status !== 200) throw unexpected(res, "reading the library settings");
+      return parseSettings(res.json());
+    },
+    io,
+  );
 }
 
 /** GET {lib}/fulltext/index: whether Zotero's full-text search index of the library is complete. */
@@ -1033,8 +1271,10 @@ async function fetchStorage(target: URL, callerSignal: AbortSignal | undefined):
 // Helpers
 
 /**
- * Follow Link rel="next" up to `maxPages`. `on404`: "empty" for a parent
- * that no longer exists, "throw" where the path must exist.
+ * Every page up to `maxPages`: when page 1 names Total-Results, the other
+ * pages go out together (the user's slots keep it polite); else Link
+ * rel="next" is followed page by page. `on404`: "empty" for a parent that
+ * no longer exists, "throw" where the path must exist.
  */
 async function allPages<T>(
   creds: ZoteroCreds,
@@ -1045,17 +1285,30 @@ async function allPages<T>(
   io: IoOptions,
 ): Promise<{ items: T[]; complete: boolean }> {
   const items: T[] = [];
-  let start = 0;
-  for (let page = 1; ; page++) {
-    const res = await zoteroFetch(creds, pathAt(start), io);
-    if (res.status === 404 && page === 1 && on404 === "empty") return { items, complete: true };
+  const read = (res: ZoteroResponse): T[] => {
     if (res.status !== 200) throw unexpected(res, "listing");
-    for (const raw of array(res.json(), "a list")) items.push(parse(raw));
-    const next = parsePaging(res.headers).nextStart;
+    return array(res.json(), "a list").map(parse);
+  };
+  const first = await zoteroFetch(creds, pathAt(0), io);
+  if (first.status === 404 && on404 === "empty") return { items, complete: true };
+  items.push(...read(first));
+  const paging = parsePaging(first.headers);
+  if (paging.total !== null) {
+    const count = Math.min(maxPages, Math.max(1, Math.ceil(paging.total / LIMITS.pageSize)));
+    const rest = await Promise.all(Array.from({ length: count - 1 }, async (_, i) => read(await zoteroFetch(creds, pathAt((i + 1) * LIMITS.pageSize), io))));
+    for (const list of rest) items.push(...list);
+    return { items, complete: count * LIMITS.pageSize >= paging.total };
+  }
+  let start = 0;
+  let next = paging.nextStart;
+  for (let page = 1; ; page++) {
     // A "next" that does not move forward would loop forever.
     if (next === null || next <= start) return { items, complete: true };
     if (page >= maxPages) return { items, complete: false };
     start = next;
+    const res = await zoteroFetch(creds, pathAt(start), io);
+    items.push(...read(res));
+    next = parsePaging(res.headers).nextStart;
   }
 }
 

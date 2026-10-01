@@ -147,11 +147,30 @@ export async function measureGuards(db: Queryable, now = new Date()): Promise<Gu
 }
 
 let modeCache: { until: number; mode: FilesMode } | null = null;
+/** The measurement in flight: concurrent callers (parallel files_* calls at expiry) share it. */
+let measuring: Promise<{ mode: FilesMode; computeOff: boolean } | null> | null = null;
+/** Bumped by the test reset, so a measurement still in flight cannot refill the cache it cleared. */
+let generation = 0;
 
 /** Tests: forget the cached mode. */
 export function __resetGuardsForTests(): void {
   modeCache = null;
+  measuring = null;
+  generation++;
   buckets.clear();
+}
+
+/**
+ * The mode when it is known without I/O — env "off"/"unconfigured", or a
+ * cached measurement (including "off" for compute hours until the month
+ * rolls over) — else null: effectiveMode() would measure. Lets files_search
+ * overlap a cold measurement with its own first queries (the measurement
+ * wakes the DB anyway), while a known "off" still touches nothing.
+ */
+export function cachedMode(now = Date.now()): FilesMode | null {
+  const env = envOnlyMode();
+  if (env === "off" || env === "unconfigured") return env;
+  return modeCache && now < modeCache.until ? stricter(env, modeCache.mode) : null;
 }
 
 /**
@@ -160,30 +179,40 @@ export function __resetGuardsForTests(): void {
  * when the guards turned the feature off for compute hours, until the next
  * UTC month: the estimate never falls within a month, and re-measuring
  * would wake the DB just to learn it again (each wake costs ≥ 5 minutes of
- * the reserve the guard protects). When the measurement itself fails the
- * env mode is returned uncached — the caller's own DB call will then fail
- * with a proper "unavailable".
+ * the reserve the guard protects). Concurrent callers share one
+ * measurement. When the measurement itself fails the env mode is returned
+ * uncached — the caller's own DB call will then fail with a proper
+ * "unavailable".
  */
 export async function effectiveMode(): Promise<FilesMode> {
+  const known = cachedMode();
+  if (known !== null) return known;
   const env = envOnlyMode();
-  if (env === "off" || env === "unconfigured") return env;
-  const now = Date.now();
-  if (modeCache && now < modeCache.until) return stricter(env, modeCache.mode);
-  let measured: { mode: FilesMode; computeOff: boolean };
-  try {
-    measured = await withScope([], async (db) => {
+  if (!measuring) {
+    const gen = generation;
+    const now = Date.now();
+    const run: Promise<{ mode: FilesMode; computeOff: boolean } | null> = withScope([], async (db) => {
       const override = parseOverride(await getSystemState<unknown>(db, MODE_OVERRIDE_KEY));
       const auto = await measureGuards(db, new Date(now));
       return { mode: override ? stricter(override, auto.mode) : auto.mode, computeOff: auto.mode === "off" };
-    });
-  } catch {
-    return env;
+    })
+      .then((measured) => {
+        if (gen === generation) {
+          modeCache = {
+            until: measured.computeOff ? nextMonthStartUtc(new Date(now)).getTime() : now + MODE_CACHE_MS,
+            mode: measured.mode,
+          };
+        }
+        return measured;
+      })
+      .catch(() => null)
+      .finally(() => {
+        if (measuring === run) measuring = null;
+      });
+    measuring = run;
   }
-  modeCache = {
-    until: measured.computeOff ? nextMonthStartUtc(new Date(now)).getTime() : now + MODE_CACHE_MS,
-    mode: measured.mode,
-  };
-  return stricter(env, measured.mode);
+  const measured = await measuring;
+  return measured ? stricter(env, measured.mode) : env;
 }
 
 // ---------------------------------------------------------------------------

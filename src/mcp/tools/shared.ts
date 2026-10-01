@@ -28,10 +28,42 @@ export const PRIVATE_READ_ONLY = {
   openWorldHint: false,
 } as const;
 
+/** Whether a YYYY-MM-DD string names a day that exists (no 2025-02-30). */
+export function isCalendarDate(value: string): boolean {
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+/**
+ * The shape check alone let "2025-02-30" and "2025-06-31" (a model's typical
+ * end of month) through to the courts, and each mishandled it silently: NSS
+ * dropped the bound, NS matched nothing, NALUS returned hits outside the
+ * range — all reported as successes. The refine keeps the regex, so the
+ * JSON Schema pattern the client sees is unchanged.
+ */
 export const isoDate = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "Use ISO format YYYY-MM-DD")
+  .refine(isCalendarDate, "Not a real calendar date (YYYY-MM-DD), e.g. 2025-02-28")
   .describe("ISO date (YYYY-MM-DD).");
+
+/**
+ * The text of an INPUT_INVALID answer for an inverted range, or null. Every
+ * court answers an inverted range with zero hits, which reads as "no case
+ * law" — so the call is refused before any upstream request is spent on it.
+ * ISO dates compare correctly as strings.
+ */
+export function dateRangeError(from: string | undefined, to: string | undefined, label = "date"): string | null {
+  if (!from || !to || from <= to) return null;
+  return `${label}_from ${from} is after ${label}_to ${to} — the range is inverted; swap the two dates.`;
+}
+
+/** Throw dateRangeError's refusal as INPUT_INVALID — called first in a
+ * handler's try, so the tool's own failure mapping answers it. */
+export function assertDateRange(source: string, from: string | undefined, to: string | undefined, label = "date"): void {
+  const message = dateRangeError(from, to, label);
+  if (message) throw new SourceError(source, "INPUT_INVALID", message, `Swap ${label}_from and ${label}_to (or drop one) and call again.`);
+}
 
 /** Turn anything thrown into the MCP error result, tagged with its source. */
 export function toolFailure(source: string): (error: unknown) => ReturnType<typeof toToolError> {
@@ -46,9 +78,13 @@ export const FIND_DESCRIPTION =
  * number the model is told matches the number the pager actually uses. */
 export const READING_DESCRIPTION = `Long texts come in ~${Math.round(DOC_PAGE_CHARS / 1000)}k-character pages. 'find' returns excerpts around a term — for locating passages and screening. A decision you rely on (quote it, cite it as authority) you read WHOLE: page 1, then every page to the last. Continue on your own — never ask the user whether to keep reading.`;
 
-/** What a paged answer ends with when there is more — empty when there is not. */
-export function continuationHint(paged: Pick<DocumentView, "page" | "total_pages" | "has_more">): string {
-  if (!paged.has_more) return "";
+/** What a paged answer ends with when there is more — empty when there is
+ * not, and in `find` (excerpt) mode: a truncated excerpt answer already says
+ * how to go on, and "page 1/1 — continue: page: 2" there would contradict it. */
+export function continuationHint(
+  paged: Pick<DocumentView, "page" | "total_pages" | "has_more"> & Partial<Pick<DocumentView, "mode">>,
+): string {
+  if (!paged.has_more || paged.mode === "excerpt") return "";
   return `\n\n(page ${paged.page}/${paged.total_pages} — continue without asking the user: page: ${paged.page + 1}. A decision you rely on is read to its last page; to locate one passage instead, use find: "term".)`;
 }
 

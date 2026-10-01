@@ -4,6 +4,7 @@ import {
   FIND_DESCRIPTION,
   READING_DESCRIPTION,
   READ_ONLY,
+  assertDateRange,
   continuationHint,
   isoDate,
   toolFailure,
@@ -13,8 +14,10 @@ import {
   JUSTICE_DOC_TYPES,
   formatCaseNumber,
   getJusticeDecision,
+  parseSection,
   searchJustice,
   type JusticeCaseNumber,
+  type JusticeSearchPage,
 } from "@/src/sources/justice";
 import { pageOrExcerpt, snippet } from "@/src/sources/shared/text";
 
@@ -89,13 +92,64 @@ export function justiceDecisionHeader(metadata: Record<string, unknown>): string
   ].filter((line): line is string => Boolean(line));
 }
 
+/**
+ * The justice_search answer text. Paging is spelled in the parameter's own
+ * 0-based terms and the next call is named outright: a 1-based "page 1/47"
+ * label sent the model to page: 2 for the second page (skipping page: 1),
+ * and to page: 47 for the last, which is past the end — where an empty page
+ * used to read "No decisions matched", a false nothing-found (live 2026-09:
+ * 234 hits at limit 5, page: 47). Hits carry the publication date (the
+ * default sort key, and what published_from monitoring reports), the ECLI and
+ * the date of the decision they affected: clients see only this text.
+ * Pure — unit-tested.
+ */
+export function justiceSearchText(
+  result: JusticeSearchPage,
+  { page, limit, sort }: { page: number; limit: number; sort?: "published" | "decided" },
+): string {
+  const first = page * limit + 1;
+  if (!result.hits.length) {
+    if (result.total === 0) {
+      return "No decisions matched. This database starts 2020-10 and holds mostly first-instance civil decisions — broaden the query, widen the dates, or try caselaw_search for NS/NSS/ÚS case law.";
+    }
+    const last = Math.max(0, result.totalPages - 1);
+    if (page >= result.totalPages) {
+      return `Page ${page} is past the end: ${result.total} decisions fill pages 0–${last} at limit ${limit}. Call page: ${last} or lower (same arguments).`;
+    }
+    // In range but empty: parseJusticeSearch drops rows without a uuid.
+    return `${result.total} decisions matched, but page ${page} returned no readable rows (a row without a uuid cannot be opened, so it is skipped)${page < last ? ` — try page: ${page + 1} (same arguments)` : ""}.`;
+  }
+  const lines = result.hits.map((hit, i) => {
+    const affects = hit.affects
+      .map((a) => `${a.types.join("/")} ${a.caseNumber ?? "?"} (${a.court ?? "?"}${a.date ? `, ${a.date}` : ""})`)
+      .join("; ");
+    return [
+      `${first + i}. ${hit.caseNumber ?? "?"} — ${hit.court ?? "?"}${hit.type ? ` (${TYPE_LABELS[hit.type] ?? hit.type})` : ""}${hit.decidedAt ? ` ${hit.decidedAt}` : ""}${hit.publishedAt ? `, zveř. ${hit.publishedAt}` : ""}`,
+      hit.ecli ? `   ${hit.ecli}` : null,
+      hit.subject ? `   ${snippet(hit.subject, 120)}` : null,
+      affects ? `   mění/potvrzuje: ${affects}` : null,
+      hit.verdict ? `   výrok: ${snippet(hit.verdict, 220)}` : null,
+      `   uuid ${hit.uuid}\n   ${hit.url}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+  });
+  const order = sort === "decided" ? "decision date" : "publication date (zveř.)";
+  return [
+    `${result.total} decisions by ${order}, newest first — hits ${first}–${first + result.hits.length - 1} (page: ${page}, last page: ${Math.max(0, result.totalPages - 1)}):`,
+    ...lines,
+    ...(page + 1 < result.totalPages ? [`More: page: ${page + 1} (same arguments).`] : []),
+    "Full text: justice_get_decision {uuid}.",
+  ].join("\n");
+}
+
 export function registerJustice(server: McpServer): void {
   server.registerTool(
     "justice_search",
     {
       title: "Obecné soudy: search decisions",
       description:
-        "FULL-TEXT search of Czech general-court decisions (okresní, krajské, vrchní — plus NS/NSS/ÚS copies) in the Ministry of Justice database. Czech queries; match: all_words (default), any_word, phrase. Also filters by spisová značka, court (court_codes), decision type, decision date, publication date, and — the citator these courts otherwise lack — applies_act '89/2012' + applies_section '§ 2201' finds decisions that APPLIED that provision, with no keywords at all. Hits carry a uuid for justice_get_decision, the výrok, and 'affects': what the decision did to the lower court's ruling (CHANGE/CONFIRM/CANCEL…). Data starts 2020-10, mostly first-instance civil decisions; party names are anonymized. With no date and no case_number the search covers only the LAST 5 YEARS of decisions (the response says so) — pass date_from: '2020-10-01' for the whole archive. Full text is SLOW upstream: multi-word queries and large result sets can exceed the time limit even with a date range, while one distinctive word plus a date window of months answers in about a second — search with 1–2 key terms, not a sentence, and narrow with dates/court_codes. For NS/NSS/ÚS case law prefer caselaw_search, whose indexes are richer.",
+        "FULL-TEXT search of Czech general-court decisions (okresní, krajské, vrchní — plus NS/NSS/ÚS copies) in the Ministry of Justice database. Czech queries; match: all_words (default), any_word, phrase. Also filters by spisová značka, court (court_codes), decision type, decision date, publication date, and — the citator these courts otherwise lack — applies_act '89/2012' + applies_section '§ 2201' finds decisions that APPLIED that provision, with no keywords at all. Hits carry a uuid for justice_get_decision, the výrok, and 'affects': what the decision did to the lower court's ruling (CHANGE/CONFIRM/CANCEL…). Data starts 2020-10, mostly first-instance civil decisions; party names are anonymized. With no date and no case_number the search covers only the LAST 5 YEARS of decisions (the response says so) — pass date_from: '2020-10-01' for the whole archive. Full text is SLOW upstream: multi-word queries and large result sets can exceed the time limit even with a date range, while one distinctive word plus a date window of months answers in about a second — search with 1–2 key terms, not a sentence, and narrow with dates/court_codes. Numbers and act citations in query ('89/2012', '§ 2201') time out whatever the dates — they belong in applies_act/applies_section. For NS/NSS/ÚS case law prefer caselaw_search, whose indexes are richer.",
       inputSchema: z.object({
         query: z.string().optional().describe("Czech full-text query over the decision texts."),
         match: z
@@ -134,13 +188,19 @@ export function registerJustice(server: McpServer): void {
         applies_section: z
           .string()
           .optional()
-          .describe("Narrows applies_act to one §, e.g. '§ 2201' or '2201'. Requires applies_act."),
+          .describe(
+            "Narrows applies_act to one §, e.g. '§ 2201' or '2201'. Requires applies_act. The index records the § only — an 'odst. 1' tail is ignored (the answer says so).",
+          ),
         sort: z
           .enum(["published", "decided"])
           .default("published")
           .describe("Newest first by publication date (default) or by decision date."),
         limit: z.number().int().min(1).max(50).default(20),
-        page: z.number().int().min(0).default(0).describe("Result page (0-indexed)."),
+        // Bounded: past Java's int (page × limit), the Spring backend answers
+        // HTTP 500 (live: page 3 000 000 000), which read as an outage. Page
+        // 1 000 000 at limit 50 still answers normally (2026-09), and the
+        // whole archive is ~600k decisions, so no real page is cut off.
+        page: z.number().int().min(0).max(1_000_000).default(0).describe("Result page (0-indexed)."),
       }),
       outputSchema: z.object({
         total: z.number(),
@@ -195,6 +255,8 @@ export function registerJustice(server: McpServer): void {
     }) => {
       try {
         const defaultFrom = defaultDecidedFrom({ date_from, date_to, published_from, published_to, case_number });
+        assertDateRange("rozhodnuti.justice.cz", date_from, date_to);
+        assertDateRange("rozhodnuti.justice.cz", published_from, published_to, "published");
         const result = await searchJustice(
           {
             query,
@@ -218,37 +280,22 @@ export function registerJustice(server: McpServer): void {
           count: result.hits.length,
           page: result.page,
           total_pages: result.totalPages,
-          has_more: result.page + 1 < result.totalPages,
+          has_more: page + 1 < result.totalPages,
           ...(defaultFrom ? { default_date_from: defaultFrom } : {}),
           // The výrok is often longer than a search result should carry; the
           // full text is one justice_get_decision away.
           items: result.hits.map(({ verdict: _verdict, ...hit }) => hit),
         };
-        const lines = result.hits.map((hit, i) => {
-          const affects = hit.affects
-            .map((a) => `${a.types.join("/")} ${a.caseNumber ?? "?"} (${a.court ?? "?"})`)
-            .join("; ");
-          return [
-            `${page * limit + i + 1}. ${hit.caseNumber ?? "?"} — ${hit.court ?? "?"}${hit.type ? ` (${TYPE_LABELS[hit.type] ?? hit.type})` : ""}${hit.decidedAt ? ` ${hit.decidedAt}` : ""}`,
-            hit.subject ? `   ${snippet(hit.subject, 120)}` : null,
-            affects ? `   mění/potvrzuje: ${affects}` : null,
-            hit.verdict ? `   výrok: ${snippet(hit.verdict, 220)}` : null,
-            `   uuid ${hit.uuid}\n   ${hit.url}`,
-          ]
-            .filter(Boolean)
-            .join("\n");
-        });
         const windowNote = defaultFrom
           ? `⚠ Default window: only decisions issued from ${defaultFrom} (the last ${DEFAULT_WINDOW_YEARS} years), because no date was given — older decisions (the archive starts 2020-10) are NOT in these results. For the whole archive pass date_from: "2020-10-01". Say this in the memo.`
           : null;
-        const body = result.hits.length
-          ? [
-              `${result.total} decisions (page ${result.page + 1}/${result.totalPages}):`,
-              ...lines,
-              "Full text: justice_get_decision {uuid}.",
-            ].join("\n")
-          : "No decisions matched. This database starts 2020-10 and holds mostly first-instance civil decisions — broaden the query, widen the dates, or try caselaw_search for NS/NSS/ÚS case law.";
-        const text = windowNote ? `${windowNote}\n\n${body}` : body;
+        // The search already validated the label, so this cannot throw here.
+        const section = applies_section && applies_act ? parseSection(applies_section) : undefined;
+        const sectionNote = section?.dropped
+          ? `applies_section filtered by § ${section.paragraph} only — the index records the §, not "${section.dropped}"; check that part when reading.`
+          : null;
+        const body = justiceSearchText(result, { page, limit, sort });
+        const text = [windowNote, sectionNote, body].filter(Boolean).join("\n\n");
         return { content: [{ type: "text", text }], structuredContent: output };
       } catch (error) {
         return fail(error);

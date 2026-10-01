@@ -164,11 +164,14 @@ describe("markLibraryForPurge / purgeLibraryContent", () => {
   it("marks once — a later mark never postpones the date", async () => {
     const lib = "org_purge";
     await scoped([lib], (db) => ensureLibrary(db, lib, "Kancelář"));
-    const soon = new Date("2026-10-04T00:00:00Z");
+    // Dates relative to now: the next test expects this mark still in the future.
+    const day = 86_400_000;
+    const at = (days: number) => new Date(Math.floor(Date.now() / day + days) * day);
+    const soon = at(4);
     await scoped([lib], (db) => markLibraryForPurge(db, lib, soon));
-    await scoped([lib], (db) => markLibraryForPurge(db, lib, new Date("2027-01-01T00:00:00Z")));
+    await scoped([lib], (db) => markLibraryForPurge(db, lib, at(90)));
     expect((await scoped([lib], (db) => getLibraries(db, [lib])))[0].purge_after).toBe(soon.toISOString());
-    const sooner = new Date("2026-10-01T00:00:00Z");
+    const sooner = at(2);
     await scoped([lib], (db) => markLibraryForPurge(db, lib, sooner));
     expect((await scoped([lib], (db) => getLibraries(db, [lib])))[0].purge_after).toBe(sooner.toISOString());
   });

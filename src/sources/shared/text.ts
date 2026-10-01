@@ -87,10 +87,35 @@ function foldChar(char: string): string {
   return char.normalize("NFD")[0]?.toLowerCase() ?? char;
 }
 
-function foldText(text: string): string {
-  let out = "";
-  for (const char of text) out += foldChar(char);
-  return out;
+/** Folds of the non-ASCII characters met so far — foldChar is pure, and a
+ * decision uses a few hundred distinct ones; bounded so an exotic text
+ * cannot grow it without limit. */
+const FOLD_MEMO = new Map<string, string>();
+const FOLD_MEMO_MAX = 4_096;
+
+/**
+ * foldChar over a whole text. ASCII (the bulk of any Czech text) is
+ * lower-cased directly and everything else is memoised: one NFD normalize
+ * per character made a 300k-character decision cost ~30 ms per fold.
+ * Output is identical to folding char by char, offsets 1:1. Exported for
+ * the tests.
+ */
+export function foldText(text: string): string {
+  const parts: string[] = [];
+  for (const char of text) {
+    const code = char.charCodeAt(0);
+    if (code < 128) {
+      parts.push(code >= 65 && code <= 90 ? String.fromCharCode(code + 32) : char);
+      continue;
+    }
+    let folded = FOLD_MEMO.get(char);
+    if (folded === undefined) {
+      folded = foldChar(char);
+      if (FOLD_MEMO.size < FOLD_MEMO_MAX) FOLD_MEMO.set(char, folded);
+    }
+    parts.push(folded);
+  }
+  return parts.join("");
 }
 
 export interface ExcerptResult {
@@ -114,9 +139,23 @@ export function findExcerpts(
   maxWindows = MAX_EXCERPT_WINDOWS,
   paragraphReach = PARAGRAPH_REACH_CHARS,
 ): ExcerptResult {
+  if (!term.trim()) return { matches: 0, text: "", windows: 0, shown: 0, cut: false, truncated: false };
+  return findExcerptsFolded(text, foldText(text), term, contextChars, maxTotalChars, maxWindows, paragraphReach);
+}
+
+/** findExcerpts over a text already folded (`haystack` = foldText(text)):
+ * a caller trying several terms on one text folds it once. */
+function findExcerptsFolded(
+  text: string,
+  haystack: string,
+  term: string,
+  contextChars: number,
+  maxTotalChars: number,
+  maxWindows: number,
+  paragraphReach: number,
+): ExcerptResult {
   const needle = foldText(term.trim());
   if (!needle) return { matches: 0, text: "", windows: 0, shown: 0, cut: false, truncated: false };
-  const haystack = foldText(text);
 
   const windows: Array<[number, number]> = [];
   let index = haystack.indexOf(needle);
@@ -177,7 +216,10 @@ export function uniqueQueries(
   const seen = new Set<string>();
   const out: string[] = [];
   for (const candidate of [query, ...(queries ?? [])]) {
-    const trimmed = candidate?.trim();
+    // Runs of whitespace collapsed: every engine tokenises on whitespace, so
+    // "náhrada  škody" and "náhrada škody" are one search — run twice, they
+    // cost a whole extra search per court and split the caches' keys.
+    const trimmed = candidate?.replace(/\s+/g, " ").trim();
     if (!trimmed) continue;
     const key = trimmed.toLowerCase();
     if (seen.has(key)) continue;
@@ -320,9 +362,13 @@ export function previewExcerpt(
   contextChars = 300,
   maxChars = 1_200,
 ): SearchPreview {
+  // Folded once for every term — up to ~9 terms for 3 variants, and the
+  // no-match case (each term tried) is the common one.
+  let haystack: string | undefined;
   for (const term of terms) {
     if (!term?.trim()) continue;
-    const result = findExcerpts(text, term, contextChars, maxChars, 2, contextChars);
+    haystack ??= foldText(text);
+    const result = findExcerptsFolded(text, haystack, term, contextChars, maxChars, 2, contextChars);
     if (result.matches) return { matches: result.matches, excerpt: result.text };
   }
   return { matches: 0, excerpt: "" };

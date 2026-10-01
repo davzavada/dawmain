@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
-import { READ_ONLY, isoDate, toolFailure } from "./shared";
+import { READ_ONLY, assertDateRange, isoDate, rangeContinuationHint, toolFailure } from "./shared";
 import {
   buildStaleUrl,
   futureVersions,
@@ -8,7 +8,8 @@ import {
   getActText,
   getHistory,
   getSection,
-  resolveVersion,
+  parseSectionLabel,
+  resolveVersionForRead,
   searchActs,
   type ActVersion,
 } from "@/src/sources/esbirka";
@@ -101,6 +102,7 @@ export function registerEsbirka(server: McpServer): void {
     },
     async ({ query, match, exclude_words, date_from, date_to, limit, offset }) => {
       try {
+        assertDateRange("e-Sbírka", date_from, date_to);
         const result = await searchActs(query, offset, limit, {
           match,
           excludeWords: exclude_words,
@@ -118,9 +120,13 @@ export function registerEsbirka(server: McpServer): void {
           (item, i) =>
             `${offset + i + 1}. ${item.staleUrl} — ${snippet(item.nazev, 160)}${item.stav ? ` [${item.stav}]` : ""}\n   ${item.url}`,
         );
+        // A page past the end of a query that DID match must not read as "no
+        // match" — that sends the model off to reformulate a working query.
         const text = result.items.length
           ? `Found ${result.total} acts (showing ${offset + 1}–${offset + result.items.length}):\n${lines.join("\n")}`
-          : `No acts matched "${query}". Try different Czech terms, fewer words (every word must occur by default), or the act's common name.`;
+          : result.total > 0
+            ? `No more acts: "${query}" matched ${result.total}, and offset ${offset} is past the last one — use an offset below ${result.total}.`
+            : `No acts matched "${query}". Try different Czech terms, fewer words (every word must occur by default), or the act's common name.`;
         return { content: [{ type: "text", text }], structuredContent: output };
       } catch (error) {
         return fail(error);
@@ -230,9 +236,17 @@ export function registerEsbirka(server: McpServer): void {
     async ({ year, number, collection, date, section, page }) => {
       try {
         if (section) {
-          const result = await getSection(collection, year, number, date, section);
+          // The version first (one detail request, cached), then the section
+          // and the future-version lookup side by side: the history needs only
+          // the version type, not the text. An invalid label makes no request
+          // at all — getSection rejects it before any I/O.
+          const label = parseSectionLabel(section);
+          const version = label ? await resolveVersionForRead(collection, year, number, date) : null;
+          const [result, future] = await Promise.all([
+            getSection(collection, year, number, date, section, label ? { version } : undefined),
+            pendingVersions(version, collection, year, number),
+          ]);
           const staleUrl = result.version?.staleUrl ?? buildStaleUrl(collection, year, number, date);
-          const future = await pendingVersions(result.version, collection, year, number);
           const paged = charPage(result.text, page);
           const output = {
             staleUrl,
@@ -247,13 +261,17 @@ export function registerEsbirka(server: McpServer): void {
             has_more: paged.has_more,
             text: paged.text,
           };
-          const header = [`${staleUrl} ${section}`, versionLabel(result.version)].filter(Boolean).join(" — ");
+          const shown = label ? (label.kind === "paragraph" ? `§ ${label.value}` : `čl. ${label.value}`) : section;
+          const header = [`${staleUrl} ${shown}`, versionLabel(result.version)].filter(Boolean).join(" — ");
           const note = futureNote(future);
+          // The next window repeats the section (and the date): "page: 2" alone
+          // would read page 2 of the WHOLE act — of today's version, without date.
+          const locator = [`section: ${JSON.stringify(section)}`, date ? `date: "${date}"` : ""].filter(Boolean).join(", ");
           return {
             content: [
               {
                 type: "text",
-                text: `${header} (via ${result.via}):${note ? `\n${note}` : ""}\n\n${paged.text}${paged.has_more ? `\n\n(page ${paged.page}/${paged.total_pages} — call again with page: ${paged.page + 1} for the rest)` : ""}`,
+                text: `${header} (via ${result.via}):${note ? `\n${note}` : ""}\n\n${paged.text}${rangeContinuationHint(locator, paged.page, paged.total_pages)}`,
               },
             ],
             structuredContent: output,
@@ -261,7 +279,7 @@ export function registerEsbirka(server: McpServer): void {
         }
 
         // Whole act, in pages cut to what a client accepts.
-        const version = await resolveVersion(collection, year, number, date).catch(() => null);
+        const version = await resolveVersionForRead(collection, year, number, date);
         const staleUrl = version?.staleUrl ?? buildStaleUrl(collection, year, number, date);
         const [actPage, future] = await Promise.all([
           getActText(staleUrl, page),
@@ -287,7 +305,9 @@ export function registerEsbirka(server: McpServer): void {
           content: [
             {
               type: "text",
-              text: `${header}:${note ? `\n${note}` : ""}\n\n${actPage.text}${actPage.hasMore ? `\n\n(continue with page: ${actPage.page + 1}; to read one provision, pass section: "§ N" instead)` : ""}`,
+              // A dated read continues with its date — dropped, the next page
+              // would silently come from today's version.
+              text: `${header}:${note ? `\n${note}` : ""}\n\n${actPage.text}${actPage.hasMore ? `\n\n(continue with ${date ? `date: "${date}", ` : ""}page: ${actPage.page + 1}; to read one provision, pass section: "§ N" instead)` : ""}`,
             },
           ],
           structuredContent: output,

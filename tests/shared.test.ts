@@ -3,7 +3,11 @@ import {
   charPage,
   DOC_PAGE_CHARS,
   excerptTerms,
+  findExcerpts,
+  foldText,
+  previewExcerpt,
   snippet,
+  uniqueQueries,
   isoToCzech,
   czechToIso,
 } from "@/src/sources/shared/text";
@@ -135,6 +139,97 @@ describe("TtlCache", () => {
     expect(cache.get("c")).toBe("C");
   });
 
+  it("re-setting an existing key at capacity keeps the other entries", async () => {
+    const { TtlCache } = await import("@/src/sources/shared/cache");
+    const cache = new TtlCache<string>(60_000, 2);
+    cache.set("a", "A");
+    cache.set("b", "B");
+    cache.set("b", "B2"); // same key: no eviction
+    expect(cache.get("a")).toBe("A");
+    expect(cache.get("b")).toBe("B2");
+    cache.set("a", "A2"); // a refreshed key moves to the end of the eviction order
+    cache.set("c", "C");
+    expect(cache.get("b")).toBeUndefined();
+    expect(cache.get("a")).toBe("A2");
+  });
+
+  it("through() shares one load among concurrent callers of a key", async () => {
+    const { TtlCache } = await import("@/src/sources/shared/cache");
+    const cache = new TtlCache<number>(60_000);
+    let loads = 0;
+    let release!: (value: number) => void;
+    const load = () => {
+      loads++;
+      return new Promise<number>((resolve) => (release = resolve));
+    };
+    const all = Promise.all([cache.through("k", load), cache.through("k", load), cache.through("k", load)]);
+    await Promise.resolve(); // the loader starts a microtask later
+    release(7);
+    expect(await all).toEqual([7, 7, 7]);
+    expect(loads).toBe(1);
+    expect(await cache.through("k", load)).toBe(7); // now cached
+    expect(loads).toBe(1);
+  });
+
+  it("through() never caches a rejection: every waiter sees it, the next call loads again", async () => {
+    const { TtlCache } = await import("@/src/sources/shared/cache");
+    const cache = new TtlCache<number>(60_000);
+    let loads = 0;
+    const failing = async () => {
+      loads++;
+      throw new Error("boom");
+    };
+    const results = await Promise.allSettled([cache.through("k", failing), cache.through("k", failing)]);
+    expect(results.map((r) => r.status)).toEqual(["rejected", "rejected"]);
+    expect(loads).toBe(1);
+    expect(await cache.through("k", async () => 5)).toBe(5);
+  });
+
+  it("through() recovers from a loader that throws synchronously", async () => {
+    const { TtlCache } = await import("@/src/sources/shared/cache");
+    const cache = new TtlCache<number>(60_000);
+    const sync = (() => {
+      throw new Error("sync");
+    }) as unknown as () => Promise<number>;
+    await expect(cache.through("k", sync)).rejects.toThrow("sync");
+    expect(await cache.through("k", async () => 3)).toBe(3);
+  });
+
+  it("delete() during a load keeps the landing value out of the cache, and the caller still gets it", async () => {
+    const { TtlCache } = await import("@/src/sources/shared/cache");
+    const cache = new TtlCache<number>(60_000);
+    let release!: (value: number) => void;
+    const first = cache.through("k", () => new Promise<number>((resolve) => (release = resolve)));
+    cache.delete("k");
+    // A call after the delete starts its own load rather than joining the dead one.
+    const second = cache.through("k", async () => 2);
+    await Promise.resolve();
+    release(1);
+    expect(await first).toBe(1);
+    expect(await second).toBe(2);
+    expect(cache.get("k")).toBe(2);
+  });
+
+  it("a caller may evict the value it got (NS bodyUnverified) once through() settles", async () => {
+    const { TtlCache } = await import("@/src/sources/shared/cache");
+    const cache = new TtlCache<{ unverified: boolean }>(60_000);
+    let loads = 0;
+    const load = async () => {
+      loads++;
+      return { unverified: true };
+    };
+    const read = async () => {
+      const value = await cache.through("k", load);
+      if (value.unverified) cache.delete("k");
+      return value;
+    };
+    await Promise.all([read(), read()]);
+    expect(loads).toBe(1);
+    expect(cache.get("k")).toBeUndefined();
+    await read();
+    expect(loads).toBe(2);
+  });
+
   it("memoKey separates scopes and ignores undefined criteria", async () => {
     const { memoKey } = await import("@/src/sources/shared/cache");
     expect(memoKey("nss-search", [{ query: "azyl" }, 1])).toBe(
@@ -143,6 +238,43 @@ describe("TtlCache", () => {
     expect(memoKey("nss-search", [{ query: "azyl" }, 1])).not.toBe(
       memoKey("ns-search", [{ query: "azyl" }, 1]),
     );
+  });
+});
+
+describe("foldText / previewExcerpt (one fold per preview)", () => {
+  // The fold as it was: one NFD normalize per character.
+  const reference = (text: string) => {
+    let out = "";
+    for (const char of text) out += char.length === 2 ? char : (char.normalize("NFD")[0]?.toLowerCase() ?? char);
+    return out;
+  };
+  const sample = "İstanbul ﬁnále 𝒜 Žaloba NÁHRADA škody é\u0301 ÆØÅ ß ǅ Ω ﬀ — § 2958 [24] \n Účinnost";
+
+  it("folds exactly as the per-character fold, offsets 1:1", () => {
+    expect(foldText(sample)).toBe(reference(sample));
+    expect(foldText(sample).length).toBe(sample.length);
+    expect(foldText(sample.repeat(3))).toBe(reference(sample.repeat(3)));
+  });
+
+  it("previewExcerpt answers as findExcerpts term by term did", () => {
+    const text = `${"úvod bez shody. ".repeat(40)}\n24. Soud dospěl k závěru, že NÁHRADA škody náleží.\n${"závěr. ".repeat(40)}`;
+    const terms = ["bezpečný přístav", "nemajetková újma", "náhrada škody"];
+    const old = (() => {
+      for (const term of terms) {
+        const result = findExcerpts(text, term, 300, 1_200, 2, 300);
+        if (result.matches) return { matches: result.matches, excerpt: result.text };
+      }
+      return { matches: 0, excerpt: "" };
+    })();
+    expect(previewExcerpt(text, terms)).toEqual(old);
+    expect(previewExcerpt(text, terms).matches).toBe(1);
+    expect(previewExcerpt(text, ["nic takového"])).toEqual({ matches: 0, excerpt: "" });
+  });
+});
+
+describe("uniqueQueries whitespace", () => {
+  it("treats variants differing only in whitespace as one, and sends the collapsed form", () => {
+    expect(uniqueQueries("náhrada  škody", ["náhrada škody", " náhrada\tškody "])).toEqual(["náhrada škody"]);
   });
 });
 
