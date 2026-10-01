@@ -67,6 +67,9 @@ describe("buildEurlexSparql", () => {
   it("groups rows by work and asks one beyond the page, with a deterministic order", () => {
     const sparql = buildEurlexSparql({ query: "data protection" }, 10, 20);
     expect(sparql).toContain("GROUP BY ?celex");
+    // MAX(?date) let Virtuoso stamp every group with the newest date of the result (live 2026-10).
+    expect(sparql).toContain("GROUP BY ?celex ?date");
+    expect(sparql).not.toContain("MAX(?date)");
     expect(sparql).toContain("ORDER BY DESC(?d) ?celex");
     expect(sparql).toContain("LIMIT 11 OFFSET 20");
     expect(sparql).toContain("(SAMPLE(?title) AS ?t)");

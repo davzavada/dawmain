@@ -137,7 +137,12 @@ const literal = (value: string) => value.replace(/["\\]/g, "");
  * a work straddling the boundary showed on two pages and "a full page means
  * more" failed. One row beyond the page tells whether more exist. ?celex
  * breaks date ties, so pages are deterministic and a judgment (62024CJ0474)
- * lists before its _RES/_SUM siblings. Pure — unit-tested. */
+ * lists before its _RES/_SUM siblings. The date is a GROUP BY key, not
+ * MAX(?date): live (2026-10) Virtuoso handed every group of a title search
+ * the newest date of the whole result — Planet49 (2019) came back dated
+ * 2026-09-03, "newest first" was arbitrary and the GDPR itself fell off the
+ * page of 'Regulation 2016/679'. A work has one work_date_document; were
+ * there two, hitsOf keeps its first (newest) row. Pure — unit-tested. */
 export function buildEurlexSparql(input: EurlexSearchInput, limit: number, offset: number): string {
   const language = requireCellarLanguage(SOURCE, input.language ?? "en").iso3.toUpperCase();
   const celex = input.celex ? literal(normalizeCelex(input.celex)) : "";
@@ -217,10 +222,10 @@ export function buildEurlexSparql(input: EurlexSearchInput, limit: number, offse
   return [
     `PREFIX cdm: <${CDM}>`,
     `PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>`,
-    `SELECT ?celex (MAX(?date) AS ?d) (SAMPLE(${titleExpression}) AS ?t) (SAMPLE(?ecli) AS ?e) (SAMPLE(?type) AS ?ty) WHERE {`,
+    `SELECT ?celex (?date AS ?d) (SAMPLE(${titleExpression}) AS ?t) (SAMPLE(?ecli) AS ?e) (SAMPLE(?type) AS ?ty) WHERE {`,
     ...clauses.map((clause) => `  ${clause}`),
     `}`,
-    `GROUP BY ?celex`,
+    `GROUP BY ?celex ?date`,
     `ORDER BY DESC(?d) ?celex`,
     `LIMIT ${limit + 1} OFFSET ${offset}`,
   ].join("\n");
