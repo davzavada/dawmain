@@ -3,7 +3,8 @@ import type { Queryable } from "./client";
 import { capString, isoOrNull, iso, num } from "./codec";
 
 /**
- * Libraries: one row per Clerk user (personal) or organization (team),
+ * Libraries: one row per Clerk user (an `org_…` row is a team library left
+ * over from before teams were removed, on its way to the 90-day purge),
  * holding the page counters the quotas are enforced against. Rows in scope
  * are read and written directly (RLS on `libraries` is keyed on the id);
  * cross-library views go through the SECURITY DEFINER functions of
@@ -14,9 +15,6 @@ import { capString, isoOrNull, iso, num } from "./codec";
  *   ingest   settlePages(n, actual)     pages_reserved −= n, page_count += actual, doc_count + 1
  *   failure  releasePages(n)            pages_reserved −= n
  *   delete   forgetPages(actual)        page_count −= actual, doc_count − 1
- * A re-upload (`replaces`) reserves in full too; only the check credits the
- * replaced document's pages (documents.ts replacementCredit), which leave
- * with forgetPages when the new document settles.
  * Every decrement floors at 0 (the CHECK constraints would otherwise turn a
  * double release into a failed transaction).
  */

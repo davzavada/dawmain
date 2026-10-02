@@ -48,9 +48,6 @@ export const LIMITS = {
   get personalPages() {
     return intEnv("FILES_PERSONAL_PAGES", 3_000);
   },
-  get teamPages() {
-    return intEnv("FILES_TEAM_PAGES", 10_000);
-  },
   get globalPages() {
     return intEnv("FILES_GLOBAL_MAX_PAGES", 30_000);
   },
@@ -112,7 +109,10 @@ export function cronSecret(): string | undefined {
   return process.env.CRON_SECRET?.trim() || undefined;
 }
 
-/** Library ids are Clerk ids: `user_…` (personal) or `org_…` (team). */
+/**
+ * Library ids are Clerk ids: `user_…`. `org_…` (a team library from before
+ * teams were removed) is still a valid id, so the cron can purge one.
+ */
 export const LIBRARY_ID_RE = /^(user|org)_[A-Za-z0-9]+$/;
 export const USER_ID_RE = /^user_[A-Za-z0-9]+$/;
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

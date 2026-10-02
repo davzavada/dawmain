@@ -26,7 +26,7 @@ export interface Hint {
 }
 
 const MODES = new Set(["on", "readonly", "off"]);
-const ROLES = new Set(["owner", "org:admin", "org:member"]);
+const ROLES = new Set(["owner"]);
 const COUNT_KEYS = ["total", "ready", "review", "processing", "error", "searchable"] as const;
 
 const isInt = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 1e9;
@@ -50,7 +50,7 @@ function library(v: unknown): LibrarySummary | null {
   const c = counts(o.counts);
   if (
     !isStr(o.id, 80) ||
-    (o.kind !== "user" && o.kind !== "org") ||
+    o.kind !== "user" ||
     !isStr(o.name, 200) ||
     !ROLES.has(o.role as string) ||
     typeof o.pro !== "boolean" ||
@@ -58,8 +58,7 @@ function library(v: unknown): LibrarySummary | null {
     typeof o.canManageAll !== "boolean" ||
     !isInt(o.quotaPages) ||
     !(o.pagesUsed === null || isInt(o.pagesUsed)) ||
-    c === undefined ||
-    !(o.memberCount === null || isInt(o.memberCount))
+    c === undefined
   ) {
     return null;
   }
@@ -74,7 +73,6 @@ function library(v: unknown): LibrarySummary | null {
     quotaPages: o.quotaPages,
     pagesUsed: o.pagesUsed as number | null,
     counts: c,
-    memberCount: o.memberCount as number | null,
   };
 }
 

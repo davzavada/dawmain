@@ -68,7 +68,7 @@ const SAFE_DISPLAY_NAME = /^[\p{L}\p{N}][\p{L}\p{N} .,&'()\-–]{0,39}$/u;
 const INSTRUCTION_WORDS = /\b(?:ignore|ignoruj|instructions?|pokyn|pokyny|system|assistant|asistent|prompt|tool|call|zavolej)\b/i;
 
 /**
- * A name somebody else chose (a team name, a Zotero group or collection),
+ * A name somebody else chose (a Zotero group or collection),
  * as tool-authored lines print it outside the fence: one that is not
  * plainly a name — too long, unusual characters, instruction-like words —
  * gives way to `fallback`, which the caller builds from verified values
@@ -82,8 +82,7 @@ export function safeDisplayName(raw: string, fallback: string): string {
 
 /**
  * A library's name as tool-authored lines print it (outside the fence): a
- * team name is set by the team's admin, so a name that is not plainly a
- * name gives way to the library's handle. Pure.
+ * name that is not plainly a name gives way to the library's handle. Pure.
  */
 export function safeLibraryName(lib: LibraryAccess): string {
   return safeDisplayName(lib.name ?? "", libraryHandle(lib));
@@ -96,7 +95,7 @@ function describe(lib: LibraryAccess): string {
 
 /**
  * The Pro libraries of the caller, optionally narrowed by `libraryFilter`
- * (one value or several; each an id, a team slug, or "osobni"). A filter
+ * (one value or several; each an id or "osobni"). A filter
  * value that matches none of them throws SourceError INPUT_INVALID naming
  * the available libraries — the same answer whether the library exists
  * elsewhere or not at all.

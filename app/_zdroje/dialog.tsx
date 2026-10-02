@@ -22,7 +22,7 @@ export function Dialog({
   title: string;
   subtitle?: ReactNode;
   onClose: () => void;
-  size?: "wide" | "narrow";
+  size?: "wide" | "medium" | "narrow";
   footer?: ReactNode;
   children: ReactNode;
 }) {

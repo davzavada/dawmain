@@ -116,6 +116,51 @@ export function splitFields(docType: DocType): { essential: FieldDef[]; extra: F
   return { essential, extra };
 }
 
+/** Width of a field in the open row's wrapping grid (wireframe 05). */
+export type FieldWidth = "full" | "wide" | "half" | "mid" | "narrow";
+
+/**
+ * The fields the open row of the file list shows (wireframe 05), in order
+ * with their widths: a short set per type — "u článku časopis, ročník a
+ * strany, u knihy vydavatel a ISBN". Title, authors and year for all; the
+ * commented act for a commentary (the search runs on it). Types outside
+ * the three main ones keep their up-front fields (splitFields). Required
+ * fields are always among them.
+ */
+export function compactFields(docType: DocType): Array<{ field: FieldDef; width: FieldWidth }> {
+  const head = [
+    { field: F.title, width: "full" as const },
+    { field: F.authors, width: "wide" as const },
+    { field: F.year, width: "narrow" as const },
+  ];
+  const publisher: FieldDef = { ...F.publisher, label: "Vydavatel" };
+  switch (docType) {
+    case "komentar":
+      return [...head, { field: F.act, width: "wide" }, { field: publisher, width: "mid" }];
+    case "clanek":
+      return [...head, { field: F.journal, width: "half" }, { field: F.volume, width: "narrow" }, { field: F.pages, width: "narrow" }];
+    case "kniha":
+      return [...head, { field: publisher, width: "wide" }, { field: F.isbn, width: "mid" }];
+    default:
+      return splitFields(docType).essential.map((field) => ({
+        field,
+        width: field.key === "title" ? "full" : field.key === "year" ? "narrow" : field.key === "authors" ? "wide" : "half",
+      }));
+  }
+}
+
+/** The three types of the open row's switch (wireframe 05); the rest sit in its "Jiný typ" menu. */
+export const MAIN_DOC_TYPES: DocType[] = ["komentar", "clanek", "kniha"];
+
+/** A list field (authors, ISBN) in a one-line input: "Lavický, P.; Novák, J." ⇄ one item per line. */
+export function listToLine(value: string): string {
+  return value.split("\n").join("; ");
+}
+
+export function lineToList(line: string): string {
+  return line.split(/; ?/).join("\n");
+}
+
 export const DOC_TYPE_OPTIONS: Array<[DocType, string]> = DOC_TYPES.map((t) => [t, DOC_TYPE_LABELS[t]]);
 
 /** The editable fields of a type: title, the type's own fields, then keywords, summary, language. */

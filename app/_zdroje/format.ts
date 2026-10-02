@@ -1,7 +1,7 @@
-import type { DocStatus, FileKind } from "@/src/files/types";
+import { DOC_TYPE_LABELS, type DocStatus, type DocType, type FileKind } from "@/src/files/types";
 
 /**
- * Czech formatting for the Vlastní zdroje UI: plurals, sizes, dates,
+ * Czech formatting for the Vlastní soubory UI: plurals, sizes, dates,
  * status badges, initials. Pure — unit-tested (tests/files-web-format.test.ts);
  * safe in server and client components.
  */
@@ -25,11 +25,6 @@ export function countDocuments(n: number): string {
   return `${formatCount(n)} ${plural(n, "dokument", "dokumenty", "dokumentů")}`;
 }
 
-/** "1 člen", "3 členové", "5 členů". */
-export function countMembers(n: number): string {
-  return `${formatCount(n)} ${plural(n, "člen", "členové", "členů")}`;
-}
-
 /** "1 strana", "3 strany", "1 240 stran". */
 export function countPages(n: number): string {
   return `${formatCount(n)} ${plural(n, "strana", "strany", "stran")}`;
@@ -38,11 +33,6 @@ export function countPages(n: number): string {
 /** The accusative after "zabere", "má": "1 stranu", "3 strany", "1 240 stran". */
 export function countPagesAcc(n: number): string {
   return `${formatCount(n)} ${plural(n, "stranu", "strany", "stran")}`;
-}
-
-/** "2 zapnuté dokumenty z 4" (the home page's Moje zdroje row). */
-export function enabledOf(enabled: number, total: number): string {
-  return `${formatCount(enabled)} ${plural(enabled, "zapnutý dokument", "zapnuté dokumenty", "zapnutých dokumentů")} z ${formatCount(total)}`;
 }
 
 /**
@@ -156,13 +146,29 @@ export function downloadFileName(disposition: string | null, fallback: string): 
   return clean || fallback;
 }
 
-/** Footer line of the modal: "4 dokumenty · 1 240 z 3 000 stran". */
-export function quotaLine(documents: number, pagesUsed: number, quotaPages: number): string {
-  return `${countDocuments(documents)} · ${formatCount(pagesUsed)} z ${formatCount(quotaPages)} ${plural(quotaPages, "strany", "stran", "stran")}`;
+/** The modal's subtitle tail: "Zbývá 660 z 2 500 stran." (never below zero). */
+export function remainingLine(pagesUsed: number, quotaPages: number): string {
+  const left = Math.max(0, quotaPages - Math.max(0, pagesUsed));
+  return `${plural(left, "Zbývá", "Zbývají", "Zbývá")} ${formatCount(left)} z ${formatCount(quotaPages)} ${plural(quotaPages, "strany", "stran", "stran")}.`;
 }
 
-/** Share of the quota for the progress bar, 0–1, with a visible minimum for a non-empty library. */
-export function quotaShare(used: number, quota: number): number {
-  if (!(quota > 0) || !(used > 0)) return 0;
-  return Math.min(1, Math.max(0.01, used / quota));
+/** "Komentář", "Kapitola v knize" — the type label as a badge or a line starts with it. */
+export function typeLabel(type: DocType): string {
+  const label = DOC_TYPE_LABELS[type] ?? DOC_TYPE_LABELS.jine;
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+/**
+ * The line under a file's title: "Článek · Právník 2/2024 · 28 stran"; with
+ * `uploadedAt` (the open row) also "· nahráno 12. 9. 2026".
+ */
+export function fileLine(
+  doc: { docType: DocType; publication: string | null; physicalPages: number | null; billablePages: number },
+  uploadedAt?: string,
+  now = new Date(),
+): string {
+  const pages = doc.physicalPages ?? doc.billablePages;
+  return [typeLabel(doc.docType), doc.publication, pages > 0 ? countPages(pages) : null, uploadedAt ? `nahráno ${formatDate(uploadedAt, now)}` : null]
+    .filter(Boolean)
+    .join(" · ");
 }

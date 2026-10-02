@@ -20,10 +20,9 @@ export default function Soukromi() {
           E-mail: <Mail />
         </p>
         <p>
-          Výjimkou jsou osobní údaje v dokumentech, které nahrajete do Vlastních zdrojů - třeba
-          jména účastníků v rozhodnutí nebo autorů článku. Jejich správcem jste vy (u týmové
-          knihovny zpravidla kancelář nebo firma, za kterou tým vystupuje): vy rozhodujete, co
-          nahrajete a komu to v týmu zpřístupníte. Já je zpracovávám jen jako zpracovatel, podle
+          Výjimkou jsou osobní údaje v dokumentech, které nahrajete do Vlastních souborů - třeba
+          jména účastníků v rozhodnutí nebo autorů článku. Jejich správcem jste vy: vy rozhodujete,
+          co nahrajete. Já je zpracovávám jen jako zpracovatel, podle
           vašich pokynů a <Link href="/podminky">Podmínek užití</Link>. Totéž platí pro osobní
           údaje v knihovně Zotero, kterou k Dawmainu připojíte (záznamy, poznámky, přílohy).
         </p>
@@ -51,7 +50,7 @@ export default function Soukromi() {
             hlášení.
           </li>
         </ul>
-        <p>Máte-li Vlastní zdroje (režim Pro), přibývá k tomu:</p>
+        <p>Máte-li Vlastní soubory (režim Pro), přibývá k tomu:</p>
         <ul>
           <li>
             <strong>text nahraných dokumentů</strong> - dokumenty se na text převádějí přímo ve
@@ -67,17 +66,12 @@ export default function Soukromi() {
             identifikátory (spisové značky, paragrafy), ve kterých asistent hledá,
           </li>
           <li>
-            <strong>kdo co udělal</strong> - kdo a kdy dokument nahrál, nahradil novou verzí,
-            potvrdil, stáhl nebo smazal, kdo koho do týmu pozval nebo z něj odebral, název knihovny
-            (vaše jméno, nebo název týmu) a záznam, že jste přijali pravidla Vlastních zdrojů,
+            <strong>kdo co udělal</strong> - kdy jste dokument nahráli, upravili, stáhli nebo
+            smazali, název knihovny a záznam, že jste přijali pravidla Vlastních souborů,
           </li>
           <li>
             <strong>denní počítadla</strong> - kolik jste za den v dokumentech četli a kolik jste
-            si z nich stáhli; hlídají limity, díky kterým může služba běžet zdarma,
-          </li>
-          <li>
-            <strong>členství v týmu</strong> - název týmu, vaše role a pozvánky; vede je Clerk a já
-            z něj jen zjišťuji, ke kterým knihovnám máte přístup.
+            si z nich stáhli; hlídají limity, díky kterým může služba běžet zdarma.
           </li>
         </ul>
         <p>Připojíte-li v režimu Pro svou knihovnu Zotero, přibývá ještě:</p>
@@ -85,28 +79,33 @@ export default function Soukromi() {
           <li>
             <strong>klíč k vaší knihovně Zotero</strong> - vydá ho Zotero, když připojení na jeho
             stránce potvrdíte. Ukládám ho zašifrovaný u vašeho účtu v Clerku, spolu s vaším
-            uživatelským jménem a číselným identifikátorem v Zoteru, datem připojení a tím, k čemu
-            klíč opravňuje (čtení knihovny, poznámek a skupin),
+            uživatelským jménem a číselným identifikátorem v Zoteru, datem připojení, vaší volbou
+            („Jen číst“, nebo „Číst a ukládat“) a tím, k čemu klíč opravňuje (čtení knihovny,
+            poznámek a skupin, případně zápis do vaší osobní knihovny),
           </li>
           <li>
             <strong>obsah knihovny, na který se váš asistent zeptá</strong> - záznamy (název,
             autoři, další údaje, štítky, kolekce), poznámky, anotace a text příloh. Neukládám ho,
             projde jen dočasnou pamětí (bod 5). Nemá-li Zotero text přílohy zaindexovaný, stáhnu
             na dotaz asistenta PDF přílohu z úložiště Zotera, převedu ji na text a soubor hned
-            zahodím.
+            zahodím,
+          </li>
+          <li>
+            <strong>záznamy, které asistent uloží</strong> - zvolíte-li „Číst a ukládat“, pošlu na
+            pokyn asistenta do vaší knihovny nový záznam (typ, název, autoři, datum, odkaz na zdroj
+            a podobně). U sebe ho neuchovávám; žije ve vaší knihovně v Zoteru.
           </li>
         </ul>
         <p>
-          Účty a týmy vede poskytovatel přihlášení Clerk; drží e-mailovou adresu, identifikátor
-          účtu, jméno, pokud ho vyplníte, a u týmů jejich členy, role a pozvánky. Přihlásíte-li se
-          přes účet jiné služby (např. Google), předá do Clerku zpravidla totéž. Pozve-li vás do
-          týmu jeho správce, zadá vaši e-mailovou adresu on a Clerk vám pošle pozvánku. Žádné další
+          Účty vede poskytovatel přihlášení Clerk; drží e-mailovou adresu, identifikátor účtu a
+          jméno, pokud ho vyplníte. Přihlásíte-li se přes účet jiné služby (např. Google), předá do
+          Clerku zpravidla totéž. Žádné další
           údaje z vašeho účtu nezpracovávám a hesla u sebe neuchovávám.
         </p>
         <p>
           Vaši konverzaci s AI asistentem server nevidí - nedostává ji. Dostane jen strojové
           volání, které asistent provede. Obsah rešerší v oficiálních zdrojích - dotazy a odpovědi
-          - si trvale neukládám; trvale ukládám jen to, co sami nahrajete do Vlastních zdrojů, a u
+          - si trvale neukládám; trvale ukládám jen to, co sami nahrajete do Vlastních souborů, a u
           připojeného Zotera klíč k němu.
           Reklamu nemám, údaje neprodávám a nepředávám je pro marketing. Nic o vás automaticky
           nevyhodnocuji ani neprofiluji.
@@ -119,11 +118,13 @@ export default function Soukromi() {
           <li>udržení přihlašovací relace,</li>
           <li>vyřízení rešerše; krátká mezipaměť šetří zdroje, ze kterých se čerpá,</li>
           <li>
-            u Vlastních zdrojů uložení vašich dokumentů, jejich zpracování do vyhledávacího indexu,
-            návrh metadat, hledání a čtení v nich vaším asistentem a v týmu jejich sdílení s
-            ostatními členy,
+            u Vlastních souborů uložení vašich dokumentů, jejich zpracování do vyhledávacího indexu,
+            návrh typu dokumentu a metadat a hledání a čtení v nich vaším asistentem,
           </li>
-          <li>u Zotera připojení vaší knihovny a hledání a čtení v ní vaším asistentem,</li>
+          <li>
+            u Zotera připojení vaší knihovny, hledání a čtení v ní vaším asistentem a při volbě
+            „Číst a ukládat“ ukládání nových záznamů do ní,
+          </li>
           <li>přehled o tom, jak se služba používá, a její další zlepšování,</li>
           <li>
             provoz a bezpečnost služby, hlídání limitů, díky kterým může běžet zdarma, a prevence
@@ -135,10 +136,10 @@ export default function Soukromi() {
       <Section heading="4. Právní základ zpracování">
         <p>
           Účet, přihlašovací relaci a vyřízení rešerše včetně krátké dočasné paměti zpracovávám pro
-          plnění smlouvy (čl. 6 odst. 1 písm. b) GDPR). Stejně tak Vlastní zdroje: uložení a
-          zpracování dokumentů, jejich zpřístupnění vám a vašemu týmu, návrh metadat, členství v
-          týmu a záznamy o tom, kdo co nahrál. A také připojení Zotera: uložení klíče a čtení z
-          vaší knihovny, když se na ni váš asistent zeptá. Skutečnost, že je služba bezúplatná, na
+          plnění smlouvy (čl. 6 odst. 1 písm. b) GDPR). Stejně tak Vlastní soubory: uložení a
+          zpracování dokumentů, jejich zpřístupnění vám, návrh typu a metadat a záznamy o tom, co
+          jste nahráli. A také připojení Zotera: uložení klíče, čtení z vaší knihovny, když se na
+          ni váš asistent zeptá, a při volbě „Číst a ukládat“ zápis nových záznamů do ní. Skutečnost, že je služba bezúplatná, na
           tom nic nemění.
         </p>
         <p>
@@ -163,10 +164,10 @@ export default function Soukromi() {
           <li>provozní záznamy hostingu - krátkodobě, v řádu dnů až týdnů,</li>
           <li>e-mailová korespondence - po dobu potřebnou k vyřízení věci, nejdéle rok.</li>
         </ul>
-        <p>U Vlastních zdrojů platí:</p>
+        <p>U Vlastních souborů platí:</p>
         <ul>
           <li>
-            dokumenty (text, index a metadata) - dokud je nesmažete vy nebo správce týmu. Smazaný
+            dokumenty (text, index a metadata) - dokud je nesmažete. Smazaný
             dokument zmizí hned; jen v historii změn, kterou Neon drží pro obnovu databáze po
             havárii, vydrží nejdéle 6 hodin,
           </li>
@@ -175,21 +176,20 @@ export default function Soukromi() {
             znovu. Pak ho smažu; v seznamu zůstane jen záznam o chybě, dokud ho nesmažete,
           </li>
           <li>
-            po zrušení účtu nebo týmu - knihovnu i s dokumenty smažu automaticky, nejpozději do 8
-            dnů. Co jste nahráli do týmu, patří týmu a zůstává v něm i po vašem odchodu; smazat to
-            může správce týmu,
+            po zrušení účtu - knihovnu i s dokumenty smažu automaticky, nejpozději do 8 dnů,
           </li>
           <li>
             po odebrání režimu Pro - asistent v knihovně přestane hledat, ale ještě 90 dní ji
-            uvidíte na webu, můžete dokumenty mazat a jejich text s metadaty si stáhnout (tlačítko
-            „Exportovat text“ v detailu dokumentu; kdyby to nešlo, napište mi a pomůžu vám). Pak
+            uvidíte na webu, můžete dokumenty mazat a jejich text s metadaty si stáhnout (odkaz
+            „Stáhnout text“ u dokumentu v seznamu souborů; kdyby to nešlo, napište mi a pomůžu
+            vám). Pak
             knihovnu smažu; předem vám o tom napíšu,
           </li>
           <li>
             text poslaný k návrhu metadat (bod 6) - Vercel ho smaže hned po vyřízení požadavku,
           </li>
           <li>
-            záznamy o tom, kdo co v knihovně nahrál, potvrdil, stáhl nebo smazal - dokud knihovna
+            záznamy o tom, co jste v knihovně nahráli, upravili, stáhli nebo smazali - dokud knihovna
             trvá. Po jejím výmazu zůstane jen její interní označení a záznam, kdy a kolik dokumentů
             jsem vymazal, bez jména a bez obsahu,
           </li>
@@ -197,7 +197,7 @@ export default function Soukromi() {
             denní počítadla čtení a stažení - 2 dny; ostatní počítadla knihovny (nahrání, strany,
             spotřeba) nejdéle 12 měsíců,
           </li>
-          <li>záznam o přijetí pravidel Vlastních zdrojů - dokud trvá účet.</li>
+          <li>záznam o přijetí pravidel Vlastních souborů - dokud trvá účet.</li>
         </ul>
         <p>U Zotera platí:</p>
         <ul>
@@ -214,7 +214,11 @@ export default function Soukromi() {
           <li>
             obsah knihovny - jen v dočasné paměti: seznamy skupin a kolekcí, údaje k hledání podle
             spisové značky a texty příloh nejdéle 10 minut. Stažené PDF neukládám vůbec, zahodím
-            ho hned po převodu na text.
+            ho hned po převodu na text,
+          </li>
+          <li>
+            záznamy, které asistent do Zotera uložil - zůstávají ve vaší knihovně, dokud je tam
+            nesmažete; u sebe je neuchovávám.
           </li>
         </ul>
         <p>
@@ -230,7 +234,7 @@ export default function Soukromi() {
         </p>
         <ul>
           <li>
-            <strong>Clerk, Inc.</strong> - přihlašování a správa účtů a týmů; společnost sídlí v
+            <strong>Clerk, Inc.</strong> - přihlašování a správa účtů; společnost sídlí v
             USA a účty vede tam,
           </li>
           <li>
@@ -239,7 +243,7 @@ export default function Soukromi() {
             Gateway mi Vercel také zprostředkuje jazykový model pro návrh metadat (viz níže),
           </li>
           <li>
-            <strong>Neon, Inc.</strong> (skupina Databricks) - databáze Vlastních zdrojů; data leží
+            <strong>Neon, Inc.</strong> (skupina Databricks) - databáze Vlastních souborů; data leží
             v evropském regionu (Frankfurt), společnost je ale americká.
           </li>
         </ul>
@@ -250,22 +254,22 @@ export default function Soukromi() {
           <strong>Google</strong>: když nahrajete dokument, pošlu přes AI Gateway jeho úvodní
           strany, tiráž, osnovu nadpisů a záhlaví stran (dohromady nejvýš asi 16 000 znaků) a
           název souboru, u PDF i s údaji z jeho vlastností, jazykovému modelu Gemini. Model z toho
-          jen navrhne název, autory, rok a podobné údaje, které pak sami zkontrolujete. Vercel ani
+          jen navrhne typ dokumentu, název, autory, rok a podobné údaje, které pak sami můžete
+          opravit. Vercel ani
           Google text nepoužijí k trénování modelů a Vercel ho po vyřízení požadavku smaže. Kdo
           dokument nahrál, s požadavkem neposílám: AI Gateway kvůli rozpočtu spotřeby dostane jen
           pseudonym, ze kterého se váš účet vyčíst nedá.
         </p>
         <p>
-          Dokumenty v osobní knihovně vidíte jen vy. Dokumenty v týmové knihovně vidí všichni
-          členové týmu, a to i s tím, kdo je nahrál; správce týmu navíc vidí seznam členů s jejich
-          e-maily. Co si z vašich dokumentů přečte váš AI asistent, dostane i jeho poskytovatel
+          Své dokumenty vidíte jen vy. Co si z vašich dokumentů přečte váš AI asistent, dostane i jeho poskytovatel
           (např. Anthropic nebo OpenAI) podle smlouvy, kterou s ním máte vy - to je vaše volba, ne
           předání z mé strany. Totéž platí pro obsah připojené knihovny Zotero.
         </p>
         <p>
           <strong>Zotero</strong> (Corporation for Digital Scholarship, USA) není můj zpracovatel.
           Je to služba, kterou máte vy a kterou jste k Dawmainu sami připojili. Na pokyn vašeho
-          asistenta do ní s vaším klíčem posílám jeho dotazy a načítám z ní záznamy a přílohy.
+          asistenta do ní s vaším klíčem posílám jeho dotazy, načítám z ní záznamy a přílohy a při
+          volbě „Číst a ukládat“ do ní zapisuji nové záznamy.
           Zotero vede vaši knihovnu podle svých{" "}
           <a href="https://www.zotero.org/support/privacy">zásad ochrany soukromí</a>.
         </p>
@@ -286,12 +290,12 @@ export default function Soukromi() {
         <p>
           Rešerše v oficiálních zdrojích Evropskou unii neopouští. Server běží v evropském regionu
           (Frankfurt) a databáze, do kterých se dotazuje, jsou české a unijní. Totéž platí pro
-          Vlastní zdroje: text dokumentů, index i hledání v nich zůstávají v databázi ve
+          Vlastní soubory: text dokumentů, index i hledání v nich zůstávají v databázi ve
           Frankfurtu.
         </p>
         <p>Mimo Evropskou unii jde z mé strany jen tohle:</p>
         <ul>
-          <li>údaje o vašem účtu a týmech, které Clerk vede ve Spojených státech,</li>
+          <li>údaje o vašem účtu, které Clerk vede ve Spojených státech,</li>
           <li>přístup k platformám Vercel a Neon, spravovaným rovněž odtamtud,</li>
           <li>
             část textu dokumentu k návrhu metadat (bod 6), kterou může Google zpracovat v USA.
@@ -303,7 +307,8 @@ export default function Soukromi() {
           Clerk, Vercel i Google jsou v rámci Data Privacy Framework zapsány.
         </p>
         <p>
-          Připojíte-li Zotero, putují dotazy vašeho asistenta a váš klíč do Zotera, které data vede
+          Připojíte-li Zotero, putují dotazy vašeho asistenta, váš klíč a případně nové záznamy do
+          Zotera, které data vede
           v USA. Nejde o předání, o kterém bych rozhodoval já: jde jen na váš pokyn, do služby,
           kterou jste si sami vybrali a připojili.
         </p>
@@ -328,53 +333,55 @@ export default function Soukromi() {
 
       <Section heading="9. Zabezpečení a umístění dat">
         <p>
-          Server i databáze Vlastních zdrojů běží v evropském regionu (Frankfurt). Komunikace
+          Server i databáze Vlastních souborů běží v evropském regionu (Frankfurt). Komunikace
           probíhá výhradně přes šifrované spojení (HTTPS) a server odmítá neověřené požadavky.
         </p>
         <p>
           U rešerší v oficiálních zdrojích chrání nejvíc to, co tu není: jejich obsah neukládám. Co
           projde dočasnou pamětí, po minutách mizí a s vaším účtem to spojené není.
         </p>
-        <p>Vlastní zdroje chrání tři věci:</p>
+        <p>Vlastní soubory chrání tři věci:</p>
         <ul>
           <li>
             <strong>originály sem vůbec nepřijdou</strong> - převádějí se na text ve vašem
             prohlížeči a server dostane jen ten text,
           </li>
           <li>
-            <strong>každá knihovna je oddělená</strong> - osobní i týmová. Oddělení hlídá sama
-            databáze pravidly zabezpečení na úrovni řádků (row-level security): každý dotaz vidí
-            jen řádky knihoven, ke kterým má přihlášený uživatel přístup,
+            <strong>každá knihovna je oddělená</strong> - oddělení hlídá sama databáze pravidly
+            zabezpečení na úrovni řádků (row-level security): každý dotaz vidí jen řádky knihovny
+            přihlášeného uživatele,
           </li>
           <li>
             <strong>přístup jen přes vaše přihlášení</strong> - k dokumentům se dostanete jen se
-            svým účtem, ne přes starší sdílený přístupový kód, a to, ke kterým knihovnám máte
-            přístup, průběžně ověřuji u Clerku.
+            svým účtem, ne přes starší sdílený přístupový kód, a to, zda máte režim Pro, průběžně
+            ověřuji u Clerku.
           </li>
         </ul>
         <p>Připojení Zotera chrání:</p>
         <ul>
           <li>
-            <strong>klíč jen ke čtení</strong> - o právo zápisu si Dawmain vůbec neříká. Kdybyste
-            ho na stránce Zotera přesto povolili, připojení odmítnu a klíč hned zruším,
+            <strong>klíč jen v rozsahu vaší volby</strong> - o právo zápisu si Dawmain řekne jen
+            při volbě „Číst a ukládat“, a to jen do vaší osobní knihovny. I pak jen přidává nové
+            záznamy: stávající nikdy nemění ani nemaže. Zvolíte-li „Jen číst“, nic nezapíše, ani
+            kdybyste zápis na stránce Zotera povolili,
           </li>
           <li>
             <strong>zašifrovaný klíč</strong> - šifruji ho (AES-256-GCM) klíčem, který je jen v
             nastavení serveru, takže ze samotného záznamu v Clerku ho nikdo nepřečte,
           </li>
           <li>
-            <strong>přístup jen přes vaše přihlášení</strong> - stejně jako u Vlastních zdrojů jen s
+            <strong>přístup jen přes vaše přihlášení</strong> - stejně jako u Vlastních souborů jen s
             vaším účtem v režimu Pro, ne přes sdílený přístupový kód.
           </li>
         </ul>
         <p>
-          Na rozdíl od Vlastních zdrojů sem u Zotera originály přijít mohou: nemá-li Zotero text
+          Na rozdíl od Vlastních souborů sem u Zotera originály přijít mohou: nemá-li Zotero text
           přílohy, stáhnu PDF z jeho úložiště. Zůstane ale jen v paměti serveru po dobu převodu;
           na disk ani do databáze ho neukládám.
         </p>
         <p>
           Kromě mě mají k údajům přístup jen poskytovatelé uvedení výše a jejich dodavatelé, a to v
-          rozsahu nutném k tomu, aby služba běžela; k týmovým dokumentům navíc členové týmu. Do
+          rozsahu nutném k tomu, aby služba běžela. Do
           obsahu vašich dokumentů se nedívám, ledaže mě o to požádáte (třeba kvůli chybě převodu)
           nebo to vyžaduje oznámení nezákonného obsahu či zákon.
         </p>
@@ -413,8 +420,8 @@ export default function Soukromi() {
             <strong>Právo na přenositelnost údajů.</strong> Údaje, které o vás zpracovávám
             automatizovaně pro plnění smlouvy, vám vydám ve strojově čitelném formátu, případně je
             na vaši žádost pošlu přímo jinému správci, je-li to technicky proveditelné. Text a
-            metadata svých dokumentů si z Vlastních zdrojů můžete stáhnout i sami tlačítkem
-            „Exportovat text“ v detailu dokumentu.
+            metadata svých dokumentů si z Vlastních souborů můžete stáhnout i sami odkazem
+            „Stáhnout text“ u dokumentu v seznamu souborů.
           </li>
           <li>
             <strong>Právo vznést námitku.</strong> Proti zpracování, které stojí na oprávněném

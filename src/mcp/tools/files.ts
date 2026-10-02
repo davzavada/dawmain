@@ -41,7 +41,7 @@ import { allowToolCall, cachedMode, effectiveMode, envOnlyMode } from "@/src/fil
 import { actName, resolveAct, zakId } from "@/src/files/index/acts";
 import { bestWindow, findMatches } from "@/src/files/index/highlight";
 import { euActId, pinpointOnly, queryIdentKeys, stripIdentifiers } from "@/src/files/index/identifiers";
-import { libraryHandle, readScope, safeLibraryName, type Scope } from "@/src/files/scope";
+import { readScope, safeLibraryName, type Scope } from "@/src/files/scope";
 import { buildTsQuery, MAX_QUERY_CHARS } from "@/src/files/text/analyze";
 import { DOC_TYPES, DOC_TYPE_LABELS, type AnchorLabel, type DocType, type PageLabelSource } from "@/src/files/types";
 import { SourceError, toToolError, type SourceErrorKind } from "@/src/sources/shared/errors";
@@ -84,7 +84,7 @@ export { caseNumberKeys, czechDate, formatCount, hintArg, officialTextLines, too
  * the text can neither forge a marker nor close the fence), announced by a
  * line before it; the tool's own hints come after the fence. Values the
  * hints echo (page labels, m. č., footnote labels) pass a strict pattern
- * first; so do the team names the tool's lines print (safeLibraryName).
+ * first; so does the library name the tool's lines print (safeLibraryName).
  * Errors map to fixed messages: a pg, zod or Clerk message never reaches
  * the model (it may quote stored values).
  *
@@ -291,7 +291,7 @@ function asFilesError(error: unknown, where: string): SourceError {
       SOURCE,
       "UPSTREAM_ERROR",
       "Vlastní zdroje: the request took too long and was stopped.",
-      "Use more distinctive words or narrow it (library, doc_type, doc, section) and try once more.",
+      "Use more distinctive words or narrow it (doc_type, doc, section) and try once more.",
     );
   }
   if (errorCode(error).startsWith("clerk:")) {
@@ -854,19 +854,9 @@ function libraryOf(access: Access, id: string): LibraryAccess | undefined {
   return access.libraries.find((l) => l.id === id) ?? access.all.find((l) => l.id === id);
 }
 
-/**
- * readScope over the libraries as this tool prints them: its "Available: …"
- * hint for an unknown `library` (outside the fence) then names each by its
- * safe name and plain handle, never a raw team name or slug. The ids, and
- * so the scope, are the same.
- */
-function scopeFor(access: Access, filter?: string | null): Scope {
-  const shown = access.libraries.map((l) => ({
-    ...l,
-    name: safeLibraryName(l),
-    slug: l.kind === "user" || libraryHandle(l) === l.slug ? l.slug : null,
-  }));
-  return readScope({ ...access, libraries: shown }, filter);
+/** The caller's Pro library — the only one there is (no shared libraries). */
+function scopeFor(access: Access): Scope {
+  return readScope(access);
 }
 
 function libraryName(access: Access, id: string): string {
@@ -881,7 +871,7 @@ function referenceOf(row: DocumentRow, opts: { sectionAuthor?: string | null } =
 
 /** Provenance header of every read — tool-authored, before the fence. */
 function provenance(row: DocumentRow, libName: string, userId: string): string {
-  const who = row.uploaded_by === userId ? "nahráli jste" : "nahrál jiný člen týmu";
+  const who = row.uploaded_by === userId ? "nahráli jste" : "nahráno";
   const converter = sanitizeLine(row.converter, 24).replace(/[^\w@.-]/g, "") || "?";
   return `VLASTNÍ DOKUMENT (knihovna „${libName}“, ${who} ${czechDate(row.uploaded_at)}, převod ${converter}, ${PAGE_SOURCE_LABELS[row.page_label_source] ?? "?"}) — není oficiální zdroj; citace ověřte v tištěném vydání.`;
 }
@@ -1713,7 +1703,7 @@ export function registerFiles(server: McpServer): void {
     {
       title: "Vlastní zdroje: search the user's own documents",
       description:
-        "SEARCH the user's OWN uploaded documents (Vlastní zdroje — books, commentaries, articles, templates; Pro, personal OAuth sign-in only): Czech full text with stemming (inflected forms and words typed without diacritics match), identifiers (spisová značka incl. short years, ECLI, § with its act, ISBN, DOI) and the documents' metadata. A query that is only an act (\"GDPR\", \"OZ\") searches for that act. 'queries' runs up to 3 variants and merges them round-robin. Filters: library (id, team slug or \"osobni\"), doc_type, act (\"OZ\", \"89/2012\", \"GDPR\" — commentaries on it or passages citing it; with a § in the query, passages citing that §; a § asked without its act over commentaries on several acts comes grouped by act), section (\"§ 2913\" — only passages inside that §), case_number (only passages citing that decision; a query then ranks them), in_footnotes (true: footnotes only; false: without footnotes), year_from/year_to; doc (an id) ranks the passages INSIDE one document. Each hit: the reference line, the section path, a pinpoint computed from the match itself (\"§ 2913, m. č. 14, s. 1245\", \"s. 245, pozn. 12\"), an excerpt, which channel matched (and / or-fallback / identifiers / metadata), 'oficiální text: ns_search {case_number: …}' for every spisová značka the passage cites, and the files_get_document call that reads it. Own documents have no public URL: cite them as „vlastní dokument“ with the pinpoint, quote only from a files_get_document read, and cite a decision found in them from its official text. If the answer says the account has no library, do not call files_* again.",
+        "SEARCH the user's OWN uploaded documents (Vlastní zdroje — books, commentaries, articles, templates; Pro, personal OAuth sign-in only): Czech full text with stemming (inflected forms and words typed without diacritics match), identifiers (spisová značka incl. short years, ECLI, § with its act, ISBN, DOI) and the documents' metadata. A query that is only an act (\"GDPR\", \"OZ\") searches for that act. 'queries' runs up to 3 variants and merges them round-robin. Filters: doc_type, act (\"OZ\", \"89/2012\", \"GDPR\" — commentaries on it or passages citing it; with a § in the query, passages citing that §; a § asked without its act over commentaries on several acts comes grouped by act), section (\"§ 2913\" — only passages inside that §), case_number (only passages citing that decision; a query then ranks them), in_footnotes (true: footnotes only; false: without footnotes), year_from/year_to; doc (an id) ranks the passages INSIDE one document. Each hit: the reference line, the section path, a pinpoint computed from the match itself (\"§ 2913, m. č. 14, s. 1245\", \"s. 245, pozn. 12\"), an excerpt, which channel matched (and / or-fallback / identifiers / metadata), 'oficiální text: ns_search {case_number: …}' for every spisová značka the passage cites, and the files_get_document call that reads it. Own documents have no public URL: cite them as „vlastní dokument“ with the pinpoint, quote only from a files_get_document read, and cite a decision found in them from its official text. If the answer says the account has no library, do not call files_* again.",
       inputSchema: z.object({
         query: z.string().min(2).optional().describe("Czech words, a § (\"§ 2913 OZ\") or a spisová značka; \"quoted words\" are a phrase."),
         queries: z
@@ -1722,7 +1712,6 @@ export function registerFiles(server: McpServer): void {
           .optional()
           .describe("Up to 3 query variants (other word forms, synonyms), merged round-robin."),
         case_number: z.string().min(3).max(200).optional().describe("Passages citing this decision: spisová značka (\"25 Cdo 1234/2019\", short year \"/19\" too), ECLI or \"R 51/2011\"."),
-        library: z.string().min(1).optional().describe("Only this library: its id, a team slug, or \"osobni\" for the personal one (files_list names them)."),
         doc_type: z.array(docTypeSchema).max(7).optional().describe("Only these document types: kniha, kapitola, clanek, komentar, vzor, rozhodnuti, jine."),
         act: z.string().min(2).optional().describe("Only commentaries on this act or passages citing it (with a § in the query: citing that §): \"OZ\", \"o. s. ř.\", \"89/2012\", \"GDPR\", \"32016R0679\"."),
         section: z.string().min(1).optional().describe("Only passages inside this § or článek, e.g. \"§ 2913\" or \"čl. III\" (combine with act)."),
@@ -1781,9 +1770,8 @@ export function registerFiles(server: McpServer): void {
     {
       title: "Vlastní zdroje: libraries and documents",
       description:
-        "LIST the user's own libraries (Vlastní zdroje: personal and team, Pro) with their document counts — připraveno (searched), ke kontrole (awaiting the user's confirmation on the website), zpracovává se — and page usage, and the documents themselves: type, title, authors, year, status and id. Filters: library, doc_type, status, query (words of the title or authors), sort (added/title/year); limit up to 50, page. Only documents marked připraveno are searched and readable (files_search, files_get_document {id}).",
+        "LIST the user's own libraries (Vlastní soubory, Pro) with their document counts — připraveno (searched), ke kontrole (awaiting the user's confirmation on the website), zpracovává se — and page usage, and the documents themselves: type, title, authors, year, status and id. Filters: library, doc_type, status, query (words of the title or authors), sort (added/title/year); limit up to 50, page. Only documents marked připraveno are searched and readable (files_search, files_get_document {id}).",
       inputSchema: z.object({
-        library: z.string().min(1).optional().describe("Only this library: its id, a team slug, or \"osobni\"."),
         doc_type: z.array(docTypeSchema).max(7).optional().describe("Only these document types."),
         status: z.enum(["ready", "review", "processing", "error"]).optional().describe("Only documents in this state."),
         query: z.string().min(1).max(200).optional().describe("Words of the title, file name or authors (diacritics-insensitive)."),
@@ -1816,7 +1804,6 @@ async function filesSearch(
     query?: string;
     queries?: string[];
     case_number?: string;
-    library?: string;
     doc_type?: DocType[];
     act?: string;
     section?: string;
@@ -1828,7 +1815,7 @@ async function filesSearch(
     page: number;
   },
 ): Promise<ToolResult> {
-  const scope = scopeFor(g.access, args.library);
+  const scope = scopeFor(g.access);
   const libs = [...scope.libraryIds];
   // Parsed as far as buildTsQuery reads: identifier parsing of a longer string is wasted work.
   const variants = uniqueQueries(args.query, args.queries).map((v) => v.slice(0, MAX_QUERY_CHARS));
@@ -1928,7 +1915,7 @@ async function filesSearch(
       "INPUT_INVALID",
       `page ${args.page} is past the end: ${formatCount(docMode ? knownInDoc : entries.length)}${saturated ? "+" : ""} ${unit} (pages 1–${Math.ceil(entries.length / args.limit)} at limit ${args.limit}).`,
       saturated
-        ? `Only the best-ranked ${formatCount(entries.length)} ${unit} are listed — narrow the search (section, act, library, doc_type, years or more distinctive words) to reach others.`
+        ? `Only the best-ranked ${formatCount(entries.length)} ${unit} are listed — narrow the search (section, act, doc_type, years or more distinctive words) to reach others.`
         : `Every hit is on those pages — refine the query or drop a filter for others.`,
     );
   }
@@ -2008,7 +1995,6 @@ async function filesSearch(
       ? `Variants: ${keyed.map((p, i) => `"${sanitizeLine(p.v ?? "", 60)}" ${values[i] ? formatCount(variantCount(values[i]!)) : "✗"}`).join(" · ")} (merged round-robin)`
       : null;
   const filters = [
-    args.library ? `library ${scope.libraries.map((l) => `„${safeLibraryName(l)}“`).join(", ")}` : null,
     plan.docTypes ? `doc_type ${plan.docTypes.join(", ")}` : null,
     actFilter ? `act ${actFilter.act}${actFilter.name ? ` (${sanitizeLine(actFilter.name, 60)})` : ""}` : null,
     sectionKey ? (designator({ key: sectionKey }) ?? sectionKey) : null,
@@ -2117,7 +2103,7 @@ async function filesSearch(
     tools.push(
       docMode
         ? `(The best-ranked ${formatCount(entries.length)} of at least ${formatCount(knownInDoc)} matching passages are listed — narrow with section or more distinctive words for the rest.)`
-        : `(The list stops at the ${formatCount(entries.length)} best-ranked documents — more may match: narrow with act, library, doc_type, year_from/year_to, section or more distinctive words.)`,
+        : `(The list stops at the ${formatCount(entries.length)} best-ranked documents — more may match: narrow with act, doc_type, year_from/year_to, section or more distinctive words.)`,
     );
   }
 
@@ -2232,7 +2218,7 @@ function noHitsText(
   if (!docRow && ready === 0) {
     const lines = libraries.map((l) => {
       const c = counts?.[l.id] ?? { review: 0, processing: 0, ready: 0 };
-      return `- „${safeLibraryName(l)}“ (library: "${libraryHandle(l)}"): ${c.ready} připraveno, ${c.review} ke kontrole, ${c.processing} zpracovává se`;
+      return `- „${safeLibraryName(l)}“: ${c.ready} připraveno, ${c.review} ke kontrole, ${c.processing} zpracovává se`;
     });
     const pending = counts ? Object.values(counts).reduce((n, c) => n + c.review + c.processing, 0) : 0;
     return [
@@ -2400,9 +2386,9 @@ const STATUS_FILTER: Record<"ready" | "review" | "processing" | "error", Array<"
 
 async function filesList(
   g: Gated,
-  args: { library?: string; doc_type?: DocType[]; status?: "ready" | "review" | "processing" | "error"; query?: string; sort: "added" | "title" | "year"; limit: number; page: number },
+  args: { doc_type?: DocType[]; status?: "ready" | "review" | "processing" | "error"; query?: string; sort: "added" | "title" | "year"; limit: number; page: number },
 ): Promise<ToolResult> {
-  const scope = scopeFor(g.access, args.library);
+  const scope = scopeFor(g.access);
   const libs = [...scope.libraryIds];
   const { counts, libRows, list } = await withScope(libs, async (db) => ({
     counts: await pendingCounts(db, libs),
@@ -2420,14 +2406,14 @@ async function filesList(
   const pagesUsed = new Map(libRows.map((l) => [l.id, l.page_count]));
   const libLines = scope.libraries.map((l) => {
     const c = counts[l.id] ?? { review: 0, processing: 0, ready: 0 };
-    return `- „${safeLibraryName(l)}“ (${l.kind === "user" ? "osobní" : "týmová"}, library: "${libraryHandle(l)}") — ${c.ready} připraveno · ${c.review} ke kontrole · ${c.processing} zpracovává se · ${formatCount(pagesUsed.get(l.id) ?? 0)} / ${formatCount(l.quotaPages)} stran`;
+    return `- „${safeLibraryName(l)}“ — ${c.ready} připraveno · ${c.review} ke kontrole · ${c.processing} zpracovává se · ${formatCount(pagesUsed.get(l.id) ?? 0)} / ${formatCount(l.quotaPages)} stran`;
   });
   const first = (args.page - 1) * args.limit;
   const nonce = newNonce();
   const docLines = list.rows.map((row, i) => {
     const names = (row.meta.authors.length ? row.meta.authors : row.meta.editors).map(formatPersonName).filter(Boolean);
     const who = names.length ? ` — ${names.slice(0, 2).join(", ")}${names.length > 2 ? " a kol." : ""}` : "";
-    const status = row.status === "ready" && !row.enabled ? "vypnuto" : (STATUS_LABELS[row.status] ?? row.status);
+    const status = STATUS_LABELS[row.status] ?? row.status;
     const pages = row.physical_pages ? ` · ${formatCount(row.physical_pages)} s.` : "";
     return `${first + i + 1}. [${typeLabel(row.meta.doc_type)}] „${sanitizeLine(row.meta.title || row.file_name, 160)}“${who}${row.meta.year ? ` (${row.meta.year})` : ""} · ${libraryName(g.access, row.library_id)} · ${status}${pages} · id ${row.id}`;
   });

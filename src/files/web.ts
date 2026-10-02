@@ -7,7 +7,7 @@ import { envOnlyMode, effectiveMode, sameOrigin } from "./guards";
 import { LIBRARY_ID_RE, LIMITS, PAGE_CHARS, TERMS_VERSION, UUID_RE, type FilesMode } from "./config";
 import { withScope, type Queryable } from "./db/client";
 import { confirmDocument, deleteDocument, getDocument, listDocuments, updateDocumentMeta, type DocumentRow } from "./db/documents";
-import { documentPreviewText, libraryDocCounts, mergeIdentKeys, metaContext, setDocumentEnabled } from "./db/documents-web";
+import { documentPreviewText, libraryDocCounts, mergeIdentKeys, metaContext } from "./db/documents-web";
 import { forgetPages, getLibraries, releasePages } from "./db/libraries";
 import { loadReadDoc, loadText } from "./db/reading";
 import { acceptTerms, audit, bumpUsage, hasAcceptedTerms, usageSum } from "./db/usage";
@@ -17,7 +17,6 @@ import { buildMetaTsv, metaIdentKeys } from "./index/derive";
 import { bibMetaBaseSchema, bibMetaSchema } from "./meta/schema";
 import { reindexDocument } from "./reindex";
 import { ownedScope } from "./scope";
-import { memberCount, memberNames } from "./team";
 import type { BibMeta } from "./types";
 import type { DocumentDetail, DocumentListItem, LibrarySummary, SummaryResponse } from "./web-types";
 
@@ -33,12 +32,12 @@ import type { DocumentDetail, DocumentListItem, LibrarySummary, SummaryResponse 
  * logs. A document or library the caller cannot see answers exactly like
  * one that does not exist (404).
  *
- * Rights: modifying a document (metadata, the on/off switch) needs a Pro
+ * Rights: modifying a document (its metadata) needs a Pro
  * library (canEditDocument); listing, deleting and exporting need only
  * ownership (ownedScope + canDeleteDocument), also after Pro was revoked.
  *
  * Modes: "readonly" keeps list, detail, delete and export working and
- * refuses metadata edits and the on/off toggle; "off" (guards) keeps list,
+ * refuses metadata edits; "off" (guards) keeps list,
  * delete (deleting is what frees the space) and export; env
  * "off"/"unconfigured" answers 503 before anything else.
  */
@@ -121,8 +120,22 @@ export function documentFlags(row: Pick<DocumentRow, "quality" | "injection_flag
   return flags;
 }
 
+/**
+ * Where an article appeared, as the list row shows it: "Právník 2/2024",
+ * "Právník 2024", "Právník"; null for any other type or without a journal. Pure.
+ */
+export function publicationLine(meta: Pick<BibMeta, "doc_type" | "container_title" | "issue" | "year">): string | null {
+  if (meta.doc_type !== "clanek") return null;
+  const journal = (meta.container_title ?? "").trim();
+  if (!journal) return null;
+  const issue = String(meta.issue ?? "").trim();
+  const year = meta.year ? String(meta.year) : "";
+  const when = issue && year ? `${issue}/${year}` : year;
+  return when ? `${journal} ${when}` : journal;
+}
+
 /** One list row from a document row and the caller's rights. Pure. */
-export function listItem(row: DocumentRow, lib: LibraryAccess, userId: string, names: Map<string, string> | null): DocumentListItem {
+export function listItem(row: DocumentRow, lib: LibraryAccess, userId: string): DocumentListItem {
   return {
     id: row.id,
     libraryId: row.library_id,
@@ -133,26 +146,25 @@ export function listItem(row: DocumentRow, lib: LibraryAccess, userId: string, n
     status: row.status,
     statusDetail: row.status_detail,
     uploadedAt: row.uploaded_at,
-    uploaderName: lib.kind === "org" ? (names?.get(row.uploaded_by) ?? null) : null,
     mine: row.uploaded_by === userId,
-    enabled: row.enabled,
     canEdit: canEditDocument(lib, row.uploaded_by, userId),
     canDelete: canDeleteDocument(lib, row.uploaded_by, userId),
     docType: row.meta.doc_type,
+    publication: publicationLine(row.meta),
+    physicalPages: row.physical_pages,
     billablePages: row.billable_pages,
     flags: documentFlags(row),
   };
 }
 
-function detailOf(row: DocumentRow, lib: LibraryAccess, userId: string, names: Map<string, string> | null, preview: string): DocumentDetail {
+function detailOf(row: DocumentRow, lib: LibraryAccess, userId: string, preview: string): DocumentDetail {
   return {
-    ...listItem(row, lib, userId, names),
+    ...listItem(row, lib, userId),
     libraryName: lib.name,
     meta: row.meta,
     proposed: row.proposed_meta,
     metaVersion: row.meta_version,
     confirmedAt: row.confirmed_at,
-    physicalPages: row.physical_pages,
     charCount: row.char_count,
     pageLabelSource: row.page_label_source,
     converter: row.converter,
@@ -166,23 +178,17 @@ function detailOf(row: DocumentRow, lib: LibraryAccess, userId: string, names: M
 // GET /api/files/summary
 
 /**
- * Libraries of the signed-in user with document counts, pages and team
- * sizes, the effective mode and whether the content rules were accepted.
- * The database is touched only for a user with at least one Pro library
- * (anyone else — signed out, never Pro — never wakes it); libraries
- * without Pro come without counts (their list loads when opened). `fresh`
- * (right after accepting a team invitation) accepts access at most 2 s old,
- * so the new team shows up at once.
+ * The signed-in user's library with document counts and pages, the
+ * effective mode and whether the content rules were accepted. The database
+ * is touched only for a user with a Pro library (anyone else — signed out,
+ * never Pro — never wakes it); a library without Pro comes without counts
+ * (its list loads when opened). `fresh` accepts access at most 10 s old.
  */
 export async function summaryFor(userId: string, opts: { fresh?: boolean } = {}): Promise<SummaryResponse> {
   const env = envOnlyMode();
   if (env === "off" || env === "unconfigured") return { state: "unavailable", mode: env };
-  const access = await getAccess(userId, { joined: opts.fresh === true });
+  const access = await getAccess(userId, { fresh: opts.fresh === true });
   const pro = access.libraries.map((l) => l.id);
-  // Team sizes come from Clerk, the counts from the database: ask both at once.
-  const members = new Map(
-    access.all.filter((lib) => lib.kind === "org" && lib.pro).map((lib) => [lib.id, memberCount(lib.id)]),
-  );
   let mode: FilesMode = env;
   let termsAccepted = false;
   let counts: Record<string, LibrarySummary["counts"]> = {};
@@ -202,8 +208,8 @@ export async function summaryFor(userId: string, opts: { fresh?: boolean } = {})
     pages = Object.fromEntries(loaded.rows.map((r) => [r.id, r.page_count + r.pages_reserved]));
     termsAccepted = loaded.terms;
   }
-  const libraries = await Promise.all(
-    access.all.map(async (lib): Promise<LibrarySummary> => ({
+  const libraries = access.all.map(
+    (lib): LibrarySummary => ({
       id: lib.id,
       kind: lib.kind,
       name: lib.name,
@@ -214,8 +220,7 @@ export async function summaryFor(userId: string, opts: { fresh?: boolean } = {})
       quotaPages: lib.quotaPages,
       pagesUsed: lib.pro && loadedCounts ? (pages[lib.id] ?? 0) : null,
       counts: lib.pro && loadedCounts ? (counts[lib.id] ?? null) : null,
-      memberCount: (await members.get(lib.id)) ?? null,
-    })),
+    }),
   );
   return { state: "ok", mode, termsAccepted, libraries };
 }
@@ -224,7 +229,7 @@ export async function summaryFor(userId: string, opts: { fresh?: boolean } = {})
 // GET /api/files/documents?lib=
 
 /**
- * The documents of one library the caller owns or belongs to — Pro or not
+ * The documents of the caller's library — Pro or not
  * (ownedScope: a user who lost Pro can still see and delete what they
  * stored). Newest first, at most 200.
  */
@@ -236,8 +241,7 @@ export async function listFor(userId: string, libraryId: string): Promise<{ libr
   const { rows, total } = await withScope(scope.libraryIds, (db) =>
     listDocuments(db, { libraryIds: [...scope.libraryIds], limit: LIST_LIMIT, offset: 0, sort: "added" }),
   );
-  const names = lib.kind === "org" && rows.length > 0 ? await memberNames(lib.id) : null;
-  return { libraryId: lib.id, documents: rows.map((r) => listItem(r, lib, userId, names)), total };
+  return { libraryId: lib.id, documents: rows.map((r) => listItem(r, lib, userId)), total };
 }
 
 // ---------------------------------------------------------------------------
@@ -266,14 +270,12 @@ export async function detailFor(userId: string, id: string): Promise<DocumentDet
     const found = await findDocument(db, access, id);
     return { ...found, preview: await documentPreviewText(db, found.row.id, found.row.library_id, PREVIEW_CHARS) };
   });
-  const names = lib.kind === "org" ? await memberNames(lib.id) : null;
-  return detailOf(row, lib, userId, names, preview);
+  return detailOf(row, lib, userId, preview);
 }
 
 const patchSchema = z.discriminatedUnion("action", [
   z.strictObject({ action: z.literal("confirm"), version: z.number().int().min(0), meta: z.unknown() }),
   z.strictObject({ action: z.literal("save"), version: z.number().int().min(0), meta: z.unknown() }),
-  z.strictObject({ action: z.literal("enable"), enabled: z.boolean() }),
 ]);
 
 /** Validation errors of the metadata form: field path → Czech message (first per field). */
@@ -306,8 +308,8 @@ function indexInputsChanged(before: BibMeta, after: BibMeta): boolean {
 
 /**
  * PATCH: confirm or save the metadata (optimistic `version` = meta_version
- * the form was loaded with), or switch the document on/off. Edit rights:
- * canEditDocument (a Pro library, and the uploader or owner/admin) — a
+ * the form was loaded with). Edit rights: canEditDocument (a Pro library
+ * and its owner) — a
  * library that lost Pro is only listed, deleted and exported. Refused
  * while the feature is read-only or off.
  */
@@ -318,7 +320,7 @@ export async function patchFor(userId: string, id: string, body: unknown): Promi
   if (mode === "readonly") throw new FilesUserError(503, MESSAGES.readonly);
   if (mode !== "on") throw new FilesUserError(503, MESSAGES.off);
   const input = parsed.data;
-  const meta = input.action === "enable" ? null : parseMetaForm(input.meta, input.action === "confirm");
+  const meta = parseMetaForm(input.meta, input.action === "confirm");
 
   const access = await getAccess(userId, { fresh: true });
   const ids = libraryIdsOf(access);
@@ -328,15 +330,10 @@ export async function patchFor(userId: string, id: string, body: unknown): Promi
     const { row, lib } = await findDocument(db, access, id);
     // Only someone who could still delete it hears about Pro; anyone else about ownership.
     if (!lib.pro && canDeleteDocument(lib, row.uploaded_by, userId)) throw new FilesUserError(403, NO_PRO_EDIT);
-    if (!canEditDocument(lib, row.uploaded_by, userId)) throw new FilesUserError(403, "Tento dokument může upravit jen ten, kdo ho nahrál, nebo správce.");
-    if (input.action === "enable") {
-      if (!(await setDocumentEnabled(db, row.id, row.library_id, input.enabled))) throw new FilesUserError(404, "Dokument nenalezen.");
-      await audit(db, { libraryId: row.library_id, actor: userId, action: input.enabled ? "document.enable" : "document.disable", docId: row.id });
-      return;
-    }
+    if (!canEditDocument(lib, row.uploaded_by, userId)) throw new FilesUserError(403, "Tento dokument může upravit jen jeho vlastník.");
     const ctx = await metaContext(db, row.id, row.library_id);
     if (!ctx) throw new FilesUserError(404, "Dokument nenalezen.");
-    const next = meta as BibMeta;
+    const next = meta;
     const edit = {
       id: row.id,
       libraryId: row.library_id,
@@ -420,14 +417,14 @@ export const EXPORTS_PER_DOC_PER_DAY = 10;
 
 /**
  * Pages (PAGE_CHARS of stored text, rounded up per document) one user may
- * export per UTC day, over all documents: one largest library's quota —
- * a whole library fits in a day, a second copy of it waits for the next.
+ * export per UTC day, over all documents: one library's quota — a whole
+ * library fits in a day, a second copy of it waits for the next.
  * Counted in `pages` under `read:<user>:export` (same retention and
  * erasure as above; never a document id, so no clash with the per-document
  * counters).
  */
 export function exportPagesPerUserPerDay(): number {
-  return Math.max(LIMITS.personalPages, LIMITS.teamPages);
+  return LIMITS.personalPages;
 }
 
 export interface DocumentExport {

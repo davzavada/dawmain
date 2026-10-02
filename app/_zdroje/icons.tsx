@@ -35,6 +35,7 @@ const PATHS = {
     </>
   ),
   back: <path d="m15 18-6-6 6-6" />,
+  chevron: <path d="m6 9 6 6 6-6" />,
   edit: <path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />,
   crown: <path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5z" fill="currentColor" />,
   // A shelf of books: the Zotero library (the menu item, the modal's panels).

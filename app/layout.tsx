@@ -29,8 +29,8 @@ export const viewport: Viewport = { themeColor: "#0E1938" };
 
 /**
  * Every page: the header (with the account control), the navigation, the
- * content, and the Vlastní zdroje / team modals, which open over any page
- * from the URL (?zdroje=…, ?tym=…). Clerk wraps the whole app so the header
+ * content, and the Vlastní soubory / Zotero modals, which open over any page
+ * from the URL (?soubory=…, ?zotero=…). Clerk wraps the whole app so the header
  * can show who is signed in everywhere — but only when it is configured:
  * without keys ClerkProvider would throw (or start keyless mode), so the
  * site then renders without it and the account control stays hidden.

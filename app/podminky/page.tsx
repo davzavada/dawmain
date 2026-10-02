@@ -4,7 +4,7 @@ import { LegalHeader, Mail, Section } from "../_legal";
 export const metadata = {
   title: "Podmínky užití - Dawmain",
   description:
-    "Dawmain je zdarma a nekomerčně. Co to znamená, co od služby čekat a jaká pravidla platí pro Vlastní zdroje a Zotero.",
+    "Dawmain je zdarma a nekomerčně. Co to znamená, co od služby čekat a jaká pravidla platí pro Vlastní soubory a Zotero.",
 };
 
 export default function Podminky() {
@@ -38,11 +38,11 @@ export default function Podminky() {
         </p>
       </Section>
 
-      <Section heading="Vlastní zdroje (Pro)">
+      <Section heading="Vlastní soubory (Pro)">
         <p>
           V režimu Pro si na webu nahrajete vlastní dokumenty - knihy, články, komentáře nebo vzory
           - a váš asistent v nich pak hledá vedle oficiálních databází. Pro je zdarma a přiděluji ho
-          ručně, jednotlivcům i týmům; stačí mi napsat na <Mail />. Můžu ho kdykoli odebrat. Pokud
+          ručně; stačí mi napsat na <Mail />. Můžu ho kdykoli odebrat. Pokud
           nejde o porušení těchto pravidel, zůstane vám knihovna ještě 90 dní k prohlížení, mazání a
           stažení textu (podrobnosti v{" "}
           <Link href="/soukromi">Zásadách ochrany osobních údajů</Link>). Nahráním dokumentu
@@ -52,14 +52,14 @@ export default function Podminky() {
           <strong>Kvóty.</strong> Místo se počítá ve stranách: jedna strana je 3 600 znaků
           převedeného textu včetně poznámek pod čarou. Kolik stran dokument zabere a kolik vám
           zbývá, uvidíte před nahráním. Kvóty můžu podle kapacity měnit, už nahrané dokumenty kvůli
-          tomu ale nemažu. Když se blíží limity bezplatných služeb, na kterých Vlastní zdroje běží,
+          tomu ale nemažu. Když se blíží limity bezplatných služeb, na kterých Vlastní soubory běží,
           přepnou se samy do režimu jen pro čtení (hledat, číst a mazat jde, nahrávat ne), případně
           se na čas vypnou.
         </p>
         <p>
           <strong>Co sem smíte nahrát.</strong> Vlastní díla a poznámky, veřejné materiály
           (předpisy, rozhodnutí soudů a úřadů, texty s otevřenou licencí) a další texty, které máte
-          právo si takto uložit a v týmu sdílet s ostatními členy. Nahráním potvrzujete, že tato
+          právo si takto uložit. Nahráním potvrzujete, že tato
           práva máte. Pozor hlavně na licencované databáze: podmínky beck-online, ASPI, Codexis a
           podobných služeb obvykle zakazují budovat si z jejich obsahu vlastní databázi. A výjimka
           pro osobní potřebu (§ 30 autorského zákona) se na práci pro klienty, kancelář nebo firmu
@@ -82,9 +82,10 @@ export default function Podminky() {
           Vzory nahrávejte bez osobních údajů klientů - vzor z konkrétní věci nejdřív anonymizujte.
         </p>
         <p>
-          <strong>AI a citace.</strong> Název, autory a další metadata navrhne jazykový model podle
-          začátku dokumentu a asistent v dokumentu hledá hned po zpracování. Návrh se může
-          splést: v detailu dokumentu ho kdykoli opravíte. Převod na text i čísla stran, poznámek a marginálních čísel dělá automat
+          <strong>AI a citace.</strong> Typ dokumentu (komentář, článek, kniha…), název, autory a
+          další metadata navrhne jazykový model podle začátku dokumentu a asistent v dokumentu hledá
+          hned po zpracování. Návrh se může splést: po rozkliknutí dokumentu v seznamu souborů ho
+          kdykoli opravíte. Převod na text i čísla stran, poznámek a marginálních čísel dělá automat
           a může se splést. Vlastní dokument není oficiální zdroj - citace z něj si před použitím
           ověřte v tištěném vydání nebo v oficiálním textu.
         </p>
@@ -92,34 +93,27 @@ export default function Podminky() {
           <strong>Záloha není.</strong> Originály si nechte u sebe: server je nikdy nedostane, takže
           vám je ani nemůže vrátit. Uložený text a metadata mimo krátkou historii změn databáze
           nezálohuji a za jejich ztrátu, třeba při výpadku nebo ukončení služby, neručím. Text
-          svých dokumentů si ale můžete stáhnout tlačítkem „Exportovat text“ v detailu
-          dokumentu (s denním limitem).
-        </p>
-        <p>
-          <strong>Týmy.</strong> Tým založím na požádání a jeho správce si pak sám zve a odebírá
-          členy. Nahrávat smějí všichni členové; každý upravuje, maže a stahuje své dokumenty,
-          správce všechny. Co kdo do týmu nahraje, vidí celý tým a zůstává to v týmu i po jeho
-          odchodu. Za to, kdo v týmu je a co se v něm sdílí, odpovídá správce týmu a tým, za který
-          vystupuje.
+          svých dokumentů si ale můžete stáhnout odkazem „Stáhnout text“ u dokumentu v seznamu
+          souborů (s denním limitem).
         </p>
         <p>
           <strong>Osobní údaje v dokumentech.</strong> U osobních údajů v tom, co nahrajete, jste
           správcem vy a já zpracovatelem (čl. 28 GDPR); tento oddíl je naší smlouvou o zpracování.
           Zpracovávám je jen podle vašich pokynů - uložím je, zaindexuji a zpřístupním vašemu
-          asistentovi a týmu - a k ničemu jinému je nepoužiji. Zachovám o nich mlčenlivost a
+          asistentovi - a k ničemu jinému je nepoužiji. Zachovám o nich mlčenlivost a
           chráním je, jak popisují Zásady ochrany osobních údajů. Tam je i seznam zpracovatelů,
           kterým je svěřuji (Vercel a přes něj Google, Neon); přibrání dalšího vám oznámím e-mailem
-          aspoň měsíc předem, a když nebudete souhlasit, můžete Vlastní zdroje opustit. Pomůžu vám
+          aspoň měsíc předem, a když nebudete souhlasit, můžete Vlastní soubory opustit. Pomůžu vám
           vyřídit žádosti lidí, o kterých dokumenty jsou, i s dalšími povinnostmi správce, o
           porušení zabezpečení vám dám vědět bez zbytečného odkladu a na požádání vám doložím, jak
-          s údaji zacházím. Když Vlastní zdroje skončí, údaje smažu tak, jak uvádějí Zásady.
+          s údaji zacházím. Když Vlastní soubory skončí, údaje smažu tak, jak uvádějí Zásady.
         </p>
         <p>
-          <strong>Nezákonný obsah.</strong> Máte-li za to, že je ve Vlastních zdrojích nezákonný
+          <strong>Nezákonný obsah.</strong> Máte-li za to, že je ve Vlastních souborech nezákonný
           obsah (typicky porušení autorských práv), napište mi na <Mail />: o jaký dokument jde,
           proč je podle vás nezákonný, a své jméno a e-mail. Oznámení posoudím bez zbytečného
           odkladu. Nezákonný obsah nebo obsah v rozporu s těmito pravidly můžu odstranit, zabránit
-          jeho opětovnému nahrání a přístup k Vlastním zdrojům omezit nebo zrušit. Tomu, koho se
+          jeho opětovnému nahrání a přístup k Vlastním souborům omezit nebo zrušit. Tomu, koho se
           to týká, napíšu, co jsem udělal a proč, a může se proti tomu ohradit.
         </p>
         <p>
@@ -140,14 +134,16 @@ export default function Podminky() {
         <p>
           V režimu Pro si můžete k Dawmainu připojit svou knihovnu v Zoteru (zotero.org). Váš
           asistent v ní pak hledá a čte záznamy, poznámky, anotace a text příloh, včetně skupin,
-          kterých jste v Zoteru členem. Připojení je <strong>jen ke čtení</strong>: Dawmain ve
-          vaší knihovně nic nemění, nepřidává ani nemaže.
+          kterých jste v Zoteru členem. Při připojení si vyberete, jestli Dawmain smí knihovnu{" "}
+          <strong>jen číst</strong>, nebo <strong>číst a ukládat</strong>: pak asistent může
+          nalezené dokumenty uložit do vaší osobní knihovny jako nové záznamy. Stávající záznamy
+          Dawmain nikdy nemění ani nemaže a do skupin nezapisuje.
         </p>
         <p>
-          Připojíte ji v nabídce účtu (položka Zotero, tlačítko „Připojit Zotero“). Zotero vás na
-          své stránce požádá o souhlas s klíčem, který smí číst vaši knihovnu, poznámky a skupiny;
-          rozsah tam můžete zúžit. Právo zápisu Dawmain nepotřebuje, a kdybyste ho povolili,
-          připojení odmítne. Odpojit můžete kdykoli tamtéž tlačítkem „Odpojit“, nebo klíč smazat
+          Připojíte ji v nabídce účtu (položka Zotero): zvolíte „Jen číst“, nebo „Číst a ukládat“,
+          a tlačítkem „Připojit Zotero“ přejdete na zotero.org. Zotero vás tam požádá o souhlas s
+          klíčem v rozsahu podle vaší volby; rozsah tam můžete i zúžit. Volbu změníte tak, že Zotero
+          připojíte znovu. Odpojit můžete kdykoli tamtéž tlačítkem „Odpojit“, nebo klíč smazat
           přímo v nastavení Zotera.
         </p>
         <p>
@@ -158,9 +154,11 @@ export default function Podminky() {
         <p>
           Zotero se řídí vlastními podmínkami. Za jeho dostupnost ani za obsah vaší knihovny
           neručím. U osobních údajů v připojené knihovně (třeba jména v rozhodnutích nebo v
-          poznámkách) jste správcem vy a já zpracovatelem, stejně jako u Vlastních zdrojů. Platí
+          poznámkách) jste správcem vy a já zpracovatelem, stejně jako u Vlastních souborů. Platí
           pro ně přiměřeně odstavec „Osobní údaje v dokumentech“ výše, s tím, že je nikam
-          neukládám a jediným zpracovatelem, kterému je svěřuji, je Vercel (hosting).
+          neukládám (kromě nových záznamů, které asistent při volbě „Číst a ukládat“ uloží přímo
+          do vaší knihovny v Zoteru) a jediným zpracovatelem, kterému je svěřuji, je Vercel
+          (hosting).
         </p>
       </Section>
 

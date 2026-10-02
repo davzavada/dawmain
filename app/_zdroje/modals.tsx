@@ -4,20 +4,19 @@ import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { useEffect } from "react";
 import { UUID_RE } from "@/src/files/config";
-import { setSourcesOpen } from "./store";
+import { FILES_PARAM, setFilesOpen } from "./store";
 
 /**
- * The Vlastní zdroje modal (design 2b–2e), the team modal (3d, 3f) and the
- * Zotero modal, mounted once in the root layout and driven by the URL:
- * ?zdroje=moje|tym (+ &dokument=<id> for a document's detail), ?tym=<org id>,
- * ?zotero=1 (+ &stav=<outcome> when the connect flow comes back). Deep links
- * and the old /vlastni-zdroje route (which redirects here) open them; closing
- * removes the parameter. At most one shows: sources, then team, then Zotero.
- * (Zotero has its own parameter: ?zdroje=zotero would read as the "moje" tab.)
+ * The Vlastní soubory modal and the Zotero modal, mounted once in the root
+ * layout and driven by the URL: ?soubory=1 (+ &dokument=<id> for the row
+ * opened in the list; ?zdroje=… is the old name and still opens it),
+ * ?zotero=1 (+ &stav=<outcome> when the connect flow comes back). Deep
+ * links and the old /vlastni-zdroje route (which redirects here) open
+ * them; closing removes the parameter. At most one shows: files first.
  *
  * Only this reader is in every page's bundle: the modals themselves — the
- * list, the detail, the uploader with the DMD parser — load when a
- * parameter asks for them, never for a visitor who does not open one.
+ * list, the uploader with the DMD parser — load when a parameter asks for
+ * them, never for a visitor who does not open one.
  */
 
 /** While a modal's code loads: the dimmed backdrop, so the click visibly did something. */
@@ -29,23 +28,20 @@ function Loading() {
   );
 }
 
-const SourcesModal = dynamic(() => import("./sources-modal").then((m) => m.SourcesModal), { ssr: false, loading: Loading });
-const TeamModal = dynamic(() => import("./team-modal").then((m) => m.TeamModal), { ssr: false, loading: Loading });
+const FilesModal = dynamic(() => import("./files-modal").then((m) => m.FilesModal), { ssr: false, loading: Loading });
 const ZoteroModal = dynamic(() => import("./zotero-modal").then((m) => m.ZoteroModal), { ssr: false, loading: Loading });
 
 export function ZdrojeModals() {
   const params = useSearchParams();
-  const tab = params.get("zdroje");
-  const team = params.get("tym");
+  const files = params.get(FILES_PARAM) ?? params.get("zdroje");
   const doc = params.get("dokument");
   const zotero = params.get("zotero");
-  const open = tab !== null && tab !== "";
-  useEffect(() => setSourcesOpen(open), [open]);
+  const open = files !== null && files !== "";
+  useEffect(() => setFilesOpen(open), [open]);
   return (
     <>
-      {open ? <SourcesModal tab={tab === "tym" ? "tym" : "moje"} documentId={doc && UUID_RE.test(doc) ? doc.toLowerCase() : null} /> : null}
-      {team && !open ? <TeamModal orgParam={team} /> : null}
-      {zotero !== null && !open && !team ? <ZoteroModal stav={params.get("stav")} /> : null}
+      {open ? <FilesModal documentId={doc && UUID_RE.test(doc) ? doc.toLowerCase() : null} /> : null}
+      {zotero !== null && !open ? <ZoteroModal stav={params.get("stav")} /> : null}
     </>
   );
 }

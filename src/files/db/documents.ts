@@ -379,7 +379,8 @@ export async function insertUploadedDocument(
   const contentSha = row.contentSha256.toLowerCase();
   const hint = inSet(m.doc_type_hint, DOC_TYPE_SET);
   const proposed: ProposedMeta | null = hint ? { doc_type: { value: hint as DocType, source: "user", confidence: 0.9 } } : null;
-  const replaces = isUuid(m.replaces) ? m.replaces : null;
+  // Re-uploads (`replaces`) are no longer accepted; the column stays for rows ingest may still settle.
+  const replaces: string | null = null;
   const { rows } = await db.query<{ id: string }>(
     `INSERT INTO documents (library_id, status, uploaded_by, file_kind, file_name, file_bytes, file_sha256, content_sha256,
         converter, rights, physical_pages, billable_pages, char_count, page_label_source, quality, hints, pending_gz,
@@ -976,29 +977,6 @@ export async function isBlocked(db: Queryable, contentSha256: string): Promise<b
   if (!SHA256_RE.test(sha)) return false;
   const { rows } = await db.query("SELECT 1 FROM blocked_content WHERE content_sha256 = $1", [sha]);
   return rows.length > 0;
-}
-
-/**
- * Pages a re-upload may count against the document it replaces: the old
- * document's billed pages while it holds settled pages (review, ready) and
- * no other re-upload of it is still in flight — else 0. The old pages leave
- * the library when the new document's ingest commits (ingest.ts
- * dropReplaced); until then both are stored, so the reservation itself is
- * made in full and the counters keep their meaning. Locks the library row
- * first: uploads into one library pass this one at a time, so two re-uploads
- * of the same document cannot both borrow its pages.
- */
-export async function replacementCredit(db: Queryable, oldId: string, libraryId: string): Promise<number> {
-  if (!isUuid(oldId)) return 0;
-  const { rows } = await db.query<{ pages: number }>(
-    `WITH lib AS (SELECT id FROM libraries WHERE id = $2 FOR UPDATE)
-     SELECT o.billable_pages AS pages FROM documents o JOIN lib ON lib.id = o.library_id
-      WHERE o.id = $1 AND o.library_id = $2 AND o.status IN ('review', 'ready')
-        AND NOT EXISTS (SELECT 1 FROM documents n
-                         WHERE n.library_id = $2 AND n.replaces = o.id AND n.status IN ('queued', 'processing'))`,
-    [oldId, libraryId],
-  );
-  return rows[0] ? Math.max(0, num(rows[0].pages)) : 0;
 }
 
 /** Drop pending_gz of documents that ended in 'error' more than `days` ago. Returns how many. */

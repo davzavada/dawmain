@@ -669,29 +669,6 @@ main > footer a {
   color: var(--green);
 }
 
-.help-title {
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-.help {
-  padding: 10px 0;
-  border-bottom: 1px solid var(--hairline);
-  font-size: 14.5px;
-}
-.help summary {
-  cursor: pointer;
-  color: var(--text);
-}
-.help summary::marker {
-  color: var(--faint);
-}
-.help p {
-  margin: 6px 0 0 1rem;
-  line-height: 1.55;
-  color: var(--body);
-}
-
 /* Legal pages */
 
 .legal {
@@ -992,13 +969,10 @@ main > footer a {
 }
 .zd-btn:focus-visible,
 .zd-icon-button:focus-visible,
-.zd-rail-item:focus-visible,
 .zd-menu-item:focus-visible,
-.zd-doc-title:focus-visible,
 .zd-row-button:focus-visible,
 .zd-dropzone-button:focus-visible,
-.zd-avatar-button:focus-visible,
-.zd-segmented button:focus-visible {
+.zd-avatar-button:focus-visible {
   outline: 2px solid var(--link);
   outline-offset: 2px;
 }
@@ -1130,10 +1104,7 @@ main > footer a {
   width: 18px;
   height: 18px;
 }
-.zd-pro-badge ~ .zd-dot {
-  top: auto;
-  bottom: -3px;
-}
+
 .zd-pro-tag {
   display: inline-block;
   margin-left: 6px;
@@ -1162,21 +1133,7 @@ main > footer a {
   height: 36px;
   font-size: 13px;
 }
-.zd-avatar-invite {
-  background: transparent;
-  border: 1px dashed var(--idle);
-  color: var(--faint);
-}
-.zd-dot {
-  position: absolute;
-  top: -3px;
-  right: -3px;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #2563eb;
-  border: 2px solid var(--bg);
-}
+
 .zd-menu {
   position: absolute;
   top: calc(100% + 12px);
@@ -1216,44 +1173,7 @@ main > footer a {
   white-space: nowrap;
   color: var(--muted);
 }
-.zd-menu-invite {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 14px 20px 16px;
-  border-top: 1px solid var(--hairline);
-  background: var(--well);
-}
-.zd-invite-icon {
-  flex: none;
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: var(--accent-bg);
-  color: var(--accent);
-}
-.zd-menu-invite-body {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--soft);
-  text-wrap: pretty;
-}
-.zd-menu-invite-body strong {
-  color: var(--text);
-}
-.zd-invite-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
-}
+
 .zd-menu-items {
   display: flex;
   flex-direction: column;
@@ -1278,29 +1198,9 @@ main > footer a {
   background: var(--well);
   color: var(--text);
 }
-.zd-menu-note {
-  margin-left: auto;
-  color: var(--muted);
-  font-weight: 400;
-}
 
 /* Nav item and the home page group (1a, 2a, 3c) */
 
-.nav-item.zd-nav-locked,
-.tab-item.zd-nav-locked {
-  color: var(--faint);
-}
-.nav-item.zd-nav-locked .icon {
-  color: var(--idle);
-}
-.zd-nav-lock {
-  margin-left: auto;
-  flex: none;
-  color: var(--faint);
-}
-.tab-item .zd-nav-lock {
-  margin-left: 0;
-}
 .zd-manage {
   margin-left: auto;
   font-size: 13px;
@@ -1324,11 +1224,7 @@ main > footer a {
   flex: none;
   color: var(--body);
 }
-.zd-own .zd-desc-line {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+
 .zd-row-locked .source-title,
 .zd-row-locked .source-desc {
   color: var(--faint);
@@ -1409,35 +1305,7 @@ main > footer a {
   margin-left: auto;
   padding: 7px 16px;
 }
-.zd-quota {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-.zd-quota-bar {
-  flex: none;
-  width: 96px;
-  height: 6px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: var(--surface);
-}
-.zd-quota-bar > span {
-  display: block;
-  height: 100%;
-  border-radius: 999px;
-  background: var(--text);
-}
-.zd-quota-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
+
 @media (max-width: 640px) {
   .zd-dialog,
   .zd-dialog[data-size="narrow"] {
@@ -1467,135 +1335,24 @@ main > footer a {
   }
 }
 
-/* Rail (desktop) or segmented control (phones) + the panel */
+/* Vlastní soubory: banners, dropzone, the file list with rows opening in place (wireframe 04, 05) */
 
-.zd-body {
+.zd-dialog[data-size="medium"] {
+  width: min(680px, calc(100vw - 48px));
+}
+.zd-files {
   flex: 1;
   min-height: 0;
-  display: flex;
-}
-.zd-rail {
-  flex: none;
-  width: 168px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 12px;
-  border-right: 1px solid var(--line);
-  background: var(--well);
   overflow-y: auto;
-}
-.zd-rail-item {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
-  width: 100%;
-  padding: 9px 12px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
+  gap: 20px;
+  padding: 18px 22px 22px;
 }
-.zd-rail-item[aria-current] {
-  background: var(--panel);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08), 0 0 0 1px var(--line);
-}
-.zd-rail-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--soft);
-  overflow-wrap: anywhere;
-}
-.zd-rail-item[aria-current] .zd-rail-title {
-  color: var(--text);
-}
-.zd-rail-lock {
-  margin-left: auto;
-  color: var(--faint);
-}
-.zd-rail-sub {
-  font-size: 13px;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
-.zd-segmented-wrap {
-  display: none;
-}
-.zd-segmented {
-  display: flex;
-  gap: 2px;
-  padding: 3px;
-  border-radius: 10px;
-  background: var(--surface);
-}
-.zd-segmented button {
-  flex: 1;
-  min-height: 36px;
-  padding: 5px 12px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-}
-.zd-segmented button[aria-selected="true"] {
-  background: var(--panel);
-  color: var(--text);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
-}
-.zd-panel {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-  padding: 20px 36px 24px 28px;
-}
-@media (max-width: 640px) {
-  .zd-body {
-    flex-direction: column;
-  }
-  .zd-rail {
-    display: none;
-  }
-  .zd-segmented-wrap {
-    display: block;
-    flex: none;
-    padding: 10px 16px;
-    border-bottom: 1px solid var(--line);
-  }
-  .zd-panel {
-    padding: 18px 16px 24px;
-  }
-}
-
-/* One library: intro, banners, dropzone, documents (2b, 2d) */
-
-.zd-library,
 .zd-upload {
   display: flex;
   flex-direction: column;
-  gap: 22px;
-}
-.zd-upload {
   gap: 12px;
-}
-.zd-intro {
-  max-width: 72ch;
-  font-size: 14px;
-  line-height: 1.55;
-  color: var(--soft);
-  text-wrap: pretty;
 }
 .zd-banner {
   display: flex;
@@ -1627,12 +1384,12 @@ main > footer a {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
-  padding: 22px 16px;
+  padding: 26px 20px;
   border: 1.5px dashed var(--idle);
-  border-radius: 10px;
-  background: var(--well);
+  border-radius: 8px;
+  background: none;
   color: var(--body);
   font: inherit;
   text-align: center;
@@ -1643,7 +1400,7 @@ main > footer a {
   background: var(--accent-bg);
 }
 .zd-dropzone-main {
-  font-size: 14px;
+  font-size: 14.5px;
   font-weight: 500;
   color: var(--text);
 }
@@ -1654,13 +1411,7 @@ main > footer a {
 .zd-dropzone-sub {
   font-size: 13px;
   color: var(--muted);
-}
-.zd-section-head {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--line);
+  text-wrap: pretty;
 }
 .zd-section-name {
   padding: 0;
@@ -1668,141 +1419,271 @@ main > footer a {
   font-weight: 600;
   color: var(--text);
 }
-.zd-section-count {
-  font-size: 13px;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
-.zd-docs {
-  display: flex;
-  flex-direction: column;
-}
 .zd-empty {
   padding: 12px 0;
   font-size: 14px;
   color: var(--muted);
 }
-.zd-doc-list,
-.zd-people {
+.zd-files-list {
+  display: flex;
+  flex-direction: column;
+}
+.zd-files-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--soft);
+}
+.zd-files-count {
+  font-weight: 400;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+.zd-files-list ul {
   margin: 0;
   padding: 0;
   list-style: none;
 }
-.zd-doc {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+.zd-file + .zd-file {
+  border-top: 1px solid var(--surface);
+}
+.zd-file-row {
+  display: flex;
   align-items: center;
   gap: 12px;
-  padding: 11px 0;
-  border-bottom: 1px solid var(--hairline);
-}
-.zd-doc-main,
-.zd-person-main {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.zd-doc-title {
-  padding: 0;
+  width: 100%;
+  padding: 12px 0;
   border: 0;
   background: none;
-  font: inherit;
-  font-size: 14.5px;
-  font-weight: 500;
-  line-height: 1.4;
-  text-align: left;
   color: var(--text);
+  font: inherit;
+  text-align: left;
+}
+button.zd-file-row {
+  cursor: pointer;
+}
+button.zd-file-row:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+.zd-file-row > .icon {
+  flex: none;
+  color: var(--muted);
+}
+.zd-file-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.zd-file-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  cursor: pointer;
+  font-size: 14.5px;
+  font-weight: 500;
 }
-.zd-doc-title:hover {
+button.zd-file-row:hover .zd-file-title {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
-.zd-doc[data-disabled] .zd-doc-title {
-  color: var(--muted);
-}
-.zd-doc-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  font-size: 13px;
-  color: var(--muted);
-}
-.zd-doc-line {
-  min-width: 0;
+.zd-file-line {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
   color: var(--muted);
 }
-.zd-doc-note {
-  font-size: 12.5px;
-  line-height: 1.45;
-  color: var(--muted);
-}
-.zd-doc-note-bad {
+.zd-file-line-bad {
   color: var(--bad);
 }
-.zd-doc-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+.zd-file[data-pending] .zd-file-row > .icon,
+.zd-file[data-pending] .zd-file-line {
+  color: var(--faint);
 }
-.zd-switch {
-  position: relative;
+.zd-file[data-pending] .zd-file-title {
+  color: var(--soft);
+}
+.zd-file-spinner {
+  margin-right: 2px;
+}
+.zd-file-chevron {
   flex: none;
-  display: inline-flex;
-  width: 34px;
-  height: 20px;
-  margin-right: 4px;
+  color: var(--faint);
+  transform: rotate(-90deg);
 }
-.zd-switch input {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
+.zd-file[data-open] .zd-file-chevron {
+  transform: none;
+}
+.zd-type-badge {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--soft);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.zd-type-badge[data-tone="indigo"] {
+  background: #ebeaf8;
+  color: #3b35a0;
+}
+.zd-type-badge[data-tone="teal"] {
+  background: #e0f2f0;
+  color: #0f6b63;
+}
+.zd-type-badge[data-tone="amber"] {
+  background: #fdf1dc;
+  color: #8a5a12;
+}
+@media (prefers-color-scheme: dark) {
+  .zd-type-badge[data-tone="indigo"] {
+    background: rgb(99 91 230 / 0.2);
+    color: #c4c1f7;
+  }
+  .zd-type-badge[data-tone="teal"] {
+    background: rgb(20 160 145 / 0.18);
+    color: #8fdcd2;
+  }
+  .zd-type-badge[data-tone="amber"] {
+    background: rgb(233 162 59 / 0.18);
+    color: hsl(36 90% 65%);
+  }
+}
+.zd-file-open {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 4px 0 18px 28px;
+}
+.zd-file-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
   margin: 0;
-  opacity: 0;
+  padding: 0;
+  border: 0;
+}
+.zd-file-type {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.zd-file-label,
+.zd-file-field > span {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--soft);
+}
+.zd-segmented-pill {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 9px;
+  background: var(--surface);
+}
+.zd-segmented-pill > button,
+.zd-layer .zd-segmented-pill > select {
+  width: auto;
+  padding: 5px 12px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--soft);
+  font: inherit;
+  font-size: 13.5px;
   cursor: pointer;
 }
-.zd-switch-track {
-  position: absolute;
-  inset: 0;
-  border-radius: 999px;
-  background: var(--idle);
-  transition: background 0.15s;
+.zd-layer .zd-segmented-pill > select {
+  padding-right: 8px;
 }
-.zd-switch-track::after {
-  content: "";
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: #ffffff;
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
-  transition: transform 0.15s;
+.zd-segmented-pill > button[aria-checked="true"],
+.zd-layer .zd-segmented-pill > select[data-checked] {
+  background: var(--panel);
+  color: var(--text);
+  font-weight: 500;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
 }
-.zd-switch input:checked + .zd-switch-track {
-  background: var(--switch-on);
-}
-.zd-switch input:checked + .zd-switch-track::after {
-  transform: translateX(14px);
-}
-.zd-switch input:focus-visible + .zd-switch-track {
+.zd-segmented-pill > button:focus-visible,
+.zd-segmented-pill > select:focus-visible {
   outline: 2px solid var(--link);
-  outline-offset: 2px;
+  outline-offset: 1px;
 }
-@media (prefers-reduced-motion: reduce) {
-  .zd-switch-track,
-  .zd-switch-track::after {
-    transition: none;
+.zd-file-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.zd-file-hint .icon {
+  color: var(--faint);
+}
+.zd-file-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.zd-file-field {
+  gap: 5px;
+}
+.zd-file-field.w-full {
+  flex: 1 1 100%;
+}
+.zd-file-field.w-wide {
+  flex: 1 1 55%;
+}
+.zd-file-field.w-half {
+  flex: 1 1 40%;
+}
+.zd-file-field.w-mid {
+  flex: 1 1 28%;
+}
+.zd-file-field.w-narrow {
+  flex: 1 1 16%;
+}
+.zd-file-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.zd-file-actions .zd-btn {
+  padding: 8px 16px;
+  font-size: 14px;
+}
+.zd-file-actions-end {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-left: auto;
+}
+.zd-file-actions-end .zd-link-button {
+  font-size: 13.5px;
+}
+.zd-danger-link,
+.zd-danger-link:hover {
+  color: var(--bad);
+}
+@media (max-width: 640px) {
+  .zd-files {
+    padding: 16px;
+  }
+  .zd-file-open {
+    padding-left: 0;
+  }
+  .zd-file-field.w-narrow,
+  .zd-file-field.w-mid {
+    flex-basis: 30%;
   }
 }
 .zd-confirm {
@@ -1861,21 +1742,6 @@ main > footer a {
   border-radius: 50%;
   background: var(--surface);
   color: var(--muted);
-}
-.zd-invite-box {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  max-width: 420px;
-  margin-top: 8px;
-  padding: 16px 20px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  font-size: 14px;
-}
-.zd-invite-box .zd-invite-actions {
-  justify-content: center;
 }
 
 /* Upload: cards, preview, fields */
@@ -1986,182 +1852,6 @@ main > footer a {
 }
 .zd-field-error {
   color: var(--bad);
-}
-.zd-source {
-  padding: 0 6px;
-  border-radius: 5px;
-  background: var(--surface);
-  color: var(--soft);
-  font-size: 11.5px;
-  font-weight: 500;
-}
-.zd-source[data-low] {
-  background: var(--busy-bg);
-  color: var(--busy);
-}
-.zd-team-picker {
-  max-width: 320px;
-}
-
-/* Detail / review panel */
-
-.zd-detail {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-.zd-back {
-  align-self: flex-start;
-}
-.zd-detail-head {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.zd-detail-title {
-  font-size: 17px;
-  font-weight: 600;
-  line-height: 1.35;
-  overflow-wrap: anywhere;
-}
-.zd-quality {
-  font-size: 13px;
-  color: var(--soft);
-}
-.zd-meta-form {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.zd-meta-form fieldset {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 14px;
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-.zd-meta-form legend {
-  margin-bottom: 10px;
-}
-.zd-meta-form fieldset > p {
-  grid-column: 1 / -1;
-}
-.zd-detail-actions {
-  justify-content: flex-start;
-}
-.zd-meta-view {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.zd-meta-view-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.zd-meta-list {
-  display: grid;
-  grid-template-columns: minmax(110px, max-content) 1fr;
-  gap: 6px 16px;
-  margin: 0;
-  font-size: 14px;
-}
-.zd-meta-list > div {
-  display: contents;
-}
-.zd-meta-list dt {
-  color: var(--soft);
-}
-.zd-meta-list dd {
-  margin: 0;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.zd-meta-extra {
-  grid-column: 1 / -1;
-}
-.zd-meta-extra > summary {
-  cursor: pointer;
-  font-size: 13px;
-  color: var(--soft);
-}
-.zd-meta-extra-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 14px;
-  margin-top: 12px;
-}
-.zd-detail-more {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding-top: 14px;
-  border-top: 1px solid var(--hairline);
-}
-.zd-detail-more .zd-confirm,
-.zd-detail-more .zd-detail-note {
-  flex-basis: 100%;
-}
-.zd-text-preview {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-/* Team management (3d, 3f) */
-
-.zd-team {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 28px;
-  overflow-y: auto;
-  padding: 22px 24px 24px;
-}
-@media (max-width: 640px) {
-  .zd-team {
-    padding: 18px 16px 24px;
-  }
-}
-.zd-invite-form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.zd-invite-form input {
-  min-height: 40px;
-}
-.zd-team-section {
-  display: flex;
-  flex-direction: column;
-}
-.zd-person {
-  display: grid;
-  grid-template-columns: 32px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  padding: 11px 0;
-  border-bottom: 1px solid var(--hairline);
-}
-.zd-person-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-.zd-person-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 14.5px;
-  font-weight: 500;
-  line-height: 1.4;
 }
 
 /* Zotero (the ?zotero=1 modal): connect, what the key reads, disconnect.

@@ -138,6 +138,4 @@ export interface UploadMeta {
   hints: UploadHints;
   rights: Rights;
   doc_type_hint?: DocType;
-  /** Re-upload of an existing document (better conversion): keeps confirmed metadata. */
-  replaces?: string;
 }

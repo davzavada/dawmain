@@ -26,22 +26,6 @@ const MAX_IDENT_KEYS = 1_000;
 /** Outline headings loaded to rebuild meta_tsv (buildMetaTsv reads levels ≤ 2 up to 3 000 chars). */
 const MAX_META_HEADINGS = 500;
 
-/**
- * Switch a document on or off for the assistant ("zapnuto"): search skips a
- * disabled document (search.ts filters `d.enabled`). Any status except
- * 'deleting'. Returns false when the document is not in the library.
- */
-export async function setDocumentEnabled(db: Queryable, id: string, libraryId: string, enabled: boolean): Promise<boolean> {
-  if (!isUuid(id)) return false;
-  const { rows } = await db.query(
-    `UPDATE documents SET enabled = $3, updated_at = now()
-      WHERE id = $1 AND library_id = $2 AND status <> 'deleting'
-      RETURNING id`,
-    [id, libraryId, enabled === true],
-  );
-  return rows.length > 0;
-}
-
 /** Counts per library (every requested id present, zeros when empty). */
 export async function libraryDocCounts(db: Queryable, libraryIds: string[]): Promise<Record<string, LibraryDocCounts>> {
   const out: Record<string, LibraryDocCounts> = {};
@@ -261,28 +245,5 @@ export async function finishReindex(
     [args.id, args.libraryId, args.runToken, args.previous === "ready" ? "ready" : "review", args.metaTsv, keys, args.sectionRange ?? null],
   );
   return rows.length > 0;
-}
-
-/**
- * Invitation outcomes the operator of a team sees that Clerk does not keep:
- * which revoked invitations were declined by the invitee (Clerk only knows
- * "revoked"), and which of those the admin removed from the list. Kept in
- * the audit log of the team library (ids only).
- */
-export async function invitationMarks(db: Queryable, orgId: string): Promise<{ declined: Set<string>; dismissed: Set<string> }> {
-  const { rows } = await db.query<{ action: string; invitation: string | null }>(
-    `SELECT action, detail->>'invitation' AS invitation FROM audit_log
-      WHERE library_id = $1 AND action IN ('invitation.declined', 'invitation.dismissed')
-        AND at > now() - interval '90 days'
-      ORDER BY at DESC LIMIT 500`,
-    [orgId],
-  );
-  const declined = new Set<string>();
-  const dismissed = new Set<string>();
-  for (const r of rows) {
-    if (typeof r.invitation !== "string") continue;
-    (r.action === "invitation.declined" ? declined : dismissed).add(r.invitation);
-  }
-  return { declined, dismissed };
 }
 

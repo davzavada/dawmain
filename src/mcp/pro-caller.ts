@@ -4,9 +4,9 @@ import { callerFromCtx } from "@/src/mcp/caller";
 /**
  * The entitlement every personal Pro tool shares (files_*, zotero_*): a
  * personal OAuth sign-in — never the shared access code — whose account
- * may use the feature: for "files" at least one library with Vlastní zdroje
- * on (access.libraries), for "zotero" access.zotero — both Pro, personal or
- * team, minus the switches in Clerk's publicMetadata.features
+ * may use the feature: for "files" its library with Vlastní soubory on
+ * (access.libraries), for "zotero" access.zotero — both Pro, minus the
+ * switches in Clerk's publicMetadata.features
  * (src/files/access.ts).
  *
  * Deliberately only the identity and the account: each tool family keeps

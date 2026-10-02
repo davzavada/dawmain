@@ -1,6 +1,6 @@
 /**
- * JSON shapes of the Vlastní zdroje web API (GET /api/files/summary,
- * /api/files/documents, /api/files/documents/[id], /api/files/team) —
+ * JSON shapes of the Vlastní soubory web API (GET /api/files/summary,
+ * /api/files/documents, /api/files/documents/[id]) —
  * produced on the server (src/files/web.ts), read by the client components
  * in app/_zdroje. Types only: safe to import from client code.
  */
@@ -16,16 +16,16 @@ export interface LibraryDocCounts {
   /** queued + processing */
   processing: number;
   error: number;
-  /** Ready AND switched on — what the assistant actually searches. */
+  /** Ready — what the assistant actually searches. */
   searchable: number;
 }
 
 /** One library as the modal, the home page and the nav see it. */
 export interface LibrarySummary {
   id: string;
-  kind: "user" | "org";
+  kind: "user";
   name: string;
-  role: "owner" | "org:admin" | "org:member";
+  role: "owner";
   pro: boolean;
   canUpload: boolean;
   canManageAll: boolean;
@@ -34,8 +34,6 @@ export interface LibrarySummary {
   pagesUsed: number | null;
   /** Null when not loaded (library without Pro, or the feature is off — its list loads when opened). */
   counts: LibraryDocCounts | null;
-  /** Team size (Clerk), null for a personal library or when unknown. */
-  memberCount: number | null;
 }
 
 export type SummaryResponse =
@@ -47,7 +45,7 @@ export type SummaryResponse =
       /** Effective mode: "on", "readonly" (search, read, delete — no uploads) or "off". */
       mode: FilesMode;
       termsAccepted: boolean;
-      /** Personal library first, then teams (Pro or not). */
+      /** The personal library (Pro or not); empty for a banned account. */
       libraries: LibrarySummary[];
     };
 
@@ -63,15 +61,16 @@ export interface DocumentListItem {
   status: DocStatus;
   statusDetail: string | null;
   uploadedAt: string;
-  /** Team libraries: the uploader's display name (null in a personal library or when unknown). */
-  uploaderName: string | null;
   mine: boolean;
-  enabled: boolean;
-  /** May edit metadata, toggle and re-upload: Pro library, and the uploader or owner/admin. */
+  /** May edit metadata: a Pro library and its owner. */
   canEdit: boolean;
-  /** May delete and export the text: the uploader or owner/admin — Pro not required. */
+  /** May delete and export the text: the owner — Pro not required. */
   canDelete: boolean;
   docType: DocType;
+  /** Where an article appeared ("Právník 2/2024"); null for other types. */
+  publication: string | null;
+  /** Pages of the PDF; null for a text without pages. */
+  physicalPages: number | null;
   billablePages: number;
   /** Conversion flags worth a badge: footnotes unsure, OCR/plain, lost numbering, instruction-like text. */
   flags: string[];
@@ -90,7 +89,6 @@ export interface DocumentDetail extends DocumentListItem {
   proposed: ProposedMeta | null;
   metaVersion: number;
   confirmedAt: string | null;
-  physicalPages: number | null;
   charCount: number;
   pageLabelSource: PageLabelSource;
   converter: string;
@@ -98,22 +96,6 @@ export interface DocumentDetail extends DocumentListItem {
   quality: ConversionQuality;
   /** The first ~1,500 characters as plain text (render as text, never as HTML). */
   preview: string;
-}
-
-export interface TeamMemberView {
-  userId: string;
-  name: string;
-  email: string;
-  admin: boolean;
-  since: number;
-  self: boolean;
-}
-
-export interface TeamView {
-  orgId: string;
-  name: string;
-  members: TeamMemberView[];
-  invitations: Array<{ id: string; email: string; state: "pending" | "declined"; sentAt: number }>;
 }
 
 /** Every error body: a fixed Czech message; 409 on upload also names the duplicate. */

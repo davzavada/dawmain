@@ -19,7 +19,6 @@ interface Platform {
   id: PlatformId;
   label: string;
   steps: (endpoint: string) => Step[];
-  help: Array<{ q: string; a: ReactNode }>;
 }
 
 const SAMPLE_QUESTION =
@@ -95,21 +94,6 @@ const PLATFORMS: Platform[] = [
         ),
       },
     ],
-    help: [
-      {
-        q: "V nabídce nástrojů Dawmain nevidím.",
-        a: (
-          <>
-            V <strong>Nastavení → Konektory</strong> zkontrolujte, že u Dawmain svítí{" "}
-            <em>Připojeno</em>. Pokud ne, klikněte na <strong>Připojit</strong> a přihlaste se znovu.
-          </>
-        ),
-      },
-      {
-        q: "Asistent databáze nepoužívá.",
-        a: <>Napište mu to přímo: „Použij Dawmain a najdi…“. Se zapnutým skillem to dělá sám.</>,
-      },
-    ],
   },
   {
     id: "chatgpt",
@@ -160,21 +144,6 @@ const PLATFORMS: Platform[] = [
             Otevřete novou konverzaci, klikněte na <strong>+</strong> vedle pole pro zprávu a
             zapněte Dawmain.
           </>,
-        ),
-      },
-    ],
-    help: [
-      {
-        q: "Režim vývojáře v nastavení nemám.",
-        a: <>Je jen v placených tarifech a jen na webu. Ve firemním účtu ho musí povolit správce.</>,
-      },
-      {
-        q: "Přihlášení proběhlo, ale Dawmain v konverzaci nevidím.",
-        a: (
-          <>
-            Obnovte stránku. Pokud to nepomůže, konektor v <strong>Pluginech</strong> odeberte a
-            přidejte znovu.
-          </>
         ),
       },
     ],
@@ -229,14 +198,6 @@ export function Guide({ endpoint }: { endpoint: string }) {
             </li>
           ))}
         </ol>
-
-        <h3 className="help-title">Něco nefunguje?</h3>
-        {platform.help.map(({ q, a }) => (
-          <details key={q} className="help">
-            <summary>{q}</summary>
-            <p>{a}</p>
-          </details>
-        ))}
       </div>
     </div>
   );

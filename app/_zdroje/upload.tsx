@@ -12,12 +12,12 @@ import { registerUnsavedWork } from "./store";
 import { buildUploadMeta, gzipText, missingBrowserFeatures, sha256Text, UNSUPPORTED_BROWSER, uploadCost, uploadForm, uploadOutcome } from "./upload-core";
 
 /**
- * Upload inside the Vlastní zdroje modal: drop files, and each one — one at
- * a time, the rest wait in a queue — is converted to text in the browser,
- * gzipped and posted, with no further step. The server proposes the
- * metadata (type, title, authors…) and the document is searchable once it
- * is processed; the user corrects the metadata later in the detail view
- * (pencil icon). Only the converted Markdown text goes to the server; the
+ * Upload inside the Vlastní soubory modal (wireframe 04): drop files, and
+ * each one — one at a time, the rest wait in a queue — is converted to text
+ * in the browser, gzipped and posted, with no further step. The server's AI
+ * classifies it (komentář, článek, kniha…) and proposes the metadata; the
+ * document is searchable once it is processed, and the user changes the
+ * type or the metadata later in its row of the list. Only the converted Markdown text goes to the server; the
  * original file never leaves the browser and nothing of it is kept.
  *
  * Uploading accepts the content rules stated under the dropzone (the
@@ -68,7 +68,6 @@ class UploadStop extends Error {}
 async function processFile(
   file: File,
   library: LibrarySummary,
-  replace: { id: string; creditPages?: number } | null,
   onProgress: (text: string) => void,
 ): Promise<string> {
   let result: Converted;
@@ -87,7 +86,7 @@ async function processFile(
     throw new UploadStop("Převedený text nejde zpracovat.");
   }
 
-  const cost = uploadCost(parsed, library.quotaPages, library.pagesUsed ?? 0, replace?.creditPages ?? 0);
+  const cost = uploadCost(parsed, library.quotaPages, library.pagesUsed ?? 0);
   if (!cost.fits) {
     throw new UploadStop(
       `Dokument má ${countPagesAcc(cost.pages)}, v knihovně ${plural(cost.remaining, "zbývá", "zbývají", "zbývá")} ${countPages(cost.remaining)}. Smažte jiný dokument nebo nahrajte jen část.`,
@@ -109,7 +108,6 @@ async function processFile(
     // Who uploads answers for having the right to (the rules under the dropzone).
     rights: "jine",
     docTypeHint: null,
-    replaces: replace?.id ?? null,
   });
 
   onProgress(`Nahrávám ${formatBytes(gz.size)}…`);
@@ -124,17 +122,7 @@ async function processFile(
   return outcome.id;
 }
 
-export function Uploader({
-  library,
-  replace,
-  onCancelReplace,
-  onUploaded,
-}: {
-  library: LibrarySummary;
-  replace: { id: string; title: string; creditPages?: number } | null;
-  onCancelReplace: () => void;
-  onUploaded: (id: string) => void;
-}) {
+export function Uploader({ library, onUploaded }: { library: LibrarySummary; onUploaded: (id: string) => void }) {
   const [queue, setQueue] = useState<File[]>([]);
   const [current, setCurrent] = useState<{ file: File; progress: string } | null>(null);
   const [log, setLog] = useState<LogEntry[]>([]);
@@ -159,8 +147,8 @@ export function Uploader({
   }, [hasWork]);
 
   // The latest props for the running upload (the quota moves after each document).
-  const props = useRef({ library, replace, onUploaded });
-  props.current = { library, replace, onUploaded };
+  const props = useRef({ library, onUploaded });
+  props.current = { library, onUploaded };
 
   // Take the next file from the queue whenever nothing is in progress.
   // The ref keeps a re-run of the effect (React's dev double-invoke) from uploading a file twice.
@@ -172,18 +160,16 @@ export function Uploader({
     setQueue(rest);
     setCurrent({ file, progress: "Připravuji převod…" });
     const update = (progress: string) => setCurrent((c) => (c && c.file === file ? { ...c, progress } : c));
-    const { library: lib, replace: rep } = props.current;
+    const { library: lib } = props.current;
     void (async () => {
-      let entry: LogEntry;
       try {
-        const id = await processFile(file, lib, rep, update);
-        // Only the upload: its processing shows (and updates) in the list below.
-        entry = { name: file.name, ok: true, message: "nahráno." };
+        const id = await processFile(file, lib, update);
+        // Nothing to report here: the file's row in the list below spins until it is processed.
         props.current.onUploaded(id);
       } catch (error) {
-        entry = { name: file.name, ok: false, message: error instanceof UploadStop ? error.message : "Nahrávání se nepodařilo. Zkuste to prosím znovu." };
+        const entry = { name: file.name, ok: false, message: error instanceof UploadStop ? error.message : "Nahrávání se nepodařilo. Zkuste to prosím znovu." };
+        setLog((l) => [entry, ...l].slice(0, 8));
       }
-      setLog((l) => [entry, ...l].slice(0, 8));
       setCurrent(null);
     })();
   }, [current, queue]);
@@ -191,8 +177,7 @@ export function Uploader({
   function add(files: FileList | File[] | null) {
     const list = [...(files ?? [])];
     if (list.length === 0) return;
-    // A re-upload replaces exactly one document: take only the first file.
-    setQueue((q) => [...q, ...(replace ? list.slice(0, 1) : list)]);
+    setQueue((q) => [...q, ...list]);
   }
 
   function onDrop(event: DragEvent) {
@@ -215,16 +200,6 @@ export function Uploader({
 
   return (
     <div className="zd-upload">
-      {replace ? (
-        <div className="zd-banner">
-          <span>
-            Nahráváte novou verzi dokumentu <strong>{replace.title}</strong>. Metadata se převezmou z původní verze; starý převod se po zpracování nahradí.
-          </span>
-          <button type="button" className="zd-link-button" onClick={onCancelReplace} disabled={current !== null}>
-            Zrušit
-          </button>
-        </div>
-      ) : null}
       <div
         className="zd-dropzone"
         data-dragging={dragging || undefined}
@@ -238,15 +213,17 @@ export function Uploader({
         <button type="button" className="zd-dropzone-button" onClick={() => picker.current?.click()}>
           <ZIcon name="upload" size={20} style={{ color: "var(--muted)" }} />
           <span className="zd-dropzone-main">
-            Přetáhněte {replace ? "novou verzi" : "soubory"} sem, nebo <span className="zd-link">vyberte z počítače</span>
+            Přetáhněte soubory sem, nebo <span className="zd-link">vyberte z počítače</span>
           </span>
-          <span className="zd-dropzone-sub">PDF, DOCX, TXT nebo MD · nejvýš {maxMb} MB na soubor · převede se na text, originál se nikam neposílá</span>
+          <span className="zd-dropzone-sub">
+            PDF, DOCX, TXT nebo MD, nejvýš {maxMb} MB. Převádí se na text přímo ve vašem prohlížeči; typ dokumentu rovnou zařadí AI.
+          </span>
         </button>
         <input
           ref={picker}
           type="file"
           accept={ACCEPT}
-          multiple={!replace}
+          multiple
           hidden
           onChange={(e) => {
             add(e.target.files);
@@ -259,7 +236,7 @@ export function Uploader({
         <a href="/podminky" target="_blank" rel="noopener">
           pravidla
         </a>
-        ). Metadata doplní AI, opravíte je v detailu dokumentu.
+        ). Typ a údaje změníte po rozkliknutí řádku.
       </p>
       {current ? (
         <div className="zd-row zd-upload-current">

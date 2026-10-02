@@ -2,7 +2,7 @@ import { headers } from "next/headers";
 import { Guide } from "./_guide";
 import { Mail } from "./_legal";
 import { SourceList } from "./_source-status";
-import { OwnSourcesGroup, ZoteroGroup } from "./_zdroje/own-sources";
+import { OwnSourcesGroup } from "./_zdroje/own-sources";
 import { zoteroConfigured } from "@/src/zotero/config";
 
 export const dynamic = "force-dynamic";
@@ -28,7 +28,8 @@ export default async function Home() {
         </p>
         <p className="lead">
           V oficiálních databázích server hledá živě – funguje jako nachytřený Google a nic si z
-          nich nekopíruje. Kdo má režim Pro, může si k nim přidat vlastní dokumenty.
+          nich nekopíruje. Kdo má režim Pro, může připojit svou knihovnu Zotero a nahrát vlastní
+          soubory.
         </p>
         <a href={OWL_URL} className="project-card">
           <img src="/owl.svg" alt="" width={36} height={36} />
@@ -47,10 +48,11 @@ export default async function Home() {
 
       <section id="zdroje" className="sources">
         <h2>Zdroje</h2>
-        {/* Client island: counts from GET /api/files/summary; the page stays server-rendered. */}
-        <OwnSourcesGroup />
-        {/* Zotero only where the deployment can connect it (the OAuth app and CREDENTIALS_SECRET). */}
-        {zoteroConfigured() ? <ZoteroGroup /> : null}
+        {/*
+          Client island: Zotero (only where the deployment can connect it — the OAuth app and
+          CREDENTIALS_SECRET) and Vlastní soubory, counts from GET /api/files/summary.
+        */}
+        <OwnSourcesGroup zotero={zoteroConfigured()} />
         {/* Client island: the badges come from GET /api/status/[id], one per source, after the page is up. */}
         <SourceList />
       </section>

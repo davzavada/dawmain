@@ -1,10 +1,10 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { canEditDocument, getAccess } from "./access";
+import { getAccess } from "./access";
 import { LIBRARY_ID_RE, LIMITS, TERMS_VERSION, USER_ID_RE } from "./config";
 import { withScope, type Queryable } from "./db/client";
-import { getDocument, insertUploadedDocument, isBlocked, replacementCredit } from "./db/documents";
+import { insertUploadedDocument, isBlocked } from "./db/documents";
 import { ensureLibrary, getLibraries, reservePages, reviveLibrary } from "./db/libraries";
 import { acceptTerms, audit, bumpUsage, hasAcceptedTerms, usageSum } from "./db/usage";
 import { billablePages } from "./dmd/billing";
@@ -52,8 +52,7 @@ import {
  *      text — what is stored (the browser sends normalized text, so for it
  *      both hashes agree);
  *   6. one transaction: blocked content (notice-and-action), library row,
- *      `replaces` (same library, uploader or admin; the replaced document's
- *      pages are credited against the library cap), atomic page
+ *      atomic page
  *      reservation against the library and global caps, a library its
  *      owner uses again is revived (reviveLibrary), insert (duplicate
  *      content in the library → 409, reservation rolled back), the daily
@@ -152,7 +151,6 @@ const uploadMetaSchema = z.object({
   hints: hintsSchema.default({}),
   rights: z.enum(RIGHTS),
   doc_type_hint: z.enum(DOC_TYPES).optional(),
-  replaces: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i).optional(),
 });
 
 /** Base name of a client file name, one line, ≤ 255 chars. Pure. */
@@ -205,7 +203,6 @@ export function parseUploadMeta(raw: string): UploadMeta | null {
     hints: sanitizeHints(m.hints),
     rights: m.rights,
     doc_type_hint: m.doc_type_hint,
-    replaces: m.replaces?.toLowerCase(),
   };
 }
 
@@ -453,22 +450,13 @@ async function upload(request: Request, userId: string): Promise<UploadOutcome> 
         return refuse(422, "Tento obsah byl na základě oznámení odstraněn a nelze ho nahrát znovu.");
       }
       await ensureLibrary(db, libraryId, library.name);
-      let credit = 0;
-      if (meta.replaces) {
-        const old = await getDocument(db, meta.replaces, [libraryId]);
-        if (!old || !canEditDocument(library, old.uploaded_by, userId)) {
-          return refuse(403, "Nahrazovaný dokument v této knihovně není, nebo ho nemůžete upravovat.");
-        }
-        // A better conversion of the same document: only the difference has to fit.
-        credit = await replacementCredit(db, old.id, libraryId);
-      }
-      const reserved = await reservePages(db, libraryId, pages, library.quotaPages + credit, LIMITS.globalPages);
+      const reserved = await reservePages(db, libraryId, pages, library.quotaPages, LIMITS.globalPages);
       if (reserved === "global") {
         return refuse(403, "Úložiště Vlastních zdrojů je teď plné. Zkuste to prosím později.");
       }
       if (reserved === "library") {
         const [row] = await getLibraries(db, [libraryId]);
-        const left = Math.max(0, library.quotaPages + credit - (row ? row.page_count + row.pages_reserved : 0));
+        const left = Math.max(0, library.quotaPages - (row ? row.page_count + row.pages_reserved : 0));
         return refuse(
           403,
           `Dokument má ${pages} normostran, v knihovně zbývá ${left} z ${library.quotaPages}. Smažte některý dokument nebo vyberte menší rozsah.`,
@@ -504,9 +492,9 @@ async function upload(request: Request, userId: string): Promise<UploadOutcome> 
       await audit(db, {
         libraryId,
         actor: userId,
-        action: meta.replaces ? "document.upload.replace" : "document.upload",
+        action: "document.upload",
         docId: inserted.id,
-        detail: { pages, injection: injectionFlag, ...(meta.replaces ? { replaces: meta.replaces } : {}) },
+        detail: { pages, injection: injectionFlag },
       });
       return { status: 201 as const, id: inserted.id, libraryId };
     });

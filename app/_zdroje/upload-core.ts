@@ -9,19 +9,11 @@ export function uploadCost(
   parsed: ParsedDoc,
   quotaPages: number,
   usedPages: number,
-  /**
-   * A new version of a document replaces it: the old version's billable
-   * pages, which the server credits against the quota (the document is in
-   * review or ready — src/files/upload.ts replacementCredit). 0 otherwise.
-   */
-  creditPages = 0,
 ): { pages: number; remaining: number; fits: boolean; line: string } {
   const pages = billablePages(parsed.stats.countedChars);
-  const credit = Math.max(0, Math.floor(creditPages));
-  const remaining = Math.max(0, quotaPages - Math.max(0, usedPages - credit));
+  const remaining = Math.max(0, quotaPages - Math.max(0, usedPages));
   const fits = pages <= remaining;
-  const base = `Zabere ${countPagesAcc(pages)} z ${formatCount(remaining)} ${plural(remaining, "zbývající", "zbývajících", "zbývajících")}`;
-  const line = credit > 0 ? `${base} (počítáno i s ${formatCount(credit)} ${plural(credit, "stranou", "stranami", "stranami")} původní verze, která se nahradí).` : `${base}.`;
+  const line = `Zabere ${countPagesAcc(pages)} z ${formatCount(remaining)} ${plural(remaining, "zbývající", "zbývajících", "zbývajících")}.`;
   return { pages, remaining, fits, line };
 }
 
@@ -73,7 +65,6 @@ export function buildUploadMeta(args: {
   contentSha256: string;
   rights: Rights;
   docTypeHint: DocType | null;
-  replaces: string | null;
 }): UploadMeta {
   const meta: UploadMeta = {
     library_id: args.libraryId,
@@ -86,7 +77,6 @@ export function buildUploadMeta(args: {
   };
   if (args.parsed.paged) meta.pages = { physical: args.parsed.stats.physicalPages, label_source: args.result.labelSource };
   if (args.docTypeHint) meta.doc_type_hint = args.docTypeHint;
-  if (args.replaces) meta.replaces = args.replaces;
   return meta;
 }
 
@@ -134,7 +124,7 @@ export function uploadOutcome(status: number, body: unknown): { ok: true; id: st
     413: "Dokument je na jedno nahrání příliš velký. Vyberte menší rozsah stran nebo oddílů.",
     422: "Dokument nejde zpracovat — nejspíš jde o sken bez textu.",
     429: "Dnes už se do knihovny nahrálo příliš mnoho dokumentů. Zkuste to zítra.",
-    503: "Vlastní zdroje jsou teď nedostupné nebo jen pro čtení. Zkuste to později.",
+    503: "Vlastní soubory jsou teď nedostupné nebo jen pro čtení. Zkuste to později.",
   };
   return { ok: false, message: server ?? fallback[status] ?? "Nahrávání se nepodařilo. Zkuste to prosím znovu." };
 }

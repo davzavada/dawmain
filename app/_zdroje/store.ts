@@ -5,8 +5,8 @@ import type { SummaryResponse } from "@/src/files/web-types";
 import { hintCookie, type Hint } from "./hint";
 
 /**
- * Client state shared by every Vlastní zdroje surface — the header's
- * account menu, the nav item, the home page group and the modals — so one
+ * Client state shared by every Vlastní soubory surface — the header's
+ * account menu, the home page group and the modals — so one
  * summary fetch serves them all and they never disagree.
  *
  *   auth      from Clerk (the bridge in ./clerk-bridge.tsx reports it); "none"
@@ -21,7 +21,7 @@ import { hintCookie, type Hint } from "./hint";
  * account state and the summary, so the server renders what the page will
  * look like and nothing jumps; the store keeps that cookie up to date.
  *
- * The modals are driven by the URL (?zdroje=moje|tym, ?tym=1, ?zotero=1): links work,
+ * The modals are driven by the URL (?soubory=1, ?zotero=1): links work,
  * the back button closes them. history.pushState integrates with Next's
  * router, so useSearchParams sees the change without a navigation — but
  * only when called with our own state (null): Next ignores a call whose
@@ -35,11 +35,9 @@ interface State {
   summary: SummaryResponse | null;
   /** The last summary fetch failed (network, 503). */
   failed: boolean;
-  /** The Vlastní zdroje modal is open (the nav item shows it as current). */
-  sourcesOpen: boolean;
 }
 
-let state: State = { auth: "loading", summary: null, failed: false, sourcesOpen: false };
+let state: State = { auth: "loading", summary: null, failed: false };
 const listeners = new Set<() => void>();
 
 function set(patch: Partial<State>): void {
@@ -90,7 +88,7 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-const SERVER_STATE: State = { auth: "loading", summary: null, failed: false, sourcesOpen: false };
+const SERVER_STATE: State = { auth: "loading", summary: null, failed: false };
 
 /**
  * The shared state (server render: loading), with the sign-in hint filling
@@ -211,11 +209,20 @@ export function signOut(): void {
 // ---------------------------------------------------------------------------
 // URL-driven modals
 
-export type SourcesTab = "moje" | "tym";
+/**
+ * The URL parameter of the Vlastní soubory modal (?soubory=1, + &dokument=<id> for the
+ * row opened in the list). ?zdroje=… is its old name, still read so links keep working.
+ */
+export const FILES_PARAM = "soubory";
+const LEGACY_FILES_PARAM = "zdroje";
+
+function filesParamIn(p: URLSearchParams): boolean {
+  return p.has(FILES_PARAM) || p.has(LEGACY_FILES_PARAM);
+}
 
 /** A modal this page opened with pushState is closed with history.back(), so Back never reopens it. */
 let pushedModal = false;
-/** The URL the Vlastní zdroje modal was last shown at (null while it is closed), to restore it on a refused Back. */
+/** The URL the Vlastní soubory modal was last shown at (null while it is closed), to restore it on a refused Back. */
 let modalHref: string | null = null;
 /** closeModal() is popping our own entry after the user already agreed: its popstate asks nothing. */
 let closingByBack = false;
@@ -225,12 +232,12 @@ function hrefOf(loc: Location): string {
 }
 
 function noteLocation(): void {
-  modalHref = new URLSearchParams(window.location.search).has("zdroje") ? hrefOf(window.location) : null;
+  modalHref = filesParamIn(new URLSearchParams(window.location.search)) ? hrefOf(window.location) : null;
 }
 
 /**
  * Back / Forward (the browser button, Android's back gesture) is a same-document history change:
- * nothing but this listener sees ?zdroje disappear before ZdrojeModals unmounts the uploader, so a
+ * nothing but this listener sees ?soubory disappear before ZdrojeModals unmounts the uploader, so a
  * conversion held only in memory would be lost without the question every other exit asks.
  * Refused: the modal's URL is pushed again, over the entry the user went back to, and stays open.
  * Registered at module load, before Next's own listener (app-router's effect), so Next's traverse
@@ -270,11 +277,10 @@ function pushParams(update: (p: URLSearchParams) => void, replace = false): void
   noteLocation();
 }
 
-/** ZdrojeModals reports whether the Vlastní zdroje modal is open. */
-export function setSourcesOpen(open: boolean): void {
+/** ZdrojeModals reports that the Vlastní soubory modal is open. */
+export function setFilesOpen(open: boolean): void {
   // A deep link (or the /vlastni-zdroje redirect) opened it without pushParams.
   if (open && modalHref === null) noteLocation();
-  if (open !== state.sourcesOpen) set({ sourcesOpen: open });
 }
 
 // ---------------------------------------------------------------------------
@@ -295,46 +301,42 @@ export function mayDiscardWork(): boolean {
   return window.confirm(DISCARD_QUESTION);
 }
 
-/** The modal already shows this tab and document: going there changes nothing, so nothing is asked. */
-function showing(tab: SourcesTab, documentId: string | null): boolean {
-  const p = new URLSearchParams(window.location.search);
-  return p.get("zdroje") === tab && !p.has("tym") && !p.has("zotero") && (p.get("dokument") ?? null) === documentId;
-}
-
-/** Open the Vlastní zdroje modal on a tab (and optionally a document's detail). Signed out: sign in first. */
-export function openSources(tab: SourcesTab = "moje", documentId?: string): void {
+/** Open the Vlastní soubory modal (optionally with one document's row open). Signed out: sign in first. */
+export function openFiles(documentId?: string): void {
   if (state.auth === "signed_out") {
     requestSignIn();
     return;
   }
-  const already = new URLSearchParams(window.location.search).has("zdroje");
-  if (already && showing(tab, documentId ?? null)) return;
-  if (already && !mayDiscardWork()) return;
-  pushParams(
-    (p) => {
-      p.set("zdroje", tab);
-      p.delete("tym");
-      p.delete("zotero");
-      p.delete("stav");
-      if (documentId) p.set("dokument", documentId);
-      else p.delete("dokument");
-    },
-    already,
-  );
-  if (!already) pushedModal = true;
+  const params = new URLSearchParams(window.location.search);
+  const already = filesParamIn(params);
+  if (already) {
+    showFile(documentId ?? null);
+    return;
+  }
+  const replace = params.has("zotero");
+  pushParams((p) => {
+    p.set(FILES_PARAM, "1");
+    p.delete(LEGACY_FILES_PARAM);
+    p.delete("zotero");
+    p.delete("stav");
+    if (documentId) p.set("dokument", documentId);
+    else p.delete("dokument");
+  }, replace);
+  if (!replace) pushedModal = true;
 }
 
 /**
- * Switch tab / document inside an open modal without adding history entries.
- * `confirmed`: the caller already asked mayDiscardWork().
+ * Open (or, with null, close) one document's row inside the open modal, without adding a
+ * history entry: the URL keeps &dokument=<id>, so a reload or a copied link opens the same row.
  */
-export function showInSources(tab: SourcesTab, documentId: string | null, confirmed = false): void {
-  if (showing(tab, documentId)) return;
-  if (!confirmed && !mayDiscardWork()) return;
-  pushParams((p) => {
-    p.set("zdroje", tab);
-    if (documentId) p.set("dokument", documentId);
-    else p.delete("dokument");
+export function showFile(documentId: string | null): void {
+  const p = new URLSearchParams(window.location.search);
+  if ((p.get("dokument") ?? null) === documentId && p.has(FILES_PARAM)) return;
+  pushParams((q) => {
+    q.set(FILES_PARAM, "1");
+    q.delete(LEGACY_FILES_PARAM);
+    if (documentId) q.set("dokument", documentId);
+    else q.delete("dokument");
   }, true);
 }
 
@@ -350,28 +352,9 @@ function closeModal(keys: string[]): void {
   }, true);
 }
 
-export function closeSources(): void {
+export function closeFiles(): void {
   if (!mayDiscardWork()) return;
-  closeModal(["zdroje", "dokument"]);
-}
-
-/** Open the team management modal (for the admin of `orgId`, or the first team administered). */
-export function openTeam(orgId?: string): void {
-  const params = new URLSearchParams(window.location.search);
-  const replace = params.has("zdroje") || params.has("tym");
-  if (params.has("zdroje") && !mayDiscardWork()) return;
-  pushParams((p) => {
-    p.delete("zdroje");
-    p.delete("dokument");
-    p.delete("zotero");
-    p.delete("stav");
-    p.set("tym", orgId ?? "1");
-  }, replace);
-  if (!replace) pushedModal = true;
-}
-
-export function closeTeam(): void {
-  closeModal(["tym"]);
+  closeModal([FILES_PARAM, LEGACY_FILES_PARAM, "dokument"]);
 }
 
 /**
@@ -380,12 +363,13 @@ export function closeTeam(): void {
  */
 export function openZotero(): void {
   const params = new URLSearchParams(window.location.search);
-  const replace = params.has("zdroje") || params.has("tym") || params.has("zotero");
-  if (params.has("zdroje") && !mayDiscardWork()) return;
+  const files = filesParamIn(params);
+  const replace = files || params.has("zotero");
+  if (files && !mayDiscardWork()) return;
   pushParams((p) => {
-    p.delete("zdroje");
+    p.delete(FILES_PARAM);
+    p.delete(LEGACY_FILES_PARAM);
     p.delete("dokument");
-    p.delete("tym");
     p.delete("stav");
     p.set("zotero", "1");
   }, replace);
