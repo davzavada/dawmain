@@ -35,7 +35,7 @@ const OTHER = "user_2zyxWVU987";
 const KEY = "P9NiFoyLeZu2bZNvvuQPDWsd";
 const NEW_KEY = "Q8MjGpzKfYa3cYOwwvRQEXte";
 const SECRET = "a-test-secret-of-sufficient-length";
-const FIELDS = ["connectedAt", "fp", "groups", "notes", "revokedAt", "sealed", "userID", "username", "v"];
+const FIELDS = ["connectedAt", "fp", "groups", "keyWrite", "mode", "notes", "revokedAt", "sealed", "userID", "username", "v"];
 
 const clerkError = (status: number) => Object.assign(new Error(`Clerk ${status}`), { code: "api_response_error", status });
 
@@ -57,7 +57,7 @@ function mergePatch(target: unknown, patch: unknown): unknown {
 let users: Map<string, Json>;
 
 function connection(overrides: Partial<NewConnection> = {}): NewConnection {
-  return { userID: 12345, username: "zuser", key: KEY, notes: true, groups: "all", ...overrides };
+  return { userID: 12345, username: "zuser", key: KEY, notes: true, groups: "all", mode: "read", keyWrite: false, ...overrides };
 }
 
 /** The raw stored record of a user. */
@@ -113,11 +113,42 @@ describe("saveConnection / loadConnection", () => {
         groups: [10, 20, 30],
         connectedAt: expect.any(String),
         fp: keyFingerprint(KEY),
+        mode: "read",
       },
     });
     expect(keyFingerprint(KEY)).toMatch(/^[0-9a-f]{16}$/);
     // Other metadata survives the merge.
     expect(users.get(USER)?.unrelated).toEqual({ keep: true });
+  });
+
+  it("keeps the mode: write with a key that may write, read otherwise", async () => {
+    await saveConnection(USER, connection({ mode: "write", keyWrite: true }));
+    expect(stored()).toMatchObject({ mode: "write", keyWrite: true });
+    const state = await loadConnection(USER);
+    expect(state.state === "ok" && state.conn.mode).toBe("write");
+
+    // A key that may write, connected as "Jen číst", stays read.
+    await saveConnection(USER, connection({ mode: "read", keyWrite: true }));
+    const read = await loadConnection(USER);
+    expect(read.state === "ok" && read.conn.mode).toBe("read");
+  });
+
+  it("reads a record from before modes (no mode, no keyWrite) as read, and never widens an odd one", async () => {
+    await saveConnection(USER, connection());
+    const { mode: _mode, keyWrite: _keyWrite, ...legacy } = stored()!;
+    users.set(USER, { zotero: legacy });
+    __resetZoteroStoreForTests();
+    const state = await loadConnection(USER);
+    expect(state.state).toBe("ok");
+    expect(state.state === "ok" && state.conn.mode).toBe("read");
+
+    // "write" without keyWrite, or an unknown mode, is read.
+    for (const odd of [{ mode: "write" }, { mode: "write", keyWrite: "true" }, { mode: "admin", keyWrite: true }]) {
+      users.set(USER, { zotero: { ...legacy, ...odd } });
+      __resetZoteroStoreForTests();
+      const s = await loadConnection(USER);
+      expect(s.state === "ok" && s.conn.mode, JSON.stringify(odd)).toBe("read");
+    }
   });
 
   it("never stores the key, only the sealed blob", async () => {
@@ -175,6 +206,10 @@ describe("saveConnection / loadConnection", () => {
       { groups: [0] },
       { groups: "some" as never },
       { username: 5 as never },
+      { mode: "readwrite" as never },
+      { keyWrite: "yes" as never },
+      // "write" needs a key that may write: the callback narrows it, the store refuses it.
+      { mode: "write", keyWrite: false },
     ];
     for (const overrides of bad) {
       const error = await saveConnection(USER, connection(overrides)).then(

@@ -4,6 +4,8 @@
  * only with these, never with raw API objects.
  */
 
+import type { ZoteroMode } from "./config";
+
 /** What every API call needs: the numeric Zotero user id and the (unsealed) key. */
 export interface ZoteroCreds {
   userID: number;
@@ -22,8 +24,10 @@ export interface KeyInfo {
   library: boolean;
   files: boolean;
   notes: boolean;
-  /** True if the key can write ANYWHERE — the personal library or any group. Such a key is refused. */
+  /** True if the key can write ANYWHERE — the personal library or any group. */
   write: boolean;
+  /** True if the key can write to the personal library — the only library zotero_save writes to. */
+  userWrite: boolean;
   /** Group read access: all current and future groups, none, or these group ids. */
   groups: "all" | "none" | number[];
 }
@@ -208,6 +212,11 @@ export type ConnectionState =
         connectedAt: string;
         /** Fingerprint of the key (for a race-free markRevoked). */
         fp: string;
+        /**
+         * Effective mode: "write" only when the user chose it AND the key may
+         * write to the personal library; a record from before modes is "read".
+         */
+        mode: ZoteroMode;
       };
     }
   /** Zotero rejected the key (revoked there); the sealed key is gone. */

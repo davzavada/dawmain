@@ -19,6 +19,8 @@ vi.mock("@/src/zotero/client", async (importOriginal) => ({
   getDeleted: vi.fn(),
   getFulltextIndex: vi.fn(),
   countFulltext: vi.fn(),
+  createItem: vi.fn(),
+  newWriteToken: vi.fn(() => "0123456789abcdef0123456789abcdef"),
   // Pure: the real ones.
   tagColorsOf: (await importOriginal<typeof import("@/src/zotero/client")>()).tagColorsOf,
   zoteroQuery: (await importOriginal<typeof import("@/src/zotero/client")>()).zoteroQuery,
@@ -112,7 +114,7 @@ const API_KEY = "AbCdEfGhIjKlMnOpQrStUvWx";
 function connection(groups: "all" | "none" | number[] = "none", notes = true): ConnectionState {
   return {
     state: "ok",
-    conn: { creds: { userID: ZUSER, key: API_KEY }, username: "zuser", notes, groups, connectedAt: "2026-09-01T10:00:00Z", fp: "fp-current" },
+    conn: { creds: { userID: ZUSER, key: API_KEY }, username: "zuser", notes, groups, connectedAt: "2026-09-01T10:00:00Z", fp: "fp-current", mode: "read" },
   };
 }
 

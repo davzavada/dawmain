@@ -4,7 +4,9 @@
  * from client components.
  *
  *   GET  /api/zotero/status      → ZoteroStatus (JSON; signed out is a normal answer)
- *   POST /api/zotero/connect     → a navigation (HTML form POST), always 303:
+ *   POST /api/zotero/connect     → a navigation (HTML form POST with
+ *                                   mode=read|write; anything else is read),
+ *                                   always 303:
  *                                   to zotero.org's authorize page, or back to
  *                                   /?zotero=1&stav=<ZoteroStav> on refusal
  *   GET  /api/zotero/callback    → 303 to /?zotero=1&stav=<ZoteroStav>
@@ -16,7 +18,6 @@ export type ZoteroStav =
   | "pripojeno" // connected
   | "zamitnuto" // the user declined on zotero.org
   | "vyprselo" // the 10-minute state expired, the cookie is missing, it was started by another account, or the token does not match
-  | "zapis" // the key had write access: revoked and refused
   | "prihlaseni" // not signed in
   | "nepro" // no Pro library
   | "nedostupne" // not configured on this deployment
@@ -27,7 +28,6 @@ export const ZOTERO_STAV: readonly ZoteroStav[] = [
   "pripojeno",
   "zamitnuto",
   "vyprselo",
-  "zapis",
   "prihlaseni",
   "nepro",
   "nedostupne",
@@ -35,12 +35,21 @@ export const ZOTERO_STAV: readonly ZoteroStav[] = [
   "chyba",
 ];
 
+/** What Dawmain may do in the library: "read", or "write" = read and save new items to the personal library. */
+export type ZoteroModeView = "read" | "write";
+
 export interface ZoteroConnectionView {
   username: string;
   userID: number;
   /** ISO timestamp. */
   connectedAt: string;
   notes: boolean;
+  /**
+   * The effective mode: "write" only when the user chose "Číst a ukládat"
+   * AND the key may write to the personal library ("čtení a ukládání");
+   * else "read" ("jen čtení").
+   */
+  mode: ZoteroModeView;
   /** Group read access of the key. */
   groups: "all" | "none" | number[];
   /** Names of the readable groups, best effort (omitted when Zotero did not answer). */

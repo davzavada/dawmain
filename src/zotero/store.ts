@@ -4,7 +4,7 @@ import { clerkClient } from "@clerk/nextjs/server";
 import { USER_ID_RE } from "@/src/files/config";
 import { openSecret, sealSecret } from "@/src/secrets/seal";
 import { TtlCache } from "@/src/sources/shared/cache";
-import { CACHE_TTL_MS, ZOTERO_KEY_RE } from "./config";
+import { CACHE_TTL_MS, ZOTERO_KEY_RE, type ZoteroMode } from "./config";
 import type { ConnectionState } from "./types";
 
 /**
@@ -16,7 +16,13 @@ import type { ConnectionState } from "./types";
  *
  * Stored shape (v1), written whole on every save:
  *
- *   { v: 1, userID, username, sealed, fp, notes, groups, connectedAt, revokedAt }
+ *   { v: 1, userID, username, sealed, fp, notes, groups, connectedAt, revokedAt, mode, keyWrite }
+ *
+ * `mode` and `keyWrite` came later and stay optional on read: a record
+ * without them (connected while the integration was read-only) is "read".
+ * `keyWrite` is what /keys/current said about writing to the personal
+ * library at connect time; the effective mode is "write" only when both
+ * the stored mode and keyWrite say so.
  *
  * updateUserMetadata deep-merges objects (arrays and scalars are replaced),
  * so a partial write would keep whatever it leaves out — a stale revokedAt
@@ -50,6 +56,8 @@ interface StoredConnection {
   groups: Groups;
   connectedAt: string;
   revokedAt: string | null;
+  mode: ZoteroMode;
+  keyWrite: boolean;
 }
 
 /** What the OAuth callback hands over after checking the key. */
@@ -59,6 +67,10 @@ export interface NewConnection {
   key: string;
   notes: boolean;
   groups: Groups;
+  /** The effective mode (the callback has already narrowed "write" to what the key allows). */
+  mode: ZoteroMode;
+  /** Whether the key may write to the personal library (whatever the mode). */
+  keyWrite: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -102,6 +114,9 @@ function parseStored(raw: unknown): StoredConnection | null {
   if (sealed !== null && typeof sealed !== "string") return null;
   if (fp !== null && typeof fp !== "string") return null;
   if (revokedAt !== null && !isTimestamp(revokedAt)) return null;
+  // Older records carry neither; an unknown value never widens to "write".
+  const keyWrite = r.keyWrite === true;
+  const mode: ZoteroMode = r.mode === "write" && keyWrite ? "write" : "read";
   return {
     v: 1,
     userID: r.userID,
@@ -112,6 +127,8 @@ function parseStored(raw: unknown): StoredConnection | null {
     groups: Array.isArray(r.groups) ? [...r.groups] : r.groups,
     connectedAt: r.connectedAt,
     revokedAt,
+    mode,
+    keyWrite,
   };
 }
 
@@ -146,6 +163,7 @@ function toState(userId: string, raw: unknown): ConnectionState {
       groups: stored.groups,
       connectedAt: stored.connectedAt,
       fp,
+      mode: stored.mode,
     },
   };
 }
@@ -261,6 +279,9 @@ export async function saveConnection(userId: string, input: NewConnection): Prom
   if (typeof input.username !== "string") throw new Error("invalid Zotero username");
   if (typeof input.notes !== "boolean") throw new Error("invalid notes flag");
   if (!isGroups(input.groups)) throw new Error("invalid group access");
+  if (input.mode !== "read" && input.mode !== "write") throw new Error("invalid Zotero connection mode");
+  if (typeof input.keyWrite !== "boolean") throw new Error("invalid write flag");
+  if (input.mode === "write" && !input.keyWrite) throw new Error("write mode needs a key that can write");
   const record: StoredConnection = {
     v: 1,
     userID: input.userID,
@@ -271,6 +292,8 @@ export async function saveConnection(userId: string, input: NewConnection): Prom
     groups: Array.isArray(input.groups) ? [...new Set(input.groups)].sort((a, b) => a - b) : input.groups,
     connectedAt: new Date().toISOString(),
     revokedAt: null,
+    mode: input.mode,
+    keyWrite: input.keyWrite,
   };
   await write(userId, record);
 }

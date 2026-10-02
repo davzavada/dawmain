@@ -26,7 +26,7 @@ const { notifyZoteroChanged } = await import("@/app/_zdroje/zotero-status");
 const NOT_CONNECTED: ZoteroStatus = { state: "ok", configured: true, pro: true, connection: null, revoked: null, unreadable: null };
 const CONNECTED: ZoteroStatus = {
   ...NOT_CONNECTED,
-  connection: { username: "jnovakova", userID: 12345, connectedAt: "2026-09-12T10:00:00Z", notes: true, groups: "all" },
+  connection: { username: "jnovakova", userID: 12345, connectedAt: "2026-09-12T10:00:00Z", mode: "read", notes: true, groups: "all" },
 };
 
 let status: { code: number; body: unknown } = { code: 200, body: NOT_CONNECTED };

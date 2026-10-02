@@ -2164,17 +2164,37 @@ main > footer a {
   line-height: 1.4;
 }
 
-/* Zotero (the ?zotero=1 modal): connect, what the key reads, disconnect.
-   Colours come from the zd tokens only, so the dark theme needs no overrides. */
+/* Zotero (the ?zotero=1 modal): choose the mode and connect, the connection, reconnect / disconnect.
+   The wireframe's colours as modal-local tokens, redefined for the dark theme right below. */
 
 .zd-zotero {
+  --zt-pick: #2563eb;
+  --zt-pick-bg: #f5f8ff;
+  --zt-ok-bg: #f0fdf4;
+  --zt-ok: #166534;
+  --zt-bad-bg: #fef2f2;
+  --zt-bad: #991b1b;
+  --zt-bad-mark-bg: #fee2e2;
+  --zt-bad-mark: #b91c1c;
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 18px;
   overflow-y: auto;
   padding: 22px 24px 24px;
+}
+@media (prefers-color-scheme: dark) {
+  .zd-zotero {
+    --zt-pick: #6ea8ff;
+    --zt-pick-bg: rgb(96 165 250 / 0.12);
+    --zt-ok-bg: rgb(34 197 94 / 0.16);
+    --zt-ok: hsl(142 60% 60%);
+    --zt-bad-bg: rgb(248 113 113 / 0.15);
+    --zt-bad: hsl(0 85% 75%);
+    --zt-bad-mark-bg: rgb(248 113 113 / 0.2);
+    --zt-bad-mark: hsl(0 85% 70%);
+  }
 }
 @media (max-width: 640px) {
   .zd-zotero {
@@ -2186,33 +2206,37 @@ main > footer a {
   outline: none;
 }
 .zd-zotero h3 {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
   letter-spacing: -0.01em;
 }
-.zd-zotero h4 {
-  margin: 0;
-}
 /* The live region stays in the DOM; empty, it must not add a gap. */
 .zd-zotero-live:empty {
-  margin-bottom: -22px;
+  margin-bottom: -18px;
 }
 .zd-zotero-banner[data-tone="ok"] {
-  background: var(--ok-soft-bg);
-  color: var(--ok);
+  background: var(--zt-ok-bg);
+  color: var(--zt-ok);
 }
 .zd-zotero-banner[data-tone="info"] {
   background: var(--accent-bg);
   color: var(--accent);
 }
 .zd-zotero-banner[data-tone="bad"] {
-  background: var(--bad-bg);
-  color: var(--bad);
+  background: var(--zt-bad-bg);
+  color: var(--zt-bad);
 }
 .zd-zotero-section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
+}
+.zd-zotero-lead {
+  max-width: 72ch;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--soft);
+  text-wrap: pretty;
 }
 .zd-zotero-who {
   display: flex;
@@ -2229,71 +2253,109 @@ main > footer a {
 .zd-zotero-user {
   overflow-wrap: anywhere;
 }
+.zd-zotero-sub {
+  font-size: 12.5px;
+  color: var(--muted);
+}
 .zd-zotero-mark {
   flex: none;
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
+  border-radius: 8px;
   background: var(--surface);
-  color: var(--body);
+  color: var(--muted);
 }
 .zd-zotero-mark[data-tone="bad"] {
-  background: var(--bad-bg);
-  color: var(--bad);
+  background: var(--zt-bad-mark-bg);
+  color: var(--zt-bad-mark);
 }
-.zd-zotero-list {
+
+/* The mode choice: two radio cards, the note, then the connect button under a divider. */
+.zd-zotero-form {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 10px;
   margin: 0;
-  padding-left: 20px;
-  font-size: 14px;
-  line-height: 1.55;
-  color: var(--body);
 }
-.zd-zotero-promises {
+.zd-zotero-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--soft);
+}
+.zd-zotero-modes {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin: 0;
-  padding: 12px 14px;
-  border-radius: 10px;
-  background: var(--well);
-  list-style: none;
-  font-size: 14px;
-  line-height: 1.5;
-  color: var(--body);
 }
-.zd-zotero-promises li {
+.zd-zotero-mode {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  cursor: pointer;
 }
-.zd-zotero-promises .icon {
+.zd-zotero-mode[data-selected] {
+  border-color: var(--zt-pick);
+  background: var(--zt-pick-bg);
+}
+.zd-zotero-mode input {
+  appearance: none;
   flex: none;
-  margin-top: 3px;
-  color: var(--ok);
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  border: 1px solid var(--idle);
+  border-radius: 50%;
+  background: var(--panel);
+  cursor: pointer;
 }
-.zd-zotero-note {
-  max-width: 72ch;
-  font-size: 13px;
-  line-height: 1.55;
-  color: var(--soft);
-  text-wrap: pretty;
+.zd-zotero-mode input:checked {
+  border: 5px solid var(--zt-pick);
 }
-.zd-zotero-note a {
-  color: inherit;
-  text-decoration: underline;
-  text-underline-offset: 2px;
+.zd-zotero-mode input:focus-visible {
+  outline: 2px solid var(--zt-pick);
+  outline-offset: 2px;
 }
-.zd-zotero-form {
+.zd-zotero-mode-text {
   display: flex;
-  margin: 0;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
-.zd-zotero-more,
+.zd-zotero-mode-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.zd-zotero-mode-desc {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--soft);
+}
+.zd-zotero-hint {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.zd-zotero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+}
+/* The divider above the buttons: inside the mode choice, and above Připojit znovu / Odpojit. */
+.zd-zotero-form .zd-zotero-actions,
+.zd-zotero-divided {
+  margin-top: 4px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
 .zd-zotero-disconnect,
 .zd-zotero-retry {
   display: flex;
@@ -2301,14 +2363,22 @@ main > footer a {
   align-items: flex-start;
   gap: 8px;
 }
+/* Confirming Odpojit: the question takes the whole row. */
+.zd-zotero-disconnect[data-confirming] {
+  flex-basis: 100%;
+}
 .zd-zotero-disconnect .zd-confirm {
   align-self: stretch;
   margin-top: 0;
 }
 @media (max-width: 640px) {
-  /* Phones: the main action spans the sheet, as the thumb expects. */
-  .zd-zotero-connect .zd-zotero-form .zd-btn {
+  /* Phones: the actions span the sheet, as the thumb expects. */
+  .zd-zotero-actions > .zd-btn,
+  .zd-zotero-actions > .zd-zotero-disconnect {
     flex: 1;
+  }
+  .zd-zotero-actions > .zd-zotero-disconnect > .zd-btn {
+    width: 100%;
   }
 }
 

@@ -1,5 +1,5 @@
 import "server-only";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { TtlCache } from "@/src/sources/shared/cache";
 import { SourceError } from "@/src/sources/shared/errors";
 import { htmlToText, loadHtml } from "@/src/sources/shared/html";
@@ -26,8 +26,11 @@ import type {
 } from "./types";
 
 /**
- * The Zotero Web API v3, read-only: pure path builders and parsers first,
- * then the calls (all through zoteroFetch, ./http.ts). The parsers turn the
+ * The Zotero Web API v3: pure path builders and parsers first, then the
+ * calls (all through zoteroFetch, ./http.ts). Everything reads, except
+ * createItem — the one write, which only ever ADDS an item to the personal
+ * library (POST, never PATCH, PUT or DELETE of an existing object) — and
+ * revokeKey, which deletes Dawmain's own key. The parsers turn the
  * API's JSON into the shapes of ./types.ts and are the only code that knows
  * the raw objects: a broken envelope (no key, no data, not an array) is
  * PARSE_DRIFT, a missing optional field is simply absent.
@@ -239,9 +242,9 @@ function nextStart(link: string | null): number | null {
 
 /**
  * GET /keys/current → KeyInfo. `write` is true when the key can write
- * ANYWHERE (the personal library, any group, all groups) — such a key is
- * refused. `files` defaults to `library` when absent (Zotero grants files
- * with the library).
+ * ANYWHERE (the personal library, any group, all groups); `userWrite` only
+ * for the personal library, the one zotero_save writes to. `files`
+ * defaults to `library` when absent (Zotero grants files with the library).
  */
 export function parseKeyInfo(json: unknown): KeyInfo {
   const o = envelope(json, "the key information");
@@ -250,7 +253,8 @@ export function parseKeyInfo(json: unknown): KeyInfo {
   const access = isObject(o.access) ? o.access : {};
   const user = isObject(access.user) ? access.user : {};
   const library = user.library === true;
-  let write = user.write === true;
+  const userWrite = user.write === true;
+  let write = userWrite;
   let all = false;
   const ids: number[] = [];
   if (isObject(access.groups)) {
@@ -273,6 +277,7 @@ export function parseKeyInfo(json: unknown): KeyInfo {
     files: typeof user.files === "boolean" ? user.files : library,
     notes: user.notes === true,
     write,
+    userWrite,
     groups: all ? "all" : ids.length ? [...new Set(ids)].sort((a, b) => a - b) : "none",
   };
 }
@@ -495,7 +500,7 @@ export async function getKeyInfo(key: string, io: IoOptions = {}): Promise<KeyIn
 }
 
 /**
- * Revoke the key on zotero.org ("Odpojit", or a key that can write).
+ * Revoke the key on zotero.org ("Odpojit", a key the callback refuses, or the one a reconnect replaces).
  * true when Zotero deleted it; false when it was already gone or not ours
  * to delete (403/404) — never an error in those cases.
  */
@@ -510,6 +515,91 @@ export async function revokeKey(creds: ZoteroCreds, io: IoOptions = {}): Promise
     if (error instanceof SourceError && error.kind === "NOT_ENTITLED") return false;
     throw error;
   }
+}
+
+/** What createItem made: the new item's key and version, and its zotero.org page when Zotero named it. */
+export interface CreatedItem {
+  key: string;
+  version: number | null;
+  webLink: string | null;
+}
+
+/** A fresh Zotero-Write-Token: 32 hex characters, one per new item. */
+export function newWriteToken(): string {
+  return randomBytes(16).toString("hex");
+}
+
+/**
+ * Zotero's reason for a failed object, safe to echo: one printable line,
+ * long tokens dropped (a value Zotero quotes could be anything).
+ */
+function writeFailureReason(raw: unknown): string | null {
+  if (!isObject(raw)) return null;
+  const message = str(raw.message)?.trim().split("\n")[0].replace(/[A-Za-z0-9]{20,}/g, "***").slice(0, 200) ?? "";
+  return message && /^[\x20-\x7E]+$/.test(message) ? message : null;
+}
+
+/**
+ * Create ONE new item in the personal library (POST /users/{id}/items) —
+ * the only write the integration makes. `data` is the item's Zotero JSON
+ * (itemType, fields, creators, tags) and must carry no key or version: a
+ * key would make the POST update that item. Sent with a fresh
+ * Zotero-Write-Token (`writeToken`, the caller's, so one tool call keeps
+ * one token): Zotero applies a token at most once, so zoteroFetch's single
+ * retry after a short 429/503 cannot create a second item — a repeat of a
+ * write Zotero had applied answers 412, reported here as "maybe saved".
+ * Never anything to a group library.
+ */
+export async function createItem(
+  creds: ZoteroCreds,
+  data: Record<string, unknown>,
+  writeToken: string = newWriteToken(),
+  io: IoOptions = {},
+): Promise<CreatedItem> {
+  if (!isObject(data) || typeof data.itemType !== "string") throw new Error("createItem needs an item object with an itemType.");
+  if ("key" in data || "version" in data || "parentItem" in data) throw new Error("createItem only creates: no key, version or parentItem.");
+  const path = `${libraryPrefix({ type: "user", id: creds.userID })}/items`;
+  const res = await zoteroFetch(creds, path, {
+    method: "POST",
+    json: [data],
+    headers: { "Zotero-Write-Token": writeToken },
+    signal: io.signal,
+  });
+  if (res.status === 412) {
+    throw new SourceError(
+      SOURCE,
+      "UPSTREAM_ERROR",
+      `${SOURCE}: the write was answered 412 — its write token was already used, so an earlier attempt of this same save may have gone through.`,
+      "Do not save again blindly: look the item up with zotero_search (title) first, and save only if it is not there.",
+    );
+  }
+  if (res.status === 413) {
+    throw new SourceError(SOURCE, "INPUT_INVALID", `${SOURCE} refused the item as too large (HTTP 413).`, "Shorten the abstract or extra and save again.");
+  }
+  if (res.status !== 200) throw unexpected(res, "saving the item");
+  const body = envelope(res.json(), "the write result");
+  const failed = isObject(body.failed) ? body.failed["0"] : undefined;
+  if (failed !== undefined) {
+    const reason = writeFailureReason(failed);
+    throw new SourceError(
+      SOURCE,
+      "INPUT_INVALID",
+      `${SOURCE} did not save the item${reason ? `: ${reason}` : ""}.`,
+      "Nothing was saved. Correct the field Zotero names (zotero_list {list: \"item_fields\", item_type: …} lists the valid fields) and save again.",
+    );
+  }
+  const successful = isObject(body.successful) ? body.successful["0"] : undefined;
+  const key = isObject(successful) ? str(successful.key) : isObject(body.success) ? str(body.success["0"]) : null;
+  if (!key || !ITEM_KEY_RE.test(key)) throw drift("a write result without the new item's key");
+  let webLink: string | null = null;
+  let version: number | null = null;
+  if (isObject(successful)) {
+    version = nonNegInt(successful.version);
+    const links = isObject(successful.links) ? successful.links : {};
+    const href = isObject(links.alternate) ? str(links.alternate.href) : null;
+    webLink = href && isZoteroWebLink(href) ? href : null;
+  }
+  return { key, version, webLink };
 }
 
 type FullScan = CaseScan & { complete: boolean };
