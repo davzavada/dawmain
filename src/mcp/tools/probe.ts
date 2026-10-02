@@ -199,7 +199,7 @@ export function canaries(): Canary[] {
       // Reachability of the Zotero Web API from this deployment, never a
       // user's library: a public schema list, no key. api.zotero.org stays
       // out of ALLOWED_FETCH_HOSTS (fetch_url must not reach the host the
-      // users' keys go to), and out of DATABASES in src/mcp/status.ts — a
+      // users' keys go to), and out of DATABASES in src/mcp/databases.ts — a
       // user's private library is not a public source's status.
       id: "zotero",
       source: "Zotero (Web API v3)",

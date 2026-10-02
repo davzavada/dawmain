@@ -179,6 +179,10 @@ export async function summaryFor(userId: string, opts: { fresh?: boolean } = {})
   if (env === "off" || env === "unconfigured") return { state: "unavailable", mode: env };
   const access = await getAccess(userId, { joined: opts.fresh === true });
   const pro = access.libraries.map((l) => l.id);
+  // Team sizes come from Clerk, the counts from the database: ask both at once.
+  const members = new Map(
+    access.all.filter((lib) => lib.kind === "org" && lib.pro).map((lib) => [lib.id, memberCount(lib.id)]),
+  );
   let mode: FilesMode = env;
   let termsAccepted = false;
   let counts: Record<string, LibrarySummary["counts"]> = {};
@@ -210,7 +214,7 @@ export async function summaryFor(userId: string, opts: { fresh?: boolean } = {})
       quotaPages: lib.quotaPages,
       pagesUsed: lib.pro && loadedCounts ? (pages[lib.id] ?? 0) : null,
       counts: lib.pro && loadedCounts ? (counts[lib.id] ?? null) : null,
-      memberCount: lib.kind === "org" && lib.pro ? await memberCount(lib.id) : null,
+      memberCount: (await members.get(lib.id)) ?? null,
     })),
   );
   return { state: "ok", mode, termsAccepted, libraries };

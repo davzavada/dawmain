@@ -1,6 +1,15 @@
 import { unstable_cache } from "next/cache";
 import { canaries, runCanary } from "./tools/probe";
 import { allSourceResults, type SourceHealth } from "@/src/sources/shared/health";
+import { DATABASES, type DatabaseStatus } from "./databases";
+
+export {
+  DATABASE_GROUPS,
+  DATABASES,
+  formatTime,
+  type DatabaseGroup,
+  type DatabaseStatus,
+} from "./databases";
 
 /**
  * The green/red light next to each database on the home page.
@@ -15,121 +24,37 @@ import { allSourceResults, type SourceHealth } from "@/src/sources/shared/health
  *     this is what a visitor sees - which is why the result goes through
  *     Next's data cache rather than module memory: on Vercel that cache is
  *     shared across instances and visitors, so ONE canary per source per
- *     5 minutes serves everybody, not one per instance.
+ *     CANARY_TTL_MS serves everybody, not one per instance.
  *  3. Nothing. If a canary cannot run, the row simply says "neověřeno"
  *     rather than claiming an outage we did not observe.
+ *
+ * No page waits on any of this: the badges are filled in by the browser from
+ * GET /api/status (app/_source-status.tsx), so a slow source can delay its
+ * badge, never the page or the end of its HTML stream.
  */
 
 /** A real observation stays authoritative for this long. */
 const FRESH_MS = 15 * 60 * 1000;
 /**
- * How long a canary result is reused before another one may run. Short on
- * purpose: the page function and the MCP function are different instances, so
- * a visitor almost never sees tier 1, and the light would otherwise sit on a
- * five-minute-old check after a source came back. One minute keeps it honest
- * while still costing at most one request per source per minute for everyone
- * together, because the cache below is shared, not per instance.
+ * How long a canary result is reused before another one may run. The badge
+ * shows the time of its check, so an older light is honest about its age;
+ * a short TTL instead made visitors wait on fresh canaries (the NS search
+ * alone often takes seconds) far more often than a source actually changed.
+ * The cache below is shared, so this is one request per source per TTL for
+ * everyone together.
  */
-const CANARY_TTL_MS = 60 * 1000;
+const CANARY_TTL_MS = 5 * 60 * 1000;
 /**
  * Matches the probe's own timeout. A shorter one produced FALSE REDS: the NS
  * Domino search regularly needs more than a few seconds, so a tight deadline
- * reported a healthy source as down. The page never waits on this anyway,
- * the status list streams in its own Suspense boundary.
+ * reported a healthy source as down. No page waits on this: only the
+ * /api/status request does.
  */
 const CANARY_TIMEOUT_MS = 12_000;
 
-export interface DatabaseStatus {
-  /** The canary id - a stable key the page hangs its icon on. */
-  id: string;
-  /** Display name of the database. */
-  label: string;
-  group: DatabaseGroup;
-  /** Where a human can verify the source themselves. */
-  href: string;
-  ok: boolean | null;
-  /** Epoch ms of the observation behind `ok`, null when unknown. */
-  at: number | null;
-  /** "provoz" = seen on a real call, "kontrola" = canary, null = unknown. */
-  via: "provoz" | "kontrola" | null;
-  detail?: string;
-}
-
-/** The headings the home page sorts the databases under, in this order. */
-export const DATABASE_GROUPS = ["Judikatura", "Předpisy", "Literatura"] as const;
-export type DatabaseGroup = (typeof DATABASE_GROUPS)[number];
-
-/**
- * The databases shown on the page, each tied to the SOURCE constant its
- * client reports under and to the probe canary that can stand in for it.
- */
-export const DATABASES: Array<{
-  label: string;
-  group: DatabaseGroup;
-  href: string;
-  source: string;
-  canaryId: string;
-}> = [
-  {
-    label: "Nejvyšší soud",
-    group: "Judikatura",
-    href: "https://rozhodnuti.nsoud.cz",
-    source: "Nejvyšší soud",
-    canaryId: "ns",
-  },
-  {
-    label: "Nejvyšší správní soud",
-    group: "Judikatura",
-    href: "https://vyhledavac.nssoud.cz",
-    source: "Nejvyšší správní soud",
-    canaryId: "nss",
-  },
-  {
-    label: "Ústavní soud",
-    group: "Judikatura",
-    href: "https://nalus.usoud.cz",
-    source: "Ústavní soud (NALUS)",
-    canaryId: "nalus",
-  },
-  {
-    label: "Obecné soudy",
-    group: "Judikatura",
-    href: "https://rozhodnuti.justice.cz",
-    source: "rozhodnuti.justice.cz",
-    canaryId: "justice",
-  },
-  {
-    label: "Soudní dvůr EU",
-    group: "Judikatura",
-    href: "https://infocuria.curia.europa.eu",
-    source: "CJEU (InfoCuria)",
-    canaryId: "curia",
-  },
-  {
-    label: "e-Sbírka",
-    group: "Předpisy",
-    href: "https://www.e-sbirka.cz",
-    source: "e-Sbírka",
-    canaryId: "esbirka-api",
-  },
-  {
-    label: "EUR-Lex",
-    group: "Předpisy",
-    href: "https://eur-lex.europa.eu",
-    source: "EUR-Lex (Cellar)",
-    canaryId: "cellar-sparql",
-  },
-  {
-    label: "UKAŽ",
-    group: "Literatura",
-    href: "https://cuni.primo.exlibrisgroup.com/discovery/search?vid=420CKIS_INST:UKAZ",
-    source: "UKAŽ (Univerzita Karlova, Primo)",
-    canaryId: "primo",
-  },
-];
-
 interface CachedCanary {
-  ok: boolean;
+  /** null: the request itself died, nothing observed about the source. */
+  ok: boolean | null;
   at: number;
   detail?: string;
 }
@@ -142,22 +67,26 @@ function fresh(entry: { at: number } | undefined, ttl: number): boolean {
  * One canary, with its own timeout. Red means THE SOURCE answered wrong - an
  * HTTP error, or a page the parsers would no longer understand. When the
  * request itself dies (DNS, egress, timeout) we observed nothing about the
- * source, so this THROWS: unstable_cache then caches nothing and the row
- * shows "neověřeno" instead of an outage we did not see. Getting that wrong
- * once painted every row red at the same minute a probe from the MCP
- * function saw all sources healthy.
+ * source, so the answer is ok: null and the row shows "neověřeno" instead of
+ * an outage we did not see. Getting that wrong once painted every row red at
+ * the same minute a probe from the MCP function saw all sources healthy.
+ * The unknown is cached like any other answer: when it threw instead,
+ * nothing was cached and every visitor waited out the full timeout again
+ * for as long as one source stayed slow.
  */
 async function runOneCanary(canaryId: string): Promise<CachedCanary> {
   const canary = canaries().find((item) => item.id === canaryId);
   if (!canary) return { ok: false, at: Date.now(), detail: "neznámý zdroj" };
+  let timer: ReturnType<typeof setTimeout> | undefined;
   const result = await Promise.race([
     runCanary(canary),
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("timeout")), CANARY_TIMEOUT_MS),
-    ),
-  ]);
+    new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), CANARY_TIMEOUT_MS);
+    }),
+  ]).finally(() => clearTimeout(timer));
   // runCanary never throws; error is set exactly when the fetch itself failed.
-  if (result.error !== null) throw new Error(result.error);
+  if (result === null) return { ok: null, at: Date.now(), detail: "timeout" };
+  if (result.error !== null) return { ok: null, at: Date.now(), detail: result.error };
   return {
     ok: result.ok,
     at: Date.now(),
@@ -209,6 +138,7 @@ export async function databaseStatuses(): Promise<DatabaseStatus[]> {
       }
       try {
         const canary = await cachedCanary(canaryId);
+        if (canary.ok === null) return { ...row, ok: null, at: null, via: null };
         return {
           ...row,
           ok: canary.ok,
@@ -222,13 +152,4 @@ export async function databaseStatuses(): Promise<DatabaseStatus[]> {
       }
     }),
   );
-}
-
-/** "14:07" in Prague time - what the light is as of. */
-export function formatTime(at: number): string {
-  return new Intl.DateTimeFormat("cs-CZ", {
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: "Europe/Prague",
-  }).format(new Date(at));
 }

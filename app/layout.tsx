@@ -6,7 +6,7 @@ import { cookies } from "next/headers";
 import Link from "next/link";
 import { Suspense, type ReactNode } from "react";
 import { clerkConfigured } from "@/src/mcp/config";
-import { DATABASES } from "@/src/mcp/status";
+import { DATABASES } from "@/src/mcp/databases";
 import { SiteHeader } from "./_header";
 import { SiteNav } from "./_nav";
 import { ClerkBridge, NoClerk } from "./_zdroje/clerk-bridge";
@@ -37,8 +37,9 @@ export const viewport: Viewport = { themeColor: "#0E1938" };
  *
  * The sign-in hint cookie (app/_zdroje/hint.ts) lets the server render the
  * signed-in header, nav and home page group straight away, so the page
- * does not change shape when Clerk loads; the header's source check makes
- * every page request-time already, so reading the cookie costs nothing.
+ * does not change shape when Clerk loads. Reading it makes every page
+ * request-time, but cheap: nothing on the server side of a page waits on
+ * the network (the source checks are fetched by the browser).
  */
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const clerk = clerkConfigured();
