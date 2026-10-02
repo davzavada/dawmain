@@ -2,7 +2,7 @@
  * The databases the home page lists, with the shape of their status and the
  * time format the badges use. Pure data and formatting, no I/O: the client
  * components that render the badges (app/_source-status.tsx) import it, the
- * checks themselves stay on the server (./status.ts, GET /api/status).
+ * checks themselves stay on the server (./status.ts, GET /api/status/[id]).
  */
 
 export interface DatabaseStatus {

@@ -1,6 +1,6 @@
 import { unstable_cache } from "next/cache";
 import { canaries, runCanary } from "./tools/probe";
-import { allSourceResults, type SourceHealth } from "@/src/sources/shared/health";
+import { allSourceResults } from "@/src/sources/shared/health";
 import { DATABASES, type DatabaseStatus } from "./databases";
 
 export {
@@ -29,7 +29,7 @@ export {
  *     rather than claiming an outage we did not observe.
  *
  * No page waits on any of this: the badges are filled in by the browser from
- * GET /api/status (app/_source-status.tsx), so a slow source can delay its
+ * GET /api/status/[id] (app/_source-status.tsx), so a slow source can delay its
  * badge, never the page or the end of its HTML stream.
  */
 
@@ -45,12 +45,13 @@ const FRESH_MS = 15 * 60 * 1000;
  */
 const CANARY_TTL_MS = 5 * 60 * 1000;
 /**
- * Matches the probe's own timeout. A shorter one produced FALSE REDS: the NS
- * Domino search regularly needs more than a few seconds, so a tight deadline
- * reported a healthy source as down. No page waits on this: only the
- * /api/status request does.
+ * How long a badge waits for its source. Shorter than the probe tool's 12 s
+ * on purpose: a source that has not answered in 3 s is not healthy for a
+ * visitor either, and its row then says "neověřeno" — not red, because a
+ * request that died tells us nothing about the source (see runOneCanary).
+ * The probe tool keeps the long timeout for diagnosing a slow source.
  */
-const CANARY_TIMEOUT_MS = 12_000;
+const CANARY_TIMEOUT_MS = 3_000;
 
 interface CachedCanary {
   /** null: the request itself died, nothing observed about the source. */
@@ -77,15 +78,8 @@ function fresh(entry: { at: number } | undefined, ttl: number): boolean {
 async function runOneCanary(canaryId: string): Promise<CachedCanary> {
   const canary = canaries().find((item) => item.id === canaryId);
   if (!canary) return { ok: false, at: Date.now(), detail: "neznámý zdroj" };
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const result = await Promise.race([
-    runCanary(canary),
-    new Promise<null>((resolve) => {
-      timer = setTimeout(() => resolve(null), CANARY_TIMEOUT_MS);
-    }),
-  ]).finally(() => clearTimeout(timer));
+  const result = await runCanary(canary, false, CANARY_TIMEOUT_MS);
   // runCanary never throws; error is set exactly when the fetch itself failed.
-  if (result === null) return { ok: null, at: Date.now(), detail: "timeout" };
   if (result.error !== null) return { ok: null, at: Date.now(), detail: result.error };
   return {
     ok: result.ok,
@@ -114,42 +108,39 @@ const cachedCanary = unstable_cache(runOneCanary, ["dawmain-source-canary"], {
 });
 
 /**
- * Status of every displayed database. Never throws - a status widget must not
- * be able to take the page down.
+ * Status of one displayed database (its canary id), null for an id that is
+ * not one. Never throws - a status widget must not be able to take the page
+ * down. One source at a time, so a slow source holds up only its own badge.
  */
-export async function databaseStatuses(): Promise<DatabaseStatus[]> {
-  const observed = new Map<string, SourceHealth>();
-  for (const entry of allSourceResults()) observed.set(entry.source, entry);
-
-  return Promise.all(
-    DATABASES.map(async ({ label, group, href, source, canaryId }): Promise<DatabaseStatus> => {
-      const row = { id: canaryId, label, group, href };
-      // A real call this instance saw recently beats any canary - it is the
-      // genuine article and costs nothing.
-      const live = observed.get(source);
-      if (live && fresh(live, FRESH_MS)) {
-        return {
-          ...row,
-          ok: live.ok,
-          at: live.at,
-          via: "provoz",
-          ...(live.detail ? { detail: live.detail } : {}),
-        };
-      }
-      try {
-        const canary = await cachedCanary(canaryId);
-        if (canary.ok === null) return { ...row, ok: null, at: null, via: null };
-        return {
-          ...row,
-          ok: canary.ok,
-          at: canary.at,
-          via: "kontrola",
-          ...(canary.detail ? { detail: canary.detail } : {}),
-        };
-      } catch {
-        // A status widget must never take the page down.
-        return { ...row, ok: null, at: null, via: null };
-      }
-    }),
-  );
+export async function databaseStatus(id: string): Promise<DatabaseStatus | null> {
+  const db = DATABASES.find((d) => d.canaryId === id);
+  if (!db) return null;
+  const { label, group, href, source, canaryId } = db;
+  const row = { id: canaryId, label, group, href };
+  // A real call this instance saw recently beats any canary - it is the
+  // genuine article and costs nothing.
+  const live = allSourceResults().find((entry) => entry.source === source);
+  if (live && fresh(live, FRESH_MS)) {
+    return {
+      ...row,
+      ok: live.ok,
+      at: live.at,
+      via: "provoz",
+      ...(live.detail ? { detail: live.detail } : {}),
+    };
+  }
+  try {
+    const canary = await cachedCanary(canaryId);
+    if (canary.ok === null) return { ...row, ok: null, at: null, via: null };
+    return {
+      ...row,
+      ok: canary.ok,
+      at: canary.at,
+      via: "kontrola",
+      ...(canary.detail ? { detail: canary.detail } : {}),
+    };
+  } catch {
+    // A status widget must never take the page down.
+    return { ...row, ok: null, at: null, via: null };
+  }
 }

@@ -228,14 +228,19 @@ export interface ProbeResult {
   raw?: string;
 }
 
-export async function runCanary(canary: Canary, includeRaw = false): Promise<ProbeResult> {
+/** `timeoutMs`: the probe tool waits the full PROBE_TIMEOUT_MS; the home page badges less (src/mcp/status.ts). */
+export async function runCanary(
+  canary: Canary,
+  includeRaw = false,
+  timeoutMs = PROBE_TIMEOUT_MS,
+): Promise<ProbeResult> {
   const { url, init } = canary.request();
   const started = Date.now();
   try {
     const response = await fetch(url, {
       ...init,
       headers: { "user-agent": USER_AGENT, ...(init.headers as Record<string, string>) },
-      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
       redirect: "follow",
     });
     const body = await response.text();

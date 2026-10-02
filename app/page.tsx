@@ -51,7 +51,7 @@ export default async function Home() {
         <OwnSourcesGroup />
         {/* Zotero only where the deployment can connect it (the OAuth app and CREDENTIALS_SECRET). */}
         {zoteroConfigured() ? <ZoteroGroup /> : null}
-        {/* Client island: the badges come from GET /api/status after the page is up. */}
+        {/* Client island: the badges come from GET /api/status/[id], one per source, after the page is up. */}
         <SourceList />
       </section>
 
