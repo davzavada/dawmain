@@ -81,18 +81,12 @@ const upload = (userId: string, lib: string, text: string, over: Partial<UploadM
 let t: TestDb;
 const ENV = { ...process.env };
 
-const membership = (id: string, role: string, pro: unknown, quota?: number) => ({
-  role,
-  organization: { id, name: `Tým ${id}`, slug: id, publicMetadata: { pro, ...(quota ? { filesQuota: { pages: quota } } : {}) } },
-});
-
 const ACCESS: Record<string, Access> = {
-  user_a: buildAccess({ id: "user_a", publicMetadata: { pro: true } }, [membership("org_b", "org:member", true)]),
-  user_m: buildAccess({ id: "user_m", publicMetadata: {} }, [membership("org_b", "org:member", true)]),
-  user_admin: buildAccess({ id: "user_admin", publicMetadata: {} }, [membership("org_b", "org:admin", true)]),
-  user_nopro: buildAccess({ id: "user_nopro", publicMetadata: { pro: "yes" } }, [membership("org_c", "org:admin", null)]),
-  user_small: buildAccess({ id: "user_small", publicMetadata: { pro: true, filesQuota: { pages: 2 } } }, []),
-  user_banned: buildAccess({ id: "user_banned", banned: true, publicMetadata: { pro: true } }, []),
+  user_a: buildAccess({ id: "user_a", publicMetadata: { pro: true } }),
+  user_m: buildAccess({ id: "user_m", publicMetadata: { pro: true } }),
+  user_nopro: buildAccess({ id: "user_nopro", publicMetadata: { pro: "yes" } }),
+  user_small: buildAccess({ id: "user_small", publicMetadata: { pro: true, filesQuota: { pages: 2 } } }),
+  user_banned: buildAccess({ id: "user_banned", banned: true, publicMetadata: { pro: true } }),
 };
 
 beforeAll(async () => {
@@ -108,7 +102,7 @@ beforeEach(async () => {
   process.env.FILES_MODE = "on";
   setScopeRunner(t.runner);
   __resetGuardsForTests();
-  __setAccessLoaderForTests(async (userId) => ACCESS[userId] ?? buildAccess({ id: userId }, []));
+  __setAccessLoaderForTests(async (userId) => ACCESS[userId] ?? buildAccess({ id: userId }));
   for (const user of Object.keys(ACCESS)) await t.runner([], (db) => acceptTerms(db, user, TERMS_VERSION));
 });
 afterEach(async () => {
@@ -164,10 +158,9 @@ describe("handleDocumentUpload — success", () => {
     expect(audit.rows).toEqual([{ action: "document.upload", actor: "user_a" }]);
   });
 
-  it("every member of a Pro team may upload into it", async () => {
-    expect((await upload("user_m", "org_b", paged(3, "m"))).status).toBe(201);
-    expect((await upload("user_admin", "org_b", paged(3, "admin"))).status).toBe(201);
-    expect((await libRow("org_b")).display_name).toBe("Tým org_b");
+  it("every Pro user uploads into their own library, named Osobní", async () => {
+    expect((await upload("user_m", "user_m", paged(3, "m"))).status).toBe(201);
+    expect((await libRow("user_m")).display_name).toBe("Osobní");
   });
 
   it("flags instruction-like text without refusing it", async () => {
@@ -180,7 +173,7 @@ describe("handleDocumentUpload — success", () => {
 });
 
 describe("handleDocumentUpload — who may upload where", () => {
-  it("a member of org_b cannot upload into user_a's personal library", async () => {
+  it("another Pro user cannot upload into user_a's personal library", async () => {
     expectRefusal(await upload("user_m", "user_a", paged(3)), 403, /nemůžete nahrávat/);
     expect(await docCount()).toBe(0);
     expect(await libRow("user_a")).toBeUndefined();
@@ -191,7 +184,6 @@ describe("handleDocumentUpload — who may upload where", () => {
       ["user_a", "org_zzz"],
       ["user_a", "user_m"],
       ["user_nopro", "user_nopro"],
-      ["user_nopro", "org_c"],
       ["user_banned", "user_banned"],
       ["user_unknown", "user_unknown"],
     ]) {
@@ -212,8 +204,8 @@ describe("handleDocumentUpload — who may upload where", () => {
   });
 
   it("per-library daily upload rate → 429", async () => {
-    await t.owner.query("INSERT INTO usage_daily (day, scope, uploads) VALUES ((now() AT TIME ZONE 'UTC')::date, 'org_b', $1)", [LIMITS.uploadsPerLibraryPerDay]);
-    expectRefusal(await upload("user_m", "org_b", paged(3)), 429, /zítra/);
+    await t.owner.query("INSERT INTO usage_daily (day, scope, uploads) VALUES ((now() AT TIME ZONE 'UTC')::date, 'user_m', $1)", [LIMITS.uploadsPerLibraryPerDay]);
+    expectRefusal(await upload("user_m", "user_m", paged(3)), 429, /zítra/);
     expect((await upload("user_a", "user_a", paged(3))).status).toBe(201);
   });
 
@@ -270,7 +262,7 @@ describe("handleDocumentUpload — quota and duplicates", () => {
     expect((await libRow("user_a")).pages_reserved).toBe(reserved);
     expect(await docCount()).toBe(1);
     // Another library may hold the same text.
-    expect((await upload("user_a", "org_b", text)).status).toBe(201);
+    expect((await upload("user_m", "user_m", text)).status).toBe(201);
   });
 
   it("content taken down under notice-and-action cannot come back", async () => {
@@ -280,24 +272,16 @@ describe("handleDocumentUpload — quota and duplicates", () => {
   });
 });
 
-describe("handleDocumentUpload — replaces", () => {
-  it("uploader may replace own document; another member may not; the admin may", async () => {
-    const own = (await upload("user_m", "org_b", paged(3, "v1"))) as { id: string };
-    const r1 = await upload("user_m", "org_b", paged(3, "v2"), { replaces: own.id });
+describe("handleDocumentUpload — re-uploads are gone", () => {
+  it("a stale client's `replaces` is ignored: a plain new upload, nothing replaced", async () => {
+    const own = (await upload("user_a", "user_a", paged(3, "v1"))) as { id: string };
+    const r1 = await upload("user_a", "user_a", paged(3, "v2"), { replaces: own.id } as Partial<UploadMeta>);
     expect(r1.status).toBe(201);
-    const { rows } = await t.owner.query<{ replaces: string }>("SELECT replaces FROM documents WHERE id = $1", [(r1 as { id: string }).id]);
-    expect(rows[0].replaces).toBe(own.id);
-
-    expectRefusal(await upload("user_a", "org_b", paged(3, "v3"), { replaces: own.id }), 403, /Nahrazovaný dokument/);
-    expect((await upload("user_admin", "org_b", paged(3, "v4"), { replaces: own.id })).status).toBe(201);
-    const audit = await t.owner.query<{ action: string }>("SELECT action FROM audit_log WHERE action = 'document.upload.replace'");
-    expect(audit.rows).toHaveLength(2);
-  });
-
-  it("a document of another library cannot be replaced, even the caller's own", async () => {
-    const personal = (await upload("user_a", "user_a", paged(3, "p"))) as { id: string };
-    expectRefusal(await upload("user_a", "org_b", paged(3, "o"), { replaces: personal.id }), 403, /Nahrazovaný dokument/);
-    expectRefusal(await upload("user_a", "user_a", paged(3, "x"), { replaces: "00000000-0000-4000-8000-000000000000" }), 403);
+    const { rows } = await t.owner.query<{ replaces: string | null }>("SELECT replaces FROM documents WHERE id = $1", [(r1 as { id: string }).id]);
+    expect(rows[0].replaces).toBeNull();
+    const audit = await t.owner.query<{ action: string }>("SELECT action FROM audit_log ORDER BY at");
+    expect(audit.rows.map((r) => r.action)).toEqual(["document.upload", "document.upload"]);
+    expect(await docCount()).toBe(2);
   });
 });
 
@@ -314,7 +298,6 @@ describe("handleDocumentUpload — request and text checks", () => {
       { ...meta("user_a", text), content: { sha256: "xyz", chars: 1 } },
       { ...meta("user_a", text), rights: "ukradeno" },
       { ...meta("user_a", text), converter: "pdf@1<script>" },
-      { ...meta("user_a", text), replaces: "not-a-uuid" },
       { ...meta("user_a", text), quality: { ...QUALITY, linked_ratio: 7 } },
       { ...meta("user_a", text), file: { name: "", bytes: 1, sha256: "a".repeat(64), kind: "pdf" } },
       { ...meta("user_a", text), file: { name: "x.doc", bytes: 1, sha256: "a".repeat(64), kind: "doc" } },
@@ -370,12 +353,12 @@ describe("handleDocumentUpload — request and text checks", () => {
 // Pure helpers
 
 describe("parseUploadMeta / cleanFileName / sanitizeHints", () => {
-  it("normalizes hashes and the replaced id, strips paths from file names", () => {
+  it("normalizes hashes, strips paths from file names and drops a stale `replaces`", () => {
     const m = parseUploadMeta(
-      JSON.stringify({ ...meta("org_b", "x"), file: { name: "C:\\Users\\jana\\Petrov.pdf", bytes: 5, sha256: "A".repeat(64), kind: "pdf" }, replaces: "ABCDEF00-0000-4000-8000-000000000000" }),
+      JSON.stringify({ ...meta("user_a", "x"), file: { name: "C:\\Users\\jana\\Petrov.pdf", bytes: 5, sha256: "A".repeat(64), kind: "pdf" }, replaces: "ABCDEF00-0000-4000-8000-000000000000" }),
     )!;
     expect(m.file).toEqual({ name: "Petrov.pdf", bytes: 5, sha256: "a".repeat(64), kind: "pdf" });
-    expect(m.replaces).toBe("abcdef00-0000-4000-8000-000000000000");
+    expect("replaces" in m).toBe(false);
     expect(parseUploadMeta("[]")).toBeNull();
     expect(parseUploadMeta("null")).toBeNull();
   });

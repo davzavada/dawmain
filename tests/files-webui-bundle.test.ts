@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 /**
  * What every page loads: the root layout's static import graph. The
- * Vlastní zdroje modals mount in the layout, but their bodies — and above
+ * Vlastní soubory and Zotero modals mount in the layout, but their bodies — and above
  * all the uploader with the DMD parser, the outline slicer, pdf.js and
  * mammoth — must stay behind dynamic imports, so a visitor of /podminky
  * downloads none of it (review web:Z8, ops:FT-8; plan §2: conversion code
@@ -66,11 +66,10 @@ describe("first-load JS of every page (review web:Z8, ops:FT-8)", () => {
   const loaded = [...files].map(rel);
 
   it("the layout reaches the modal reader, not the modals", () => {
-    // The walker really walks: the header's account menu and the nav item are in every page.
-    expect(loaded).toContain("app/_zdroje/own-sources.tsx");
+    // The walker really walks: the header's account menu and the modal reader are in every page.
     expect(loaded).toContain("app/_zdroje/store.ts");
     expect(loaded).toContain("app/_zdroje/modals.tsx");
-    for (const lazy of ["app/_zdroje/sources-modal.tsx", "app/_zdroje/team-modal.tsx", "app/_zdroje/detail.tsx", "app/_zdroje/list.tsx", "app/_zdroje/meta-form.ts"]) {
+    for (const lazy of ["app/_zdroje/files-modal.tsx", "app/_zdroje/zotero-modal.tsx", "app/_zdroje/meta-form.ts"]) {
       expect(loaded, lazy).not.toContain(lazy);
     }
   });
@@ -91,10 +90,10 @@ describe("first-load JS of every page (review web:Z8, ops:FT-8)", () => {
   });
 
   it("inside the modal the uploader is lazy too (only Pro users with upload rights load it)", () => {
-    const modal = graph("app/_zdroje/sources-modal.tsx").files;
+    const modal = graph("app/_zdroje/files-modal.tsx").files;
     const inModal = [...modal].map(rel);
     expect(inModal).not.toContain("app/_zdroje/upload.tsx");
     expect(inModal).not.toContain("src/files/dmd/parse.ts");
-    expect(readFileSync(path.join(ROOT, "app/_zdroje/sources-modal.tsx"), "utf8")).toMatch(/dynamic\(\(\) => import\("\.\/upload"\)/);
+    expect(readFileSync(path.join(ROOT, "app/_zdroje/files-modal.tsx"), "utf8")).toMatch(/dynamic\(\(\) => import\("\.\/upload"\)/);
   });
 });

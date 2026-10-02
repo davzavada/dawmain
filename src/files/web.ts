@@ -380,7 +380,7 @@ export async function deleteFor(userId: string, id: string): Promise<void> {
   if (ids.length === 0) throw new FilesUserError(404, "Dokument nenalezen.");
   await withScope(ids, async (db) => {
     const { row, lib } = await findDocument(db, access, id);
-    if (!canDeleteDocument(lib, row.uploaded_by, userId)) throw new FilesUserError(403, "Tento dokument může smazat jen ten, kdo ho nahrál, nebo správce.");
+    if (!canDeleteDocument(lib, row.uploaded_by, userId)) throw new FilesUserError(403, "Tento dokument může smazat jen jeho vlastník.");
     const gone = await deleteDocument(db, row.id, row.library_id);
     if (!gone) throw new FilesUserError(404, "Dokument nenalezen.");
     if (gone.status === "review" || gone.status === "ready") await forgetPages(db, row.library_id, gone.billablePages);
@@ -509,7 +509,7 @@ export async function exportFor(
     if (!doc) throw new FilesUserError(404, "Dokument nenalezen.");
     const { row } = doc;
     if (!canDeleteDocument(lib, row.uploaded_by, userId)) {
-      throw new FilesUserError(403, "Text tohoto dokumentu si může stáhnout jen ten, kdo ho nahrál, nebo správce.");
+      throw new FilesUserError(403, "Text tohoto dokumentu si může stáhnout jen jeho vlastník.");
     }
     if (row.status === "queued" || row.status === "processing") {
       throw new FilesUserError(409, "Dokument se ještě zpracovává — text půjde stáhnout, až bude hotový.");

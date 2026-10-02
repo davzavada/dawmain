@@ -2,27 +2,48 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { LibrarySummary, SummaryResponse } from "@/src/files/web-types";
 
 /**
- * The document detail in a DOM (happy-dom), fetch faked: "Exportovat text"
- * downloads GET /api/files/documents/{id}/export?lib=<library> for whoever
- * may delete the document (canDelete: uploader, owner/admin — the export
- * route's own rule), also after Pro was withdrawn (canEdit false), and
- * shows the server's Czech refusal in place; the quality line uses
- * Czech plurals (review web:Z4); delete follows canDelete, not canEdit.
+ * A file's open row in the Vlastní soubory modal (&dokument=<id>) in a DOM
+ * (happy-dom), fetch faked: "Stáhnout text" downloads GET
+ * /api/files/documents/{id}/export?lib=<library> for whoever may delete the
+ * document (the export route's own rule), also after Pro was withdrawn
+ * (canEdit false), and shows the server's Czech refusal in place; the type
+ * switch saves at once, Uložit confirms the short form; a file still being
+ * processed only spins and does not open.
  */
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const { DocumentPanel } = await import("@/app/_zdroje/detail");
+// The uploader is a lazy chunk, not under test here.
+vi.mock("next/dynamic", () => ({ default: () => () => null }));
+
+const store = await import("@/app/_zdroje/store");
+const { FilesModal } = await import("@/app/_zdroje/files-modal");
 
 const ID = "11111111-1111-4111-8111-111111111111";
+
+function library(pro: boolean): LibrarySummary {
+  return {
+    id: "user_a",
+    kind: "user",
+    name: "Osobní",
+    role: "owner",
+    pro,
+    canUpload: pro,
+    canManageAll: true,
+    quotaPages: 3000,
+    pagesUsed: pro ? 3 : null,
+    counts: pro ? { total: 1, ready: 1, review: 0, processing: 0, error: 0, searchable: 1 } : null,
+  };
+}
 
 function detail(over: Record<string, unknown> = {}) {
   return {
     id: ID,
-    libraryId: "org_team1",
-    libraryName: "Kancelář",
+    libraryId: "user_a",
+    libraryName: "Osobní",
     title: "Komentář k OZ",
     fileName: "k.pdf",
     fileKind: "pdf",
@@ -30,24 +51,23 @@ function detail(over: Record<string, unknown> = {}) {
     status: "ready",
     statusDetail: null,
     uploadedAt: "2026-09-01T00:00:00Z",
-    uploaderName: null,
     mine: true,
-    enabled: true,
     canEdit: false,
     canDelete: true,
     docType: "jine",
+    publication: null,
+    physicalPages: 3,
     billablePages: 3,
     flags: [],
-    meta: { doc_type: "jine", title: "Komentář k OZ", authors: [], editors: [] },
+    meta: { doc_type: "jine", title: "Komentář k OZ", authors: [], editors: [], isbn: [], keywords: [], language: "cs" },
     proposed: null,
     metaVersion: 1,
     confirmedAt: "2026-09-02T00:00:00Z",
-    physicalPages: 1,
     charCount: 100,
     pageLabelSource: "printed",
     converter: "pdf/1",
-    rights: "own",
-    quality: { footnotes: "none", linked_ratio: 0, columns_pages: 0, headings_from: "outline", mn: 0, unsure_pages: [7, 8] },
+    rights: "vlastni",
+    quality: { footnotes: "none", linked_ratio: 0, columns_pages: 0, headings_from: "outline", mn: 0, unsure_pages: [] },
     preview: "Začátek.",
     ...over,
   };
@@ -55,174 +75,130 @@ function detail(over: Record<string, unknown> = {}) {
 
 let host: HTMLDivElement;
 let root: Root;
-let calls: string[];
+let calls: Array<{ url: string; method: string; body: unknown }>;
 
 beforeEach(() => {
   calls = [];
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
+  window.history.replaceState(null, "", `/?soubory=1&dokument=${ID}`);
 });
 afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
+  store.setAuth("none");
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
-function stubFetch(doc: ReturnType<typeof detail>, exportResponse: () => Response) {
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+
+/** Fake the API: summary, the list (the document as its list item), its detail, PATCH and the export. */
+async function setup(doc: ReturnType<typeof detail>, opts: { pro?: boolean; exportResponse?: () => Response } = {}) {
+  const summary: SummaryResponse = { state: "ok", mode: "on", termsAccepted: true, libraries: [library(opts.pro ?? true)] };
+  let current = doc;
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (url: string) => {
-      calls.push(url);
-      if (url.includes("/export")) return exportResponse();
-      return new Response(JSON.stringify(doc), { status: 200, headers: { "content-type": "application/json" } });
+    vi.fn(async (url: string, init: RequestInit = {}) => {
+      const method = init.method ?? "GET";
+      const body = typeof init.body === "string" ? JSON.parse(init.body) : undefined;
+      calls.push({ url, method, body });
+      if (url.startsWith("/api/files/summary")) return json(summary);
+      if (url.startsWith("/api/files/documents?")) return json({ libraryId: "user_a", documents: [current], total: 1 });
+      if (url.includes("/export")) return (opts.exportResponse ?? (() => new Response("", { status: 500 })))();
+      if (method === "PATCH") {
+        const meta = (body as { meta: { doc_type: string } }).meta;
+        current = { ...current, docType: meta.doc_type, meta: { ...current.meta, ...meta }, metaVersion: current.metaVersion + 1 };
+        return json(current);
+      }
+      return json(current);
     }),
   );
+  store.setAuth("signed_in");
+  await act(async () => {
+    await store.refreshSummary();
+  });
+  await act(async () => root.render(createElement(FilesModal, { documentId: ID })));
+  await waitFor(() => host.querySelector(".zd-file-open .zd-file-actions") !== null || host.querySelector('[data-pending="true"]') !== null);
 }
 
-async function render(doc: ReturnType<typeof detail>) {
-  await act(async () =>
-    root.render(createElement(DocumentPanel, { id: ID, readonly: false, team: true, onBack: () => undefined, onReupload: () => undefined, onDeleted: () => undefined })),
-  );
-  for (let i = 0; i < 50 && !host.querySelector(".zd-detail-title"); i++) {
+async function waitFor(done: () => boolean): Promise<void> {
+  for (let i = 0; i < 100 && !done(); i++) {
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 5));
+      await new Promise((r) => setTimeout(r, 2));
     });
   }
-  expect(host.querySelector(".zd-detail-title")?.textContent).toBe(doc.title);
 }
 
-const button = (text: string) => [...host.querySelectorAll("button")].find((b) => b.textContent?.includes(text)) as HTMLButtonElement | undefined;
+const button = (text: string) => [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === text) as HTMLButtonElement | undefined;
 
-describe("document detail", () => {
-  it("exports the text of a document whose library lost Pro (download named by the server)", async () => {
-    const doc = detail();
-    stubFetch(
-      doc,
-      () =>
+describe("a file's open row", () => {
+  it("downloads the text of a file whose library lost Pro (named by the server); no editing", async () => {
+    let downloaded: string | null = null;
+    const created = vi.fn(() => "blob:x");
+    URL.createObjectURL = created;
+    URL.revokeObjectURL = vi.fn();
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      downloaded = this.download;
+    });
+    await setup(detail(), {
+      pro: false,
+      exportResponse: () =>
         new Response("---\ntitle: Komentář\n---\ntext", {
           status: 200,
           headers: { "content-type": "text/markdown; charset=utf-8", "content-disposition": `attachment; filename="Komentar.md"; filename*=UTF-8''Koment%C3%A1%C5%99.md` },
         }),
-    );
-    const created = vi.fn(() => "blob:x");
-    URL.createObjectURL = created;
-    URL.revokeObjectURL = vi.fn();
-    let downloaded: string | null = null;
-    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
-      downloaded = this.download;
     });
-    await render(doc);
-    expect(button("Nahrát znovu")).toBeUndefined();
-    expect(button("Smazat")).toBeDefined();
-    await act(async () => button("Exportovat text")!.click());
-    for (let i = 0; i < 50 && downloaded === null; i++) {
-      await act(async () => {
-        await new Promise((r) => setTimeout(r, 5));
-      });
-    }
-    expect(calls.at(-1)).toBe(`/api/files/documents/${ID}/export?lib=org_team1`);
+    expect(host.textContent).toContain("Režim Pro tu už není aktivní");
+    expect(button("Uložit")).toBeUndefined();
+    expect(button("Smazat dokument")).toBeDefined();
+    await act(async () => button("Stáhnout text")!.click());
+    await waitFor(() => downloaded !== null);
+    expect(calls.at(-1)?.url).toBe(`/api/files/documents/${ID}/export?lib=user_a`);
     expect(created).toHaveBeenCalledTimes(1);
     expect(downloaded).toBe("Komentář.md");
   });
 
-  it("a team member who cannot manage the document gets no export button (the server would refuse)", async () => {
-    const doc = detail({ canDelete: false, mine: false });
-    stubFetch(doc, () => new Response("", { status: 500 }));
-    await render(doc);
-    expect(button("Smazat")).toBeUndefined();
-    expect(button("Exportovat text")).toBeUndefined();
+  it("a refusal shows the server's message in the row", async () => {
+    await setup(detail(), {
+      exportResponse: () => json({ error: "Dnes už jste si text tohoto dokumentu stáhli několikrát. Zkuste to zítra." }, 429),
+    });
+    await act(async () => button("Stáhnout text")!.click());
+    await waitFor(() => host.querySelector(".zd-file-open .zd-error") !== null);
+    expect(host.querySelector(".zd-file-open .zd-error")?.textContent).toContain("Zkuste to zítra");
   });
 
-  it("a refusal shows the server's message", async () => {
-    const doc = detail();
-    stubFetch(doc, () => new Response(JSON.stringify({ error: "Dokument se ještě zpracovává — text půjde stáhnout, až bude hotový." }), { status: 409 }));
-    await render(doc);
-    await act(async () => button("Exportovat text")!.click());
-    for (let i = 0; i < 50 && !host.querySelector(".zd-detail-more .zd-error"); i++) {
-      await act(async () => {
-        await new Promise((r) => setTimeout(r, 5));
-      });
-    }
-    expect(host.querySelector(".zd-detail-more .zd-error")?.textContent).toContain("ještě zpracovává");
+  it("who may not delete gets neither download nor delete (the server would refuse)", async () => {
+    await setup(detail({ canDelete: false, mine: false }));
+    expect(button("Smazat dokument")).toBeUndefined();
+    expect(button("Stáhnout text")).toBeUndefined();
   });
 
-  it("no export while the text is still being processed", async () => {
-    const doc = detail({ status: "processing" });
-    stubFetch(doc, () => new Response("", { status: 500 }));
-    await render(doc);
-    expect(button("Exportovat text")).toBeUndefined();
+  it("the type switch saves at once; Uložit confirms the short form of that type", async () => {
+    await setup(detail({ canEdit: true, docType: "jine" }));
+    const typeButton = (label: string) => [...host.querySelectorAll('[role="radio"]')].find((b) => b.textContent === label) as HTMLButtonElement;
+    expect(typeButton("Komentář").getAttribute("aria-checked")).toBe("false");
+    await act(async () => typeButton("Kniha").click());
+    await waitFor(() => calls.some((c) => c.method === "PATCH"));
+    const saved = calls.find((c) => c.method === "PATCH")!;
+    expect(saved.body).toMatchObject({ action: "save", version: 1, meta: { doc_type: "kniha" } });
+    await waitFor(() => typeButton("Kniha").getAttribute("aria-checked") === "true");
+    // The short form of a book: publisher and ISBN, not a commented act.
+    const labels = [...host.querySelectorAll(".zd-file-field > span")].map((s) => s.textContent);
+    expect(labels).toEqual(["Název *", "Autoři", "Rok", "Vydavatel", "ISBN"]);
+    await act(async () => button("Uložit")!.click());
+    await waitFor(() => calls.filter((c) => c.method === "PATCH").length === 2);
+    expect(calls.filter((c) => c.method === "PATCH")[1].body).toMatchObject({ action: "confirm", version: 2, meta: { doc_type: "kniha", title: "Komentář k OZ" } });
+    await waitFor(() => host.querySelector(".zd-ok-line") !== null);
+    expect(host.querySelector(".zd-ok-line")?.textContent).toBe("Uloženo.");
   });
 
-  it("the quality line agrees with its numbers (web:Z4)", async () => {
-    const doc = detail({ billablePages: 3 });
-    stubFetch(doc, () => new Response("", { status: 500 }));
-    await render(doc);
-    const line = host.querySelector(".zd-quality")?.textContent ?? "";
-    expect(line).toContain("3 účtované strany");
-    expect(line).toContain("2 sporné strany");
-  });
-
-  it("metadata show read-only; the pencil opens the form, Zrušit closes it", async () => {
-    const doc = detail({ canEdit: true, meta: { doc_type: "kniha", title: "Komentář k OZ", authors: ["Jan Novák"], editors: [], year: 2024, isbn: ["978-80-7400-000-0"] } });
-    stubFetch(doc, () => new Response("", { status: 500 }));
-    await render(doc);
-    expect(host.querySelector("form.zd-meta-form")).toBeNull();
-    const list = host.querySelector(".zd-meta-list")?.textContent ?? "";
-    expect(list).toContain("Jan Novák");
-    expect(list).toContain("2024");
-    expect(host.textContent).not.toContain("Práva:");
-    await act(async () => (host.querySelector('button[aria-label="Upravit metadata"]') as HTMLButtonElement).click());
-    expect(host.querySelector("form.zd-meta-form")).not.toBeNull();
-    // ISBN waits under "Další údaje".
-    const extra = host.querySelector("details.zd-meta-extra");
-    expect(extra?.textContent).toContain("ISBN");
-    expect(extra?.hasAttribute("open")).toBe(false);
-    await act(async () => button("Zrušit")!.click());
-    expect(host.querySelector("form.zd-meta-form")).toBeNull();
-  });
-
-  it("no pencil for who may not edit", async () => {
-    const doc = detail();
-    stubFetch(doc, () => new Response("", { status: 500 }));
-    await render(doc);
-    expect(host.querySelector(".zd-meta-list")).not.toBeNull();
-    expect(host.querySelector('button[aria-label="Upravit metadata"]')).toBeNull();
-  });
-
-  it("a document still processing reloads by itself until it is ready", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    try {
-      let status = "processing";
-      vi.stubGlobal(
-        "fetch",
-        vi.fn(async (url: string) => {
-          calls.push(url);
-          return new Response(JSON.stringify(detail({ status })), { status: 200, headers: { "content-type": "application/json" } });
-        }),
-      );
-      await render(detail({ status: "processing" }));
-      expect(host.textContent).toContain("Dokument se zpracovává");
-      status = "ready";
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(4_100);
-      });
-      for (let i = 0; i < 50 && host.textContent?.includes("Dokument se zpracovává"); i++) {
-        await act(async () => {
-          await vi.advanceTimersByTimeAsync(10);
-        });
-      }
-      expect(host.textContent).not.toContain("Dokument se zpracovává");
-      expect(host.textContent).toContain("Připraveno");
-      // Ready: no more reloads.
-      const n = calls.filter((c) => c.startsWith("/api/files/documents/")).length;
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(30_000);
-      });
-      expect(calls.filter((c) => c.startsWith("/api/files/documents/")).length).toBe(n);
-    } finally {
-      vi.useRealTimers();
-    }
+  it("a file still being processed only spins: no row to open", async () => {
+    await setup(detail({ status: "processing" }));
+    const pending = host.querySelector('[data-pending="true"]');
+    expect(pending?.textContent).toContain("Zpracovávám…");
+    expect(pending?.querySelector("button")).toBeNull();
+    expect(host.querySelector(".zd-file-open")).toBeNull();
   });
 });

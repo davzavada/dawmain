@@ -111,7 +111,7 @@ function tile(text: string, size: number) {
   return blocks;
 }
 
-function uploadMeta(lib: string, name: string, content: string, hint?: DocType, replaces?: string): UploadMeta {
+function uploadMeta(lib: string, name: string, content: string, hint?: DocType): UploadMeta {
   return {
     library_id: lib,
     file: { name, bytes: 12345, sha256: sha(`file:${content}`), kind: "pdf" },
@@ -122,7 +122,6 @@ function uploadMeta(lib: string, name: string, content: string, hint?: DocType, 
     hints: {},
     rights: "vlastni",
     doc_type_hint: hint,
-    replaces,
   };
 }
 
@@ -140,12 +139,12 @@ const META: BibMeta = {
   section_range: "§ 2913",
 };
 
-async function upload(lib: string, content: string, name = "kniha.pdf", hint?: DocType, replaces?: string, scope = [lib]) {
+async function upload(lib: string, content: string, name = "kniha.pdf", hint?: DocType, scope = [lib]) {
   return scoped(scope, (db) =>
     insertUploadedDocument(db, {
       libraryId: lib,
       uploadedBy: "user_u1",
-      meta: uploadMeta(lib, name, content, hint, replaces),
+      meta: uploadMeta(lib, name, content, hint),
       contentSha256: sha(content),
       charCount: content.length,
       billablePages: 2,
@@ -262,16 +261,25 @@ describe("insertUploadedDocument", () => {
     ).rejects.toThrow(/row-level security/);
   });
 
-  it("keeps `replaces` only for a document of the same library", async () => {
+  it("never sets `replaces` (re-uploads are no longer accepted), even when a stale client sends one", async () => {
     const own = (await upload(A, "content-old")) as { id: string };
-    const foreign = (await upload(B, "content-foreign-old")) as { id: string };
-    const r1 = (await upload(A, "content-new-1", "n.pdf", undefined, own.id)) as { id: string };
-    const r2 = (await upload(A, "content-new-2", "n.pdf", undefined, foreign.id, [A, B])) as { id: string };
-    const r3 = (await upload(A, "content-new-3", "n.pdf", undefined, "not-a-uuid")) as { id: string };
+    const r1 = (await scoped([A], (db) =>
+      insertUploadedDocument(db, {
+        libraryId: A,
+        uploadedBy: "user_u1",
+        meta: { ...uploadMeta(A, "n.pdf", "content-new-1"), replaces: own.id } as UploadMeta,
+        contentSha256: sha("content-new-1"),
+        charCount: "content-new-1".length,
+        billablePages: 2,
+        physicalPages: 2,
+        pendingGz: Buffer.from("gz:content-new-1"),
+        quality: uploadMeta(A, "n.pdf", "content-new-1").quality,
+        hints: {},
+        injectionFlag: false,
+      }),
+    )) as { id: string };
     const get = (id: string) => scoped([A], (db) => getDocument(db, id, [A]));
-    expect((await get(r1.id))!.replaces).toBe(own.id);
-    expect((await get(r2.id))!.replaces).toBeNull();
-    expect((await get(r3.id))!.replaces).toBeNull();
+    expect((await get(r1.id))!.replaces).toBeNull();
   });
 });
 

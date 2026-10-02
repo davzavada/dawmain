@@ -42,21 +42,18 @@ import {
   clipText,
   documentPreviewText,
   finishReindex,
-  invitationMarks,
   leaseForReindex,
   libraryDocCounts,
   mergeIdentKeys,
   metaContext,
   reindexBacklog,
   reindexCandidates,
-  setDocumentEnabled,
   stuckDocuments,
 } from "@/src/files/db/documents-web";
-import { acceptTerms, audit, getSystemState } from "@/src/files/db/usage";
+import { acceptTerms, getSystemState } from "@/src/files/db/usage";
 import { __resetGuardsForTests, effectiveMode, MODE_OVERRIDE_KEY } from "@/src/files/guards";
 import { isOperator, operatorSnapshot, REINDEX_STATE_KEY } from "@/src/files/operator";
 import { reindexBatch, reindexDocument } from "@/src/files/reindex";
-import { __setTeamClientForTests } from "@/src/files/team";
 import type { ConversionQuality, UploadMeta } from "@/src/files/types";
 import { createTestDb, type TestDb } from "./helpers/pglite";
 
@@ -94,7 +91,6 @@ beforeAll(async () => {
 afterAll(async () => {
   setScopeRunner(null);
   __setAccessLoaderForTests(null);
-  __setTeamClientForTests(null);
   await t.close();
 });
 beforeEach(async () => {
@@ -103,7 +99,7 @@ beforeEach(async () => {
   process.env.FILES_OPERATOR_IDS = "user_op, ,user_op2";
   setScopeRunner(t.runner);
   __resetGuardsForTests();
-  __setAccessLoaderForTests(async (userId) => buildAccess({ id: userId, publicMetadata: { pro: true } }, []));
+  __setAccessLoaderForTests(async (userId) => buildAccess({ id: userId, publicMetadata: { pro: true } }));
   mocks.auth.mockReset();
   mocks.after.length = 0;
   mocks.revalidatePath.mockReset();
@@ -296,14 +292,11 @@ describe("reindex", () => {
 });
 
 describe("documents-web repository", () => {
-  it("setDocumentEnabled and libraryDocCounts respect the library", async () => {
+  it("libraryDocCounts respects the library; every ready document is searchable", async () => {
     const id = await uploaded("user_a", "x");
-    expect(await t.runner(["user_b"], (db) => setDocumentEnabled(db, id, "user_b", false))).toBe(false);
-    expect(await t.runner(["user_a"], (db) => setDocumentEnabled(db, id, "user_a", false))).toBe(true);
-    expect(await t.runner(["user_a"], (db) => setDocumentEnabled(db, "bad-id", "user_a", false))).toBe(false);
     await t.owner.query("UPDATE documents SET status = 'ready' WHERE id = $1", [id]);
     const counts = await t.runner(["user_a"], (db) => libraryDocCounts(db, ["user_a", "user_b"]));
-    expect(counts.user_a).toEqual({ total: 1, ready: 1, review: 0, processing: 0, error: 0, searchable: 0 });
+    expect(counts.user_a).toEqual({ total: 1, ready: 1, review: 0, processing: 0, error: 0, searchable: 1 });
     expect(counts.user_b.total).toBe(0);
     // RLS: a scope without the library sees nothing even when asked for it.
     const hidden = await t.runner(["user_b"], (db) => libraryDocCounts(db, ["user_a"]));
@@ -354,16 +347,5 @@ describe("documents-web repository", () => {
       expect(await finishReindex(db, { id, libraryId: "user_a", runToken: lease!.runToken, previous: "review", metaTsv: "", identKeys: ["a"] })).toBe(true);
     });
     expect((await t.owner.query<{ status: string }>("SELECT status FROM documents WHERE id = $1", [id])).rows[0].status).toBe("review");
-  });
-
-  it("invitationMarks reads declines and dismissals of one team", async () => {
-    await t.runner([], async (db) => {
-      await audit(db, { libraryId: "org_t", actor: "user_x", action: "invitation.declined", detail: { invitation: "orginv_1" } });
-      await audit(db, { libraryId: "org_t", actor: "user_admin", action: "invitation.dismissed", detail: { invitation: "orginv_2" } });
-      await audit(db, { libraryId: "org_other", actor: "user_x", action: "invitation.declined", detail: { invitation: "orginv_3" } });
-    });
-    const marks = await t.runner([], (db) => invitationMarks(db, "org_t"));
-    expect([...marks.declined]).toEqual(["orginv_1"]);
-    expect([...marks.dismissed]).toEqual(["orginv_2"]);
   });
 });

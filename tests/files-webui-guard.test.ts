@@ -2,13 +2,13 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { LibrarySummary, SummaryResponse } from "@/src/files/web-types";
+import type { DocumentListItem, LibrarySummary, SummaryResponse } from "@/src/files/web-types";
 
 /**
  * The discard question (web:Z3) is asked only when something would be
- * thrown away: clicking the tab, team or rail item already shown changes
- * nothing, so it asks nothing; going elsewhere still asks. The modal in a
- * DOM (happy-dom) with the summary and the list faked.
+ * thrown away: opening or closing a file's row keeps the uploader mounted,
+ * so it asks nothing; closing the modal still asks. The Vlastní soubory
+ * modal in a DOM (happy-dom) with the summary and the list faked.
  */
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -17,29 +17,43 @@ import type { LibrarySummary, SummaryResponse } from "@/src/files/web-types";
 vi.mock("next/dynamic", () => ({ default: () => () => null }));
 
 const store = await import("@/app/_zdroje/store");
-const { SourcesModal } = await import("@/app/_zdroje/sources-modal");
+const { FilesModal } = await import("@/app/_zdroje/files-modal");
 
-function library(id: string, name: string): LibrarySummary {
-  return {
-    id,
-    kind: id.startsWith("org_") ? "org" : "user",
-    name,
-    role: "owner",
-    pro: true,
-    canUpload: true,
-    canManageAll: true,
-    quotaPages: 3000,
-    pagesUsed: 0,
-    counts: { total: 0, ready: 0, review: 0, processing: 0, error: 0, searchable: 0 },
-    memberCount: id.startsWith("org_") ? 3 : null,
-  };
-}
+const DOC = "11111111-1111-4111-8111-111111111111";
 
-const SUMMARY: SummaryResponse = {
-  state: "ok",
-  mode: "on",
-  termsAccepted: true,
-  libraries: [library("user_a", "Já"), library("org_1", "Kancelář A"), library("org_2", "Kancelář B")],
+const LIBRARY: LibrarySummary = {
+  id: "user_a",
+  kind: "user",
+  name: "Osobní",
+  role: "owner",
+  pro: true,
+  canUpload: true,
+  canManageAll: true,
+  quotaPages: 3000,
+  pagesUsed: 12,
+  counts: { total: 1, ready: 1, review: 0, processing: 0, error: 0, searchable: 1 },
+};
+
+const SUMMARY: SummaryResponse = { state: "ok", mode: "on", termsAccepted: true, libraries: [LIBRARY] };
+
+const ITEM: DocumentListItem = {
+  id: DOC,
+  libraryId: "user_a",
+  title: "Komentář k OZ",
+  fileName: "k.pdf",
+  fileKind: "pdf",
+  fileBytes: 1000,
+  status: "ready",
+  statusDetail: null,
+  uploadedAt: "2026-09-01T00:00:00Z",
+  mine: true,
+  canEdit: true,
+  canDelete: true,
+  docType: "komentar",
+  publication: null,
+  physicalPages: 12,
+  billablePages: 12,
+  flags: [],
 };
 
 let host: HTMLDivElement;
@@ -50,8 +64,12 @@ beforeEach(async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) => {
-      const body = url.startsWith("/api/files/summary") ? SUMMARY : { documents: [], total: 0 };
-      return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+      const body = url.startsWith("/api/files/summary")
+        ? SUMMARY
+        : url.startsWith("/api/files/documents?")
+          ? { libraryId: "user_a", documents: [ITEM], total: 1 }
+          : { error: "Dokument nenalezen." };
+      return new Response(JSON.stringify(body), { status: url.startsWith("/api/files/documents/") ? 404 : 200, headers: { "content-type": "application/json" } });
     }),
   );
   confirm = vi.fn(() => false);
@@ -73,34 +91,39 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-const rail = (title: string) => [...host.querySelectorAll(".zd-rail-item")].find((b) => b.querySelector(".zd-rail-title")?.textContent === title) as HTMLButtonElement;
-const tab = (text: string) => [...host.querySelectorAll('[role="tab"]')].find((b) => b.textContent === text) as HTMLButtonElement;
+async function settle(): Promise<void> {
+  for (let i = 0; i < 20; i++) {
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 1));
+    });
+  }
+}
 
-describe("discard question only when something changes (web:Z3)", () => {
-  it("the current tab, team or rail item asks nothing; another one still asks", async () => {
-    window.history.replaceState(null, "", "/?zdroje=tym");
-    await act(async () => root.render(createElement(SourcesModal, { tab: "tym", documentId: null })));
-    expect(rail("Kancelář A").getAttribute("aria-current")).toBe("true");
+const row = () => host.querySelector(".zd-file-row") as HTMLButtonElement;
+const button = (text: string) => [...host.querySelectorAll("button")].find((b) => b.textContent === text) as HTMLButtonElement;
+
+describe("discard question only when something is lost (web:Z3)", () => {
+  it("opening and closing a row asks nothing; closing the modal asks, and refusing keeps it", async () => {
+    window.history.replaceState(null, "", "/?soubory=1");
+    await act(async () => root.render(createElement(FilesModal, { documentId: null })));
+    await settle();
+    expect(row().textContent).toContain("Komentář k OZ");
+    expect(host.textContent).toMatch(/Zbývá 2\s988 z 3\s000 stran\./);
     store.registerUnsavedWork(() => true);
 
-    await act(async () => rail("Kancelář A").click());
-    await act(async () => tab("Týmové").click());
-    // The team picker, set to the team it shows.
-    const picker = host.querySelector(".zd-panel select") as HTMLSelectElement;
-    expect(picker.value).toBe("org_1");
-    await act(async () => {
-      picker.dispatchEvent(new Event("change", { bubbles: true }));
-    });
-    store.openSources("tym");
+    await act(async () => row().click());
+    expect(window.location.search).toBe(`?soubory=1&dokument=${DOC}`);
+    await act(async () => root.render(createElement(FilesModal, { documentId: DOC })));
+    expect(row().getAttribute("aria-expanded")).toBe("true");
+    await act(async () => row().click());
+    expect(window.location.search).toBe("?soubory=1");
+    store.openFiles();
     expect(confirm).not.toHaveBeenCalled();
-    expect(window.location.search).toBe("?zdroje=tym");
 
-    // Elsewhere: asked, and refusing keeps everything as it was.
-    await act(async () => rail("Kancelář B").click());
-    await act(async () => rail("Moje zdroje").click());
-    await act(async () => tab("Moje").click());
-    expect(confirm).toHaveBeenCalledTimes(3);
-    expect(rail("Kancelář A").getAttribute("aria-current")).toBe("true");
-    expect(window.location.search).toBe("?zdroje=tym");
+    // Closing the modal would unmount the uploader: asked, and refusing keeps everything as it was.
+    await act(async () => button("Hotovo").click());
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(confirm).toHaveBeenCalledWith(store.DISCARD_QUESTION);
+    expect(window.location.search).toBe("?soubory=1");
   });
 });

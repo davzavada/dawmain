@@ -8,7 +8,8 @@ import type { LibrarySummary } from "@/src/files/web-types";
  * The uploader in a DOM (happy-dom) with Markdown files — the real browser
  * conversion; fetch is a fake. Covers: a dropped file goes up by itself,
  * with no preview and no choices (only the converted text, rights "jine",
- * no type hint); several files go one after another; a file in progress is
+ * no type hint, no success line — the file's row in the list spins until it
+ * is processed); several files go one after another; a file in progress is
  * unsaved work (review web:Z3); a refusal ends in a Czech log line; a
  * browser without CompressionStream or module Workers gets a clear message
  * instead of the dropzone (completeness:PC-14).
@@ -30,7 +31,6 @@ const LIBRARY: LibrarySummary = {
   quotaPages: 3000,
   pagesUsed: 0,
   counts: { total: 0, ready: 0, review: 0, processing: 0, error: 0, searchable: 0 },
-  memberCount: null,
 };
 
 const DOC = ["# Zákon o pokusech", "", "## § 1", "", "První paragraf o pokusech a jejich pravidlech.", "", "## § 2", "", "Druhý paragraf o pokusech.", "", "## § 3", "", "Třetí paragraf, poslední."].join("\n");
@@ -83,7 +83,7 @@ function stubUpload(respond: (n: number) => Response = (n) => new Response(JSON.
 }
 
 async function drop(files: File[], onUploaded = vi.fn()) {
-  await act(async () => root.render(createElement(Uploader, { library: LIBRARY, replace: null, onCancelReplace: () => undefined, onUploaded })));
+  await act(async () => root.render(createElement(Uploader, { library: LIBRARY, onUploaded })));
   const input = host.querySelector('input[type="file"]') as HTMLInputElement;
   Object.defineProperty(input, "files", { configurable: true, value: files });
   await act(async () => {
@@ -104,9 +104,11 @@ describe("uploader", () => {
     // Only the converted text travels, gzipped.
     const text = await new Response(posted[0].gz.stream().pipeThrough(new DecompressionStream("gzip"))).text();
     expect(text).toContain("První paragraf o pokusech");
-    await until(() => host.querySelector(".zd-ok-line") !== null, "the log line");
-    expect(host.querySelector(".zd-ok-line")?.textContent).toBe("zakon.md: nahráno.");
-    expect(host.textContent).not.toContain("zpracovává se");
+    expect(onUploaded).toHaveBeenCalledWith("55555555-5555-4555-8555-555555555551");
+    // Nothing to report in the uploader: the row in the list below shows the file.
+    await until(() => host.querySelector(".zd-upload-current") === null, "the uploader to settle");
+    expect(host.querySelector(".zd-ok-line")).toBeNull();
+    expect(host.querySelector(".zd-error")).toBeNull();
     expect(host.querySelector(".zd-dropzone")).not.toBeNull();
     expect(host.textContent).toContain("Nahráním potvrzujete");
   });
@@ -116,7 +118,7 @@ describe("uploader", () => {
     const onUploaded = await drop([new File([DOC], "a.md", { type: "text/markdown" }), new File([DOC2], "b.md", { type: "text/markdown" })]);
     await until(() => onUploaded.mock.calls.length === 2, "both uploads");
     expect(posted.map((p) => (p.meta.file as { name: string }).name)).toEqual(["a.md", "b.md"]);
-    expect(host.querySelectorAll(".zd-ok-line")).toHaveLength(2);
+    expect(onUploaded.mock.calls.map((c) => c[0])).toEqual(["55555555-5555-4555-8555-555555555551", "55555555-5555-4555-8555-555555555552"]);
   });
 
   it("a file in progress is unsaved work (web:Z3)", async () => {
@@ -154,7 +156,7 @@ describe("uploader", () => {
 
   it("an old browser gets a clear message instead of the dropzone (PC-14)", async () => {
     vi.stubGlobal("CompressionStream", undefined);
-    await act(async () => root.render(createElement(Uploader, { library: LIBRARY, replace: null, onCancelReplace: () => undefined, onUploaded: () => undefined })));
+    await act(async () => root.render(createElement(Uploader, { library: LIBRARY, onUploaded: () => undefined })));
     expect(host.querySelector(".zd-dropzone")).toBeNull();
     expect(host.textContent).toContain("Váš prohlížeč nahrávání nepodporuje");
     expect(host.textContent).toContain("Safari 16.4");

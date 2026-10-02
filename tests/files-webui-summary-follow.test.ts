@@ -21,7 +21,6 @@ const LIB: LibrarySummary = {
   quotaPages: 3000,
   pagesUsed: 3,
   counts: { total: 1, ready: 0, review: 0, processing: 1, error: 0, searchable: 0 },
-  memberCount: null,
 };
 const summary = (processing: number): SummaryResponse => ({
   state: "ok",

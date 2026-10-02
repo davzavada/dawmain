@@ -112,7 +112,7 @@ async function seed(
   return t.runner([lib], async (db) => {
     await ensureLibrary(db, lib, "Knihovna");
     expect(await reservePages(db, lib, pages, 100_000, 1_000_000)).toBe("ok");
-    const meta = uploadMeta(lib, text, { doc_type_hint: opts.hint, replaces: opts.replaces });
+    const meta = uploadMeta(lib, text, { doc_type_hint: opts.hint });
     const r = await insertUploadedDocument(db, {
       libraryId: lib,
       uploadedBy: opts.uploadedBy ?? "user_owner",
@@ -127,6 +127,8 @@ async function seed(
       injectionFlag: false,
     });
     if (!("id" in r)) throw new Error("duplicate in fixture");
+    // Uploads no longer set `replaces`; a legacy in-flight re-upload still carries it in its row.
+    if (opts.replaces) await db.query("UPDATE documents SET replaces = $1 WHERE id = $2", [opts.replaces, r.id]);
     return { id: r.id, pages };
   });
 }
@@ -240,7 +242,7 @@ describe("ingestDocument — success", () => {
   });
 });
 
-describe("ingestDocument — replaces", () => {
+describe("ingestDocument — replaces (legacy re-uploads still in flight)", () => {
   it("with the review step on, a re-upload of a confirmed document keeps the confirmed metadata, goes back to review and deletes the old one", async () => {
     const old = await seed(LIB, commentaryDmd(6, "stará verze"));
     await t.owner.query(`UPDATE libraries SET settings = '{"autoConfirm": false}'::jsonb WHERE id = $1`, [LIB]);

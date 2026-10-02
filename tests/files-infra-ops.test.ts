@@ -107,7 +107,7 @@ beforeEach(async () => {
   process.env.CRON_SECRET = "cron-secret-value";
   setScopeRunner(t.runner);
   __resetGuardsForTests();
-  __setAccessLoaderForTests(async (userId) => buildAccess({ id: userId, publicMetadata: { pro: true } }, []));
+  __setAccessLoaderForTests(async (userId) => buildAccess({ id: userId, publicMetadata: { pro: true } }));
   __setOwnerLookupForTests(async () => "pro");
   mocks.auth.mockReset();
   mocks.after.length = 0;

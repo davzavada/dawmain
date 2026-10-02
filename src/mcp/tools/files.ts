@@ -1770,7 +1770,7 @@ export function registerFiles(server: McpServer): void {
     {
       title: "Vlastní zdroje: libraries and documents",
       description:
-        "LIST the user's own libraries (Vlastní soubory, Pro) with their document counts — připraveno (searched), ke kontrole (awaiting the user's confirmation on the website), zpracovává se — and page usage, and the documents themselves: type, title, authors, year, status and id. Filters: library, doc_type, status, query (words of the title or authors), sort (added/title/year); limit up to 50, page. Only documents marked připraveno are searched and readable (files_search, files_get_document {id}).",
+        "LIST the user's own libraries (Vlastní soubory, Pro) with their document counts — připraveno (searched), ke kontrole (awaiting the user's confirmation on the website), zpracovává se — and page usage, and the documents themselves: type, title, authors, year, status and id. Filters: doc_type, status, query (words of the title or authors), sort (added/title/year); limit up to 50, page. Only documents marked připraveno are searched and readable (files_search, files_get_document {id}).",
       inputSchema: z.object({
         doc_type: z.array(docTypeSchema).max(7).optional().describe("Only these document types."),
         status: z.enum(["ready", "review", "processing", "error"]).optional().describe("Only documents in this state."),
@@ -1835,7 +1835,7 @@ async function filesSearch(
     return errorResult(
       "INPUT_INVALID",
       "Provide query/queries, case_number or section.",
-      "library, doc_type, act, doc and the years only narrow a search; files_list lists the documents.",
+      "doc_type, act, doc and the years only narrow a search; files_list lists the documents.",
     );
   }
   if (args.year_from && args.year_to && args.year_from > args.year_to) {
@@ -2429,7 +2429,7 @@ async function filesList(
         : `No documents${args.status || args.doc_type || args.query ? " match these filters" : " yet"} — they are uploaded at ${uploadUrl(g.origin)}.`,
     ...(list.rows.length ? [FENCE_NOTE(nonce), fence(nonce, docLines.join("\n"))] : []),
     "",
-    `Only documents marked připraveno are searched (files_search) and read (files_get_document {id}). ke kontrole = the user confirms the metadata at ${uploadUrl(g.origin)}; vypnuto = switched off by the user.`,
+    `Only documents marked připraveno are searched (files_search) and read (files_get_document {id}). ke kontrole = the user confirms the metadata at ${uploadUrl(g.origin)}.`,
   ].join("\n");
   return textResult(text);
 }

@@ -4,15 +4,15 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * The Vlastní zdroje modals are driven by the URL through history.pushState
+ * The Vlastní soubory and Zotero modals are driven by the URL through history.pushState
  * / replaceState. Next's app router patches both and forwards a call to
  * useSearchParams only when its state is not Next's own entry (__NA) —
  * passing window.history.state made every open, tab switch and close a
  * no-op (review web:Z1). This file installs the same patch Next does
  * (node_modules/next/dist/client/components/app-router.js) and checks that
- * every store action reaches the router; then the guard that asks before a
- * finished conversion is thrown away (web:Z3) and the nav item that stays
- * current while the modal is open (web:Z5).
+ * every store action reaches the router (?soubory=1, &dokument=<id>); then
+ * the guard that asks before a finished conversion is thrown away (web:Z3),
+ * Back included, and which modal the URL reader mounts.
  */
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -22,17 +22,18 @@ vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams(s
 vi.mock("next/link", () => ({
   default: ({ href, children, ...rest }: { href: string; children?: ReactNode }) => createElement("a", { href, ...rest }, children),
 }));
-// The modal bodies are lazy chunks; here only whether ZdrojeModals asks for one matters.
+// The modal bodies are lazy chunks; here only whether ZdrojeModals asks for one (and with what) matters.
 vi.mock("next/dynamic", () => ({
   default: () =>
-    function Lazy(props: { tab?: string }) {
-      return createElement("div", { "data-lazy": props.tab ?? "team" });
+    function Lazy(props: { documentId?: string | null; stav?: string | null }) {
+      return "documentId" in props
+        ? createElement("div", { "data-lazy": "files", "data-doc": props.documentId ?? "" })
+        : createElement("div", { "data-lazy": "zotero", "data-stav": props.stav ?? "" });
     },
 }));
 
 const store = await import("@/app/_zdroje/store");
 const { ZdrojeModals } = await import("@/app/_zdroje/modals");
-const { OwnSourcesNavItem } = await import("@/app/_zdroje/own-sources");
 
 /** URLs the router saw (Next's applyUrlFromHistoryPushReplace), and calls it skipped. */
 let routed: string[] = [];
@@ -80,90 +81,111 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+const DOC = "11111111-1111-4111-8111-111111111111";
+
 describe("URL-driven modals reach Next's router (web:Z1)", () => {
-  it("open, switch tab, open a document and close all go through the router", () => {
+  it("open, open a row, close the row and close all go through the router", () => {
     expect(window.history.state?.__NA).toBe(true);
-    store.openSources("moje");
-    expect(window.location.search).toBe("?zdroje=moje");
-    store.showInSources("tym", null);
-    store.showInSources("tym", "11111111-1111-4111-8111-111111111111");
+    store.openFiles();
+    expect(window.location.search).toBe("?soubory=1");
+    store.showFile(DOC);
+    expect(window.location.search).toBe(`?soubory=1&dokument=${DOC}`);
+    // The same row again changes nothing.
+    store.showFile(DOC);
+    store.showFile(null);
     const back = vi.spyOn(window.history, "back").mockImplementation(() => undefined);
-    store.closeSources();
+    store.closeFiles();
     // Opened with pushState here: closing pops that entry, so Back never reopens the modal.
     expect(back).toHaveBeenCalledTimes(1);
     expect(skipped).toEqual([]);
-    expect(routed).toEqual(["/?zdroje=moje", "/?zdroje=tym", "/?zdroje=tym&dokument=11111111-1111-4111-8111-111111111111"]);
+    expect(routed).toEqual(["/?soubory=1", `/?soubory=1&dokument=${DOC}`, "/?soubory=1"]);
   });
 
-  it("closing a modal that came from a link (/vlastni-zdroje redirect) replaces the entry", () => {
-    window.history.replaceState({ __NA: true }, "", "/?zdroje=moje&dokument=x#pripojeni");
+  it("openFiles with a document opens the modal at that row; when already open it only switches the row", () => {
+    store.openFiles(DOC);
+    expect(window.location.search).toBe(`?soubory=1&dokument=${DOC}`);
+    store.openFiles();
+    expect(window.location.search).toBe("?soubory=1");
+    expect(routed).toEqual([`/?soubory=1&dokument=${DOC}`, "/?soubory=1"]);
+  });
+
+  it("closing a modal that came from a link (/vlastni-zdroje redirect, the old ?zdroje) replaces the entry", () => {
+    window.history.replaceState({ __NA: true }, "", `/?soubory=1&dokument=${DOC}#pripojeni`);
     window.dispatchEvent(new PopStateEvent("popstate", { state: window.history.state }));
     routed = [];
     skipped = [];
-    store.closeSources();
+    store.closeFiles();
     expect(skipped).toEqual([]);
     expect(routed).toEqual(["/#pripojeni"]);
+
+    window.history.replaceState({ __NA: true }, "", "/podminky?zdroje=moje");
+    window.dispatchEvent(new PopStateEvent("popstate", { state: window.history.state }));
+    routed = [];
+    store.closeFiles();
+    expect(routed).toEqual(["/podminky"]);
   });
 
-  it("the team modal opens and closes through the router too", () => {
-    store.openTeam("org_1");
+  it("the Zotero modal opens and closes through the router too", () => {
+    store.openZotero();
     const back = vi.spyOn(window.history, "back").mockImplementation(() => undefined);
-    store.closeTeam();
+    store.closeZotero();
     expect(back).toHaveBeenCalledTimes(1);
-    expect(routed).toEqual(["/?tym=org_1"]);
+    expect(routed).toEqual(["/?zotero=1"]);
     expect(skipped).toEqual([]);
   });
 
   it("withParams keeps the path and the hash", () => {
-    expect(store.withParams("https://x.cz/podminky?a=1#b", (p) => p.set("zdroje", "moje"))).toBe("/podminky?a=1&zdroje=moje#b");
+    expect(store.withParams("https://x.cz/podminky?a=1#b", (p) => p.set("soubory", "1"))).toBe("/podminky?a=1&soubory=1#b");
   });
 });
 
 describe("unsaved conversion guard (web:Z3)", () => {
-  it("asks before close, tab switch, opening a document or the team modal; refusing changes nothing", () => {
-    window.history.replaceState({ __NA: true }, "", "/?zdroje=moje");
+  it("asks before closing or switching to Zotero; refusing changes nothing; a row opens without asking", () => {
+    window.history.replaceState({ __NA: true }, "", "/?soubory=1");
     window.dispatchEvent(new PopStateEvent("popstate", { state: window.history.state }));
     routed = [];
     let work = true;
     store.registerUnsavedWork(() => work);
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
 
-    store.closeSources();
-    store.showInSources("tym", null);
-    store.showInSources("moje", "11111111-1111-4111-8111-111111111111");
-    store.openTeam("org_1");
-    store.openSources("tym");
-    expect(confirm).toHaveBeenCalledTimes(5);
+    store.closeFiles();
+    store.openZotero();
+    expect(confirm).toHaveBeenCalledTimes(2);
     expect(confirm).toHaveBeenLastCalledWith(store.DISCARD_QUESTION);
     expect(routed).toEqual([]);
-    expect(window.location.search).toBe("?zdroje=moje");
+    expect(window.location.search).toBe("?soubory=1");
 
-    confirm.mockReturnValue(true);
-    store.showInSources("tym", null);
-    expect(routed).toEqual(["/?zdroje=tym"]);
+    // Opening a row keeps the uploader mounted: nothing to ask.
+    store.showFile(DOC);
+    store.openFiles();
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(routed).toEqual([`/?soubory=1&dokument=${DOC}`, "/?soubory=1"]);
 
     // Nothing to lose: no question.
     work = false;
     confirm.mockClear();
-    store.closeSources();
+    store.closeFiles();
     expect(confirm).not.toHaveBeenCalled();
     expect(routed.at(-1)).toBe("/");
   });
 
-  it("the caller that asked already is not asked twice", () => {
-    window.history.replaceState({ __NA: true }, "", "/?zdroje=moje");
+  it("mayDiscardWork asks once and answers what the user chose", () => {
     store.registerUnsavedWork(() => true);
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     expect(store.mayDiscardWork()).toBe(true);
-    store.showInSources("tym", null, true);
-    expect(confirm).toHaveBeenCalledTimes(1);
+    confirm.mockReturnValue(false);
+    expect(store.mayDiscardWork()).toBe(false);
+    expect(confirm).toHaveBeenCalledTimes(2);
+    store.registerUnsavedWork(null);
+    expect(store.mayDiscardWork()).toBe(true);
+    expect(confirm).toHaveBeenCalledTimes(2);
   });
 });
 
 describe("Back with a conversion open asks too (web:Z3, final review)", () => {
   it("refused: the modal's URL comes back and closing pops it later", () => {
-    store.openSources("moje");
-    store.showInSources("moje", "11111111-1111-4111-8111-111111111111");
+    store.openFiles();
+    store.showFile(DOC);
     routed = [];
     store.registerUnsavedWork(() => true);
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
@@ -171,21 +193,21 @@ describe("Back with a conversion open asks too (web:Z3, final review)", () => {
     goBackTo("/");
     expect(confirm).toHaveBeenCalledTimes(1);
     expect(confirm).toHaveBeenCalledWith(store.DISCARD_QUESTION);
-    // Pushed again through the router, so useSearchParams keeps ?zdroje and the uploader stays mounted.
-    expect(routed).toEqual(["/?zdroje=moje&dokument=11111111-1111-4111-8111-111111111111"]);
-    expect(window.location.search).toBe("?zdroje=moje&dokument=11111111-1111-4111-8111-111111111111");
+    // Pushed again through the router, so useSearchParams keeps ?soubory and the uploader stays mounted.
+    expect(routed).toEqual([`/?soubory=1&dokument=${DOC}`]);
+    expect(window.location.search).toBe(`?soubory=1&dokument=${DOC}`);
 
     // The re-pushed entry is ours: closing (agreed) pops it, and that pop is not asked about again.
     confirm.mockReturnValue(true);
     const back = vi.spyOn(window.history, "back").mockImplementation(() => goBackTo("/"));
-    store.closeSources();
+    store.closeFiles();
     expect(back).toHaveBeenCalledTimes(1);
     expect(confirm).toHaveBeenCalledTimes(2);
     expect(window.location.search).toBe("");
   });
 
   it("agreed: the modal closes; nothing to lose: no question", () => {
-    store.openSources("moje");
+    store.openFiles();
     routed = [];
     let work = true;
     store.registerUnsavedWork(() => work);
@@ -195,7 +217,7 @@ describe("Back with a conversion open asks too (web:Z3, final review)", () => {
     expect(routed).toEqual([]);
     expect(window.location.search).toBe("");
 
-    store.openSources("tym");
+    store.openFiles();
     work = false;
     confirm.mockClear();
     goBackTo("/");
@@ -204,26 +226,26 @@ describe("Back with a conversion open asks too (web:Z3, final review)", () => {
   });
 
   it("a deep-linked modal is guarded too; Back within the modal's URLs or to another page is not asked", () => {
-    window.history.replaceState({ __NA: true }, "", "/?zdroje=moje");
-    store.setSourcesOpen(true);
+    window.history.replaceState({ __NA: true }, "", `/?soubory=1&dokument=${DOC}`);
+    store.setFilesOpen(true);
     store.registerUnsavedWork(() => true);
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-    goBackTo("/?zdroje=tym");
+    goBackTo("/?soubory=1");
     expect(confirm).not.toHaveBeenCalled();
     goBackTo("/podminky");
     expect(confirm).not.toHaveBeenCalled();
     expect(routed).toEqual([]);
 
-    window.history.replaceState({ __NA: true }, "", "/?zdroje=moje");
-    store.setSourcesOpen(false);
-    store.setSourcesOpen(true);
+    window.history.replaceState({ __NA: true }, "", "/?soubory=1");
+    store.setFilesOpen(false);
+    store.setFilesOpen(true);
     goBackTo("/#pripojeni");
     expect(confirm).toHaveBeenCalledTimes(1);
-    expect(window.location.pathname + window.location.search).toBe("/?zdroje=moje");
+    expect(window.location.pathname + window.location.search).toBe("/?soubory=1");
   });
 });
 
-describe("modal reader and nav item (web:Z5, web:Z8)", () => {
+describe("the modal reader (web:Z8)", () => {
   let host: HTMLDivElement;
   let root: Root;
   beforeEach(() => {
@@ -237,22 +259,32 @@ describe("modal reader and nav item (web:Z5, web:Z8)", () => {
     search = "";
   });
 
-  it("the nav item is current while the modal is open, not otherwise", async () => {
-    store.setAuth("signed_out");
-    const tree = () => createElement("div", null, createElement(ZdrojeModals), createElement(OwnSourcesNavItem, { variant: "sidebar", current: false }));
-    search = "zdroje=moje";
-    await act(async () => root.render(tree()));
-    expect(host.querySelector("[data-lazy]")?.getAttribute("data-lazy")).toBe("moje");
-    expect(host.querySelector('a[href="/vlastni-zdroje"]')?.getAttribute("aria-current")).toBe("location");
+  const lazy = () => host.querySelector("[data-lazy]");
 
-    search = "tym=org_1";
-    await act(async () => root.render(tree()));
-    expect(host.querySelector("[data-lazy]")?.getAttribute("data-lazy")).toBe("team");
-    expect(host.querySelector('a[href="/vlastni-zdroje"]')?.hasAttribute("aria-current")).toBe(false);
-
-    search = "";
-    await act(async () => root.render(tree()));
-    expect(host.querySelector("[data-lazy]")).toBeNull();
-    expect(host.querySelector('a[href="/vlastni-zdroje"]')?.hasAttribute("aria-current")).toBe(false);
+  it("mounts the files modal for ?soubory (and the old ?zdroje), with a well-formed &dokument only", async () => {
+    const show = async (q: string) => {
+      search = q;
+      await act(async () => root.render(createElement(ZdrojeModals)));
+    };
+    await show("soubory=1");
+    expect(lazy()?.getAttribute("data-lazy")).toBe("files");
+    expect(lazy()?.getAttribute("data-doc")).toBe("");
+    await show(`soubory=1&dokument=${DOC.toUpperCase()}`);
+    expect(lazy()?.getAttribute("data-doc")).toBe(DOC);
+    await show("soubory=1&dokument=../../etc");
+    expect(lazy()?.getAttribute("data-doc")).toBe("");
+    await show("zdroje=moje");
+    expect(lazy()?.getAttribute("data-lazy")).toBe("files");
+    // At most one modal: files first.
+    await show("soubory=1&zotero=1");
+    expect(host.querySelectorAll("[data-lazy]")).toHaveLength(1);
+    expect(lazy()?.getAttribute("data-lazy")).toBe("files");
+    await show("zotero=1&stav=ok");
+    expect(lazy()?.getAttribute("data-lazy")).toBe("zotero");
+    expect(lazy()?.getAttribute("data-stav")).toBe("ok");
+    await show("soubory=");
+    expect(lazy()).toBeNull();
+    await show("");
+    expect(lazy()).toBeNull();
   });
 });

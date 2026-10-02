@@ -2,11 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   avatarColor,
   countDocuments,
-  countMembers,
   countPages,
   countPagesAcc,
   downloadFileName,
-  enabledOf,
+  fileLine,
   formatBytes,
   formatCount,
   formatDate,
@@ -14,25 +13,36 @@ import {
   kindLabel,
   libraryBadge,
   plural,
-  quotaLine,
-  quotaShare,
+  remainingLine,
   statusBadge,
+  typeLabel,
 } from "@/app/_zdroje/format";
-import { metaLine, nextPollDelay } from "@/app/_zdroje/list";
-import { actInput, czechDate, fieldsFor, formFromMeta, payloadFromForm, proposalBadge, splitFields } from "@/app/_zdroje/meta-form";
+import {
+  actInput,
+  compactFields,
+  czechDate,
+  fieldsFor,
+  formFromMeta,
+  lineToList,
+  listToLine,
+  MAIN_DOC_TYPES,
+  payloadFromForm,
+  proposalBadge,
+  splitFields,
+} from "@/app/_zdroje/meta-form";
 import { buildUploadMeta, gzipText, missingBrowserFeatures, sha256Text, uploadCost, uploadForm, uploadOutcome } from "@/app/_zdroje/upload-core";
 import { parseDmd } from "@/src/files/dmd/parse";
 import { bibMetaBaseSchema, bibMetaSchema } from "@/src/files/meta/schema";
-import { displayName, mapInvitations, mapMembers, normalizeEmail } from "@/src/files/team";
 import { DOC_TYPES, type BibMeta } from "@/src/files/types";
+import { publicationLine } from "@/src/files/web";
 import { gunzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
 
 /**
  * Pure helpers of the Vlastní zdroje UI: Czech formatting and plurals,
  * status badges, the upload's cost / meta / gzip / refusal messages, the
- * page strip, the metadata form's shape (round-tripped through the
- * server's bibMetaSchema), and the team mapping.
+ * page strip, the file list's lines and the metadata form's shape
+ * (round-tripped through the server's bibMetaSchema).
  */
 
 describe("Czech formatting", () => {
@@ -43,13 +53,8 @@ describe("Czech formatting", () => {
     expect(countDocuments(4)).toBe("4 dokumenty");
     expect(countDocuments(5)).toBe("5 dokumentů");
     expect(countDocuments(0)).toBe("0 dokumentů");
-    expect(countMembers(5)).toBe("5 členů");
-    expect(countMembers(3)).toBe("3 členové");
     expect(countPages(1)).toBe("1 strana");
     expect(countPages(1240)).toBe("1 240 stran");
-    expect(enabledOf(2, 4)).toBe("2 zapnuté dokumenty z 4");
-    expect(enabledOf(1, 1)).toBe("1 zapnutý dokument z 1");
-    expect(enabledOf(0, 7)).toBe("0 zapnutých dokumentů z 7");
   });
 
   it("counts with a narrow no-break space; garbage becomes 0", () => {
@@ -103,7 +108,7 @@ describe("Czech formatting", () => {
     expect(libraryBadge({ total: 1, processing: 0, review: 0, ready: 0 })?.label).toBe("chyba");
   });
 
-  it("initials, avatar colours, kinds and the quota line", () => {
+  it("initials, avatar colours, kinds and the remaining-pages line", () => {
     expect(initials("David Závada")).toBe("DZ");
     expect(initials("jana.novakova@novak.cz")).toBe("JN");
     expect(initials("Čeněk")).toBe("Č");
@@ -113,29 +118,39 @@ describe("Czech formatting", () => {
     expect(avatarColor("user_a")).toBe(avatarColor("user_a"));
     expect(avatarColor("user_a")).toMatch(/^#[0-9a-f]{6}$/);
     expect(kindLabel("docx")).toBe("DOCX");
-    expect(quotaLine(4, 1240, 3000)).toBe("4 dokumenty · 1 240 z 3 000 stran");
-    expect(quotaShare(0, 3000)).toBe(0);
-    expect(quotaShare(1, 3000)).toBe(0.01);
-    expect(quotaShare(4000, 3000)).toBe(1);
-    expect(quotaShare(10, 0)).toBe(0);
+    expect(remainingLine(1840, 2500)).toBe("Zbývá 660 z 2 500 stran.");
+    expect(remainingLine(2497, 2500)).toBe("Zbývají 3 z 2 500 stran.");
+    expect(remainingLine(2499, 2500)).toBe("Zbývá 1 z 2 500 stran.");
+    expect(remainingLine(4000, 3000)).toBe("Zbývá 0 z 3 000 stran.");
+    expect(remainingLine(-5, 3)).toBe("Zbývají 3 z 3 stran.");
+    expect(remainingLine(0, 1)).toBe("Zbývá 1 z 1 strany.");
   });
 });
 
-describe("document list helpers", () => {
-  it("polling backs off from 4 s to 15 s", () => {
-    let d = 4_000;
-    const seen = [d];
-    for (let i = 0; i < 5; i++) seen.push((d = nextPollDelay(d)));
-    expect(seen).toEqual([4_000, 6_000, 9_000, 13_500, 15_000, 15_000]);
-    expect(nextPollDelay(0)).toBe(4_000);
+describe("file list lines", () => {
+  it("type labels start with a capital", () => {
+    expect(typeLabel("komentar")).toBe("Komentář");
+    expect(typeLabel("clanek")).toBe("Článek");
+    expect(typeLabel("bogus" as never)).toBe(typeLabel("jine"));
   });
 
-  it("the meta line: kind · size · date, with the uploader in a team", () => {
+  it("the line under a title: type · publication · pages, the open row adds the upload date", () => {
     const now = new Date("2026-09-27T10:00:00Z");
-    const doc = { fileKind: "pdf" as const, fileBytes: 6_200_000, uploadedAt: "2026-09-19T09:00:00Z", uploaderName: "Jana Nováková" };
-    expect(metaLine(doc, false, now)).toBe("PDF · 6,2 MB · 19. 9. 2026");
-    expect(metaLine(doc, true, now)).toBe("PDF · 6,2 MB · Jana Nováková, 19. 9. 2026");
-    expect(metaLine({ ...doc, fileBytes: null, uploaderName: null }, true, now)).toBe("PDF · 19. 9. 2026");
+    const article = { docType: "clanek" as const, publication: "Právník 2/2024", physicalPages: 28, billablePages: 30 };
+    expect(fileLine(article)).toBe("Článek · Právník 2/2024 · 28 stran");
+    expect(fileLine(article, "2026-09-12T09:00:00Z", now)).toBe("Článek · Právník 2/2024 · 28 stran · nahráno 12. 9. 2026");
+    // A text without pages counts its billed pages; no pages at all leaves the count out.
+    expect(fileLine({ docType: "vzor", publication: null, physicalPages: null, billablePages: 3 })).toBe("Vzor · 3 strany");
+    expect(fileLine({ docType: "vzor", publication: null, physicalPages: null, billablePages: 0 })).toBe("Vzor");
+  });
+
+  it("publicationLine: where an article appeared, null for other types", () => {
+    const meta = { doc_type: "clanek" as const, container_title: "Právník", issue: "2", year: 2024 };
+    expect(publicationLine(meta)).toBe("Právník 2/2024");
+    expect(publicationLine({ ...meta, issue: null })).toBe("Právník 2024");
+    expect(publicationLine({ ...meta, issue: null, year: null })).toBe("Právník");
+    expect(publicationLine({ ...meta, container_title: "  " })).toBeNull();
+    expect(publicationLine({ ...meta, doc_type: "kniha" })).toBeNull();
   });
 });
 
@@ -152,11 +167,6 @@ describe("upload core", () => {
     expect(uploadCost(parsed, 3000, 100).line).toBe("Zabere 1 stranu z 2 900 zbývajících.");
     expect(uploadCost(parsed, 100, 100)).toMatchObject({ remaining: 0, fits: false });
     expect(uploadCost(parsed, 100, 500).remaining).toBe(0);
-    // A new version of a document: its old pages are credited, as the server does (completeness:PC-2).
-    expect(uploadCost(parsed, 100, 100, 5)).toMatchObject({ remaining: 5, fits: true });
-    expect(uploadCost(parsed, 100, 100, 5).line).toBe("Zabere 1 stranu z 5 zbývajících (počítáno i s 5 stranami původní verze, která se nahradí).");
-    expect(uploadCost(parsed, 100, 100, 1).line).toContain("s 1 stranou původní verze");
-    expect(uploadCost(parsed, 100, 100, 0)).toMatchObject({ remaining: 0, fits: false });
   });
 
   it("UploadMeta for paged and unpaged documents", () => {
@@ -169,7 +179,6 @@ describe("upload core", () => {
       contentSha256: "d".repeat(64),
       rights: "licence",
       docTypeHint: "komentar",
-      replaces: null,
     });
     expect(meta).toEqual({
       library_id: "user_a",
@@ -183,18 +192,17 @@ describe("upload core", () => {
       doc_type_hint: "komentar",
     });
     const plain = buildUploadMeta({
-      libraryId: "org_t",
+      libraryId: "user_b",
       file: { name: "vzor.docx", bytes: 10, sha256: "c".repeat(64) },
       result: { kind: "docx", converter: "docx@1", quality: QUALITY, hints: {}, labelSource: "none" },
       parsed: parseDmd("Text."),
       contentSha256: "d".repeat(64),
       rights: "vlastni",
       docTypeHint: null,
-      replaces: "00000000-0000-4000-8000-000000000001",
     });
     expect(plain.pages).toBeUndefined();
     expect(plain.doc_type_hint).toBeUndefined();
-    expect(plain.replaces).toBe("00000000-0000-4000-8000-000000000001");
+    expect("replaces" in plain).toBe(false);
   });
 
   it("gzip and SHA-256 of the UTF-8 text match what the server recomputes", async () => {
@@ -323,6 +331,24 @@ describe("metadata form", () => {
     expect(payloadFromForm({ ...komentar, doc_type: "<script>" }).doc_type).toBe("jine");
   });
 
+  it("the open row's short form per type (wireframe 05) and its one-line list fields", () => {
+    expect(MAIN_DOC_TYPES).toEqual(["komentar", "clanek", "kniha"]);
+    const keys = (t: (typeof DOC_TYPES)[number]) => compactFields(t).map((c) => c.field.key);
+    expect(keys("clanek")).toEqual(["title", "authors", "year", "container_title", "volume", "pages_range"]);
+    expect(keys("kniha")).toEqual(["title", "authors", "year", "publisher", "isbn"]);
+    expect(keys("komentar")).toEqual(["title", "authors", "year", "commented_act", "publisher"]);
+    expect(compactFields("kniha").find((c) => c.field.key === "publisher")?.field.label).toBe("Vydavatel");
+    for (const t of DOC_TYPES) {
+      const shown = keys(t);
+      expect(shown[0]).toBe("title");
+      // Required fields are always in the short form.
+      for (const f of fieldsFor(t).filter((f) => f.required)) expect(shown, `${t}: ${f.key}`).toContain(f.key);
+    }
+    expect(listToLine("Lavický, P.\nNovák, J.")).toBe("Lavický, P.; Novák, J.");
+    expect(lineToList("Lavický, P.; Novák, J.;Dvořák, K.")).toBe("Lavický, P.\nNovák, J.\nDvořák, K.");
+    expect(lineToList(listToLine("a\nb"))).toBe("a\nb");
+  });
+
   it("proposal badges and the low-confidence highlight", () => {
     const proposed = {
       title: { value: "X", source: "ai" as const, confidence: 0.4 },
@@ -340,40 +366,6 @@ describe("metadata form", () => {
   });
 });
 
-describe("team mapping", () => {
-  it("names, e-mail addresses, members and invitations", () => {
-    expect(displayName("Jana", "Nováková")).toBe("Jana Nováková");
-    expect(displayName(null, null, "jana@novak.cz")).toBe("jana@novak.cz");
-    expect(displayName(" ", "", "")).toBe("");
-    expect(displayName("A‮B", "⟦x⟧")).not.toMatch(/[‮⟦⟧]/);
-    expect(normalizeEmail("  Jana@Novak.CZ ")).toBe("jana@novak.cz");
-    for (const bad of ["", "jana", "jana@", "@novak.cz", "a b@c.cz", "a@b", `${"x".repeat(250)}@a.cz`, 42, null]) expect(normalizeEmail(bad)).toBeNull();
-    const members = mapMembers([
-      { role: "org:member", createdAt: 2, publicUserData: { userId: "user_b", identifier: "b@x.cz", firstName: "Bára", lastName: null } },
-      { role: "org:admin", createdAt: 1, publicUserData: { userId: "user_z", identifier: "z@x.cz", firstName: "Zdeněk", lastName: "Z" } },
-      { role: "org:member", createdAt: 3, publicUserData: null },
-    ]);
-    expect(members.map((m) => [m.userId, m.admin])).toEqual([
-      ["user_z", true],
-      ["user_b", false],
-    ]);
-    const invitations = mapInvitations(
-      [
-        { id: "i1", emailAddress: "a@x.cz", organizationId: "org_t", status: "pending", createdAt: 1 },
-        { id: "i2", emailAddress: "b@x.cz", organizationId: "org_t", status: "revoked", createdAt: 3 },
-        { id: "i3", emailAddress: "c@x.cz", organizationId: "org_t", status: "revoked", createdAt: 2 },
-        { id: "i4", emailAddress: "d@x.cz", organizationId: "org_t", status: "revoked", createdAt: 4 },
-        { id: "i5", emailAddress: "e@x.cz", organizationId: "org_t", status: "accepted", createdAt: 5 },
-      ],
-      { declined: new Set(["i2", "i4"]), dismissed: new Set(["i4"]) },
-    );
-    expect(invitations.map((i) => [i.id, i.state])).toEqual([
-      ["i2", "declined"],
-      ["i1", "pending"],
-    ]);
-  });
-});
-
 describe("Czech cases and downloads (review web:Z4, export)", () => {
   it("counts pages in the accusative after zabere / má", () => {
     expect([1, 2, 4, 5, 22, 0].map(countPagesAcc)).toEqual(["1 stranu", "2 strany", "4 strany", "5 stran", "22 stran", "0 stran"]);
@@ -382,11 +374,9 @@ describe("Czech cases and downloads (review web:Z4, export)", () => {
 
   it("the UI source has no fixed plural after a variable count", async () => {
     const { readFileSync } = await import("node:fs");
-    const detail = readFileSync("app/_zdroje/detail.tsx", "utf8");
-    // "3 účtovaných stran", "1 sporných stran": the plural must follow the number.
-    expect(detail).not.toMatch(/\} (účtovaných|sporných) stran`/);
-    expect(detail).toContain('plural(doc.billablePages, "účtovaná strana", "účtované strany", "účtovaných stran")');
-    expect(detail).toContain('"sporná strana", "sporné strany", "sporných stran"');
+    const modal = readFileSync("app/_zdroje/files-modal.tsx", "utf8");
+    // "3 stran", "1 dokumentů": the plural must follow the number.
+    expect(modal).not.toMatch(/\} (stran|stránek|dokumentů|dokumenty)\b/);
     const upload = readFileSync("app/_zdroje/upload.tsx", "utf8");
     expect(upload).not.toMatch(/linkedPercent\}%/);
     expect(upload).toContain("Dokument má ${countPagesAcc(cost.pages)}");

@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * Client behaviour of the Vlastní zdroje modal in a DOM (happy-dom): the
+ * Client behaviour of the Vlastní soubory modal in a DOM (happy-dom): the
  * list's status polling (only while the tab is visible, 4 s → 15 s
  * backoff, stops when nothing is pending, reloads when something settles),
  * the dialog shell (Escape, backdrop, focus return) and the inline
@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const { useDocumentList } = await import("@/app/_zdroje/list");
+const { useDocumentList } = await import("@/app/_zdroje/files-modal");
 const { Dialog, Confirm } = await import("@/app/_zdroje/dialog");
 
 let host: HTMLDivElement;
@@ -38,11 +38,11 @@ afterEach(async () => {
 const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
 
 function listItem(id: string, status: string) {
-  return { id, libraryId: "user_a", title: id, fileName: id, fileKind: "pdf", fileBytes: 1, status, statusDetail: null, uploadedAt: "2026-09-01T00:00:00Z", uploaderName: null, mine: true, enabled: true, canEdit: true, canDelete: true, docType: "jine", billablePages: 1, flags: [] };
+  return { id, libraryId: "user_a", title: id, fileName: id, fileKind: "pdf", fileBytes: 1, status, statusDetail: null, uploadedAt: "2026-09-01T00:00:00Z", mine: true, canEdit: true, canDelete: true, docType: "jine", publication: null, physicalPages: 1, billablePages: 1, flags: [] };
 }
 
 function Probe() {
-  const { documents } = useDocumentList("user_a", 0);
+  const { documents } = useDocumentList("user_a");
   return createElement("output", null, (documents ?? []).map((d) => `${d.id}:${d.status}`).join(","));
 }
 

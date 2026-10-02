@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 /**
  * The public texts make promises that hang on code: who processes what, how
- * a page is billed, where Vlastní zdroje live in the navigation. These tests
+ * a page is billed, what the Zotero key may do. These tests
  * render the real pages and pin those promises to the constants they depend
  * on, so changing the code without the text (or the text without the code)
  * fails here instead of on the live site.
@@ -104,7 +104,8 @@ describe("privacy policy (/soukromi)", () => {
   });
 
   it("points to the self-service text export (web: GET /api/files/documents/[id]/export)", () => {
-    expect(privacy).toContain("„Exportovat text“ v detailu dokumentu");
+    expect(privacy).toContain("„Stáhnout text“ u dokumentu v seznamu souborů");
+    expect(privacy).not.toContain("Exportovat text");
     expect(privacy).toMatch(/90 dní ji uvidíte na webu, můžete dokumenty mazat a jejich text s metadaty si stáhnout/);
     expect(privacy).not.toContain("na požádání vám pošlu jejich text");
   });
@@ -146,8 +147,8 @@ describe("Zotero in the legal texts", () => {
   it("states that a PDF may be fetched when Zotero has no text, and is never stored", () => {
     expect(privacy).toContain("stáhnu na dotaz asistenta PDF přílohu z úložiště Zotera");
     expect(privacy).toContain("Stažené PDF neukládám vůbec");
-    // The Vlastní zdroje promise stays, scoped to Vlastní zdroje.
-    expect(privacy).toContain("Na rozdíl od Vlastních zdrojů sem u Zotera originály přijít mohou");
+    // The Vlastní soubory promise stays, scoped to Vlastní soubory.
+    expect(privacy).toContain("Na rozdíl od Vlastních souborů sem u Zotera originály přijít mohou");
     expect(privacy).toContain("originály sem vůbec nepřijdou");
   });
 
@@ -157,21 +158,28 @@ describe("Zotero in the legal texts", () => {
     expect(privacy).toContain(STATE_COOKIE);
   });
 
-  it("states the read-only key and refuses write access", () => {
-    expect(privacy).toContain("o právo zápisu si Dawmain vůbec neříká");
+  it("states the user's choice of key: read only, or read and save new records — never changing or deleting", () => {
+    expect(privacy).toContain("o právo zápisu si Dawmain řekne jen při volbě „Číst a ukládat“, a to jen do vaší osobní knihovny");
+    expect(privacy).toContain("stávající nikdy nemění ani nemaže");
+    expect(privacy).toContain("Zvolíte-li „Jen číst“, nic nezapíše");
+    expect(privacy).not.toContain("o právo zápisu si Dawmain vůbec neříká");
     expect(terms).toContain("Zotero (Pro)");
-    expect(terms).toContain("jen ke čtení");
-    expect(terms).toContain("kdybyste ho povolili, připojení odmítne");
+    expect(terms).toContain("„Jen číst“, nebo „Číst a ukládat“");
+    expect(terms).toContain("Stávající záznamy Dawmain nikdy nemění ani nemaže a do skupin nezapisuje");
     expect(terms).toContain("„Odpojit“");
   });
 });
 
 describe("terms of use (/podminky)", () => {
-  it("keeps the existing sections and adds Vlastní zdroje (Pro)", () => {
-    for (const heading of ["Účet a slušné užívání", "Vlastní zdroje (Pro)", "Ukončení a změny"]) {
+  it("keeps the existing sections and adds Vlastní soubory (Pro)", () => {
+    for (const heading of ["Účet a slušné užívání", "Vlastní soubory (Pro)", "Ukončení a změny"]) {
       expect(terms).toContain(heading);
     }
     expect(terms).toContain(`Účinné od ${EFFECTIVE}`);
+  });
+
+  it("knows no teams any more", () => {
+    for (const page of [terms, privacy]) expect(page).not.toMatch(/[Tt]ým(?!ž)|týmov/);
   });
 
   it("bills pages by the same character count as the code", () => {
@@ -193,7 +201,7 @@ describe("terms of use (/podminky)", () => {
   });
 
   it("says the AI metadata may be wrong and can be corrected, and that there is no backup", () => {
-    expect(terms).toContain("v detailu dokumentu ho kdykoli opravíte");
+    expect(terms).toContain("po rozkliknutí dokumentu v seznamu souborů ho kdykoli opravíte");
     expect(terms).toContain("Záloha není");
   });
 
@@ -215,7 +223,7 @@ describe("terms of use (/podminky)", () => {
 
   it("keeps the text export open after Pro is revoked and names it next to the no-backup rule", () => {
     expect(terms).toContain("90 dní k prohlížení, mazání a stažení textu");
-    expect(terms).toContain("„Exportovat text“");
+    expect(terms).toContain("„Stáhnout text“ u dokumentu v seznamu souborů");
   });
 });
 
@@ -224,49 +232,13 @@ describe("site navigation", () => {
     pathname = "/";
   });
 
-  function ownSourcesLinks(html: string): string[] {
-    return html.match(/<a[^>]*href="\/vlastni-zdroje"[^>]*>.*?<\/a>/g) ?? [];
-  }
-
-  it("links Vlastní zdroje from the sidebar and the tab strip, locked for visitors (design 1a)", () => {
-    const html = renderToStaticMarkup(createElement(SiteNav, { sourceCount: 8 }));
-    const links = ownSourcesLinks(html);
-    expect(links).toHaveLength(2);
-    for (const link of links) {
-      expect(link).toContain('title="Vlastní zdroje — v režimu Pro, přiděluji zdarma"');
-      expect(link).toContain("zd-nav-locked");
-      expect(link).toContain("zd-nav-lock");
-      expect(link).not.toContain("pro-pill");
-      expect(link).not.toContain("aria-current");
-      expect(link).not.toContain("aria-disabled");
+  it("has no Vlastní zdroje item any more: the home page's group opens the modal", () => {
+    for (const at of ["/", "/vlastni-zdroje/provoz", "/soukromi"]) {
+      pathname = at;
+      const html = renderToStaticMarkup(createElement(SiteNav, { sourceCount: 8 }));
+      expect(html).not.toContain('href="/vlastni-zdroje"');
+      expect(html).not.toContain("zd-nav-locked");
+      expect(html).not.toContain("placené verzi");
     }
-    expect(links[0]).toContain("Nahrát vlastní zdroje");
-    expect(links[1]).toContain(">Vlastní zdroje<");
-    expect(html).not.toContain("placené verzi");
-  });
-
-  it("marks Vlastní zdroje current on its pages only", () => {
-    pathname = "/vlastni-zdroje/provoz";
-    const inside = ownSourcesLinks(renderToStaticMarkup(createElement(SiteNav, { sourceCount: 8 })));
-    expect(inside).toHaveLength(2);
-    for (const link of inside) expect(link).toContain('aria-current="location"');
-
-    pathname = "/vlastni-zdroje";
-    const root = ownSourcesLinks(renderToStaticMarkup(createElement(SiteNav, { sourceCount: 8 })));
-    for (const link of root) expect(link).toContain('aria-current="location"');
-
-    // Segment-aware: a route that merely shares the prefix is not inside.
-    pathname = "/vlastni-zdrojeX";
-    const lookalike = ownSourcesLinks(
-      renderToStaticMarkup(createElement(SiteNav, { sourceCount: 8 })),
-    );
-    expect(lookalike).toHaveLength(2);
-    for (const link of lookalike) expect(link).not.toContain("aria-current");
-
-    pathname = "/soukromi";
-    const elsewhere = ownSourcesLinks(
-      renderToStaticMarkup(createElement(SiteNav, { sourceCount: 8 })),
-    );
-    for (const link of elsewhere) expect(link).not.toContain("aria-current");
   });
 });

@@ -27,10 +27,8 @@ const PERSONAL_PRO: LibraryAccess = {
   quotaPages: 3000,
 };
 const PERSONAL_FREE: LibraryAccess = { ...PERSONAL_PRO, pro: false, canUpload: false };
-const TEAM_PRO: LibraryAccess = { ...PERSONAL_PRO, id: "org_team", kind: "org", name: "Tým AK", slug: "tym-ak", role: "org:member", canManageAll: false };
 
 const PRO_ACCESS: Access = { userId: USER, banned: false, libraries: [PERSONAL_PRO], all: [PERSONAL_PRO], zotero: true };
-const TEAM_ONLY_ACCESS: Access = { userId: USER, banned: false, libraries: [TEAM_PRO], all: [PERSONAL_FREE, TEAM_PRO], zotero: true };
 const NON_PRO_ACCESS: Access = { userId: USER, banned: false, libraries: [], all: [PERSONAL_FREE], zotero: false };
 
 const userCtx = (userId: unknown = USER, clientId: unknown = CLIENT) => ({
@@ -94,22 +92,14 @@ describe("personalProCaller — the account", () => {
     if (r.ok) expect(Object.isFrozen(r.access)).toBe(true);
   });
 
-  it("a user whose only Pro library is a team's is still entitled", async () => {
-    loader.mockImplementation(async () => TEAM_ONLY_ACCESS);
+  it("the same holds for an Access built from Clerk-shaped data; Clerk organizations play no part", async () => {
+    loader.mockImplementation(async (id) => buildAccess({ id, publicMetadata: { pro: true } }));
     const r = await personalProCaller(userCtx(), "files");
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.access.libraries.map((l) => l.id)).toEqual(["org_team"]);
-  });
-
-  it("the same holds for an Access built from Clerk-shaped data (team Pro, personal not)", async () => {
-    loader.mockImplementation(async (id) =>
-      buildAccess({ id, publicMetadata: { pro: "true" } }, [
-        { role: "org:member", organization: { id: "org_pro", name: "Pro tým", slug: "pro", publicMetadata: { pro: true } } },
-      ]),
-    );
-    const r = await personalProCaller(userCtx(), "files");
-    expect(r.ok).toBe(true);
-    if (r.ok) expect(r.access.libraries.map((l) => l.id)).toEqual(["org_pro"]);
+    if (r.ok) expect(r.access.libraries.map((l) => l.id)).toEqual([USER]);
+    loader.mockImplementation(async (id) => buildAccess({ id, publicMetadata: { pro: "true" } }));
+    __setAccessLoaderForTests(loader);
+    expect(await personalProCaller(userCtx(), "files")).toEqual({ ok: false, reason: "no-pro" });
   });
 
   it("a user without any Pro library", async () => {
@@ -124,8 +114,8 @@ describe("personalProCaller — the account", () => {
 
   it("a banned or locked account — also when the flag comes with libraries", async () => {
     for (const make of [
-      (id: string) => buildAccess({ id, banned: true, publicMetadata: { pro: true } }, []),
-      (id: string) => buildAccess({ id, locked: true, publicMetadata: { pro: true } }, []),
+      (id: string) => buildAccess({ id, banned: true, publicMetadata: { pro: true } }),
+      (id: string) => buildAccess({ id, locked: true, publicMetadata: { pro: true } }),
       () => ({ ...PRO_ACCESS, banned: true }),
     ]) {
       loader.mockImplementation(async (id) => make(id));
@@ -152,11 +142,11 @@ describe("personalProCaller — the account", () => {
   });
 
   it("the switches from Clerk's publicMetadata reach the gate", async () => {
-    loader.mockImplementation(async (id) => buildAccess({ id, publicMetadata: { pro: true, features: { zotero: false } } }, []));
+    loader.mockImplementation(async (id) => buildAccess({ id, publicMetadata: { pro: true, features: { zotero: false } } }));
     expect((await personalProCaller(userCtx(), "files")).ok).toBe(true);
     __setAccessLoaderForTests(loader);
     expect(await personalProCaller(userCtx(), "zotero")).toEqual({ ok: false, reason: "no-pro" });
-    loader.mockImplementation(async (id) => buildAccess({ id, publicMetadata: { pro: true, features: { files: false } } }, []));
+    loader.mockImplementation(async (id) => buildAccess({ id, publicMetadata: { pro: true, features: { files: false } } }));
     __setAccessLoaderForTests(loader);
     expect(await personalProCaller(userCtx(), "files")).toEqual({ ok: false, reason: "no-pro" });
     __setAccessLoaderForTests(loader);

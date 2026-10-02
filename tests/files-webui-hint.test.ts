@@ -15,7 +15,7 @@ import type { LibrarySummary, SummaryResponse } from "@/src/files/web-types";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-vi.mock("@clerk/nextjs", () => ({ useUser: () => ({ isLoaded: false, user: undefined }), useOrganizationList: () => ({ userInvitations: undefined }) }));
+vi.mock("@clerk/nextjs", () => ({ useUser: () => ({ isLoaded: false, user: undefined }) }));
 
 const { encodeHint, hintCookie, parseHint, HINT_COOKIE } = await import("@/app/_zdroje/hint");
 const { HintProvider } = await import("@/app/_zdroje/store");
@@ -32,7 +32,6 @@ const LIB: LibrarySummary = {
   quotaPages: 3000,
   pagesUsed: 12,
   counts: { total: 2, ready: 2, review: 0, processing: 0, error: 0, searchable: 2 },
-  memberCount: null,
 };
 const SUMMARY: SummaryResponse = { state: "ok", mode: "on", termsAccepted: true, libraries: [LIB] };
 
@@ -50,12 +49,16 @@ describe("hint cookie", () => {
     // A tampered library drops the summary, not the page.
     const bad = { ...SUMMARY, libraries: [{ ...LIB, pro: "yes" }] };
     expect(parseHint(encodeURIComponent(JSON.stringify({ i: "DZ", s: bad })))).toEqual({ initials: "DZ", summary: null });
+    // So does a team library or role from before teams were removed (an old cookie).
+    for (const lib of [{ ...LIB, id: "org_1", kind: "org" }, { ...LIB, role: "org:admin" }]) {
+      expect(parseHint(encodeURIComponent(JSON.stringify({ i: "DZ", s: { ...SUMMARY, libraries: [lib] } })))).toEqual({ initials: "DZ", summary: null });
+    }
     // Markup in the initials never survives.
     expect(parseHint(encodeURIComponent(JSON.stringify({ i: "<b>", s: null })))?.initials).toBe("b");
   });
 
   it("drops a summary too big for a cookie but keeps the initials", () => {
-    const many = { ...SUMMARY, libraries: Array.from({ length: 20 }, (_, i) => ({ ...LIB, id: `org_${i}`, kind: "org" as const, name: "Tým ".repeat(40) })) };
+    const many = { ...SUMMARY, libraries: Array.from({ length: 20 }, (_, i) => ({ ...LIB, id: `user_${i}`, name: "Knihovna ".repeat(20) })) };
     const value = encodeHint({ initials: "DZ", summary: many });
     expect(value.length).toBeLessThanOrEqual(3_000);
     expect(parseHint(value)).toEqual({ initials: "DZ", summary: null });

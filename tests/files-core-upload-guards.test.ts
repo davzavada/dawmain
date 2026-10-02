@@ -89,9 +89,9 @@ const ENV = { ...process.env };
 let quotaQ = 3_000;
 
 const access = (userId: string): Access => {
-  if (userId === "user_q") return buildAccess({ id: "user_q", publicMetadata: { pro: true, filesQuota: { pages: quotaQ } } }, []);
-  if (userId === "user_a" || userId === "user_back") return buildAccess({ id: userId, publicMetadata: { pro: true } }, []);
-  return buildAccess({ id: userId }, []);
+  if (userId === "user_q") return buildAccess({ id: "user_q", publicMetadata: { pro: true, filesQuota: { pages: quotaQ } } });
+  if (userId === "user_a" || userId === "user_back") return buildAccess({ id: userId, publicMetadata: { pro: true } });
+  return buildAccess({ id: userId });
 };
 
 beforeAll(async () => {
@@ -219,38 +219,17 @@ describe("takedown and duplicates compare the normalized text (core:F7)", () => 
   });
 });
 
-describe("a re-upload (replaces) reserves only the difference (completeness:PC-2)", () => {
-  it("a large document can be replaced in a nearly full library; counters settle to the new document", async () => {
+describe("re-uploads are gone: a stale client's `replaces` earns no credit", () => {
+  it("the upload is judged in full against the quota, and the old document stays", async () => {
     const v1 = long(14, "v1");
     const v2 = long(14, "v2");
-    const p1 = pagesOf(v1);
-    const p2 = pagesOf(v2);
-    expect(p2).toBeGreaterThan(2);
-    quotaQ = p1 + Math.max(0, p2 - p1) + 1;
-    const old = idOf(await upload("user_q", "user_q", v1));
-    expect(await ingestDocument(old, "user_q")).toBe("done");
-
-    // A plain upload of the same size does not fit…
-    expect((await upload("user_q", "user_q", long(14, "jiný"))).status).toBe(403);
-    // …its re-upload does.
-    const next = idOf(await upload("user_q", "user_q", v2, { replaces: old }));
-    // A second re-upload of the same document while the first is in flight gets no second credit.
-    const second = await upload("user_q", "user_q", long(14, "v3"), { replaces: old });
-    expect(second.status).toBe(403);
-    expect((second as { error: string }).error).toMatch(/v knihovně zbývá/);
-
-    expect(await ingestDocument(next, "user_q")).toBe("done");
-    expect(await libRow("user_q")).toMatchObject({ page_count: p2, pages_reserved: 0, doc_count: 1 });
-  });
-
-  it("a failed re-upload gives its reservation back and the old document still counts", async () => {
-    const v1 = long(8, "v1");
     quotaQ = pagesOf(v1) + 1;
     const old = idOf(await upload("user_q", "user_q", v1));
     expect(await ingestDocument(old, "user_q")).toBe("done");
-    const next = idOf(await upload("user_q", "user_q", long(8, "v2"), { replaces: old }));
-    await t.owner.query("UPDATE documents SET pending_gz = '\\x00'::bytea WHERE id = $1", [next]);
-    expect(await ingestDocument(next, "user_q")).toBe("failed");
+
+    const refused = await upload("user_q", "user_q", v2, { replaces: old } as Partial<UploadMeta>);
+    expect(refused.status).toBe(403);
+    expect((refused as { error: string }).error).toMatch(/v knihovně zbývá/);
     expect(await libRow("user_q")).toMatchObject({ page_count: pagesOf(v1), pages_reserved: 0, doc_count: 1 });
   });
 });

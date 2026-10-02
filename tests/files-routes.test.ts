@@ -80,13 +80,9 @@ function uploadRequest(lib: string, text: string, headers: Record<string, string
 }
 
 const ACCESS: Record<string, Access> = {
-  user_a: buildAccess({ id: "user_a", publicMetadata: { pro: true } }, [
-    { role: "org:member", organization: { id: "org_b", name: "Tým", slug: "tym", publicMetadata: { pro: true } } },
-  ]),
-  user_m: buildAccess({ id: "user_m", publicMetadata: {} }, [
-    { role: "org:member", organization: { id: "org_b", name: "Tým", slug: "tym", publicMetadata: { pro: true } } },
-  ]),
-  user_lapsed: buildAccess({ id: "user_lapsed", publicMetadata: {} }, []),
+  user_a: buildAccess({ id: "user_a", publicMetadata: { pro: true } }),
+  user_m: buildAccess({ id: "user_m", publicMetadata: { pro: true } }),
+  user_lapsed: buildAccess({ id: "user_lapsed", publicMetadata: {} }),
 };
 
 // ---------------------------------------------------------------------------
@@ -110,7 +106,7 @@ beforeEach(async () => {
   process.env.CLERK_WEBHOOK_SIGNING_SECRET = "whsec_test";
   setScopeRunner(t.runner);
   __resetGuardsForTests();
-  __setAccessLoaderForTests(async (userId) => ACCESS[userId] ?? buildAccess({ id: userId }, []));
+  __setAccessLoaderForTests(async (userId) => ACCESS[userId] ?? buildAccess({ id: userId }));
   __setOwnerLookupForTests(null);
   mocks.auth.mockReset();
   mocks.verifyWebhook.mockReset();
@@ -178,7 +174,7 @@ describe("POST /api/files/documents", () => {
     expect(log.mock.calls.flat().join(" ")).not.toContain("clerkMiddleware");
   });
 
-  it("a member of org_b cannot upload into user_a's library", async () => {
+  it("another Pro user cannot upload into user_a's library", async () => {
     signedIn("user_m");
     const res = await documentsPOST(uploadRequest("user_a", dmd(3, "x")));
     expect(res.status).toBe(403);
@@ -199,10 +195,10 @@ describe("GET /api/files/status", () => {
   const statusReq = (query: string) => new Request(`https://dawmain.cz/api/files/status?${query}`);
 
   it("statuses of the caller's documents; foreign and malformed ids are absent; a waiting one kicks ingest", async () => {
-    const mine = await uploaded("user_a", "org_b", "mine");
-    const personal = await uploaded("user_a", "user_a", "personal");
-    signedIn("user_m");
-    const res = await statusGET(statusReq(`lib=org_b&ids=${mine},${personal},nonsense,${mine}`));
+    const theirs = await uploaded("user_m", "user_m", "theirs");
+    const mine = await uploaded("user_a", "user_a", "mine");
+    signedIn("user_a");
+    const res = await statusGET(statusReq(`lib=user_a&ids=${mine},${theirs},nonsense,${mine}`));
     expect(res.status).toBe(200);
     const body = (await res.json()) as { documents: Array<{ id: string; status: string }> };
     expect(body.documents.map((d) => [d.id, d.status])).toEqual([[mine, "queued"]]);
@@ -210,7 +206,7 @@ describe("GET /api/files/status", () => {
     await runAfter();
     expect(await statusOf(mine)).toBe("ready");
 
-    const again = (await (await statusGET(statusReq(`lib=org_b&ids=${mine}`))).json()) as { documents: Array<{ status: string }> };
+    const again = (await (await statusGET(statusReq(`lib=user_a&ids=${mine}`))).json()) as { documents: Array<{ status: string }> };
     expect(again.documents[0].status).toBe("ready");
     expect(mocks.after).toHaveLength(0);
   });

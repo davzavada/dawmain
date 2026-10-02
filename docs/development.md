@@ -20,7 +20,7 @@ Uživatelský popis je v [README](../README.md).
 | `eurlex_get_history` | Cellar SPARQL (Publications Office) | travaux préparatoires aktu z dossieru interinstitucionálního postupu (`cdm:dossier_contains_work` — obsahuje i přijatý akt, takže kotví CELEX aktu i kteréhokoli dokumentu postupu, případně číslo postupu `2012/0011(COD)`); vrací návrh s důvodovou zprávou, impact assessmenty, stanoviska, postoje EP/Rady + číslo postupu, právní základ a stav (přijato/projednáváno/staženo) |
 | `doctrine_search` | cuni.primo.exlibrisgroup.com | doktrína: knihy, kapitoly a články z UKAŽ Univerzity Karlovy (Primo VE: katalog UK + Central Discovery Index licencovaných e-zdrojů); `query`/`queries` (≤ 3 varianty), `title`, `author`, `subject`, `language`, `year_from`/`year_to`; katalog stránkuje po 10, `limit` (≤ 20; nad 10 záznamy stručně, bez abstraktů) stáhne víc stránek v paralelní dávce a `page` kráčí dál (`total` = `total_local` + `total_central`) — vrací bibliografické záznamy s odkazem na záznam, abstraktem/obsahem a přístupovými odkazy, žádné plné texty; klient postavený na zachyceném požadavku SPA (HAR 2026-09), ověřený živě z produkce |
 | `doctrine_get_record` | cuni.primo.exlibrisgroup.com | jeden záznam v plném znění přes full-display endpoint Prima (ověřený živě): celý abstrakt, obsah (TOC), hesla, identifikátory a přístupové odkazy — hledání ukazuje jen začátek abstraktu a obsahu; text díla se nestahuje (k němu vede odkaz na záznam, licencované tituly si čtenář otevře sám přes vzdálený přístup UK) |
-| `files_search` | Vlastní zdroje (Neon) | hledání ve vlastních dokumentech uživatele s Pro (osobní a týmové knihovny): český fulltext (Snowball stemmer v aplikaci; váhy vlastní nadpis › nadřazený nadpis › tělo › poznámky pod čarou), identifikátory (sp. zn. i s krátkým rokem, §, předpisy i zkratkami „o. z.“/„OSŘ“, ISBN, DOI, ECLI) a metadata — kanály sloučené přes RRF se stropem shod na dokument už v SQL; filtry typu dokumentu, roku, předpisu, § / článku, sp. zn., jednoho dokumentu a jen poznámek (§ a sp. zn. se uplatní v SQL před stropem); hit nese cestu oddíly, pinpoint (s., § + m. č., pozn.), výřez se zvýrazněním a pro každou sp. zn. řádek „oficiální text:“ s voláním `ns_search`/`nss_search`/`us_search`/`sdeu_search` |
+| `files_search` | Vlastní zdroje (Neon) | hledání ve vlastních dokumentech uživatele s Pro (osobní knihovna): český fulltext (Snowball stemmer v aplikaci; váhy vlastní nadpis › nadřazený nadpis › tělo › poznámky pod čarou), identifikátory (sp. zn. i s krátkým rokem, §, předpisy i zkratkami „o. z.“/„OSŘ“, ISBN, DOI, ECLI) a metadata — kanály sloučené přes RRF se stropem shod na dokument už v SQL; filtry typu dokumentu, roku, předpisu, § / článku, sp. zn., jednoho dokumentu a jen poznámek (§ a sp. zn. se uplatní v SQL před stropem); hit nese cestu oddíly, pinpoint (s., § + m. č., pozn.), výřez se zvýrazněním a pro každou sp. zn. řádek „oficiální text:“ s voláním `ns_search`/`nss_search`/`us_search`/`sdeu_search` |
 | `files_get_document` | Vlastní zdroje (Neon) | čtení vlastního dokumentu: u dokumentu nad ~30 stran bez cíle osnova (`toc`), jinak `section` (§, článek, kapitola), `mn` (marginální číslo, i rozsah), `at` (tištěná strana), `footnote`, `find`; okna ≤ 45 000 znaků zarovnaná na celé strany, hlavička „VLASTNÍ DOKUMENT“ s citací ČSN ISO 690, pokračování omezené na zvolený úsek, denní limit čtení na dokument (proti vysávání celých knih) |
 | `files_list` | Vlastní zdroje (Neon) | knihovny uživatele a jejich dokumenty (stav, typ, strany, co čeká na potvrzení metadat) a odkaz na nahrávání |
 | `zotero_search` | Zotero (api.zotero.org, klíč uživatele) | hledání v připojené knihovně Zotero, jen ke čtení: `mode` `title` (názvy, autoři, roky) / `everything` (všechna pole, poznámky, full-text index příloh), prázdné `title` se samo zopakuje v `everything`; `query`/`queries` (≤ 3 varianty round-robin), `library` (výchozí osobní + skupiny, nejvýš 6), `collection`, `tags` (všechny), `item_type`, `sort`, `limit` (≤ 50 na knihovnu), `page`; shody v přílohách, poznámkách a anotacích seskupené pod dílo; sp. zn. v dotazu navíc projde nejnovější položky `case` (Zotero `q` do `docketNumber` nevidí) a řekne, kolik jich prošla; řazení není podle relevance |
@@ -126,15 +126,15 @@ src/files/index/            chunky, tsvector, identifikátory a zkratky předpis
 src/files/meta/             návrh metadat: heuristiky + Gemini přes AI Gateway
 src/files/db/               withScope (transakce + RLS), repozitáře, migrace
                             v čistém SQL (migrations/)
-src/files/access.ts         Clerk → knihovny (osobní / týmové), Pro, role, kvóty
+src/files/access.ts         Clerk → osobní knihovna, Pro, kvóta
 src/files/guards.ts         režim (env, přepínač provozovatele, pojistky free
                             tieru) a rate limit
 src/files/upload.ts         nahrání: kontroly, rezervace kvóty, zápis textu
 src/files/ingest.ts         zpracování po nahrání (after(), lease v řádku DB)
 app/vlastni-zdroje/         vstup do Vlastních zdrojů na webu (modální okno nad
                             stránkou, /?zdroje=moje); provoz/ = stránka provozovatele
-app/api/files/…             nahrání, stav zpracování, souhrn, dokumenty, správa týmu
-app/api/webhooks/clerk/     smazání účtu / týmu → výmaz knihovny po 7 dnech
+app/api/files/…             nahrání, stav zpracování, souhrn, dokumenty
+app/api/webhooks/clerk/     smazání účtu (i dřívějšího týmu) → výmaz knihovny po 7 dnech
 app/api/cron/files/         denní úklid a pojistky (vercel.json, 03:00 UTC)
 scripts/db-migrate.mjs      migrace — ručně, vlastnickým připojením
 ```
@@ -391,10 +391,11 @@ co čeká. Už aplikovaný soubor se nemění — oprava = nový soubor.
 | `0003_ops.sql` | rozpočet přeindexování (`usage_daily.reindexes`, `documents.reindex_requested_at`), `files_db_usage()` a `files_table_usage()` (živá data, plán `VACUUM FULL`), úklid auditu vymazaných knihoven, oznámení a odstranění napříč knihovnami, noční přepočet počítadel |
 | `0004_search.sql` | kanály hledání jako funkce `SECURITY DEFINER` (`files_search_chunks`, `files_search_meta`), aby dotazy role aplikace šly přes GIN indexy |
 | `0005_search_filters.sql` | přetížení obou funkcí: filtry `case_number` a `section` (§ i s vnořenými oddíly) přímo v SQL před stropem shod na dokument, strop na dokument až 200 (hledání uvnitř dokumentu), knihovna u každé shody, ISBN/DOI z metadat dokumentu; podpisy z `0004` zůstávají, dokud je volá nasazená verze |
+| `0006_always_enabled.sql` | přepínač zapnuto/vypnuto u dokumentu zmizel z webu i API: zapne zpět všechny dříve vypnuté dokumenty (sloupec `enabled` zůstává) |
 
-**Tahle verze potřebuje `0003`, `0004` a `0005`** — pusť `--dry-run`, pak
-migraci, a teprve potom nasazuj. Všechny přidávají jen sloupce `IF NOT
-EXISTS`, indexy a funkce, na data nesahají. Po nasazení je navíc potřeba přeindexovat starší
+**Tahle verze potřebuje `0003` až `0006`** — pusť `--dry-run`, pak
+migraci, a teprve potom nasazuj. `0003`–`0005` přidávají jen sloupce `IF NOT
+EXISTS`, indexy a funkce; `0006` jen zapne vypnuté dokumenty. Po nasazení je navíc potřeba přeindexovat starší
 dokumenty (`ANALYZER_VERSION` 2, viz Kapacita).
 
 Migrace `0002` založí roli `dawmain_app` SQL příkazem — jen taková role na
@@ -426,7 +427,6 @@ dalšího kromě tří proměnných Zotera na konci tabulky). Po změně Redeplo
 | `FILES_USER_HASH_SECRET` | klíč HMAC pro pseudonym nahrávajícího, který dostává AI Gateway k rozpočítání spotřeby (`gateway.user`, čte `src/files/ingest.ts`); dlouhý náhodný řetězec. Změna klíče = nové pseudonymy v přehledu Gateway | `CLERK_SECRET_KEY` |
 | `FILES_GLOBAL_MAX_PAGES` | strop stran pro celou instalaci | 30 000 |
 | `FILES_PERSONAL_PAGES` | kvóta osobní knihovny (stran) | 3 000 |
-| `FILES_TEAM_PAGES` | kvóta týmové knihovny (stran) | 10 000 |
 | `FILES_OPERATOR_IDS` | Clerk `user_…` oddělená čárkou — přístup na `/vlastni-zdroje/provoz` | — |
 | `FILES_AI_BUDGET_USD` | klouzavý 30denní rozpočet AI v celých USD; nad ním jen heuristiky | 4 |
 | `FILES_GLOBAL_UPLOADS_PER_DAY` | nahrání za den ve všech knihovnách dohromady | 200 |
@@ -440,7 +440,7 @@ dalšího kromě tří proměnných Zotera na konci tabulky). Po změně Redeplo
 | `CREDENTIALS_SECRET` | Zotero: klíč pečetění uložených klíčů (AES-256-GCM přes HKDF), ≥ 32 znaků, `openssl rand -base64 32`; změna = všichni připojí Zotero znovu | — (Zotero vypnuté) |
 
 Strana = 3 600 znaků převedeného textu včetně poznámek (`PAGE_CHARS`); cenu
-ve stranách vidí uživatel před nahráním. Kvóta jednoho uživatele nebo týmu jde
+ve stranách vidí uživatel před nahráním. Kvóta jednoho uživatele jde
 přepsat v Clerku (níže).
 
 ### Clerk

@@ -1604,7 +1604,9 @@ button.zd-file-row:hover .zd-file-title {
   cursor: pointer;
 }
 .zd-layer .zd-segmented-pill > select {
+  min-height: 0;
   padding-right: 8px;
+  line-height: inherit;
 }
 .zd-segmented-pill > button[aria-checked="true"],
 .zd-layer .zd-segmented-pill > select[data-checked] {
