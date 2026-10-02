@@ -330,7 +330,7 @@ function parseCall(line: string): { tool: string; args: Record<string, unknown> 
 
 describe("own documents first (MCP-4)", () => {
   it("the server instructions search files_* in every rešerše and stop after a 'no library' answer", () => {
-    expect(INSTRUCTIONS).toMatch(/^- Vlastní zdroje .*In legal research call files_search in the first round of every question/m);
+    expect(INSTRUCTIONS).toMatch(/^- Vlastní soubory .*In legal research call files_search in the first round of every question/m);
     expect(INSTRUCTIONS).toContain("do not call files_* again in this conversation");
     expect(INSTRUCTIONS).toMatch(/^- Literature: .*close the answer with the most relevant works as further sources/m);
   });

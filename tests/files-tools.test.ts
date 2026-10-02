@@ -371,8 +371,8 @@ describe("registration", () => {
   it("the server instructions route to files_* and carve out own documents from 'read whole'", () => {
     const [first] = INSTRUCTIONS.split("\n");
     expect(first).not.toContain("no local corpus");
-    expect(first).toContain("Vlastní zdroje");
-    expect(INSTRUCTIONS).toMatch(/^- Vlastní zdroje .*files_search .*files_get_document .*files_list/m);
+    expect(first).toContain("Vlastní soubory");
+    expect(INSTRUCTIONS).toMatch(/^- Vlastní soubory .*files_search .*files_get_document .*files_list/m);
     expect(INSTRUCTIONS).toContain("Own documents (files_get_document) are books and commentaries: never read one whole.");
     expect(INSTRUCTIONS).toMatch(/^TRUST — .*uploaded files \(between ⟦DOC n⟧ and ⟦\/DOC n⟧/m);
     expect(INSTRUCTIONS).toMatch(/^1\. .*Exception — own documents \(files_\*\) have no public URL: cite them as „vlastní dokument“/m);

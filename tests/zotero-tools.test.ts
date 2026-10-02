@@ -278,7 +278,7 @@ describe("registration", () => {
 
   it("the server instructions route to zotero_* next to files_* and fence Zotero content", () => {
     const INSTRUCTIONS = buildInstructions(true);
-    expect(INSTRUCTIONS).toMatch(/^- Vlastní zdroje .*\n- Zotero — .*zotero_search .*zotero_get_item .*zotero_get_text .*zotero_list/m);
+    expect(INSTRUCTIONS).toMatch(/^- Vlastní soubory .*\n- Zotero — .*zotero_search .*zotero_get_item .*zotero_get_text .*zotero_list/m);
     expect(INSTRUCTIONS).toMatch(/^- Zotero — .*zotero_cite = .*ČSN ISO 690/m);
     expect(INSTRUCTIONS).toMatch(/^- Zotero — .*In legal research call zotero_search in the first round next to files_search/m);
     expect(INSTRUCTIONS).toMatch(/^- Zotero — .*do not call zotero_\* again in this conversation/m);
@@ -290,7 +290,7 @@ describe("registration", () => {
     const without = buildInstructions(false);
     expect(without.toLowerCase()).not.toContain("zotero");
     // Everything else is the same text: only the Zotero parts drop out.
-    expect(without).toMatch(/^- Vlastní zdroje .*files_search/m);
+    expect(without).toMatch(/^- Vlastní soubory .*files_search/m);
     expect(without).toMatch(/^TRUST — .*⟦\/DOC n⟧ in files_\* answers\)\. If retrieved/m);
     expect(without).toMatch(/^1\. .*not from the file\.$/m);
     expect(buildInstructions(true).length).toBeGreaterThan(without.length);
