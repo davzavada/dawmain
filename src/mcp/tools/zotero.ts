@@ -15,6 +15,7 @@ import {
   bibliography,
   citeItems,
   countFulltext,
+  createItem,
   downloadPdf,
   exportItems,
   getChildren,
@@ -29,6 +30,7 @@ import {
   listGroups,
   listSearches,
   listTags,
+  newWriteToken,
   tagColorsOf,
   scanCases,
   searchItems,
@@ -72,8 +74,9 @@ import { READ_ONLY } from "./shared";
 import { describeError } from "./variants";
 
 /**
- * Zotero — the user's own cloud library on zotero.org (Web API v3), READ
- * ONLY, next to the official sources:
+ * Zotero — the user's own cloud library on zotero.org (Web API v3), next to
+ * the official sources. Five tools read; zotero_save is the one write and
+ * only CREATES (see below):
  *
  *   zotero_search    Zotero's quick search: titles, creators, years and a
  *                    note's first line, plus the attachments' full text
@@ -91,7 +94,15 @@ import { describeError } from "./variants";
  *                    through the Vlastní zdroje converter (kept in memory
  *                    only), else what is missing and how the user fixes it;
  *   zotero_list      the libraries, collections, tags and saved searches
- *                    the key reads.
+ *                    the key reads;
+ *   zotero_save      ONE new item in the personal library (POST under a
+ *                    Zotero-Write-Token, src/zotero/client.ts createItem) —
+ *                    only for a connection in "write" mode („Číst a
+ *                    ukládat“ AND a key that may write there), its own
+ *                    hourly bucket (LIMITS.savesPerHour). It never updates,
+ *                    moves or deletes an existing object, never writes to a
+ *                    group, and adds no collection or tag of its own. Its
+ *                    refusals start with a Czech sentence for the user.
  *
  * Gating (no Zotero request before step 5 has passed):
  *   1. the OAuth app / sealing secret / Clerk not configured → unavailable;
@@ -336,7 +347,10 @@ export interface ZoteroCaller {
   connect: string;
 }
 
-export type ZoteroGate = ({ ok: true } & ZoteroCaller) | { ok: false; result: ToolResult };
+/** Which gate step refused: a ZOTERO_GATE_TEXT name, or "access" when Clerk (or the time budget) failed. */
+export type ZoteroGateReason = Exclude<keyof typeof ZOTERO_GATE_TEXT, "rejected"> | "access";
+
+export type ZoteroGate = ({ ok: true } & ZoteroCaller) | { ok: false; result: ToolResult; reason: ZoteroGateReason };
 
 /** Clerk (or the store) failed: a fixed text, the code logged. */
 function accessFailure(error: unknown, where: string): ToolResult {
@@ -355,9 +369,13 @@ function accessFailure(error: unknown, where: string): ToolResult {
  */
 export async function zoteroGate(ctx: unknown): Promise<ZoteroGate> {
   const connect = zoteroConnectUrl(ctx);
-  const refuse = (kind: SourceErrorKind, message: string, hint: string): ZoteroGate => ({ ok: false, result: errorResult(kind, message, hint) });
+  const refuse = (reason: ZoteroGateReason, kind: SourceErrorKind, message: string, hint: string): ZoteroGate => ({
+    ok: false,
+    reason,
+    result: errorResult(kind, message, hint),
+  });
   if (!zoteroConfigured()) {
-    return refuse("NOT_ENTITLED", ZOTERO_GATE_TEXT.unavailable, `${STOP}. (Where it is enabled, the user connects Zotero at ${connect}.)`);
+    return refuse("unavailable", "NOT_ENTITLED", ZOTERO_GATE_TEXT.unavailable, `${STOP}. (Where it is enabled, the user connects Zotero at ${connect}.)`);
   }
   const who = callerFromCtx(ctx);
   const access = personalProCaller(ctx, "zotero");
@@ -375,7 +393,7 @@ export async function zoteroGate(ctx: unknown): Promise<ZoteroGate> {
   try {
     caller = await access;
   } catch (error) {
-    return { ok: false, result: accessFailure(error, "access") };
+    return { ok: false, reason: "access", result: accessFailure(error, "access") };
   }
   if (!caller.ok && (caller.reason === "shared-token" || caller.reason === "anonymous")) {
     const why =
@@ -383,6 +401,7 @@ export async function zoteroGate(ctx: unknown): Promise<ZoteroGate> {
         ? "this connection uses the shared access code, which belongs to no user."
         : "this call carries no signed-in user.";
     return refuse(
+      "signIn",
       "NOT_ENTITLED",
       `${ZOTERO_GATE_TEXT.signIn}: ${why}`,
       `To reach their Zotero library the user connects Dawmain with the OAuth login (their own account) and connects Zotero at ${connect}. ${STOP}; continue with the official sources.`,
@@ -390,41 +409,44 @@ export async function zoteroGate(ctx: unknown): Promise<ZoteroGate> {
   }
   if (!caller.ok) {
     // banned or no-pro: one answer, as in files_* — neither account may use it.
-    return refuse("NOT_ENTITLED", ZOTERO_GATE_TEXT.noPro, `Pro and the Zotero connection: ${connect}. ${STOP}; continue with the official sources.`);
+    return refuse("noPro", "NOT_ENTITLED", ZOTERO_GATE_TEXT.noPro, `Pro and the Zotero connection: ${connect}. ${STOP}; continue with the official sources.`);
   }
   if (!allowToolCall(`zotero:${caller.userId}`, undefined, LIMITS.toolCallsPerHour)) {
     return refuse(
+      "rateLimited",
       "UPSTREAM_ERROR",
       ZOTERO_GATE_TEXT.rateLimited,
       "Continue with the official sources and come back to zotero_* later — fewer, better-aimed calls (library, collection, item_type) go further.",
     );
   }
   if (zoteroBreakerOpen()) {
-    return refuse("UPSTREAM_UNREACHABLE", ZOTERO_GATE_TEXT.paused, "Continue with the official sources; try zotero_* again in about 5 minutes.");
+    return refuse("paused", "UPSTREAM_UNREACHABLE", ZOTERO_GATE_TEXT.paused, "Continue with the official sources; try zotero_* again in about 5 minutes.");
   }
   let state: ConnectionState;
   try {
     state = await (early && who.kind === "user" && who.userId === caller.userId ? early : loadConnection(caller.userId));
   } catch (error) {
-    return { ok: false, result: accessFailure(error, "connection") };
+    return { ok: false, reason: "access", result: accessFailure(error, "connection") };
   }
   switch (state.state) {
     case "none":
       return refuse(
+        "notConnected",
         "NOT_ENTITLED",
         ZOTERO_GATE_TEXT.notConnected,
-        `The user connects it at ${connect} (button „Připojit Zotero“ — read-only access). ${STOP}; continue with the official sources.`,
+        `The user connects it at ${connect} (button „Připojit Zotero“; „Jen číst“ or „Číst a ukládat“). ${STOP}; continue with the official sources.`,
       );
     case "revoked": {
       const when = czechDate(state.revokedAt);
       return refuse(
+        "revoked",
         "NOT_ENTITLED",
         `${ZOTERO_GATE_TEXT.revoked}${when ? ` (noticed ${when})` : ""}`,
         `The user connects Zotero again at ${connect}. ${STOP}; continue with the official sources.`,
       );
     }
     case "unreadable":
-      return refuse("NOT_ENTITLED", ZOTERO_GATE_TEXT.unreadable, `The user connects Zotero again at ${connect}. ${STOP}; continue with the official sources.`);
+      return refuse("unreadable", "NOT_ENTITLED", ZOTERO_GATE_TEXT.unreadable, `The user connects Zotero again at ${connect}. ${STOP}; continue with the official sources.`);
     case "ok":
       return { ok: true, userId: caller.userId, conn: state.conn, connect };
   }
@@ -469,20 +491,27 @@ function settlesAtOnce(promise: Promise<unknown>): Promise<boolean> {
  * verified" text (a late gate only reads and takes a rate-limit token);
  * the Zotero requests get what is left of it. When the call returns, what
  * it started and no longer waits for (a scan left behind by a failed
- * search) is cancelled with it. Every failure becomes a fixed text.
+ * search) is cancelled with it. Every failure becomes a fixed text;
+ * `onRefusal` may restate a gate's refusal (zotero_save adds a Czech line
+ * for the user).
  */
-async function runTool(ctx: unknown, where: string, body: (g: ZoteroCaller, io: IoOptions) => Promise<ToolResult>): Promise<ToolResult> {
+async function runTool(
+  ctx: unknown,
+  where: string,
+  body: (g: ZoteroCaller, io: IoOptions) => Promise<ToolResult>,
+  onRefusal?: (reason: ZoteroGateReason, result: ToolResult) => ToolResult,
+): Promise<ToolResult> {
   const budget = new AbortController();
   const timer = setTimeout(() => budget.abort(new DOMException("The Zotero tool budget ran out", "TimeoutError")), LIMITS.toolBudgetMs);
   let onExpiry = () => undefined as void;
   const expired = new Promise<ZoteroGate>((resolve) => {
-    onExpiry = () => resolve({ ok: false, result: accessFailure(budget.signal.reason, "access-timeout") });
+    onExpiry = () => resolve({ ok: false, reason: "access", result: accessFailure(budget.signal.reason, "access-timeout") });
     budget.signal.addEventListener("abort", onExpiry, { once: true });
   });
   try {
     const g = await Promise.race([zoteroGate(ctx), expired]);
     budget.signal.removeEventListener("abort", onExpiry);
-    if (!g.ok) return g.result;
+    if (!g.ok) return onRefusal ? onRefusal(g.reason, g.result) : g.result;
     try {
       return await body(g, { signal: budget.signal });
     } catch (error) {
@@ -2582,7 +2611,7 @@ async function zoteroList(g: ZoteroCaller, args: ListArgs, io: IoOptions): Promi
       return lines;
     });
     const text = [
-      `✓ Zotero: ${named.length} ${named.length === 1 ? "library" : "libraries"} the connected key reads (connected ${czechDate(g.conn.connectedAt) || "?"}; read-only; notes ${g.conn.notes ? "included" : "not shared"}; ${groups}).`,
+      `✓ Zotero: ${named.length} ${named.length === 1 ? "library" : "libraries"} the connected key reads (connected ${czechDate(g.conn.connectedAt) || "?"}; ${g.conn.mode === "write" ? "read, and zotero_save may add new items to the personal library" : "read-only: zotero_save is off"}; notes ${g.conn.notes ? "included" : "not shared"}; ${groups}).`,
       ...(groupsFailed ? [`⚠ The group libraries could not be listed: ${groupsFailed}`] : []),
       ...(shown.length ? [fenceNote(nonce), fence(nonce, data.join("\n")), ...shown.map((r, i) => `${first + i + 1}. library: "${r.id}"`)] : ["(none on this page)"]),
       ...(named.length > first + shown.length ? [`More: ${toolCall("zotero_list", ['list: "libraries"', queryArg, ...limitArg(args.limit), `page: ${args.page + 1}`])}`] : []),
@@ -2789,6 +2818,232 @@ async function zoteroList(g: ZoteroCaller, args: ListArgs, io: IoOptions): Promi
 }
 
 // ---------------------------------------------------------------------------
+// zotero_save — the one write: ONE new item in the personal library
+
+/** The item types zotero_save creates (Zotero's names). */
+const SAVE_TYPES = ["journalArticle", "book", "bookSection", "case", "statute", "webpage", "document"] as const;
+type SaveType = (typeof SAVE_TYPES)[number];
+
+/** Optional fields the tool takes, by their Zotero names; each item type accepts the ones in SAVE_FIELDS. */
+const SAVE_FIELD_NAMES = [
+  "abstractNote",
+  "publicationTitle",
+  "journalAbbreviation",
+  "bookTitle",
+  "websiteTitle",
+  "websiteType",
+  "volume",
+  "issue",
+  "pages",
+  "numPages",
+  "series",
+  "edition",
+  "place",
+  "publisher",
+  "ISBN",
+  "ISSN",
+  "DOI",
+  "court",
+  "docketNumber",
+  "reporter",
+  "reporterVolume",
+  "firstPage",
+  "code",
+  "codeNumber",
+  "publicLawNumber",
+  "section",
+  "session",
+  "history",
+  "language",
+  "shortTitle",
+  "extra",
+] as const;
+type SaveField = (typeof SAVE_FIELD_NAMES)[number];
+
+const COMMON_FIELDS: readonly SaveField[] = ["abstractNote", "language", "shortTitle", "extra"];
+
+/**
+ * Per item type (Zotero schema): the field that holds the title and the
+ * date, the optional fields it accepts, and its creator types — so Zotero
+ * never gets a field it would reject.
+ */
+const SAVE_SCHEMA: Record<SaveType, { title: string; date: string; fields: readonly SaveField[]; creators: readonly string[] }> = {
+  journalArticle: {
+    title: "title",
+    date: "date",
+    fields: [...COMMON_FIELDS, "publicationTitle", "journalAbbreviation", "volume", "issue", "pages", "series", "ISSN", "DOI"],
+    creators: ["author", "contributor", "editor", "translator", "reviewedAuthor"],
+  },
+  book: {
+    title: "title",
+    date: "date",
+    fields: [...COMMON_FIELDS, "series", "volume", "edition", "place", "publisher", "numPages", "ISBN"],
+    creators: ["author", "contributor", "editor", "seriesEditor", "translator"],
+  },
+  bookSection: {
+    title: "title",
+    date: "date",
+    fields: [...COMMON_FIELDS, "bookTitle", "series", "volume", "edition", "place", "publisher", "pages", "ISBN"],
+    creators: ["author", "bookAuthor", "contributor", "editor", "seriesEditor", "translator"],
+  },
+  case: {
+    title: "caseName",
+    date: "dateDecided",
+    fields: [...COMMON_FIELDS, "court", "docketNumber", "reporter", "reporterVolume", "firstPage", "history"],
+    creators: ["author", "counsel", "contributor"],
+  },
+  statute: {
+    title: "nameOfAct",
+    date: "dateEnacted",
+    fields: [...COMMON_FIELDS, "code", "codeNumber", "publicLawNumber", "pages", "section", "session", "history"],
+    creators: ["author", "contributor"],
+  },
+  webpage: {
+    title: "title",
+    date: "date",
+    fields: [...COMMON_FIELDS, "websiteTitle", "websiteType"],
+    creators: ["author", "contributor", "translator"],
+  },
+  document: {
+    title: "title",
+    date: "date",
+    fields: [...COMMON_FIELDS, "publisher"],
+    creators: ["author", "contributor", "editor", "translator", "reviewedAuthor"],
+  },
+};
+
+/** Characters per field: the long ones, and everything else. */
+const SAVE_LONG_FIELDS: Partial<Record<SaveField, number>> = { abstractNote: 10_000, extra: 5_000, history: 2_000 };
+const SAVE_FIELD_CHARS = 500;
+
+interface SaveCreator {
+  type: string;
+  last_name?: string;
+  first_name?: string;
+  name?: string;
+}
+
+type SaveArgs = {
+  item_type: SaveType;
+  title: string;
+  creators?: SaveCreator[];
+  date?: string;
+  url?: string;
+  tags?: string[];
+} & Partial<Record<SaveField, string>>;
+
+/** Czech lines for the user when zotero_save cannot run, by gate step (the English text for the model follows). */
+const SAVE_REFUSAL_CS: Record<ZoteroGateReason | "readOnly", (connect: string) => string> = {
+  unavailable: () => "Ukládání do Zotera není na tomto webu zapnuté.",
+  signIn: () => "Do Zotera jde ukládat jen po osobním přihlášení k Dawmainu, ne přes sdílený přístupový kód.",
+  noPro: () => "Ukládat do Zotera jde jen v režimu Pro.",
+  notConnected: (connect) => `Zotero není připojené. Připojte ho na ${connect} a zvolte „Číst a ukládat“.`,
+  revoked: (connect) => `Klíč k Zoteru přestal platit, nic jsem neuložil. Připojte Zotero znovu na ${connect}.`,
+  unreadable: (connect) => `Připojení Zotera je potřeba obnovit, nic jsem neuložil. Připojte Zotero znovu na ${connect}.`,
+  readOnly: (connect) =>
+    `Zotero je připojené jen ke čtení, do knihovny proto nic neuložím. Ukládání zapnete tak, že Zotero připojíte znovu na ${connect} a zvolíte „Číst a ukládat“.`,
+  rateLimited: () => "Do Zotera teď ukládat nejde, pokusů bylo příliš mnoho. Zkuste to prosím později.",
+  paused: () => "Do Zotera teď ukládat nejde. Zkuste to prosím za pár minut.",
+  access: () => "Do Zotera teď ukládat nejde, přístup se nepodařilo ověřit. Zkuste to prosím za chvíli.",
+};
+
+/** The text for the user goes first, then the refusal for the model. */
+function czechRefusal(cs: string, result: ToolResult): ToolResult {
+  const english = result.content.map((c) => c.text).join("\n");
+  return { ...result, isError: true, content: [{ type: "text", text: `Uložení do Zotera se nepovedlo (řekněte to uživateli): ${cs}\n\n${english}` }] };
+}
+
+/** "2026-10-02 14:03:00": Zotero's own accessDate format (UTC). */
+function zoteroNow(now = new Date()): string {
+  return now.toISOString().slice(0, 19).replace("T", " ");
+}
+
+/**
+ * The item's Zotero JSON from the tool's arguments, or an INPUT_INVALID that
+ * names what to change. Pure. Only the type's own fields, creator types and
+ * at most the given tags go in — no collection, no tag of Dawmain's own —
+ * and accessDate is set when there is a url (Zotero shows "Accessed").
+ */
+export function saveItemData(args: SaveArgs, now = new Date()): Record<string, unknown> {
+  const schema = SAVE_SCHEMA[args.item_type];
+  const title = args.title.trim();
+  if (!title) throw invalid("zotero_save needs a title.", "Give the work's title (for a case the case name or the spisová značka, for a statute the name of the act).");
+  const data: Record<string, unknown> = { itemType: args.item_type, [schema.title]: title };
+
+  const foreign = SAVE_FIELD_NAMES.filter((name) => typeof args[name] === "string" && args[name]!.trim() !== "" && !schema.fields.includes(name));
+  if (foreign.length) {
+    throw invalid(
+      `zotero_save: ${args.item_type} has no field ${foreign.join(", ")}.`,
+      `Fields of ${args.item_type}: ${schema.fields.join(", ")} (plus title, date, url, creators, tags). Put anything else into extra.`,
+    );
+  }
+  for (const name of schema.fields) {
+    const value = args[name]?.trim();
+    if (value) data[name] = value;
+  }
+  const date = args.date?.trim();
+  if (date) data[schema.date] = date;
+  const url = args.url?.trim();
+  if (url) {
+    data.url = url;
+    data.accessDate = zoteroNow(now);
+  }
+
+  const creators: Array<Record<string, string>> = [];
+  for (const c of args.creators ?? []) {
+    if (!schema.creators.includes(c.type)) {
+      throw invalid(`zotero_save: ${args.item_type} has no creator type "${sanitizeLine(c.type, 30)}".`, `Creator types of ${args.item_type}: ${schema.creators.join(", ")}.`);
+    }
+    const name = c.name?.trim();
+    const last = c.last_name?.trim();
+    const first = c.first_name?.trim();
+    if (name) creators.push({ creatorType: c.type, name });
+    else if (last) creators.push({ creatorType: c.type, lastName: last, firstName: first ?? "" });
+    else throw invalid("zotero_save: every creator needs last_name (with first_name) or a single-field name.", 'A person: {last_name: "Novák", first_name: "Jan"}; an institution or court: {name: "Nejvyšší soud"}.');
+  }
+  if (creators.length) data.creators = creators;
+
+  const tags = [...new Set((args.tags ?? []).map((t) => t.trim()).filter(Boolean))];
+  if (tags.length) data.tags = tags.map((tag) => ({ tag }));
+  return data;
+}
+
+async function zoteroSave(g: ZoteroCaller, args: SaveArgs, io: IoOptions): Promise<ToolResult> {
+  if (g.conn.mode !== "write") {
+    return czechRefusal(
+      SAVE_REFUSAL_CS.readOnly(g.connect),
+      errorResult(
+        "NOT_ENTITLED",
+        "Zotero is connected read-only for this account: nothing was saved.",
+        `To allow saving, the user connects Zotero again at ${g.connect} and chooses „Číst a ukládat“. Do not call zotero_save again in this conversation; the other zotero_* tools still read the library.`,
+      ),
+    );
+  }
+  if (!allowToolCall(`zotero-save:${g.userId}`, undefined, LIMITS.savesPerHour)) {
+    return czechRefusal(
+      SAVE_REFUSAL_CS.rateLimited(g.connect),
+      errorResult("UPSTREAM_ERROR", `Too many Zotero saves: at most ${LIMITS.savesPerHour} new items per hour for one user.`, "Nothing was saved. Tell the user and save the rest later."),
+    );
+  }
+  const data = saveItemData(args);
+  if (JSON.stringify(data).length > LIMITS.maxSaveBytes) {
+    throw invalid(`zotero_save: the item is larger than ${Math.round(LIMITS.maxSaveBytes / 1024)} kB.`, "Shorten the abstract or extra and save again.");
+  }
+  // One token per call: zoteroFetch's retry after a short 429/503 reuses it, so Zotero creates the item at most once.
+  const created = await createItem(g.conn.creds, data, newWriteToken(), io);
+  const key = safeKey(created.key);
+  const shown = sanitizeLine(args.title, 200);
+  return textResult(
+    [
+      `✓ Uloženo do Zotera (osobní knihovna): [${args.item_type}] „${shown}“ — klíč ${key}.`,
+      created.webLink ? `Na zotero.org: ${created.webLink}` : "zotero.org did not name the item's page; it is in the personal library under „Moje knihovna“.",
+      `Read it back: ${toolCall("zotero_get_item", [`key: "${key}"`, 'library: "personal"'])}.`,
+      "A NEW item was created (nothing existing was changed). Do not save the same work again; to fix a mistake the user edits the item in Zotero.",
+    ].join("\n"),
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Registration
 
 const librarySchema = z
@@ -2804,7 +3059,7 @@ export function registerZotero(server: McpServer): void {
     {
       title: "Zotero: search the user's own Zotero library",
       description:
-        "SEARCH the user's own Zotero library (cloud zotero.org, read-only; Pro, personal OAuth sign-in, and Zotero connected on the Dawmain website): the books, articles, commentaries, decisions (item type case) and statutes they collected, with their notes, PDF annotations and attachments. This is Zotero's own quick search: mode \"title\" (default) matches titles, creators, years and a note's first line; \"everything\" adds the attachments' full text (Zotero's index) — a title search without any hit is repeated in everything mode automatically (not when item_type leaves out attachments: full-text matches are attachment items). Zotero's search reads no other field and never the body of a note or the text of an annotation (item_type [\"note\"] or [\"annotation\"] lists them, zotero_get_item shows them whole). The query is split at spaces and EVERY word must occur as a substring, case- and diacritics-insensitive — a stem („smlouv“) finds every form; titles take no phrase (quotes are left out there), while in everything mode \"double quotes\" make the attachments' text match the exact phrase; give up to 3 variants in queries. Zotero's search never looks into docket numbers, so a spisová značka in the query (\"25 Cdo 1234/19\") also scans the newest case items and lists matches first, saying how many were scanned; a short one is searched written out too (\"25 Cdo 1234/2019\"). Default scope: the personal library and the group libraries (up to 6); library narrows it. scope: \"top\" = top-level items only, \"trash\" = the trash, \"publications\" = My Publications; include_trashed adds the trash. Filters: collection (key from zotero_list; its subcollections are not included), tags (all must match), tags_any (any), exclude_tags, item_type or exclude_item_type, since with library (only items changed after that library's version, which the answer names). With no query and no filter it lists the library by sort. Results are NOT ranked by relevance (sort, direction); a page holds up to limit items per library, and matches inside attachments and notes are grouped under their work (\"matched in: …\"). Each hit names its zotero_get_item call and, for a decision, the official-text search — cite the decision from there, never from Zotero. If the answer says Zotero is not connected or needs a personal sign-in, do not call zotero_* again.",
+        "SEARCH the user's own Zotero library (cloud zotero.org; Pro, personal OAuth sign-in, and Zotero connected on the Dawmain website): the books, articles, commentaries, decisions (item type case) and statutes they collected, with their notes, PDF annotations and attachments. This is Zotero's own quick search: mode \"title\" (default) matches titles, creators, years and a note's first line; \"everything\" adds the attachments' full text (Zotero's index) — a title search without any hit is repeated in everything mode automatically (not when item_type leaves out attachments: full-text matches are attachment items). Zotero's search reads no other field and never the body of a note or the text of an annotation (item_type [\"note\"] or [\"annotation\"] lists them, zotero_get_item shows them whole). The query is split at spaces and EVERY word must occur as a substring, case- and diacritics-insensitive — a stem („smlouv“) finds every form; titles take no phrase (quotes are left out there), while in everything mode \"double quotes\" make the attachments' text match the exact phrase; give up to 3 variants in queries. Zotero's search never looks into docket numbers, so a spisová značka in the query (\"25 Cdo 1234/19\") also scans the newest case items and lists matches first, saying how many were scanned; a short one is searched written out too (\"25 Cdo 1234/2019\"). Default scope: the personal library and the group libraries (up to 6); library narrows it. scope: \"top\" = top-level items only, \"trash\" = the trash, \"publications\" = My Publications; include_trashed adds the trash. Filters: collection (key from zotero_list; its subcollections are not included), tags (all must match), tags_any (any), exclude_tags, item_type or exclude_item_type, since with library (only items changed after that library's version, which the answer names). With no query and no filter it lists the library by sort. Results are NOT ranked by relevance (sort, direction); a page holds up to limit items per library, and matches inside attachments and notes are grouped under their work (\"matched in: …\"). Each hit names its zotero_get_item call and, for a decision, the official-text search — cite the decision from there, never from Zotero. If the answer says Zotero is not connected or needs a personal sign-in, do not call zotero_* again.",
       inputSchema: z.object({
         // Trimmed first: "   " would pass min(2) and silently list the whole library as "matching".
         query: z.string().trim().min(2).max(300).optional().describe("Words that must all occur (titles, creators, years, a note's first line; with mode \"everything\" also the attachments' full text), or a spisová značka."),
@@ -2911,5 +3166,41 @@ export function registerZotero(server: McpServer): void {
       annotations: READ_ONLY,
     },
     async (args, ctx: unknown) => runTool(ctx, "zotero_list", (g, io) => zoteroList(g, args, io)),
+  );
+
+  const savedText = (max: number) => z.string().trim().min(1).max(max);
+  server.registerTool(
+    "zotero_save",
+    {
+      title: "Zotero: save one new item to the user's library",
+      description: `SAVE one new item into the user's PERSONAL Zotero library — only when the user asks for it (\"ulož do Zotera\") or agreed to your offer, and only for Zotero connected with „Číst a ukládat“ (Pro, personal OAuth sign-in). CREATE ONLY: it adds a new item and never changes, moves or deletes anything already there, and never writes to a group library or a collection. Check with zotero_search first that the work is not already in the library. Fill the record from what the tools returned, never invented: item_type (case = court decision, statute = legislation, journalArticle, book, bookSection, webpage, document), title (for a case the case name, e.g. „Rozsudek Nejvyššího soudu sp. zn. 25 Cdo 1234/2019“; for a statute the name of the act), creators, date (as published; for a case the decision date), url (the official text's public link; accessDate is set to now), abstractNote, and the type's own fields by their Zotero names: case — court, docketNumber (spisová značka), reporter, reporterVolume, firstPage, history; journalArticle — publicationTitle, volume, issue, pages, ISSN, DOI; book — publisher, place, edition, numPages, ISBN, series; bookSection — bookTitle, publisher, place, pages, ISBN; statute — code, codeNumber, publicLawNumber, section, pages; webpage — websiteTitle; document — publisher; any type — language, shortTitle, extra (e.g. „ECLI: …“). tags only when the user names them. At most ${LIMITS.savesPerHour} saves per hour. The answer gives the new item's key and zotero.org link. If it says Zotero is read-only or not connected, tell the user (the answer has the Czech sentence) and do not call zotero_save again.`,
+      inputSchema: z.object({
+        item_type: z.enum(SAVE_TYPES).describe("Zotero item type: case (court decision), statute, journalArticle, book, bookSection, webpage, document."),
+        title: savedText(1_000).describe("The work's title (case: the case name / spisová značka; statute: the name of the act)."),
+        creators: z
+          .array(
+            z.object({
+              type: z.string().regex(/^[a-zA-Z]{2,30}$/, "A Zotero creator type like author or editor.").default("author").describe("author (default), editor, contributor, translator, bookAuthor, seriesEditor, counsel, reviewedAuthor — as the item type allows."),
+              last_name: z.string().trim().max(200).optional(),
+              first_name: z.string().trim().max(200).optional(),
+              name: z.string().trim().max(300).optional().describe("Single-field name (an institution, a court)."),
+            }),
+          )
+          .max(50)
+          .optional()
+          .describe("Authors, editors…: a person as last_name + first_name, an institution as name."),
+        date: savedText(100).optional().describe("Date as published (\"2019\", \"2019-05-14\", \"14. 5. 2019\"); for a case the decision date, for a statute the date enacted."),
+        url: z.string().trim().max(2_000).regex(/^https?:\/\/\S+$/, "An http(s) URL.").optional().describe("The work's own public link (an official text, the publisher), never a zotero.org link."),
+        ...Object.fromEntries(
+          SAVE_FIELD_NAMES.map((name) => [name, savedText(SAVE_LONG_FIELDS[name] ?? SAVE_FIELD_CHARS).optional()]),
+        ) as Record<SaveField, z.ZodOptional<z.ZodString>>,
+        tags: z.array(z.string().trim().min(1).max(200)).max(20).optional().describe("Tags to put on the item — only ones the user asked for."),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    async (args, ctx: unknown) =>
+      runTool(ctx, "zotero_save", (g, io) => zoteroSave(g, args as SaveArgs, io), (reason, result) =>
+        czechRefusal(SAVE_REFUSAL_CS[reason](zoteroConnectUrl(ctx)), result),
+      ),
   );
 }

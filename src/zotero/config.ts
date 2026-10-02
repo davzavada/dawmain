@@ -6,9 +6,14 @@ import { secretsConfigured } from "@/src/secrets/seal";
  * of the integration shares: the OAuth app, the hosts, the politeness
  * limits and the size caps. Nothing here does I/O.
  *
- * The integration is READ-ONLY by design: the OAuth request asks for a key
- * without write access, and a key that turns out to have it is revoked and
- * refused (src/zotero/web.ts).
+ * Two modes, chosen by the user in the modal before connecting (ZoteroMode):
+ * "read" asks for a key without write access, "write" for one that may
+ * also write to the PERSONAL library (groups are only ever read). Writing
+ * is CREATE ONLY — zotero_save adds one new item (src/zotero/client.ts
+ * createItem); nothing here edits, moves or deletes what is in a library.
+ * The effective mode is what the key turned out to allow: a "write" key the
+ * user narrowed on zotero.org is stored as "read", and a key with more
+ * rights than the chosen mode is simply never used to write.
  */
 
 /** The string health, errors and logs are keyed on. */
@@ -22,19 +27,30 @@ export const OAUTH_REQUEST_URL = `${WWW_ORIGIN}/oauth/request`;
 export const OAUTH_AUTHORIZE_URL = `${WWW_ORIGIN}/oauth/authorize`;
 export const OAUTH_ACCESS_URL = `${WWW_ORIGIN}/oauth/access`;
 
+/** What the user lets Dawmain do in the library: "read", or "write" = read and save new items to the personal library. */
+export type ZoteroMode = "read" | "write";
+export const ZOTERO_MODES: readonly ZoteroMode[] = Object.freeze(["read", "write"] as const);
+
+export function isZoteroMode(value: unknown): value is ZoteroMode {
+  return value === "read" || value === "write";
+}
+
 /**
  * Parameters appended to the authorize URL. They pre-fill Zotero's "new
- * key" form: read the personal library and notes, read all groups, never
- * write. `identity` must NEVER be sent — with it Zotero creates no key and
+ * key" form: read the personal library and notes, read all groups (never
+ * write there), and write to the personal library only in "write" mode.
+ * `identity` must NEVER be sent — with it Zotero creates no key and
  * returns the literal "identity" in its place.
  */
-export const AUTHORIZE_PARAMS: ReadonlyArray<readonly [string, string]> = Object.freeze([
-  ["name", "Dawmain"],
-  ["library_access", "1"],
-  ["notes_access", "1"],
-  ["write_access", "0"],
-  ["all_groups", "read"],
-] as const);
+export function authorizeParams(mode: ZoteroMode): ReadonlyArray<readonly [string, string]> {
+  return Object.freeze([
+    ["name", "Dawmain"],
+    ["library_access", "1"],
+    ["notes_access", "1"],
+    ["write_access", mode === "write" ? "1" : "0"],
+    ["all_groups", "read"],
+  ] as const);
+}
 
 /** Honest, contactable, and without "Zotero/" (that marks a sync client at /keys/current). */
 export const ZOTERO_UA = "dawmain/0.2 (+https://dawmain.davidzavada.cz)";
@@ -102,6 +118,10 @@ export const LIMITS = Object.freeze({
   toolCallsPerHour: 120,
   /** Connect attempts per user per hour. */
   connectsPerHour: 10,
+  /** zotero_save: new items per user per hour (inside toolCallsPerHour; its own, tighter bucket). */
+  savesPerHour: 30,
+  /** zotero_save: the JSON of one new item, at most (Zotero's own cap is far higher; a citation record is a few kB). */
+  maxSaveBytes: 64 * 1024,
 });
 
 /** Cache lifetimes (per instance, always keyed by the Clerk user id). */

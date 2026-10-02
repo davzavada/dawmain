@@ -5,9 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ZoteroStatus } from "@/src/zotero/web-types";
 
 /**
- * The Zotero group on the home page (ZoteroGroup in
- * app/_zdroje/own-sources.tsx, rendered by app/page.tsx only where the
- * deployment can connect Zotero): the connection state in one row, and the
+ * The Zotero row of the home page's "Vlastní zdroje" group (OwnSourcesGroup
+ * in app/_zdroje/own-sources.tsx, with `zotero` only where the deployment
+ * can connect Zotero): the connection state in one row, and the
  * way into the Zotero modal (?zotero=1) — or the sign-in for a visitor, who
  * never makes the status request.
  */
@@ -20,13 +20,13 @@ vi.mock("next/link", () => ({
 }));
 
 const store = await import("@/app/_zdroje/store");
-const { OwnSourcesGroup, ZoteroGroup } = await import("@/app/_zdroje/own-sources");
+const { OwnSourcesGroup } = await import("@/app/_zdroje/own-sources");
 const { notifyZoteroChanged } = await import("@/app/_zdroje/zotero-status");
 
 const NOT_CONNECTED: ZoteroStatus = { state: "ok", configured: true, pro: true, connection: null, revoked: null, unreadable: null };
 const CONNECTED: ZoteroStatus = {
   ...NOT_CONNECTED,
-  connection: { username: "jnovakova", userID: 12345, connectedAt: "2026-09-12T10:00:00Z", notes: true, groups: "all" },
+  connection: { username: "jnovakova", userID: 12345, connectedAt: "2026-09-12T10:00:00Z", mode: "read", notes: true, groups: "all" },
 };
 
 let status: { code: number; body: unknown } = { code: 200, body: NOT_CONNECTED };
@@ -86,7 +86,6 @@ const PRO_SUMMARY = {
       quotaPages: 1000,
       pagesUsed: 10,
       counts: { total: 2, ready: 2, review: 0, processing: 0, error: 0, searchable: 2 },
-      memberCount: null,
     },
   ],
 };
@@ -94,27 +93,31 @@ const PRO_SUMMARY = {
 async function render(auth: "signed_in" | "signed_out" = "signed_in"): Promise<void> {
   store.setAuth(auth);
   await act(async () =>
-    root.render(createElement("div", null, createElement(OwnSourcesGroup), createElement(ZoteroGroup))),
+    root.render(createElement(OwnSourcesGroup, { zotero: true })),
   );
   await settle();
 }
 
-function group(): HTMLDivElement | null {
-  return [...host.querySelectorAll<HTMLDivElement>(".source-group")].find((g) => g.querySelector(".source-group-name")?.textContent === "Zotero") ?? null;
+/** The Zotero row; `locked` reads its own lock or, for a visitor, the whole group's. */
+function group(): (HTMLLIElement & { locked: boolean }) | null {
+  const row = [...host.querySelectorAll<HTMLLIElement>(".source")].find((r) => r.querySelector(".source-title")?.textContent?.trim() === "Zotero");
+  if (!row) return null;
+  const locked = row.className.includes("zd-row-locked") || (row.closest(".source-group")?.className.includes("locked") ?? false);
+  return Object.assign(row, { locked });
 }
 
 function statusCalls(): number {
   return calls.filter((c) => c === "/api/zotero/status").length;
 }
 
-describe("the Zotero group on the home page", () => {
+describe("the Zotero row on the home page", () => {
   it("invites a visitor to sign in, locked, without asking the server", async () => {
     const signIn = vi.fn();
     store.registerClerkActions({ signIn, manageAccount: vi.fn(), signOut: vi.fn() });
     await render("signed_out");
     const g = group()!;
     expect(g).not.toBeNull();
-    expect(g.className).toContain("locked");
+    expect(g.locked).toBe(true);
     expect(g.textContent).toContain("V režimu Pro");
     expect(statusCalls()).toBe(0);
     await act(async () => g.querySelector<HTMLButtonElement>("button")!.click());
@@ -124,7 +127,7 @@ describe("the Zotero group on the home page", () => {
   it("offers to connect, and opens the Zotero modal (?zotero=1)", async () => {
     await render();
     const g = group()!;
-    expect(g.className).not.toContain("locked");
+    expect(g.locked).toBe(false);
     expect(g.textContent).toContain("Připojte svou knihovnu");
     await act(async () => g.querySelector<HTMLButtonElement>("button")!.click());
     expect(new URLSearchParams(window.location.search).get("zotero")).toBe("1");
@@ -134,13 +137,13 @@ describe("the Zotero group on the home page", () => {
     status = { code: 200, body: CONNECTED };
     await render();
     const g = group()!;
-    expect(g.className).not.toContain("locked");
+    expect(g.locked).toBe(false);
     expect(g.textContent).toContain("Účet jnovakova");
     expect(g.textContent!.match(/Připojeno/g)).toHaveLength(1);
-    expect(g.querySelector('.zd-badge[data-tone="ok"]')?.textContent).toBe("Připojeno");
+    expect(g.querySelector(".zd-badge")?.textContent).toBe("Připojeno");
   });
 
-  it("asks for the status once, however the Vlastní zdroje summary settles", async () => {
+  it("asks for the status once, however the Vlastní soubory summary settles", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
@@ -152,7 +155,7 @@ describe("the Zotero group on the home page", () => {
       }),
     );
     await render();
-    expect(host.textContent).toContain("Moje zdroje");
+    expect(host.textContent).toContain("2 dokumenty · 10 stran");
     expect(statusCalls()).toBe(1);
   });
 
@@ -160,7 +163,7 @@ describe("the Zotero group on the home page", () => {
     status = { code: 200, body: { ...CONNECTED, pro: false } };
     await render();
     const g = group()!;
-    expect(g.className).toContain("locked");
+    expect(g.locked).toBe(true);
     expect(g.textContent).toContain("bez režimu Pro do knihovny asistent nevidí");
     expect(g.querySelector(".zd-badge")).toBeNull();
   });

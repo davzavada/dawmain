@@ -3,7 +3,6 @@ import { USER_ID_RE } from "@/src/files/config";
 import { openSecret, sealSecret } from "@/src/secrets/seal";
 import { SourceError } from "@/src/sources/shared/errors";
 import {
-  AUTHORIZE_PARAMS,
   LIMITS,
   OAUTH_ACCESS_URL,
   OAUTH_AUTHORIZE_URL,
@@ -12,8 +11,11 @@ import {
   STATE_TTL_SECONDS,
   ZOTERO_KEY_RE,
   ZOTERO_UA,
+  authorizeParams,
   clientKey,
   clientSecret,
+  isZoteroMode,
+  type ZoteroMode,
 } from "./config";
 import { oauthHeader, parseForm } from "./oauth1";
 
@@ -23,14 +25,16 @@ import { oauthHeader, parseForm } from "./oauth1";
  *
  *   1. requestToken(callback)  — POST /oauth/request, signed with the
  *      consumer secret; a temporary token + secret come back;
- *   2. authorizeUrl(token)     — the user approves Dawmain's fixed, read-only
- *      permissions on zotero.org and is sent back with a verifier;
+ *   2. authorizeUrl(token, mode) — the user approves Dawmain's fixed
+ *      permissions for the chosen mode (read, or read + write to the
+ *      personal library) on zotero.org and is sent back with a verifier;
  *   3. accessToken(…, verifier) — POST /oauth/access, signed with both
  *      secrets; the API key comes back as `oauth_token_secret`.
  *
- * Between 1 and 3 the temporary token and its secret wait in a short-lived
- * cookie, sealed and bound to the Clerk user (sealState / openState), so a
- * callback can finish only the connection the same account started.
+ * Between 1 and 3 the temporary token, its secret and the chosen mode wait
+ * in a short-lived cookie, sealed and bound to the Clerk user (sealState /
+ * openState), so a callback can finish only the connection the same account
+ * started, in the mode it chose.
  *
  * Nothing here logs, and no error message carries a token, a secret, a
  * verifier or the key — only HTTP statuses and OAuth problem codes.
@@ -40,6 +44,11 @@ import { oauthHeader, parseForm } from "./oauth1";
 export interface RequestToken {
   token: string;
   tokenSecret: string;
+}
+
+/** A request token back from the state cookie, with the mode the user chose before connecting. */
+export interface OpenedState extends RequestToken {
+  mode: ZoteroMode;
 }
 
 /** What step 3 yields: the API key and whose it is. */
@@ -209,17 +218,20 @@ export async function requestToken(callbackUrl: string): Promise<RequestToken> {
 }
 
 /**
- * Step 2: where to send the user. The permissions are fixed in
- * AUTHORIZE_PARAMS (read-only, notes, all groups) and appended in that
- * order. `identity` is refused outright: with it Zotero creates no key at
- * all and answers the literal "identity" in its place.
+ * Step 2: where to send the user. The permissions are fixed per mode in
+ * authorizeParams (library, notes, all groups read; write to the personal
+ * library only for "write") and appended in that order. `identity` is
+ * refused outright: with it Zotero creates no key at all and answers the
+ * literal "identity" in its place.
  */
-export function authorizeUrl(token: string): string {
+export function authorizeUrl(token: string, mode: ZoteroMode = "read"): string {
   if (!TOKEN_RE.test(token)) throw new Error("Malformed Zotero OAuth request token.");
-  if (AUTHORIZE_PARAMS.some(([name]) => name.toLowerCase() === "identity")) {
-    throw new Error("AUTHORIZE_PARAMS must never ask for `identity` — Zotero would create no key.");
+  if (!isZoteroMode(mode)) throw new Error("Unknown Zotero connection mode.");
+  const params = authorizeParams(mode);
+  if (params.some(([name]) => name.toLowerCase() === "identity")) {
+    throw new Error("authorizeParams must never ask for `identity` — Zotero would create no key.");
   }
-  const query = new URLSearchParams([["oauth_token", token], ...AUTHORIZE_PARAMS.map(([n, v]): [string, string] => [n, v])]);
+  const query = new URLSearchParams([["oauth_token", token], ...params.map(([n, v]): [string, string] => [n, v])]);
   return `${OAUTH_AUTHORIZE_URL}?${query.toString()}`;
 }
 
@@ -272,6 +284,8 @@ interface StatePayload {
   s: string;
   /** Clerk user id that started the connection. */
   u: string;
+  /** The mode chosen in the modal; absent in a cookie sealed before modes existed (= "read"). */
+  m?: ZoteroMode;
   /** Expiry, ms since the epoch. */
   exp: number;
 }
@@ -286,35 +300,40 @@ function stateAad(userId: string): string {
  * Clerk user so a cookie planted in another account's browser does not
  * open there (login CSRF). Expires STATE_TTL_SECONDS after `now`.
  */
-export function sealState(input: { token: string; tokenSecret: string; userId: string; now?: number }): string {
+export function sealState(input: { token: string; tokenSecret: string; userId: string; mode?: ZoteroMode; now?: number }): string {
   if (!USER_ID_RE.test(input.userId)) throw new Error("invalid user id");
+  const mode = input.mode ?? "read";
+  if (!isZoteroMode(mode)) throw new Error("invalid Zotero connection mode");
   const payload: StatePayload = {
     t: input.token,
     s: input.tokenSecret,
     u: input.userId,
+    m: mode,
     exp: (input.now ?? Date.now()) + STATE_TTL_SECONDS * 1000,
   };
   return sealSecret(JSON.stringify(payload), "zotero-oauth-state-v1", stateAad(input.userId));
 }
 
 /**
- * The request token back from the cookie — or null for anything that is
- * not a live state of this user: a missing, foreign, tampered, expired or
- * malformed value, or a deployment whose CREDENTIALS_SECRET changed. Never
- * throws: every failure means the same thing to the callback ("start
- * again").
+ * The request token and the chosen mode back from the cookie — or null
+ * for anything that is not a live state of this user: a missing, foreign,
+ * tampered, expired or malformed value, or a deployment whose
+ * CREDENTIALS_SECRET changed. Never throws: every failure means the same
+ * thing to the callback ("start again"). A state without a mode (sealed
+ * before modes existed) is "read".
  */
-export function openState(value: string | null | undefined, userId: string, now: number = Date.now()): RequestToken | null {
+export function openState(value: string | null | undefined, userId: string, now: number = Date.now()): OpenedState | null {
   if (typeof value !== "string" || value.length > MAX_STATE_CHARS || !USER_ID_RE.test(userId)) return null;
   try {
     const parsed: unknown = JSON.parse(openSecret(value, "zotero-oauth-state-v1", stateAad(userId)));
     if (!parsed || typeof parsed !== "object") return null;
-    const { t, s, u, exp } = parsed as Partial<Record<keyof StatePayload, unknown>>;
+    const { t, s, u, exp, m } = parsed as Partial<Record<keyof StatePayload, unknown>>;
     if (typeof t !== "string" || !TOKEN_RE.test(t) || typeof s !== "string" || !TOKEN_RE.test(s)) return null;
     // The aad already binds the user; the payload says so too, independently.
     if (u !== userId) return null;
     if (typeof exp !== "number" || !Number.isFinite(exp) || now >= exp) return null;
-    return { token: t, tokenSecret: s };
+    // Anything but an explicit "write" is the narrower mode: a state can only ever ask for less.
+    return { token: t, tokenSecret: s, mode: m === "write" ? "write" : "read" };
   } catch {
     return null;
   }

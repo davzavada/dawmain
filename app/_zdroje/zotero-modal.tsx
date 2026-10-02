@@ -2,22 +2,24 @@
 
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { CONTACT } from "@/app/_legal";
-import { ZOTERO_STAV, type ZoteroConnectionView, type ZoteroStatus, type ZoteroStav } from "@/src/zotero/web-types";
+import { ZOTERO_STAV, type ZoteroConnectionView, type ZoteroModeView, type ZoteroStatus, type ZoteroStav } from "@/src/zotero/web-types";
 import { api } from "./api";
 import { Confirm, Dialog } from "./dialog";
-import { formatCount, formatDate, plural } from "./format";
+import { formatDate } from "./format";
 import { ZIcon, type ZIconName } from "./icons";
 import { closeZotero, dropZoteroStav, requestSignIn, useZdroje } from "./store";
 import { asStatus, notifyZoteroChanged, STATUS_URL } from "./zotero-status";
 
 /**
  * The Zotero modal, opened by ZdrojeModals (./modals.tsx) from ?zotero=1:
- * connect the user's zotero.org library (read-only) or see and remove the
+ * connect the user's zotero.org library — choosing first what Dawmain may do
+ * there ("Jen číst" or "Číst a ukládat") — or see, reconnect and remove the
  * connection. The routes are the contract in src/zotero/web-types.ts:
  *
  *   status      GET, JSON — loaded when the modal opens and after Odpojit
- *   connect     a real HTML form POST, not fetch: the server answers 303 to
- *               zotero.org's consent page, and the whole tab goes there
+ *   connect     a real HTML form POST (mode=read|write from the radio
+ *               cards), not fetch: the server answers 303 to zotero.org's
+ *               consent page, and the whole tab goes there
  *   disconnect  POST via api() (JSON)
  *
  * zotero.org and our callback send the user back to /?zotero=1&stav=<outcome>;
@@ -27,25 +29,27 @@ import { asStatus, notifyZoteroChanged, STATUS_URL } from "./zotero-status";
 
 const CONNECT_URL = "/api/zotero/connect";
 const DISCONNECT_URL = "/api/zotero/disconnect";
-const KEYS_URL = "https://www.zotero.org/settings/keys";
 const MAIL_ZOTERO = `mailto:${CONTACT}?subject=${encodeURIComponent("Dawmain - Zotero (Pro)")}`;
 
 const BAD_ANSWER = "Server odpověděl nečekaně. Zkuste to prosím za chvíli.";
 
 type Tone = "ok" | "info" | "bad";
 
-/** One sentence per connect outcome; `pripojeno` is the only success, `zamitnuto` the user's own choice. */
+/**
+ * One sentence per connect outcome; `pripojeno` is the only success (its
+ * text here is the "write" one — bannerText picks PRIPOJENO_READ for a
+ * read-only connection), `zamitnuto` the user's own choice.
+ */
 export const STAV_BANNER: Record<ZoteroStav, { tone: Tone; text: string }> = {
-  pripojeno: { tone: "ok", text: "Zotero je připojené. Asistent teď může hledat a číst ve vaší knihovně." },
+  pripojeno: {
+    tone: "ok",
+    text: "Zotero je připojené. Asistent teď může hledat a číst ve vaší knihovně a ukládat do ní nalezené dokumenty.",
+  },
   zamitnuto: { tone: "info", text: "Na stránce Zotera jste připojení nepotvrdili, nic se nezměnilo." },
   // web.ts: a missing or expired state cookie, one sealed for another account, or a token that does not match.
   vyprselo: {
     tone: "bad",
     text: "Připojování vypršelo nebo se přerušilo. Na potvrzení je 10 minut a dokončit ho jde jen v tomtéž prohlížeči a pod tímtéž účtem. Zkuste to prosím znovu.",
-  },
-  zapis: {
-    tone: "bad",
-    text: "Na stránce Zotera jste povolili i zápis. Takový klíč nepřijímám: neuložil jsem ho a požádal Zotero, aby ho zrušilo. Připojte Zotero znovu a zápis nepovolujte.",
   },
   prihlaseni: {
     tone: "bad",
@@ -62,6 +66,25 @@ export const STAV_BANNER: Record<ZoteroStav, { tone: Tone; text: string }> = {
   },
 };
 
+/** `pripojeno` for a connection that may only read (chosen so, or the key on zotero.org did not allow writing). */
+export const PRIPOJENO_READ = "Zotero je připojené. Asistent teď může hledat a číst ve vaší knihovně.";
+
+/** The banner's sentence: `pripojeno` follows the connection's effective mode. */
+export function bannerText(stav: ZoteroStav, mode: ZoteroModeView | null): string {
+  return stav === "pripojeno" && mode !== "write" ? PRIPOJENO_READ : STAV_BANNER[stav].text;
+}
+
+/** What the user may let Dawmain do, as the radio cards say it ("write" preselected by design). */
+const MODES: ReadonlyArray<{ value: ZoteroModeView; title: string; text: string }> = [
+  { value: "read", title: "Jen číst", text: "Asistent v knihovně hledá a čte. Nic v ní nezapíše, nezmění ani nesmaže." },
+  { value: "write", title: "Číst a ukládat", text: "Asistent může i rovnou do Zotera ukládat nalezené dokumenty." },
+];
+
+/** The second line under "Připojeno jako": "od dneška · čtení a ukládání". */
+export function modeText(mode: ZoteroModeView): string {
+  return mode === "write" ? "čtení a ukládání" : "jen čtení";
+}
+
 function isStav(value: string | null): value is ZoteroStav {
   return value !== null && (ZOTERO_STAV as readonly string[]).includes(value);
 }
@@ -72,19 +95,6 @@ function since(iso: string): string {
   if (date === "dnes") return "od dneška";
   if (date === "včera") return "od včerejška";
   return date ? `od ${date}` : "";
-}
-
-/** The key's group access in words: "všechny", "žádné", the names, or "3 skupiny" when Zotero did not name them. */
-export function groupsText(connection: Pick<ZoteroConnectionView, "groups" | "groupNames">): string {
-  const names = connection.groupNames?.filter((n) => n.trim() !== "") ?? null;
-  if (connection.groups === "none") return "žádné";
-  if (connection.groups === "all") {
-    if (names === null) return "všechny";
-    return names.length > 0 ? `všechny (${names.join(", ")})` : "všechny (zatím nejste členem žádné)";
-  }
-  if (names && names.length > 0) return names.join(", ");
-  const n = connection.groups.length;
-  return n === 0 ? "žádné" : `${formatCount(n)} ${plural(n, "skupina", "skupiny", "skupin")}`;
 }
 
 export function ZoteroModal({ stav }: { stav: string | null }) {
@@ -149,7 +159,7 @@ export function ZoteroModal({ stav }: { stav: string | null }) {
       <Notice
         icon="library"
         title="Přihlaste se"
-        text="Zotero se připojuje k vašemu účtu v Dawmainu. Asistent pak hledá a čte i ve vaší knihovně na zotero.org - jen čte, nic v ní nezmění."
+        text="Zotero se připojuje k vašemu účtu v Dawmainu. Asistent pak hledá a čte i ve vaší knihovně na zotero.org, a když mu to povolíte, ukládá do ní nalezené dokumenty."
       >
         <button type="button" className="zd-btn zd-btn-primary" onClick={requestSignIn}>
           Přihlásit se
@@ -208,8 +218,6 @@ export function ZoteroModal({ stav }: { stav: string | null }) {
         title="Klíč přestal platit"
         who={`Zotero ${status.revoked.username}${from ? ` · neplatí ${from}` : ""}`}
         text="Klíč přestal platit (smazali jste ho v Zoteru?). Připojte Zotero znovu."
-        forget="Odpojit Zotero úplně? Smažu i uložené jméno v Zoteru a čas, kdy klíč přestal platit."
-        onChanged={changed}
       />
     );
   } else if (status.unreadable) {
@@ -218,19 +226,19 @@ export function ZoteroModal({ stav }: { stav: string | null }) {
         title="Připojení je potřeba obnovit"
         who={`Zotero ${status.unreadable.username}`}
         text="Uložený klíč k Zoteru už neumím přečíst, změnilo se zabezpečení serveru. Připojte Zotero znovu. Starý klíč pak smažte v nastavení Zotera, já ho zrušit nemůžu."
-        forget="Odpojit Zotero? Uložený klíč smažu; v Zoteru ho pak smažte sami."
-        onChanged={changed}
       />
     );
   } else {
     body = <NotConnected />;
   }
 
-  const shown = banner ? STAV_BANNER[banner] : null;
+  // "Připojeno" waits for the status: its sentence depends on the mode the connection got.
+  const mode = status?.state === "ok" ? (status.connection?.mode ?? null) : null;
+  const shown = banner && (banner !== "pripojeno" || status) ? { tone: STAV_BANNER[banner].tone, text: bannerText(banner, mode) } : null;
   return (
     <Dialog
       title="Zotero"
-      subtitle="Vaše knihovna ze zotero.org, ve které asistent hledá a čte."
+      subtitle="Vaše knihovna ze zotero.org, ve které asistent hledá, čte a případně ukládá."
       size="narrow"
       onClose={closeZotero}
       footer={
@@ -244,7 +252,7 @@ export function ZoteroModal({ stav }: { stav: string | null }) {
         <div className="zd-zotero-live" aria-live="polite" aria-atomic="true">
           {shown ? (
             <p className="zd-banner zd-zotero-banner" data-tone={shown.tone}>
-              <ZIcon name={shown.tone === "ok" ? "check" : "alert"} />
+              {shown.tone === "ok" ? <ZIcon name="check" /> : <Glyph mark={shown.tone === "bad" ? "!" : "i"} />}
               <span>{shown.text}</span>
             </p>
           ) : null}
@@ -274,13 +282,44 @@ function Notice({ icon, title, text, children }: { icon: ZIconName; title: strin
   );
 }
 
+/** A round "!" or "i" mark (the error and info banners, the invalid-key row): 24×24 grid like ZIcon. */
+function Glyph({ mark, size = 16 }: { mark: "!" | "i"; size?: number }) {
+  return (
+    <svg className="icon" viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="10" />
+      <path d={mark === "!" ? "M12 7v6M12 17h.01" : "M12 11v6M12 7h.01"} />
+    </svg>
+  );
+}
+
 /**
- * "Připojit Zotero": a navigation to the connect route, which answers 303 to
- * zotero.org (never fetch — the consent page must open in this tab, and the
- * state cookie comes with that answer).
+ * The mode choice and "Připojit Zotero" in one form: a navigation to the
+ * connect route with mode=read|write from real radio inputs, which answers
+ * 303 to zotero.org (never fetch — the consent page must open in this tab,
+ * and the state cookie comes with that answer). `onCancel` (reconnecting)
+ * adds Zrušit; `autoFocus` puts focus on the chosen card when the form
+ * replaces the button that opened it.
  */
-function ConnectForm({ label = "Připojit Zotero", quiet = false }: { label?: string; quiet?: boolean }) {
+function ConnectChoice({
+  initial = "write",
+  label = "Připojit Zotero",
+  onCancel,
+  autoFocus = false,
+}: {
+  initial?: ZoteroModeView;
+  label?: string;
+  onCancel?: () => void;
+  autoFocus?: boolean;
+}) {
+  const [mode, setMode] = useState<ZoteroModeView>(initial);
   const [sent, setSent] = useState(false);
+  const labelId = useId();
+  const name = useId();
+  const chosen = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (autoFocus) chosen.current?.focus();
+    // Mount only: re-focusing on every choice would fight the arrow keys.
+  }, []);
   useEffect(() => {
     // Back from zotero.org can restore this page from the back-forward cache, button still "sent".
     function onShow(event: PageTransitionEvent) {
@@ -291,36 +330,78 @@ function ConnectForm({ label = "Připojit Zotero", quiet = false }: { label?: st
   }, []);
   return (
     <form method="post" action={CONNECT_URL} className="zd-zotero-form" onSubmit={() => setSent(true)}>
-      <button type="submit" className={quiet ? "zd-btn" : "zd-btn zd-btn-primary zd-btn-tall"} disabled={sent}>
-        {sent ? "Přecházím na Zotero…" : label}
-      </button>
+      <p className="zd-zotero-label" id={labelId}>
+        Co smí Dawmain v knihovně dělat
+      </p>
+      <div className="zd-zotero-modes" role="radiogroup" aria-labelledby={labelId}>
+        {MODES.map((m) => (
+          <label key={m.value} className="zd-zotero-mode" data-selected={mode === m.value ? "true" : undefined}>
+            <input
+              ref={mode === m.value ? chosen : undefined}
+              type="radio"
+              name={`mode-${name}`}
+              value={m.value}
+              checked={mode === m.value}
+              onChange={() => setMode(m.value)}
+            />
+            <span className="zd-zotero-mode-text">
+              <span className="zd-zotero-mode-title">{m.title}</span>
+              <span className="zd-zotero-mode-desc">{m.text}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+      {/* The radios' own names are unique per form (two forms may coexist briefly); the route reads `mode`. */}
+      <input type="hidden" name="mode" value={mode} />
+      <p className="zd-zotero-hint">Volbu změníte kdykoli tak, že Zotero připojíte znovu.</p>
+      <div className="zd-zotero-actions">
+        <button type="submit" className="zd-btn zd-btn-primary zd-btn-tall" disabled={sent}>
+          {sent ? "Přecházím na Zotero…" : label}
+        </button>
+        {onCancel ? (
+          <button type="button" className="zd-btn zd-btn-tall" onClick={onCancel} disabled={sent}>
+            Zrušit
+          </button>
+        ) : null}
+      </div>
     </form>
   );
 }
 
-/** What happens on zotero.org — said before the button, so the consent page is no surprise. */
-function ConsentNote() {
+/**
+ * "Připojit znovu": the button, or — once clicked — the mode choice in its
+ * place (Zrušit brings the button back, focused). `children` are the other
+ * actions of the row (Odpojit), hidden while choosing.
+ */
+function Reconnectable({ initial, children }: { initial: ZoteroModeView; children?: ReactNode }) {
+  const [choosing, setChoosing] = useState(false);
+  const [refocus, setRefocus] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!refocus || choosing) return;
+    setRefocus(false);
+    trigger.current?.focus();
+  }, [refocus, choosing]);
+  if (choosing) {
+    return (
+      <ConnectChoice
+        initial={initial}
+        label="Připojit znovu"
+        autoFocus
+        onCancel={() => {
+          setChoosing(false);
+          setRefocus(true);
+        }}
+      />
+    );
+  }
   return (
-    <p className="zd-zotero-note">
-      Po kliknutí přejdete na zotero.org. Zotero se zeptá, jestli Dawmainu povolíte klíč ke čtení knihovny, poznámek a skupin. Rozsah tam můžete
-      zúžit (poznámky, skupiny), čtení vaší knihovny ale nechte povolené. Zápis nepovolujte - klíč s právem zápisu Dawmain odmítne.
-    </p>
-  );
-}
-
-function LegalNote() {
-  return (
-    <p className="zd-zotero-note">
-      Podrobnosti najdete v{" "}
-      <a href="/soukromi" target="_blank" rel="noopener">
-        zásadách ochrany osobních údajů
-      </a>{" "}
-      a v{" "}
-      <a href="/podminky" target="_blank" rel="noopener">
-        podmínkách užití
-      </a>
-      .
-    </p>
+    <div className="zd-zotero-actions zd-zotero-divided">
+      <button ref={trigger} type="button" className="zd-btn zd-btn-tall" onClick={() => setChoosing(true)}>
+        Připojit znovu
+      </button>
+      {children}
+    </div>
   );
 }
 
@@ -330,149 +411,66 @@ function NotConnected() {
     <>
       <section className="zd-zotero-section" aria-labelledby={headingId}>
         <h3 id={headingId}>Připojte svou knihovnu Zotero</h3>
-        <p className="zd-intro">
-          Asistent pak při rešerši hledá a čte i ve vaší knihovně na zotero.org, včetně skupin, kterých jste členem - vedle oficiálních databází a
-          Vlastních zdrojů.
+        <p className="zd-zotero-lead">
+          Asistent pak při rešerši hledá a čte i ve vaší knihovně na zotero.org, včetně skupin, kterých jste členem – vedle oficiálních databází.
         </p>
       </section>
-      <section className="zd-zotero-section">
-        <h4 className="zd-section-name">Co Dawmain na dotaz asistenta přečte</h4>
-        <ul className="zd-zotero-list">
-          <li>
-            <strong>záznamy</strong> - název, autoři, spisová značka a další údaje, štítky, kolekce a uložená hledání,
-          </li>
-          <li>
-            <strong>poznámky a anotace</strong>,
-          </li>
-          <li>
-            <strong>text příloh</strong> - z indexu Zotera, a když tam chybí nebo je neúplný, z PDF v úložišti Zotera: to převedu na text a soubor hned
-            zahodím.
-          </li>
-        </ul>
-      </section>
-      <ul className="zd-zotero-promises" aria-label="Na co se můžete spolehnout">
-        <li>
-          <ZIcon name="check" />
-          <span>
-            <strong>Jen čte.</strong> Ve vaší knihovně nic nezapíše, nezmění ani nesmaže.
-          </span>
-        </li>
-        <li>
-          <ZIcon name="check" />
-          <span>Klíč k Zoteru ukládám zašifrovaný. Odpojit Zotero můžete kdykoli tady, klíč smazat i sami v nastavení Zotera.</span>
-        </li>
-        <li>
-          <ZIcon name="check" />
-          <span>Do knihovny se dostane jen asistent přihlášený vaším účtem, ne přes sdílený přístupový kód.</span>
-        </li>
-      </ul>
-      <div className="zd-zotero-section zd-zotero-connect">
-        <ConsentNote />
-        <ConnectForm />
-        <LegalNote />
-      </div>
+      <ConnectChoice />
     </>
   );
 }
 
 function Connected({ connection, warning, onChanged }: { connection: ZoteroConnectionView; warning: string | null; onChanged: () => void }) {
   const headingId = useId();
-  const narrowed = !connection.notes || connection.groups !== "all";
   const from = since(connection.connectedAt);
+  const mode = modeText(connection.mode);
   return (
     <>
       <section className="zd-zotero-section" aria-labelledby={headingId}>
         <div className="zd-zotero-who">
           <span className="zd-zotero-mark" aria-hidden="true">
-            <ZIcon name="library" />
+            <ZIcon name="library" size={18} />
           </span>
           <div className="zd-zotero-who-text">
             <h3 id={headingId}>
               Připojeno jako <span className="zd-zotero-user">{connection.username}</span>
             </h3>
-            <p className="zd-muted zd-small">{from ? `${from} · jen ke čtení` : "jen ke čtení"}</p>
+            <p className="zd-zotero-sub">{from ? `${from} · ${mode}` : mode}</p>
           </div>
         </div>
       </section>
       {warning ? <p className="zd-banner">{warning}</p> : null}
-      <section className="zd-zotero-section">
-        <h4 className="zd-section-name">Co klíč smí číst</h4>
-        <dl className="zd-meta-list">
-          <div>
-            <dt>Vaše knihovna</dt>
-            <dd>ano</dd>
-          </div>
-          <div>
-            <dt>Poznámky</dt>
-            <dd>{connection.notes ? "ano" : "ne"}</dd>
-          </div>
-          <div>
-            <dt>Skupiny</dt>
-            <dd>{groupsText(connection)}</dd>
-          </div>
-          <div>
-            <dt>Zápis</dt>
-            <dd>ne</dd>
-          </div>
-        </dl>
-        {narrowed ? (
-          <div className="zd-zotero-more">
-            <p className="zd-zotero-note">Rozsah změníte tak, že Zotero připojíte znovu a na jeho stránce povolíte víc. Starý klíč pak smažu a požádám Zotero, aby ho zrušilo.</p>
-            <ConnectForm label="Připojit znovu" quiet />
-          </div>
-        ) : null}
-      </section>
-      <section className="zd-zotero-section">
-        <h4 className="zd-section-name">Odpojení</h4>
-        <p className="zd-zotero-note">
-          Odpojením klíč smažu a požádám Zotero, aby ho zrušilo. Ve vaší knihovně se nic nezmění. Klíč můžete smazat i sami v nastavení Zotera:{" "}
-          <a href={KEYS_URL} target="_blank" rel="noopener noreferrer">
-            zotero.org/settings/keys
-          </a>
-          .
-        </p>
+      <Reconnectable initial={connection.mode}>
         <Disconnect question="Odpojit Zotero? Asistent pak do vaší knihovny neuvidí. Připojit ji můžete kdykoli znovu." onDone={onChanged} />
-      </section>
-      <LegalNote />
+      </Reconnectable>
     </>
   );
 }
 
-/** Revoked or unreadable: why, the connect form again, and a way to remove the leftover record. */
-function Reconnect({ title, who, text, forget, onChanged }: { title: string; who: string; text: string; forget: string; onChanged: () => void }) {
+/** Revoked or unreadable: why, and "Připojit znovu" (the mode choice). A new key replaces the leftover record. */
+function Reconnect({ title, who, text }: { title: string; who: string; text: string }) {
   const headingId = useId();
   return (
     <>
       <section className="zd-zotero-section" aria-labelledby={headingId}>
         <div className="zd-zotero-who">
           <span className="zd-zotero-mark" data-tone="bad" aria-hidden="true">
-            <ZIcon name="alert" />
+            <Glyph mark="i" size={18} />
           </span>
           <div className="zd-zotero-who-text">
             <h3 id={headingId}>{title}</h3>
-            <p className="zd-muted zd-small">{who}</p>
+            <p className="zd-zotero-sub">{who}</p>
           </div>
         </div>
-        <p className="zd-intro">{text}</p>
+        <p className="zd-zotero-lead">{text}</p>
       </section>
-      <div className="zd-zotero-section zd-zotero-connect">
-        <ConsentNote />
-        <ConnectForm />
-        <p className="zd-zotero-note">
-          Staré klíče najdete v{" "}
-          <a href={KEYS_URL} target="_blank" rel="noopener noreferrer">
-            nastavení Zotera
-          </a>
-          .
-        </p>
-      </div>
-      <Disconnect question={forget} onDone={onChanged} quiet />
+      <Reconnectable initial="write" />
     </>
   );
 }
 
 /** "Odpojit" behind an inline confirmation; POST disconnect, then the parent reloads the status. */
-function Disconnect({ question, onDone, quiet = false }: { question: string; onDone: () => void; quiet?: boolean }) {
+function Disconnect({ question, onDone }: { question: string; onDone: () => void }) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -504,11 +502,11 @@ function Disconnect({ question, onDone, quiet = false }: { question: string; onD
   }
 
   return (
-    <div className="zd-zotero-disconnect">
+    <div className="zd-zotero-disconnect" data-confirming={confirming ? "true" : undefined}>
       {confirming ? (
         <Confirm question={question} confirmLabel="Odpojit" busy={busy} onConfirm={() => void disconnect()} onCancel={cancel} />
       ) : (
-        <button ref={trigger} type="button" className={quiet ? "zd-btn zd-btn-quiet" : "zd-btn"} onClick={() => setConfirming(true)}>
+        <button ref={trigger} type="button" className="zd-btn zd-btn-tall" onClick={() => setConfirming(true)}>
           Odpojit
         </button>
       )}

@@ -9,6 +9,7 @@ import {
   buildTagsPath,
   citeItems,
   countFulltext,
+  createItem,
   downloadPdf,
   exportItems,
   getChildren,
@@ -25,6 +26,7 @@ import {
   listGroups,
   listSearches,
   listTags,
+  newWriteToken,
   parseCollection,
   parseFulltext,
   parseGroup,
@@ -217,6 +219,7 @@ describe("parseKeyInfo", () => {
       files: true,
       notes: true,
       write: false,
+      userWrite: false,
       groups: "all",
     });
   });
@@ -230,14 +233,16 @@ describe("parseKeyInfo", () => {
     expect(info.write).toBe(false);
   });
 
-  it("flags a key that can write in ANY group as write", () => {
+  it("flags a key that can write in ANY group as write, and one that can write the personal library as userWrite", () => {
     const info = parseKeyInfo(fixture("keys-current-write.json"));
     expect(info.write).toBe(true);
+    // A group's write right is not the personal library's: zotero_save writes only there.
+    expect(info.userWrite).toBe(false);
     expect(info.groups).toBe("all");
     const allWrite = parseKeyInfo({ userID: 1, access: { user: { library: true }, groups: { all: { library: true, write: true } } } });
     expect(allWrite.write).toBe(true);
     const userWrite = parseKeyInfo({ userID: 1, access: { user: { library: true, write: true } } });
-    expect(userWrite).toMatchObject({ write: true, groups: "none", files: true });
+    expect(userWrite).toMatchObject({ write: true, userWrite: true, groups: "none", files: true });
   });
 
   it("never returns the key itself", () => {
@@ -1312,5 +1317,87 @@ describe("searchItems: a repeated page is revalidated, not re-run", () => {
       await searchItems(CREDS, ME, params);
       expect(headerOf(calls[1], "if-modified-since-version")).toBeNull();
     }
+  });
+});
+
+describe("createItem: the one write", () => {
+  const DATA = { itemType: "case", caseName: "Rozsudek NS 25 Cdo 1234/2019", court: "Nejvyšší soud" };
+  const TOKEN = "0123456789abcdef0123456789abcdef";
+  const created = (key = "ABCD2345") =>
+    json({
+      successful: { "0": { key, version: 12, links: { alternate: { href: `https://www.zotero.org/zuser/items/${key}` } }, data: { key, ...DATA } } },
+      success: { "0": key },
+      unchanged: {},
+      failed: {},
+    });
+
+  it("POSTs one item as a JSON array to the personal library under the write token, and returns its key and page", async () => {
+    const calls = stubFetch(() => created());
+    const result = await createItem(CREDS, DATA, TOKEN);
+    expect(result).toEqual({ key: "ABCD2345", version: 12, webLink: "https://www.zotero.org/zuser/items/ABCD2345" });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe(`${API_ORIGIN}/users/475425/items`);
+    expect(calls[0].init.method).toBe("POST");
+    expect(headerOf(calls[0], "zotero-write-token")).toBe(TOKEN);
+    expect(headerOf(calls[0], "content-type")).toBe("application/json");
+    expect(headerOf(calls[0], "zotero-api-key")).toBe(CREDS.key);
+    expect(JSON.parse(String(calls[0].init.body))).toEqual([DATA]);
+    expect(newWriteToken()).toMatch(/^[0-9a-f]{32}$/);
+    expect(newWriteToken()).not.toBe(newWriteToken());
+  });
+
+  it("only creates: refuses data with a key, version or parent before any request", async () => {
+    const calls = stubFetch(() => created());
+    for (const bad of [{ ...DATA, key: "ABCD2345" }, { ...DATA, version: 3 }, { ...DATA, parentItem: "ABCD2345" }, { title: "no type" }]) {
+      await expect(createItem(CREDS, bad as never, TOKEN)).rejects.toThrow();
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it("retries after a short 429 with the SAME token and body (Zotero applies a token once)", async () => {
+    const calls = stubFetch((_c, n) => (n === 1 ? new Response(null, { status: 429, headers: { "retry-after": "0" } }) : created()));
+    await expect(createItem(CREDS, DATA, TOKEN)).resolves.toMatchObject({ key: "ABCD2345" });
+    expect(calls).toHaveLength(2);
+    expect(headerOf(calls[1], "zotero-write-token")).toBe(TOKEN);
+    expect(calls[1].init.body).toBe(calls[0].init.body);
+  });
+
+  it("never repeats a POST without a write token, and never sends a malformed one", async () => {
+    const { zoteroFetch } = await import("@/src/zotero/http");
+    const calls = stubFetch(() => new Response(null, { status: 429, headers: { "retry-after": "0" } }));
+    await expect(zoteroFetch(CREDS, "/users/475425/items", { method: "POST", json: [DATA] })).rejects.toThrow(SourceError);
+    expect(calls).toHaveLength(1);
+    await expect(zoteroFetch(CREDS, "/users/475425/items", { method: "POST", json: [DATA], headers: { "Zotero-Write-Token": "x" } })).rejects.toThrow(/32 hex/);
+    await expect(zoteroFetch(CREDS, "/users/475425/items", { method: "GET", json: [DATA] })).rejects.toThrow(/POST/);
+  });
+
+  it("412 (the token was used) says the save may have gone through; a failed object names Zotero's reason", async () => {
+    stubFetch(() => new Response("Write token already used", { status: 412 }));
+    const used = await rejection(createItem(CREDS, DATA, TOKEN));
+    expect(used.message).toMatch(/412/);
+    expect(used.hint).toMatch(/zotero_search/);
+
+    stubFetch(() => json({ successful: {}, success: {}, unchanged: {}, failed: { "0": { key: null, code: 400, message: "'foo' is not a valid field for type 'case'" } } }));
+    const failed = await rejection(createItem(CREDS, DATA, TOKEN));
+    expect(failed.kind).toBe("INPUT_INVALID");
+    expect(failed.message).toContain("is not a valid field");
+  });
+
+  it("a key without write access: 403 is NOT_ENTITLED and says nothing was saved; Invalid key stays ZoteroKeyInvalidError", async () => {
+    stubFetch(() => new Response("Write access denied", { status: 403 }));
+    const denied = await rejection(createItem(CREDS, DATA, TOKEN));
+    expect(denied.kind).toBe("NOT_ENTITLED");
+    expect(denied.hint).toContain("Nothing was saved");
+    stubFetch(() => new Response("Invalid key", { status: 403 }));
+    await expect(createItem(CREDS, DATA, TOKEN)).rejects.toMatchObject({ name: "ZoteroKeyInvalidError" });
+  });
+
+  it("an answer without a valid new key is drift; a missing page link is null", async () => {
+    stubFetch(() => json({ successful: {}, success: { "0": "not-a-key" }, failed: {} }));
+    await expect(createItem(CREDS, DATA, TOKEN)).rejects.toMatchObject({ kind: "PARSE_DRIFT" });
+    stubFetch(() => json({ success: { "0": "WXYZ6789" }, failed: {} }));
+    await expect(createItem(CREDS, DATA, TOKEN)).resolves.toEqual({ key: "WXYZ6789", version: null, webLink: null });
+    stubFetch(() => json({ successful: { "0": { key: "WXYZ6789", version: 3, links: { alternate: { href: "https://evil.example/x" } } } }, failed: {} }));
+    await expect(createItem(CREDS, DATA, TOKEN)).resolves.toMatchObject({ webLink: null });
   });
 });

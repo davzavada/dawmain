@@ -20,7 +20,8 @@ import type { ZoteroCreds } from "./types";
  * - Politeness per Zotero user (Zotero allows 5 concurrent requests per
  *   user, shared with the user's desktop sync): at most
  *   LIMITS.concurrencyPerUser at a time on this instance, one retry of a GET
- *   after a short Retry-After, and a 429's Retry-After remembered as the
+ *   — or of a POST that carries a Zotero-Write-Token — after a short
+ *   Retry-After, and a 429's Retry-After remembered as the
  *   user's not-before time, so queued and later requests do not go straight
  *   back (a short one is waited out, a long one fails fast).
  * - Politeness per instance: Backoff (and a 503's Retry-After) speaks of
@@ -44,7 +45,14 @@ import type { ZoteroCreds } from "./types";
 export type ZoteroAuth = ZoteroCreds | { key: string; userID?: number };
 
 export interface ZoteroFetchOptions {
-  method?: "GET" | "DELETE";
+  method?: "GET" | "DELETE" | "POST";
+  /**
+   * POST only: a JSON body (sent as application/json). A POST is repeated
+   * after a short 429/503 only when it carries a Zotero-Write-Token header:
+   * Zotero applies a token at most once (a repeat of a write it already
+   * applied answers 412), so the retry cannot create a second item.
+   */
+  json?: unknown;
   /** Extra request headers (If-Modified-Since-Version…). They cannot replace the key, the API version or the UA. */
   headers?: Record<string, string>;
   /** The caller's budget (a tool call's), combined with the per-request timeout. */
@@ -91,7 +99,9 @@ export class ZoteroBodyTooLargeError extends SourceError {
 }
 
 /** Reserved headers the caller cannot set. */
-const RESERVED_HEADERS = new Set(["zotero-api-key", "zotero-api-version", "user-agent", "authorization"]);
+const RESERVED_HEADERS = new Set(["zotero-api-key", "zotero-api-version", "user-agent", "authorization", "content-type"]);
+/** Zotero-Write-Token: 32 hex characters (the write_requests docs). */
+const WRITE_TOKEN_RE = /^[0-9a-f]{32}$/;
 /** An "Invalid key" 403 is a short sentence; this much is enough to recognise it. */
 const FORBIDDEN_BODY_BYTES = 4 * 1024;
 
@@ -269,6 +279,11 @@ export async function zoteroFetch(auth: ZoteroAuth, pathAndQuery: string, opts: 
   const url = apiUrl(pathAndQuery);
   if (typeof auth.key !== "string" || !auth.key) throw new Error("zoteroFetch needs an API key.");
   const method = opts.method ?? "GET";
+  if ((method === "POST") !== (opts.json !== undefined)) throw new Error("zoteroFetch: a JSON body goes with POST, and only with POST.");
+  const writeToken = Object.entries(opts.headers ?? {}).find(([name]) => name.toLowerCase() === "zotero-write-token")?.[1];
+  if (writeToken !== undefined && !WRITE_TOKEN_RE.test(writeToken)) throw new Error("zoteroFetch: a Zotero-Write-Token is 32 hex characters.");
+  // Serialized once: a retry sends exactly the same body under the same token.
+  const body = opts.json !== undefined ? JSON.stringify(opts.json) : undefined;
   const maxBytes = opts.maxBytes ?? LIMITS.maxJsonBytes;
   const fp = keyFingerprint(auth.key);
   if (keyRejected(fp)) throw new ZoteroKeyInvalidError();
@@ -283,7 +298,7 @@ export async function zoteroFetch(auth: ZoteroAuth, pathAndQuery: string, opts: 
       // have had the same key rejected, or tripped the breaker.
       if (keyRejected(fp)) throw new ZoteroKeyInvalidError();
       if (zoteroBreakerOpen()) throw breakerError();
-      const res = await send(url, method, auth.key, opts, maxBytes);
+      const res = await send(url, method, auth.key, opts, maxBytes, body);
       // Backoff: Zotero is overloaded — fewer requests from this instance as a whole, not from one user.
       pause(INSTANCE, (parseSeconds(res.headers.get("backoff")) ?? 0) * 1000);
 
@@ -293,8 +308,10 @@ export async function zoteroFetch(auth: ZoteroAuth, pathAndQuery: string, opts: 
         // fail fast on a long wait). A 429 is Zotero's per-user rate limit;
         // a 503 means the API itself is unavailable, for everyone.
         if (waitMs !== null) pause(res.status === 429 ? who : INSTANCE, waitMs);
-        // Only a GET is repeated: a DELETE that Zotero may have applied is the caller's call.
-        if (attempt === 1 && method === "GET" && waitMs !== null && waitMs <= LIMITS.maxRetryAfterMs) {
+        // Only a GET, or a POST under a write token, is repeated: a DELETE that Zotero may have applied is the
+        // caller's call, and a POST without a token could create its item twice.
+        const repeatable = method === "GET" || (method === "POST" && writeToken !== undefined);
+        if (attempt === 1 && repeatable && waitMs !== null && waitMs <= LIMITS.maxRetryAfterMs) {
           await sleep(waitMs, opts.signal);
           continue;
         }
@@ -304,6 +321,14 @@ export async function zoteroFetch(auth: ZoteroAuth, pathAndQuery: string, opts: 
         if (/invalid key/i.test(res.text())) {
           noteInvalidKey(fp);
           throw new ZoteroKeyInvalidError();
+        }
+        if (method === "POST") {
+          throw new SourceError(
+            SOURCE,
+            "NOT_ENTITLED",
+            `${SOURCE} refused the write (HTTP 403): the connected key may not write to this library.`,
+            "Nothing was saved. The user can allow saving by connecting Zotero again in Dawmain with „Číst a ukládat“ and leaving write access ticked on zotero.org.",
+          );
         }
         throw new SourceError(
           SOURCE,
@@ -341,11 +366,19 @@ function apiUrl(pathAndQuery: string): URL {
 }
 
 /** One network exchange under the per-request timeout, the body read under the cap. */
-async function send(url: URL, method: "GET" | "DELETE", key: string, opts: ZoteroFetchOptions, maxBytes: number): Promise<ZoteroResponse> {
+async function send(
+  url: URL,
+  method: "GET" | "DELETE" | "POST",
+  key: string,
+  opts: ZoteroFetchOptions,
+  maxBytes: number,
+  body: string | undefined,
+): Promise<ZoteroResponse> {
   const headers = new Headers();
   for (const [name, value] of Object.entries(opts.headers ?? {})) {
     if (!RESERVED_HEADERS.has(name.toLowerCase())) headers.set(name, value);
   }
+  if (body !== undefined) headers.set("Content-Type", "application/json");
   headers.set("Zotero-API-Key", key);
   headers.set("Zotero-API-Version", "3");
   headers.set("User-Agent", ZOTERO_UA);
@@ -357,7 +390,7 @@ async function send(url: URL, method: "GET" | "DELETE", key: string, opts: Zoter
   );
   const signal = opts.signal ? AbortSignal.any([opts.signal, timer.signal]) : timer.signal;
   try {
-    const response = await fetch(url.href, { method, headers, redirect: "manual", signal });
+    const response = await fetch(url.href, { method, headers, body, redirect: "manual", signal });
     const status = response.status;
     let bytes: Uint8Array;
     if (status === 204 || status === 304 || (status >= 300 && status < 400) || status === 429 || status >= 500) {

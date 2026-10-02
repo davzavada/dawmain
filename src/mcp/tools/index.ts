@@ -162,8 +162,9 @@ function registrations(zotero: boolean): Registration[] {
 
 /**
  * `zotero`: whether to offer the zotero_* tools (the user's own cloud Zotero
- * library, read-only, gated per call like files_*). Only a deployment with
- * the Zotero OAuth app and CREDENTIALS_SECRET can connect a library at all;
+ * library — read, plus zotero_save that only creates — gated per call like
+ * files_*). Only a deployment with the Zotero OAuth app and
+ * CREDENTIALS_SECRET can connect a library at all;
  * elsewhere the tools stay out of tools/list, as their lines stay out of the
  * server instructions (buildInstructions in src/mcp/server.ts).
  */

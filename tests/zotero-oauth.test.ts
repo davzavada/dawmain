@@ -2,13 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sealSecret } from "@/src/secrets/seal";
 import { SourceError } from "@/src/sources/shared/errors";
 import {
-  AUTHORIZE_PARAMS,
   LIMITS,
   OAUTH_ACCESS_URL,
   OAUTH_AUTHORIZE_URL,
   OAUTH_REQUEST_URL,
   STATE_TTL_SECONDS,
   ZOTERO_UA,
+  authorizeParams,
 } from "@/src/zotero/config";
 import { accessToken, authorizeUrl, openState, requestToken, sealState } from "@/src/zotero/oauth";
 import { baseString, hmacSha1 } from "@/src/zotero/oauth1";
@@ -193,8 +193,9 @@ describe("requestToken", () => {
 });
 
 describe("authorizeUrl", () => {
-  it("is the authorize endpoint with the token and exactly the fixed, read-only parameters, in order", () => {
+  it("is the authorize endpoint with the token and exactly the fixed read parameters, in order (read is the default)", () => {
     const url = new URL(authorizeUrl(REQUEST_TOKEN));
+    expect(authorizeUrl(REQUEST_TOKEN, "read")).toBe(url.href);
     expect(`${url.origin}${url.pathname}`).toBe(OAUTH_AUTHORIZE_URL);
     expect([...url.searchParams]).toEqual([
       ["oauth_token", REQUEST_TOKEN],
@@ -204,15 +205,30 @@ describe("authorizeUrl", () => {
       ["write_access", "0"],
       ["all_groups", "read"],
     ]);
-    expect([...url.searchParams].slice(1)).toEqual(AUTHORIZE_PARAMS.map(([n, v]) => [n, v]));
+    expect([...url.searchParams].slice(1)).toEqual(authorizeParams("read").map(([n, v]) => [n, v]));
     expect(url.searchParams.get("write_access")).toBe("0");
     expect(url.hash).toBe("");
   });
 
+  it("asks for write access only in write mode — to the personal library; the groups stay read", () => {
+    const url = new URL(authorizeUrl(REQUEST_TOKEN, "write"));
+    expect([...url.searchParams]).toEqual([
+      ["oauth_token", REQUEST_TOKEN],
+      ["name", "Dawmain"],
+      ["library_access", "1"],
+      ["notes_access", "1"],
+      ["write_access", "1"],
+      ["all_groups", "read"],
+    ]);
+    expect(() => authorizeUrl(REQUEST_TOKEN, "admin" as never)).toThrow();
+  });
+
   it("never asks for identity", () => {
-    const url = authorizeUrl(REQUEST_TOKEN);
-    expect(url).not.toMatch(/identity/i);
-    expect(new URL(url).searchParams.has("identity")).toBe(false);
+    for (const mode of ["read", "write"] as const) {
+      const url = authorizeUrl(REQUEST_TOKEN, mode);
+      expect(url).not.toMatch(/identity/i);
+      expect(new URL(url).searchParams.has("identity")).toBe(false);
+    }
   });
 
   it("refuses a malformed token rather than injecting parameters", () => {
@@ -331,8 +347,19 @@ describe("OAuth state cookie", () => {
     expect(value).toMatch(/^v1\.[A-Za-z0-9_-]+$/);
     expect(value).not.toContain(REQUEST_SECRET);
     expect(value).not.toContain(REQUEST_TOKEN);
-    expect(openState(value, USER, NOW)).toEqual({ token: REQUEST_TOKEN, tokenSecret: REQUEST_SECRET });
-    expect(openState(value, USER, NOW + STATE_TTL_SECONDS * 1000 - 1)).toEqual({ token: REQUEST_TOKEN, tokenSecret: REQUEST_SECRET });
+    expect(openState(value, USER, NOW)).toEqual({ token: REQUEST_TOKEN, tokenSecret: REQUEST_SECRET, mode: "read" });
+    expect(openState(value, USER, NOW + STATE_TTL_SECONDS * 1000 - 1)).toEqual({ token: REQUEST_TOKEN, tokenSecret: REQUEST_SECRET, mode: "read" });
+  });
+
+  it("carries the chosen mode; a state without one (sealed before modes) or with an odd one is read", () => {
+    const write = sealState({ token: REQUEST_TOKEN, tokenSecret: REQUEST_SECRET, userId: USER, mode: "write", now: NOW });
+    expect(openState(write, USER, NOW)).toEqual({ token: REQUEST_TOKEN, tokenSecret: REQUEST_SECRET, mode: "write" });
+    const seal = (payload: object) => sealSecret(JSON.stringify(payload), "zotero-oauth-state-v1", `state:${USER}`);
+    const base = { t: REQUEST_TOKEN, s: REQUEST_SECRET, u: USER, exp: NOW + 60_000 };
+    expect(openState(seal(base), USER, NOW)?.mode).toBe("read");
+    expect(openState(seal({ ...base, m: "WRITE" }), USER, NOW)?.mode).toBe("read");
+    expect(openState(seal({ ...base, m: true }), USER, NOW)?.mode).toBe("read");
+    expect(() => sealState({ token: REQUEST_TOKEN, tokenSecret: REQUEST_SECRET, userId: USER, mode: "all" as never })).toThrow();
   });
 
   it("expires after STATE_TTL_SECONDS", () => {
@@ -343,7 +370,7 @@ describe("OAuth state cookie", () => {
 
   it("defaults to the current time", () => {
     const value = sealState({ token: REQUEST_TOKEN, tokenSecret: REQUEST_SECRET, userId: USER });
-    expect(openState(value, USER)).toEqual({ token: REQUEST_TOKEN, tokenSecret: REQUEST_SECRET });
+    expect(openState(value, USER)).toEqual({ token: REQUEST_TOKEN, tokenSecret: REQUEST_SECRET, mode: "read" });
     expect(openState(value, USER, Date.now() + STATE_TTL_SECONDS * 1000 + 1)).toBeNull();
   });
 

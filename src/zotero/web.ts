@@ -8,9 +8,9 @@ import { clerkConfigured, tokenMatches } from "@/src/mcp/config";
 import { proRefusal } from "@/src/mcp/pro-caller";
 import { SourceError } from "@/src/sources/shared/errors";
 import { getKeyInfo, listGroups, revokeKey } from "./client";
-import { CALLBACK_PATH, LIMITS, STATE_COOKIE, STATE_TTL_SECONDS, zoteroConfigured } from "./config";
+import { CALLBACK_PATH, LIMITS, STATE_COOKIE, STATE_TTL_SECONDS, zoteroConfigured, type ZoteroMode } from "./config";
 import { ZoteroKeyInvalidError, zoteroBreakerOpen } from "./http";
-import { accessToken, authorizeUrl, openState, requestToken, sealState, type AccessGrant, type RequestToken } from "./oauth";
+import { accessToken, authorizeUrl, openState, requestToken, sealState, type AccessGrant, type OpenedState } from "./oauth";
 import { deleteConnection, keyFingerprint, loadConnection, markRevoked, saveConnection } from "./store";
 import type { ConnectionState, KeyInfo, ZoteroCreds } from "./types";
 import type { ZoteroConnectionView, ZoteroStatus, ZoteroStav } from "./web-types";
@@ -20,16 +20,19 @@ import type { ZoteroConnectionView, ZoteroStatus, ZoteroStav } from "./web-types
  * handlers in app/api/zotero/{connect,callback,disconnect,status}; the
  * contract with the modal is ./web-types.ts.
  *
- *   connect     a form POST (a navigation): Origin, configuration, session,
- *               Pro (the Vlastní zdroje entitlement), LIMITS.connectsPerHour
- *               → a temporary token from zotero.org, sealed into a cookie
- *               that only the callback path gets → 303 to zotero.org.
+ *   connect     a form POST (a navigation) carrying mode=read|write: Origin,
+ *               configuration, session, Pro (the Vlastní zdroje
+ *               entitlement), LIMITS.connectsPerHour → a temporary token
+ *               from zotero.org, sealed with the mode into a cookie that
+ *               only the callback path gets → 303 to zotero.org, asking for
+ *               write access to the personal library only in "write" mode.
  *   callback    zotero.org sends the browser back: the cookie opens for the
  *               signed-in user and holds the token in the query → the key
- *               → /keys/current: the same Zotero user, the personal library
- *               and NO write access anywhere (a key that can write is revoked
- *               and never stored) → stored sealed; the key it replaces is
- *               revoked.
+ *               → /keys/current: the same Zotero user and the personal
+ *               library → stored sealed with its effective mode ("write"
+ *               only when chosen AND the key may write to the personal
+ *               library; a key with more rights than chosen is kept and
+ *               simply never used to write); the key it replaces is revoked.
  *   disconnect  fetch: revoke the key on zotero.org, best effort, and forget it.
  *   status      fetch: what the modal shows — never the key or its fingerprint.
  *
@@ -150,12 +153,32 @@ async function revokeQuietly(creds: ZoteroCreds, where: string, timeoutMs: numbe
 // ---------------------------------------------------------------------------
 // POST /api/zotero/connect
 
+/** Bound on the connect form's body: it carries one short field. */
+const MAX_CONNECT_BODY_CHARS = 1_024;
+
+/**
+ * The mode the connect form chose: "write" only when the form says exactly
+ * that; a missing, unknown or unreadable body is "read" — the narrower
+ * permission is what a malformed request gets.
+ */
+export async function connectMode(request: Request): Promise<ZoteroMode> {
+  try {
+    const type = request.headers.get("content-type")?.toLowerCase() ?? "";
+    if (!type.startsWith("application/x-www-form-urlencoded")) return "read";
+    const body = await request.text();
+    if (body.length > MAX_CONNECT_BODY_CHARS) return "read";
+    return new URLSearchParams(body).get("mode") === "write" ? "write" : "read";
+  } catch {
+    return "read";
+  }
+}
+
 /**
  * "Připojit Zotero": 303 to zotero.org's authorize page with Dawmain's
- * fixed read-only permissions (authorizeUrl), the temporary token sealed
- * into the state cookie for this user; any refusal is a 303 back to the
- * modal. Only a cross-site POST gets a 403 (JSON, like /api/files): the
- * page that sent it is not ours to redirect.
+ * fixed permissions for the chosen mode (authorizeUrl), the temporary
+ * token and the mode sealed into the state cookie for this user; any
+ * refusal is a 303 back to the modal. Only a cross-site POST gets a 403
+ * (JSON, like /api/files): the page that sent it is not ours to redirect.
  */
 export async function connectResponse(request: Request): Promise<Response> {
   if (!sameOrigin(request)) return filesError(403, MESSAGES.badOrigin);
@@ -185,9 +208,10 @@ export async function connectResponse(request: Request): Promise<Response> {
   if (!allowToolCall(`zotero-connect:${userId}`, undefined, LIMITS.connectsPerHour)) return seeOther(backTo("limit"));
   const origin = publicOrigin(request);
   if (!origin) return seeOther(backTo("chyba"));
+  const mode = await connectMode(request);
   try {
     const { token, tokenSecret } = await requestToken(origin + CALLBACK_PATH);
-    return seeOther(authorizeUrl(token), stateCookie(sealState({ token, tokenSecret, userId })));
+    return seeOther(authorizeUrl(token, mode), stateCookie(sealState({ token, tokenSecret, userId, mode })));
   } catch (error) {
     logZoteroError("connect.request", error);
     return seeOther(backTo("chyba"));
@@ -197,8 +221,8 @@ export async function connectResponse(request: Request): Promise<Response> {
 // ---------------------------------------------------------------------------
 // GET /api/zotero/callback
 
-/** The request token of a state cookie that opens for this user, else null. */
-function stateFor(request: Request, userId: string): RequestToken | null {
+/** The request token (and mode) of a state cookie that opens for this user, else null. */
+function stateFor(request: Request, userId: string): OpenedState | null {
   for (const value of cookieValues(request, STATE_COOKIE)) {
     const state = openState(value, userId);
     if (state) return state;
@@ -274,13 +298,14 @@ async function callbackFlow(request: Request): Promise<Response> {
   }
   // Not the key this flow asked for: another Zotero user's.
   if (info.userID !== grant.userID) return refuse("chyba", "mismatch");
-  // Read-only by design: a key that can write anywhere (the user ticked it
-  // on zotero.org's form) is revoked on the spot and never stored. Checked
-  // before the library, so such a key always gets the banner that says how
-  // to fix it.
-  if (info.write) return refuse("zapis", "write");
   // Without the personal library the tools would have nothing to start from.
   if (!info.library) return refuse("chyba", "no-library");
+  // The user may have changed the permissions on zotero.org's form. Writing
+  // needs both: the user chose it here, and the key may write to the
+  // personal library. Anything else is "read" — a key that can write more
+  // than chosen (in the library or a group) is kept, and nothing ever writes
+  // with it; a "write" choice whose key cannot write is shown as "jen čtení".
+  const mode: ZoteroMode = state.mode === "write" && info.userWrite ? "write" : "read";
 
   try {
     const previous: ConnectionState = await loadConnection(userId);
@@ -291,6 +316,8 @@ async function callbackFlow(request: Request): Promise<Response> {
       key: grant.key,
       notes: info.notes,
       groups: info.groups,
+      mode,
+      keyWrite: info.userWrite,
     });
     // Saved first: should the save fail, the old key must still work. A
     // re-approval that returned the same key must not revoke it.
@@ -345,6 +372,7 @@ function connectionView(conn: Extract<ConnectionState, { state: "ok" }>["conn"])
     username: conn.username,
     userID: conn.creds.userID,
     connectedAt: conn.connectedAt,
+    mode: conn.mode,
     notes: conn.notes,
     groups: Array.isArray(conn.groups) ? [...conn.groups] : conn.groups,
   };

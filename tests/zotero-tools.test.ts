@@ -19,6 +19,8 @@ vi.mock("@/src/zotero/client", async (importOriginal) => ({
   getDeleted: vi.fn(),
   getFulltextIndex: vi.fn(),
   countFulltext: vi.fn(),
+  createItem: vi.fn(),
+  newWriteToken: vi.fn(() => "0123456789abcdef0123456789abcdef"),
   // Pure: the real ones.
   tagColorsOf: (await importOriginal<typeof import("@/src/zotero/client")>()).tagColorsOf,
   zoteroQuery: (await importOriginal<typeof import("@/src/zotero/client")>()).zoteroQuery,
@@ -108,7 +110,7 @@ const API_KEY = "AbCdEfGhIjKlMnOpQrStUvWx";
 function connection(groups: "all" | "none" | number[] = "none", notes = true): ConnectionState {
   return {
     state: "ok",
-    conn: { creds: { userID: ZUSER, key: API_KEY }, username: "zuser", notes, groups, connectedAt: "2026-09-01T10:00:00Z", fp: "fp-current" },
+    conn: { creds: { userID: ZUSER, key: API_KEY }, username: "zuser", notes, groups, connectedAt: "2026-09-01T10:00:00Z", fp: "fp-current", mode: "read" },
   };
 }
 
@@ -251,10 +253,12 @@ afterEach(() => {
 // Registration
 
 describe("registration", () => {
-  it("registers five read-only tools (Zotero is external: open world) and does no I/O", () => {
-    expect(Object.keys(tools).sort()).toEqual(["zotero_cite", "zotero_get_item", "zotero_get_text", "zotero_list", "zotero_search"]);
-    for (const tool of Object.values(tools)) {
-      expect(tool.config.annotations).toEqual(READ_ONLY);
+  it("registers five read-only tools and zotero_save, which writes but never destroys (Zotero is external: open world), and does no I/O", () => {
+    expect(Object.keys(tools).sort()).toEqual(["zotero_cite", "zotero_get_item", "zotero_get_text", "zotero_list", "zotero_save", "zotero_search"]);
+    for (const [name, tool] of Object.entries(tools)) {
+      expect(tool.config.annotations, name).toEqual(
+        name === "zotero_save" ? { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } : READ_ONLY,
+      );
       expect(tool.config).not.toHaveProperty("outputSchema");
     }
     expectNoZoteroRequest();

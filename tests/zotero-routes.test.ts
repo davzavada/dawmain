@@ -105,10 +105,10 @@ const ENV: Record<string, string> = {
 };
 
 const ACCESS: Record<string, Access> = {
-  [USER]: buildAccess({ id: USER, publicMetadata: { pro: true } }, []),
-  [OTHER]: buildAccess({ id: OTHER, publicMetadata: { pro: true } }, []),
-  [NO_PRO]: buildAccess({ id: NO_PRO, publicMetadata: {} }, []),
-  [BANNED]: buildAccess({ id: BANNED, banned: true, publicMetadata: { pro: true } }, []),
+  [USER]: buildAccess({ id: USER, publicMetadata: { pro: true } }),
+  [OTHER]: buildAccess({ id: OTHER, publicMetadata: { pro: true } }),
+  [NO_PRO]: buildAccess({ id: NO_PRO, publicMetadata: {} }),
+  [BANNED]: buildAccess({ id: BANNED, banned: true, publicMetadata: { pro: true } }),
 };
 
 // ---------------------------------------------------------------------------
@@ -191,8 +191,13 @@ const SAME_ORIGIN_HEADERS: Record<string, string> = {
   "sec-fetch-site": "same-origin",
 };
 
-const connectRequest = (headers: Record<string, string> = SAME_ORIGIN_HEADERS) =>
-  new Request(`${ORIGIN}/api/zotero/connect`, { method: "POST", headers });
+/** The modal's form POST; `mode` is what the radio cards chose (undefined: no body at all). */
+const connectRequest = (headers: Record<string, string> = SAME_ORIGIN_HEADERS, mode?: string) =>
+  new Request(`${ORIGIN}/api/zotero/connect`, {
+    method: "POST",
+    headers: mode === undefined ? headers : { ...headers, "content-type": "application/x-www-form-urlencoded" },
+    body: mode === undefined ? undefined : new URLSearchParams({ mode }).toString(),
+  });
 
 const disconnectRequest = (headers: Record<string, string> = SAME_ORIGIN_HEADERS) =>
   new Request(`${ORIGIN}/api/zotero/disconnect`, { method: "POST", headers });
@@ -206,8 +211,8 @@ function callbackRequest(query: Record<string, string>, cookie?: string): Reques
 }
 
 /** The Cookie header a browser sends back for a state sealed for `userId`. */
-const stateCookieFor = (userId = USER, token = REQUEST_TOKEN, tokenSecret = REQUEST_SECRET) =>
-  `__session=clerk-session; ${STATE_COOKIE}=${sealState({ token, tokenSecret, userId })}`;
+const stateCookieFor = (userId = USER, token = REQUEST_TOKEN, tokenSecret = REQUEST_SECRET, mode: "read" | "write" = "read") =>
+  `__session=clerk-session; ${STATE_COOKIE}=${sealState({ token, tokenSecret, userId, mode })}`;
 
 const APPROVED = { oauth_token: REQUEST_TOKEN, oauth_verifier: VERIFIER };
 
@@ -246,8 +251,8 @@ function expectStateCookieCleared(res: Response): void {
   expect(attrs.get("path")).toBe(CALLBACK_PATH);
 }
 
-async function connected(key = API_KEY, groups: "all" | "none" | number[] = "all"): Promise<void> {
-  await saveConnection(USER, { userID: ZOTERO_USER, username: "zuser", key, notes: true, groups });
+async function connected(key = API_KEY, groups: "all" | "none" | number[] = "all", mode: "read" | "write" = "read"): Promise<void> {
+  await saveConnection(USER, { userID: ZOTERO_USER, username: "zuser", key, notes: true, groups, mode, keyWrite: mode === "write" });
   vi.mocked(saveConnection).mockClear();
   mocks.updateUserMetadata.mockClear();
 }
@@ -266,7 +271,7 @@ beforeEach(() => {
   __resetZoteroHttpForTests();
   __resetZoteroClientForTests();
   __resetZoteroStoreForTests();
-  __setAccessLoaderForTests(async (userId) => ACCESS[userId] ?? buildAccess({ id: userId }, []));
+  __setAccessLoaderForTests(async (userId) => ACCESS[userId] ?? buildAccess({ id: userId }));
   vi.clearAllMocks();
 
   users = new Map([
@@ -315,24 +320,12 @@ afterEach(() => {
 
 describe("proRefusal — the website and the MCP gate agree on Pro", () => {
   it("gives personalProCaller's reason for every kind of account", async () => {
-    const team = buildAccess({ id: USER, publicMetadata: {} }, [
-      { role: "org:member", organization: { id: "org_team", name: "Tým", slug: "tym", publicMetadata: { pro: true } } },
-    ]);
-    const lapsedTeam = buildAccess({ id: USER, publicMetadata: {} }, [
-      { role: "org:member", organization: { id: "org_team", name: "Tým", slug: "tym", publicMetadata: {} } },
-    ]);
-    // Clerk's feature switches (publicMetadata.features): Zotero follows its own, not Vlastní zdroje's.
-    const zoteroOff = buildAccess({ id: USER, publicMetadata: { pro: true, features: { zotero: false } } }, []);
-    const teamZoteroOff = buildAccess({ id: USER, publicMetadata: {} }, [
-      { role: "org:member", organization: { id: "org_team", name: "Tým", slug: "tym", publicMetadata: { pro: true, features: { zotero: false } } } },
-    ]);
-    const filesOff = buildAccess({ id: USER, publicMetadata: { pro: true, features: { files: false } } }, []);
+    // Clerk's feature switches (publicMetadata.features): Zotero follows its own, not that of Vlastní soubory.
+    const zoteroOff = buildAccess({ id: USER, publicMetadata: { pro: true, features: { zotero: false } } });
+    const filesOff = buildAccess({ id: USER, publicMetadata: { pro: true, features: { files: false } } });
     const cases: Array<[Access, ReturnType<typeof proRefusal>]> = [
       [ACCESS[USER], null],
-      [team, null],
-      [lapsedTeam, "no-pro"],
       [zoteroOff, "no-pro"],
-      [teamZoteroOff, "no-pro"],
       [filesOff, null],
       [ACCESS[NO_PRO], "no-pro"],
       [ACCESS[BANNED], "banned"],
@@ -360,7 +353,7 @@ describe("POST /api/zotero/connect", () => {
     expect(calls).toEqual([]);
   });
 
-  it("sends the browser to zotero.org's authorize page with the fixed read-only permissions and no identity", async () => {
+  it("without a mode (or an odd one): zotero.org's authorize page with the fixed read permissions and no identity", async () => {
     const res = await connectPOST(connectRequest());
     expect(res.status).toBe(303);
     const location = res.headers.get("location")!;
@@ -378,6 +371,22 @@ describe("POST /api/zotero/connect", () => {
     expect([...params.keys()].map((k) => k.toLowerCase())).not.toContain("identity");
     expect(location).not.toContain(REQUEST_SECRET);
     expect(res.headers.get("cache-control")).toBe("private, no-store");
+    for (const odd of ["read", "WRITE", "write ", ""]) {
+      const again = await connectPOST(connectRequest(SAME_ORIGIN_HEADERS, odd));
+      expect(new URL(again.headers.get("location")!).searchParams.get("write_access"), odd).toBe("0");
+    }
+  });
+
+  it("mode=write asks for write access to the personal library (groups stay read) and seals the mode into the state", async () => {
+    const res = await connectPOST(connectRequest(SAME_ORIGIN_HEADERS, "write"));
+    const params = new URL(res.headers.get("location")!).searchParams;
+    expect(params.get("write_access")).toBe("1");
+    expect(params.get("all_groups")).toBe("read");
+    const cookie = cookieAttributes(setCookies(res)[0]);
+    expect(openState(cookie.value, USER)).toMatchObject({ token: REQUEST_TOKEN, mode: "write" });
+    // A read connect seals read.
+    const read = await connectPOST(connectRequest(SAME_ORIGIN_HEADERS, "read"));
+    expect(openState(cookieAttributes(setCookies(read)[0]).value, USER)).toMatchObject({ mode: "read" });
   });
 
   it("asks zotero.org to call back on the request's own origin (a preview), not the production domain", async () => {
@@ -420,7 +429,7 @@ describe("POST /api/zotero/connect", () => {
     expect(value).toMatch(/^v1\.[A-Za-z0-9_-]+$/);
     expect(cookies[0]).not.toContain(REQUEST_SECRET);
     expect(cookies[0]).not.toContain(REQUEST_TOKEN);
-    expect(openState(value, USER)).toEqual({ token: REQUEST_TOKEN, tokenSecret: REQUEST_SECRET });
+    expect(openState(value, USER)).toEqual({ token: REQUEST_TOKEN, tokenSecret: REQUEST_SECRET, mode: "read" });
     expect(openState(value, OTHER)).toBeNull();
   });
 
@@ -562,6 +571,8 @@ describe("GET /api/zotero/callback", () => {
       key: API_KEY,
       notes: true,
       groups: "all",
+      mode: "read",
+      keyWrite: false,
     });
     expect(mocks.updateUserMetadata).toHaveBeenCalledTimes(1);
     const everything = JSON.stringify([...users.entries()]);
@@ -596,22 +607,45 @@ describe("GET /api/zotero/callback", () => {
     expect(callsTo(OAUTH_ACCESS_URL)).toEqual([]);
   });
 
-  it("revokes a key that can write and never stores it (stav=zapis)", async () => {
-    zotero.keyInfo = () => json(fixture("keys-current-write.json"));
-    const res = await callbackGET(callbackRequest(APPROVED, stateCookieFor()));
-    expect(stavOf(res)).toBe("zapis");
-    expectStateCookieCleared(res);
-    expect(revokedKeys()).toEqual([API_KEY]);
-    expect(vi.mocked(saveConnection)).not.toHaveBeenCalled();
-    expect(mocks.updateUserMetadata).not.toHaveBeenCalled();
-    expect(storedRecord()).toBeUndefined();
+  const writeKey = () => {
+    const base = fixture("keys-current.json") as Json;
+    return { ...base, access: { ...(base.access as Json), user: { library: true, files: true, notes: true, write: true } } };
+  };
+
+  it("chose write and the key may write to the personal library: stored in write mode", async () => {
+    zotero.keyInfo = () => json(writeKey());
+    const res = await callbackGET(callbackRequest(APPROVED, stateCookieFor(USER, REQUEST_TOKEN, REQUEST_SECRET, "write")));
+    expect(stavOf(res)).toBe("pripojeno");
+    expect(revokedKeys()).toEqual([]);
+    expect(vi.mocked(saveConnection).mock.calls[0][1]).toMatchObject({ mode: "write", keyWrite: true });
+    const state = await loadConnection(USER);
+    expect(state.state === "ok" && state.conn.mode).toBe("write");
   });
 
-  it("still answers stav=zapis when the revocation itself fails", async () => {
-    zotero.keyInfo = () => json(fixture("keys-current-write.json"));
-    zotero.revoke = () => new Response("down", { status: 500 });
-    expect(stavOf(await callbackGET(callbackRequest(APPROVED, stateCookieFor())))).toBe("zapis");
-    expect(storedRecord()).toBeUndefined();
+  it("chose write but the key cannot write there (unticked on zotero.org, or only a group): stored as read", async () => {
+    for (const body of [fixture("keys-current.json"), fixture("keys-current-write.json")]) {
+      vi.mocked(saveConnection).mockClear();
+      zotero.keyInfo = () => json(body);
+      expect(stavOf(await callbackGET(callbackRequest(APPROVED, stateCookieFor(USER, REQUEST_TOKEN, REQUEST_SECRET, "write"))))).toBe("pripojeno");
+      expect(vi.mocked(saveConnection).mock.calls[0][1]).toMatchObject({ mode: "read", keyWrite: false });
+      const state = await loadConnection(USER);
+      expect(state.state === "ok" && state.conn.mode).toBe("read");
+    }
+  });
+
+  it("chose read but the key may write anyway: no longer refused — kept, in read mode, never revoked", async () => {
+    for (const body of [writeKey(), fixture("keys-current-write.json")]) {
+      calls = [];
+      vi.mocked(saveConnection).mockClear();
+      zotero.keyInfo = () => json(body);
+      const res = await callbackGET(callbackRequest(APPROVED, stateCookieFor()));
+      expect(stavOf(res)).toBe("pripojeno");
+      expectStateCookieCleared(res);
+      expect(revokedKeys()).toEqual([]);
+      expect(vi.mocked(saveConnection).mock.calls[0][1]).toMatchObject({ mode: "read" });
+      const state = await loadConnection(USER);
+      expect(state.state === "ok" && state.conn.mode).toBe("read");
+    }
   });
 
   it("revokes and refuses a key of another Zotero user, or without the personal library (stav=chyba)", async () => {
@@ -796,6 +830,7 @@ describe("GET /api/zotero/status", () => {
         username: "zuser",
         userID: ZOTERO_USER,
         connectedAt: expect.any(String),
+        mode: "read",
         notes: true,
         groups: "all",
         groupNames: ["Advokátní kancelář – judikatura", "Seminář občanské právo"],
@@ -805,6 +840,18 @@ describe("GET /api/zotero/status", () => {
     });
     expectNoSecrets(text);
     expect(callsTo(`${API_ORIGIN}/users/${ZOTERO_USER}/groups?limit=100&start=0`)).toHaveLength(1);
+  });
+
+  it("exposes the effective mode: write for a write connection, read for one stored before modes", async () => {
+    await connected(API_KEY, "all", "write");
+    const { body } = await status();
+    expect(body.state === "ok" && body.connection?.mode).toBe("write");
+
+    const { mode: _m, keyWrite: _k, ...legacy } = storedRecord()!;
+    users.set(USER, { ...users.get(USER), zotero: legacy });
+    __resetZoteroStoreForTests();
+    const again = await status();
+    expect(again.body.state === "ok" && again.body.connection?.mode).toBe("read");
   });
 
   it("names only the groups the key may read", async () => {
@@ -827,7 +874,7 @@ describe("GET /api/zotero/status", () => {
     expect(body.state === "ok" && body.connection).toMatchObject({ groups: "none" });
     expect(calls).toEqual([]);
 
-    ACCESS[USER] = buildAccess({ id: USER, publicMetadata: {} }, []);
+    ACCESS[USER] = buildAccess({ id: USER, publicMetadata: {} });
     __setAccessLoaderForTests(async (userId) => ACCESS[userId]);
     try {
       await connected();
@@ -835,7 +882,7 @@ describe("GET /api/zotero/status", () => {
       expect(body).toMatchObject({ pro: false, connection: { username: "zuser" } });
       expect(calls).toEqual([]);
     } finally {
-      ACCESS[USER] = buildAccess({ id: USER, publicMetadata: { pro: true } }, []);
+      ACCESS[USER] = buildAccess({ id: USER, publicMetadata: { pro: true } });
     }
   });
 
@@ -898,7 +945,7 @@ describe("the Zotero routes' contract", () => {
     const source = read("src/zotero/web.ts");
     const emitted = new Set([...source.matchAll(/\b(?:backTo|done|refuse|callbackDone)\("([a-z]+)"/g)].map((m) => m[1]));
     expect([...emitted].sort()).toEqual(
-      ["chyba", "limit", "nedostupne", "nepro", "pripojeno", "prihlaseni", "vyprselo", "zamitnuto", "zapis"].sort(),
+      ["chyba", "limit", "nedostupne", "nepro", "pripojeno", "prihlaseni", "vyprselo", "zamitnuto"].sort(),
     );
     for (const stav of emitted) expect(ZOTERO_STAV).toContain(stav);
   });
