@@ -903,6 +903,7 @@ tělo 403 „Invalid key“ a host přesměrování `/file` (pak zúžit
 3. Řádka v `src/mcp/tools/index.ts`, kanárek do `src/mcp/tools/probe.ts`,
    testy do `tests/`, jméno nástroje do `EXPECTED_TOOLS` v `scripts/smoke.mjs`.
 4. Pokud se zdroj má objevit na stránce se semaforem, řádka do `DATABASES`
-   v `src/mcp/status.ts` — stránka i její fallback čtou ten samý seznam.
+   v `src/mcp/databases.ts` — odznaky i statická `GET /api/status` (kontrola
+   nejvýš jednou denně, mimo Clerk) čtou ten samý seznam.
 5. Anotace, `isoDate`, `find`/stránkovací popisy a `fail()` ber
    z `src/mcp/tools/shared.ts`, nekopíruj je.
