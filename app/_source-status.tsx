@@ -101,7 +101,7 @@ const LOOK: Record<string, { icon: IconName; color: string }> = {
   ns: { icon: "court", color: "var(--indigo)" },
   nss: { icon: "scale", color: "var(--teal)" },
   nalus: { icon: "shield", color: "var(--rose)" },
-  justice: { icon: "court", color: "#52525b" },
+  justice: { icon: "court", color: "var(--soft)" },
   curia: { icon: "eu", color: "var(--blue)" },
   "esbirka-api": { icon: "list", color: "var(--green)" },
   "cellar-sparql": { icon: "eu", color: "var(--blue)" },
@@ -148,7 +148,7 @@ export function SourceList() {
         </div>
         <ul>
           {items.map((row) => {
-            const look = LOOK[row.id] ?? { icon: "list", color: "#52525b" };
+            const look = LOOK[row.id] ?? { icon: "list", color: "var(--soft)" };
             return (
               <li key={row.id} className="source">
                 <Icon name={look.icon} style={{ color: look.color }} />

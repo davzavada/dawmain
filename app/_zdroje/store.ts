@@ -67,11 +67,13 @@ function pageHint(): Hint | null {
 }
 
 let hintInitials: string | null = null;
+let hintImage: string | null = null;
 
-/** The account menu reports the signed-in user's initials for the next page load. */
-export function rememberInitials(initials: string): void {
-  if (initials === hintInitials) return;
+/** The account menu reports the signed-in user's initials and picture for the next page load. */
+export function rememberAccount(initials: string, image: string | null): void {
+  if (initials === hintInitials && image === hintImage) return;
   hintInitials = initials;
+  hintImage = image;
   writeHint();
 }
 
@@ -86,7 +88,7 @@ function writeHint(): void {
     const summary = state.summary?.state === "ok" || state.summary?.state === "unavailable" ? state.summary : null;
     // Before the initials and the summary are known there is nothing new to keep.
     if (hintInitials === null && summary === null) return;
-    document.cookie = hintCookie({ initials: hintInitials ?? "?", summary }, secure);
+    document.cookie = hintCookie({ initials: hintInitials ?? "?", image: hintImage, summary }, secure);
   } catch {
     // Cookies blocked: the page just loads the way it did before the hint.
   }
@@ -120,6 +122,11 @@ export function useZdroje(): State {
 /** The remembered initials while Clerk's user is not loaded yet (signed in only, so never during hydration). */
 export function useHintInitials(): string | null {
   return pageHint()?.initials ?? null;
+}
+
+/** The remembered picture while Clerk's user is not loaded yet (as useHintInitials). */
+export function useHintImage(): string | null {
+  return pageHint()?.image ?? null;
 }
 
 /** Tests: forget the hint read from the cookie, so the next read sees the current one. */

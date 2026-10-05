@@ -24,6 +24,12 @@
   --green: hsl(142 72% 25%);
   --ok-bg: hsl(142 76% 36% / 0.12);
   --down-bg: hsl(347 77% 50% / 0.11);
+  --indigo-bg: hsl(239 84% 67% / 0.13);
+  --teal-bg: hsl(173 80% 36% / 0.12);
+  --amber-bg: hsl(38 92% 50% / 0.15);
+  /* The selected segment of a switch, lifted off its track (Owl's --raised). */
+  --raised: #ffffff;
+  --shadow-raised: 0 1px 2px rgb(0 0 0 / 0.08);
 
   --sans: var(--font-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     sans-serif;
@@ -67,6 +73,14 @@ a {
 a:hover {
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+/* Keyboard focus in the site's blue, as on Owl; :where keeps it easy to override. */
+:where(a, button, summary):focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+}
+:where(a):focus-visible {
+  border-radius: 6px;
 }
 code {
   font-family: var(--mono);
@@ -244,7 +258,14 @@ main > footer a {
   color: var(--muted);
 }
 .tab-item:hover {
+  color: var(--text);
+  background: var(--surface);
   text-decoration: none;
+}
+/* Inside the scrolling strip and sidebar an outer ring would be clipped. */
+.tab-item:focus-visible,
+.nav-item:focus-visible {
+  outline-offset: -2px;
 }
 .tab-item[aria-current] {
   background: var(--accent-bg);
@@ -513,7 +534,8 @@ main > footer a {
 .badge {
   font-size: 12px;
   font-weight: 500;
-  padding: 2px 8px;
+  line-height: 18px;
+  padding: 1px 7px;
   border-radius: 6px;
   white-space: nowrap;
   background: var(--surface);
@@ -559,15 +581,18 @@ main > footer a {
   cursor: pointer;
   font-size: 13px;
   font-weight: 500;
-  padding: 5px 14px;
+  padding: 5px 12px;
   border-radius: 7px;
   background: transparent;
   color: var(--muted);
 }
-.tabs button[aria-selected="true"] {
-  background: #ffffff;
+.tabs button:hover {
   color: var(--text);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+}
+.tabs button[aria-selected="true"] {
+  background: var(--raised);
+  color: var(--text);
+  box-shadow: var(--shadow-raised);
 }
 
 .steps {
@@ -744,7 +769,8 @@ main > footer a {
    modals, the home page group, the nav item and the operator page
    (app/_zdroje/*, app/vlastni-zdroje/provoz). Owner's design: frames 1a–3f.
    Everything here is prefixed zd-.
-   The dark theme below derives from the same tokens for the whole site.
+   The dark theme below derives from the same tokens for the whole site; its
+   values are Owl's (the zinc palette), so both sites look alike at night too.
    ========================================================================== */
 
 :root {
@@ -770,28 +796,33 @@ main > footer a {
     color-scheme: dark;
     --text: #fafafa;
     --body: #d4d4d8;
-    --soft: #b4b4bb;
+    --soft: #a1a1aa;
     --muted: #a1a1aa;
     --faint: #71717a;
-    --idle: #52525b;
-    --line: #2a2a30;
-    --hairline: #1f1f24;
-    --surface: #26262b;
-    --well: #17171a;
-    --link: #6ea8ff;
+    --idle: #3f3f46;
+    --line: #27272a;
+    --hairline: #1c1c1f;
+    --surface: #27272a;
+    --well: #0c0c0e;
+    --link: #60a5fa;
     --accent: #93c5fd;
-    --accent-bg: rgb(96 165 250 / 0.14);
-    --indigo: hsl(244 75% 76%);
-    --teal: hsl(175 60% 52%);
-    --rose: hsl(345 80% 70%);
-    --blue: hsl(224 90% 72%);
-    --amber: hsl(30 90% 62%);
-    --green: hsl(142 60% 58%);
-    --ok-bg: hsl(142 60% 45% / 0.18);
-    --down-bg: hsl(347 77% 60% / 0.18);
+    --accent-bg: rgb(96 165 250 / 0.12);
+    --indigo: hsl(230 94% 82%);
+    --teal: hsl(172 66% 55%);
+    --rose: hsl(351 95% 76%);
+    --blue: hsl(213 94% 68%);
+    --amber: hsl(43 96% 56%);
+    --green: hsl(142 69% 58%);
+    --ok-bg: hsl(142 71% 45% / 0.16);
+    --down-bg: hsl(347 77% 50% / 0.16);
+    --indigo-bg: hsl(234 89% 74% / 0.16);
+    --teal-bg: hsl(173 80% 40% / 0.16);
+    --amber-bg: hsl(38 92% 50% / 0.16);
+    --raised: #3f3f46;
+    --shadow-raised: 0 1px 2px rgb(0 0 0 / 0.4);
 
-    --bg: #0b0b0d;
-    --panel: #141417;
+    --bg: #09090b;
+    --panel: #111113;
     --overlay: rgb(0 0 0 / 0.6);
     --primary-bg: #fafafa;
     --primary-fg: #09090b;
@@ -811,9 +842,8 @@ main > footer a {
     background: var(--bg);
   }
   .site-header {
-    background: rgb(11 11 13 / 0.85);
+    background: rgb(9 9 11 / 0.85);
   }
-  .tabs button[aria-selected="true"],
   .copy button {
     background: var(--panel);
   }
@@ -906,14 +936,14 @@ main > footer a {
   text-underline-offset: 3px;
 }
 
-/* Buttons and badges (design: black primary, white secondary, 8px radius) */
+/* Buttons and badges (design: black primary, white secondary, 8px radius; sizes as Owl's .btn) */
 
 .zd-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 7px 14px;
+  padding: 7px 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
@@ -926,7 +956,7 @@ main > footer a {
   text-decoration: none;
 }
 .zd-btn:hover {
-  background: var(--well);
+  background: var(--surface);
   text-decoration: none;
 }
 .zd-btn-primary,
@@ -967,15 +997,6 @@ main > footer a {
   opacity: 0.5;
   cursor: not-allowed;
 }
-.zd-btn:focus-visible,
-.zd-icon-button:focus-visible,
-.zd-menu-item:focus-visible,
-.zd-row-button:focus-visible,
-.zd-dropzone-button:focus-visible,
-.zd-avatar-button:focus-visible {
-  outline: 2px solid var(--link);
-  outline-offset: 2px;
-}
 .zd-icon-button {
   flex: none;
   width: 32px;
@@ -1005,6 +1026,7 @@ main > footer a {
   color: var(--body);
   font-size: 12px;
   font-weight: 500;
+  line-height: 18px;
   white-space: nowrap;
 }
 .zd-badge[data-tone="ok"] {
@@ -1022,9 +1044,6 @@ main > footer a {
 .zd-badge[data-tone="bad"] {
   background: var(--bad-bg);
   color: var(--bad);
-}
-.source-state .zd-badge {
-  padding: 2px 8px;
 }
 
 /* Header: sign-in and the account menu (2a, 3a, 3c; phones 2f, 3e) */
@@ -1047,18 +1066,20 @@ main > footer a {
   min-width: 30px;
   min-height: 30px;
 }
+/* The same outlined button as Owl's "Přihlásit se" (30px tall, like the avatar). */
 .zd-signin {
-  padding: 6px 4px;
-  border: 0;
-  background: none;
-  color: var(--link);
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
   font-size: 13px;
   font-weight: 500;
+  line-height: 1.4;
   cursor: pointer;
 }
 .zd-signin:hover {
-  text-decoration: underline;
-  text-underline-offset: 3px;
+  background: var(--surface);
 }
 .zd-avatar {
   flex: none;
@@ -1072,8 +1093,19 @@ main > footer a {
   background: #e1e4fb;
   color: #372fa2;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.02em;
+}
+/* The account's picture from Clerk (a photo, or Clerk's default) fills the
+   circle, as Clerk's own button does on Owl; the initials show only when
+   there is no picture or it does not load. */
+.zd-avatar-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
 }
 .zd-avatar-button {
   width: 30px;
@@ -1085,7 +1117,8 @@ main > footer a {
 .zd-avatar-button:hover {
   background: #d4d8f8;
 }
-/* Pro: an amber crown badge on the avatar's top right. */
+/* Pro: an amber crown badge on the avatar's top right, ringed in the colour
+   of what it sits on (--ring: the page, or the menu). Owl has the same one. */
 .zd-pro-badge {
   position: absolute;
   top: -5px;
@@ -1098,7 +1131,7 @@ main > footer a {
   border-radius: 50%;
   background: #e9a23b;
   color: #ffffff;
-  box-shadow: 0 0 0 2px var(--bg);
+  box-shadow: 0 0 0 2px var(--ring, var(--bg));
 }
 .zd-avatar-lg .zd-pro-badge {
   width: 18px;
@@ -1144,6 +1177,7 @@ main > footer a {
   border-radius: 12px;
   background: var(--panel);
   box-shadow: var(--shadow-pop);
+  --ring: var(--panel);
 }
 @media (max-width: 640px) {
   .zd-menu {
@@ -1167,7 +1201,8 @@ main > footer a {
   font-size: 13px;
   line-height: 1.4;
 }
-.zd-menu-who span {
+/* The e-mail line; only direct children, so the Pro tag in the name keeps its colour. */
+.zd-menu-who > span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1195,7 +1230,7 @@ main > footer a {
 }
 .zd-menu-item:hover,
 .zd-menu-item:focus-visible {
-  background: var(--well);
+  background: var(--surface);
   color: var(--text);
 }
 
@@ -1240,14 +1275,20 @@ main > footer a {
 /*
  * The sign-in hint (app/_zdroje/hint.ts). Until Clerk loads, the header and
  * the home page group carry both variants: the visitor's (.zd-hint-out) and
- * the signed-in one (.zd-hint-in), whose initials, files line, crown and
- * lock the inline <head> script sets on <html> before the first paint.
+ * the signed-in one (.zd-hint-in), whose picture, initials, files line,
+ * crown and lock the inline <head> script sets on <html> before the first
+ * paint.
  */
 :root:not([data-hint]) .zd-hint-in,
 :root[data-hint] .zd-hint-out,
+:root:not([data-hint-image]) .zd-hint-image,
+:root[data-hint-image] .zd-hint-initials,
 :root:not([data-hint-pro]) .zd-hint-pro,
 :root:not([data-hint-files-locked]) .zd-hint-files-lock {
   display: none;
+}
+.zd-hint-image {
+  background: var(--hint-image) center / cover no-repeat;
 }
 .zd-hint-initials::before {
   content: var(--hint-initials, "?");
@@ -1282,6 +1323,12 @@ main > footer a {
   background: var(--panel);
   box-shadow: var(--shadow-dialog);
   outline: none;
+}
+/* On a dark page the shadow alone does not show the edge; Owl's dialog has the same line. */
+@media (prefers-color-scheme: dark) {
+  .zd-dialog {
+    border: 1px solid var(--line);
+  }
 }
 .zd-dialog[data-size="narrow"] {
   width: min(640px, calc(100vw - 48px));
@@ -1336,6 +1383,7 @@ main > footer a {
     transform: none;
     width: 100%;
     height: 100dvh;
+    border: 0;
     border-radius: 0;
   }
   .zd-dialog-head {
@@ -1543,40 +1591,29 @@ button.zd-file-row:hover .zd-file-title {
 .zd-file[data-open] .zd-file-chevron {
   transform: none;
 }
+/* The document type, as Owl's badges: the same size and the shared tints. */
 .zd-type-badge {
   flex: none;
-  padding: 2px 8px;
+  padding: 1px 7px;
   border-radius: 6px;
   background: var(--surface);
   color: var(--soft);
   font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
   white-space: nowrap;
 }
 .zd-type-badge[data-tone="indigo"] {
-  background: #ebeaf8;
-  color: #3b35a0;
+  background: var(--indigo-bg);
+  color: var(--indigo);
 }
 .zd-type-badge[data-tone="teal"] {
-  background: #e0f2f0;
-  color: #0f6b63;
+  background: var(--teal-bg);
+  color: var(--teal);
 }
 .zd-type-badge[data-tone="amber"] {
-  background: #fdf1dc;
-  color: #8a5a12;
-}
-@media (prefers-color-scheme: dark) {
-  .zd-type-badge[data-tone="indigo"] {
-    background: rgb(99 91 230 / 0.2);
-    color: #c4c1f7;
-  }
-  .zd-type-badge[data-tone="teal"] {
-    background: rgb(20 160 145 / 0.18);
-    color: #8fdcd2;
-  }
-  .zd-type-badge[data-tone="amber"] {
-    background: rgb(233 162 59 / 0.18);
-    color: hsl(36 90% 65%);
-  }
+  background: var(--amber-bg);
+  color: var(--amber);
 }
 .zd-file-open {
   display: flex;
@@ -1620,22 +1657,26 @@ button.zd-file-row:hover .zd-file-title {
   border: 0;
   border-radius: 7px;
   background: none;
-  color: var(--soft);
+  color: var(--muted);
   font: inherit;
-  font-size: 13.5px;
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
+}
+.zd-segmented-pill > button:hover {
+  color: var(--text);
 }
 .zd-layer .zd-segmented-pill > select {
   min-height: 0;
   padding-right: 8px;
   line-height: inherit;
 }
+/* The selected one as on .tabs and Owl's .segment: lifted, lighter than the track in both themes. */
 .zd-segmented-pill > button[aria-checked="true"],
 .zd-layer .zd-segmented-pill > select[data-checked] {
-  background: var(--panel);
+  background: var(--raised);
   color: var(--text);
-  font-weight: 500;
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+  box-shadow: var(--shadow-raised);
 }
 .zd-segmented-pill > button:focus-visible,
 .zd-segmented-pill > select:focus-visible {
@@ -2024,7 +2065,7 @@ button.zd-file-row:hover .zd-file-title {
   width: 16px;
   height: 16px;
   margin: 2px 0 0;
-  border: 1px solid var(--idle);
+  border: 1px solid var(--faint);
   border-radius: 50%;
   background: var(--panel);
   cursor: pointer;

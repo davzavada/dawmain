@@ -3,16 +3,18 @@
 import { useUser } from "@clerk/nextjs";
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { initials } from "./format";
-import { hasPro } from "./hint";
+import { avatarSrc, hasPro } from "./hint";
 import { ZIcon } from "./icons";
-import { manageAccount, openZotero, rememberInitials, requestSignIn, signOut, useHintInitials, useZdroje } from "./store";
+import { manageAccount, openZotero, rememberAccount, requestSignIn, signOut, useHintImage, useHintInitials, useZdroje } from "./store";
 
 /**
- * The account control at the right end of the header (wireframe 01, 02).
- * Signed out: a small "Přihlásit se" text button. Signed in: the avatar
- * with initials (a crown badge with Pro), opening a menu — name with the
- * Pro tag and e-mail, Zotero (only where the deployment has it configured
- * — `zotero`), Spravovat účet, and apart Odhlásit se. Vlastní soubory are
+ * The account control at the right end of the header (wireframe 01, 02),
+ * looking as on Owl. Signed out: an outlined "Přihlásit se" button. Signed
+ * in: the avatar — the account's picture from Clerk (a photo, or Clerk's
+ * default) as Owl's Clerk button shows it, the initials while there is
+ * none, and a crown badge with Pro — opening a menu: name with the Pro tag
+ * and e-mail, Zotero (only where the deployment has it configured —
+ * `zotero`), Spravovat účet, and apart Odhlásit se. Vlastní soubory are
  * reached from the home page's source list. A menu button in the WAI-ARIA sense: arrow
  * keys move between items, Escape and a click outside close it. Nothing
  * at all on a deployment without Clerk.
@@ -44,12 +46,13 @@ function SignInButton({ className }: { className?: string }) {
   );
 }
 
-/** The menu button as the hint draws it: the initials and the crown come from CSS. Inert until Clerk loads. */
+/** The menu button as the hint draws it: the picture (or the initials) and the crown come from CSS. Inert until Clerk loads. */
 function HintedAvatar() {
   return (
     <span className="zd-account zd-hint-in">
       <button type="button" className="zd-avatar zd-avatar-button" aria-label="Účet" title="Účet">
         <span className="zd-hint-initials" aria-hidden="true" />
+        <span className="zd-avatar-image zd-hint-image" aria-hidden="true" />
         <span className="zd-pro-badge zd-hint-pro" aria-hidden="true">
           <ZIcon name="crown" size={10} />
         </span>
@@ -68,14 +71,16 @@ function AccountMenu({ zotero }: { zotero: boolean }) {
   const menuId = useId();
 
   const hinted = useHintInitials();
+  const hintedImage = useHintImage();
   const name = user?.fullName?.trim() || user?.username || user?.primaryEmailAddress?.emailAddress || "Účet";
   const email = user?.primaryEmailAddress?.emailAddress ?? "";
-  // Before Clerk's user loads, the initials remembered from the last visit (no jump from "Ú" to "DZ").
+  // Before Clerk's user loads, the initials and the picture remembered from the last visit (no jump from "Ú" to "DZ").
   const shown = user ? initials(name) : (hinted ?? initials(name));
+  const image = user ? user.imageUrl || null : hintedImage;
   const pro = hasPro(summary);
 
   useEffect(() => {
-    if (user) rememberInitials(initials(name));
+    if (user) rememberAccount(initials(name), user.imageUrl || null);
   }, [user, name]);
 
   useEffect(() => {
@@ -131,7 +136,7 @@ function AccountMenu({ zotero }: { zotero: boolean }) {
         title={pro ? "Účet · Pro" : "Účet"}
         onClick={() => setOpen((o) => !o)}
       >
-        {shown}
+        <AvatarFace image={image} initials={shown} />
         {pro ? (
           <span className="zd-pro-badge" aria-hidden="true">
             <ZIcon name="crown" size={10} />
@@ -142,7 +147,7 @@ function AccountMenu({ zotero }: { zotero: boolean }) {
         <div ref={menu} id={menuId} className="zd-menu" role="menu" aria-label="Účet" onKeyDown={onMenuKey}>
           <div className="zd-menu-user">
             <span className="zd-avatar zd-avatar-lg" aria-hidden="true">
-              {shown}
+              <AvatarFace image={image} initials={shown} />
               {pro ? (
                 <span className="zd-pro-badge" aria-hidden="true">
                   <ZIcon name="crown" size={11} />
@@ -179,4 +184,15 @@ function AccountMenu({ zotero }: { zotero: boolean }) {
       ) : null}
     </span>
   );
+}
+
+/**
+ * What fills the avatar's circle: the account's picture, or the initials
+ * when there is none or it does not load. Decorative (alt=""): the button
+ * names itself.
+ */
+function AvatarFace({ image, initials }: { image: string | null; initials: string }) {
+  const [broken, setBroken] = useState<string | null>(null);
+  if (!image || broken === image) return <>{initials}</>;
+  return <img className="zd-avatar-image" src={avatarSrc(image)} alt="" onError={() => setBroken(image)} />;
 }
