@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { clerkConfigured } from "@/src/mcp/config";
 import { zoteroConfigured } from "@/src/zotero/config";
 import { StatusSummary } from "./_source-status";
 import { AccountControl } from "./_zdroje/account";
@@ -20,8 +21,8 @@ export function SiteHeader() {
       </Link>
       <span className="site-tagline">MCP server pro české a unijní právo · David Závada</span>
       <StatusSummary />
-      {/* Zotero only where the deployment can connect it (the OAuth app and CREDENTIALS_SECRET). */}
-      <AccountControl zotero={zoteroConfigured()} />
+      {/* Without Clerk there is no account at all; Zotero only where the deployment can connect it (the OAuth app and CREDENTIALS_SECRET). */}
+      {clerkConfigured() ? <AccountControl zotero={zoteroConfigured()} /> : null}
     </header>
   );
 }

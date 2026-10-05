@@ -131,6 +131,8 @@ afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
   search = "";
+  signedOut = false;
+  store.setAuth("loading");
 });
 
 /** Let the status fetch (a few awaits deep) land and React commit it. */
@@ -138,10 +140,13 @@ async function settle(): Promise<void> {
   for (let i = 0; i < 5; i++) await act(async () => new Promise((r) => setTimeout(r, 0)));
 }
 
+/** The modal for a signed-in user (Clerk loaded), unless the test said otherwise. */
 async function renderModal(stav: string | null = null): Promise<void> {
+  if (!signedOut) store.setAuth("signed_in");
   await act(async () => root.render(createElement(ZoteroModal, { stav })));
   await settle();
 }
+let signedOut = false;
 
 function text(): string {
   return (host.textContent ?? "").replace(/\s+/g, " ");
@@ -292,8 +297,20 @@ describe("modal states (GET /api/zotero/status)", () => {
     expect(connectForm()).toBeNull();
   });
 
+  it("before Clerk has loaded: Načítám…, and the server is not asked with a session cookie that may be stale", async () => {
+    signedOut = true; // keep "loading"
+    await renderModal();
+    expect(calls.filter((c) => c.url.startsWith("/api/zotero"))).toEqual([]);
+    expect(text()).toContain("Načítám…");
+    store.setAuth("signed_in");
+    await settle();
+    expect(calls.filter((c) => c.url.startsWith("/api/zotero"))).toEqual([{ url: "/api/zotero/status", method: "GET" }]);
+    expect(connectForm()).not.toBeNull();
+  });
+
   it("signed out according to Clerk: the server is not even asked", async () => {
     store.setAuth("signed_out");
+    signedOut = true;
     try {
       await renderModal();
       expect(calls.filter((c) => c.url.startsWith("/api/zotero"))).toEqual([]);

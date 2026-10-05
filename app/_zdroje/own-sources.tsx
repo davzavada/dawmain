@@ -1,9 +1,9 @@
 "use client";
 
-import type { MouseEvent } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import { Icon } from "@/app/_icons";
-import type { LibrarySummary } from "@/src/files/web-types";
-import { countDocuments, countPages } from "./format";
+import type { SummaryResponse } from "@/src/files/web-types";
+import { filesRowView } from "./hint";
 import { ZIcon } from "./icons";
 import { openFiles, openZotero, requestSignIn, useZdroje } from "./store";
 import { useZoteroStatus } from "./zotero-status";
@@ -16,7 +16,9 @@ import { useZoteroStatus } from "./zotero-status";
  * connected account and Vlastní soubory the documents and pages, with
  * "Spravovat" opening the modal (02). The rows read the shared summary
  * (./store.ts) and the Zotero status, so the page itself stays
- * server-rendered and never waits for them.
+ * static and never waits for them. Until Clerk loads, the group renders
+ * both the visitor's and the signed-in variant; the sign-in hint (./hint.ts)
+ * decides in CSS which one shows, so the group never switches between them.
  */
 
 /** The stable entry point: /vlastni-zdroje redirects to /?soubory=1. */
@@ -35,58 +37,94 @@ function intercept(auth: string) {
 
 export function OwnSourcesGroup({ zotero }: { zotero: boolean }) {
   const { auth, summary } = useZdroje();
+  if (auth === "loading") {
+    return (
+      <>
+        <Group signedIn={false} className="zd-hint-out">
+          {zotero ? <ZoteroRow signedIn={false} /> : null}
+          <FilesInvite auth={auth} />
+        </Group>
+        <Group signedIn className="zd-hint-in">
+          {zotero ? <ZoteroRowView desc={LOADING} /> : null}
+          <HintedFilesRow />
+        </Group>
+      </>
+    );
+  }
   const signedIn = auth === "signed_in";
-  const ok = signedIn && summary?.state === "ok" ? summary : null;
-  const personal = ok?.libraries.find((l) => l.kind === "user") ?? null;
-  const locked = !signedIn;
-
   return (
-    <div className={locked ? "source-group locked zd-own" : "source-group zd-own"}>
+    <Group signedIn={signedIn}>
+      {zotero ? <ZoteroRow signedIn={signedIn} /> : null}
+      {signedIn ? <FilesRow auth={auth} summary={summary} /> : <FilesInvite auth={auth} />}
+    </Group>
+  );
+}
+
+function Group({ signedIn, className, children }: { signedIn: boolean; className?: string; children: ReactNode }) {
+  const classes = ["source-group", signedIn ? null : "locked", "zd-own", className].filter(Boolean).join(" ");
+  return (
+    <div className={classes}>
       <div className="source-group-head">
         <span className="source-group-name">Vlastní zdroje</span>
-        {locked ? <ZIcon name="lock" size={13} className="zd-group-lock" /> : null}
+        {signedIn ? null : <ZIcon name="lock" size={13} className="zd-group-lock" />}
       </div>
-      <ul>
-        {zotero ? <ZoteroRow signedIn={signedIn} /> : null}
-        <FilesRow auth={auth} library={personal} unavailable={signedIn && summary?.state === "unavailable"} />
-      </ul>
+      <ul>{children}</ul>
     </div>
   );
 }
 
-function FilesRow({ auth, library, unavailable }: { auth: string; library: LibrarySummary | null; unavailable: boolean }) {
-  if (auth !== "signed_in") {
-    return (
-      <li className="source zd-own-row">
-        <Icon name="upload" />
-        <div className="source-name">
-          <button type="button" className="source-title zd-row-button" onClick={requestSignIn} disabled={auth !== "signed_out"}>
-            Vlastní soubory
-          </button>
-          <span className="source-desc">Nahrané knihy, články, komentáře a vzory, ve kterých asistent hledá vedle oficiálních databází. V režimu Pro.</span>
-        </div>
-      </li>
-    );
-  }
-  const pro = library?.pro === true;
-  let desc: string;
-  if (unavailable) desc = "Teď dočasně vypnuté.";
-  else if (!library) desc = "Načítám…";
-  else if (!pro) desc = "Jen v režimu Pro. Přiděluji ho ručně a zdarma.";
-  else if (library.counts && library.counts.total > 0) desc = `${countDocuments(library.counts.total)} · ${countPages(library.pagesUsed ?? 0)}`;
-  else desc = "Zatím žádné dokumenty";
+const LOADING = "Načítám…";
+
+/** Visitors (and, until Clerk loads, the visitor's variant): what the files are, and a click signs in. */
+function FilesInvite({ auth }: { auth: string }) {
   return (
-    <li className={pro || !library ? "source zd-own-row" : "source zd-own-row zd-row-locked"}>
+    <li className="source zd-own-row">
+      <Icon name="upload" />
+      <div className="source-name">
+        <button type="button" className="source-title zd-row-button" onClick={requestSignIn} disabled={auth !== "signed_out"}>
+          Vlastní soubory
+        </button>
+        <span className="source-desc">Nahrané knihy, články, komentáře a vzory, ve kterých asistent hledá vedle oficiálních databází. V režimu Pro.</span>
+      </div>
+    </li>
+  );
+}
+
+function FilesRow({ auth, summary }: { auth: string; summary: SummaryResponse | null }) {
+  const { desc, locked } = filesRowView(summary);
+  return (
+    <li className={locked ? "source zd-own-row zd-row-locked" : "source zd-own-row"}>
       <Icon name="upload" />
       <div className="source-name">
         <span className="source-title">
           Vlastní soubory
-          {library && !pro ? <ZIcon name="lock" size={13} /> : null}
+          {locked ? <ZIcon name="lock" size={13} /> : null}
         </span>
         <span className="source-desc">{desc}</span>
       </div>
       <div className="source-state">
         <a href={OWN_FILES_HREF} className="zd-manage" onClick={intercept(auth)}>
+          Spravovat
+        </a>
+      </div>
+    </li>
+  );
+}
+
+/** FilesRow as the sign-in hint draws it before Clerk loads: the line and the lock come from CSS. */
+function HintedFilesRow() {
+  return (
+    <li className="source zd-own-row zd-hint-files">
+      <Icon name="upload" />
+      <div className="source-name">
+        <span className="source-title">
+          Vlastní soubory
+          <ZIcon name="lock" size={13} className="zd-hint-files-lock" />
+        </span>
+        <span className="source-desc zd-hint-files-desc" />
+      </div>
+      <div className="source-state">
+        <a href={OWN_FILES_HREF} className="zd-manage">
           Spravovat
         </a>
       </div>
@@ -111,7 +149,7 @@ function ZoteroRow({ signedIn }: { signedIn: boolean }) {
   if (visitor) {
     desc = "Asistent v ní bude hledat a číst, a když povolíte, i ukládat nalezené dokumenty. V režimu Pro.";
   } else if (status === undefined) {
-    desc = "Načítám…";
+    desc = LOADING;
   } else if (!ok) {
     desc = "Stav připojení se teď nepodařilo zjistit.";
   } else if (ok.connection && ok.pro) {
@@ -131,11 +169,16 @@ function ZoteroRow({ signedIn }: { signedIn: boolean }) {
     desc = "Připojte svou knihovnu - asistent v ní bude hledat, číst, a když povolíte, i ukládat.";
   }
 
+  return <ZoteroRowView desc={desc} locked={locked} connected={connected} onClick={visitor ? requestSignIn : openZotero} />;
+}
+
+/** The Zotero row itself; without a status yet (the hinted variant), a click opens the modal, which waits for Clerk. */
+function ZoteroRowView({ desc, locked = false, connected = false, onClick = openZotero }: { desc: string; locked?: boolean; connected?: boolean; onClick?: () => void }) {
   return (
     <li className={locked ? "source zd-own-row zd-row-locked" : "source zd-own-row"}>
       <Icon name="book" />
       <div className="source-name">
-        <button type="button" className="source-title zd-row-button" onClick={visitor ? requestSignIn : openZotero}>
+        <button type="button" className="source-title zd-row-button" onClick={onClick}>
           Zotero
           {locked ? <ZIcon name="lock" size={13} /> : null}
         </button>

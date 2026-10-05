@@ -8,18 +8,22 @@ import type { LibrarySummary, SummaryResponse } from "@/src/files/web-types";
 /**
  * The sign-in hint (app/_zdroje/hint.ts): the cookie round-trips, anything
  * that is not exactly a hint is ignored, an oversized summary is dropped
- * but the initials stay; and the header renders from it before Clerk
- * loads — the remembered initials and the Pro crown on the server already,
- * the "Přihlásit se" button without a hint — so nothing jumps.
+ * but the initials stay. The pages are static, so the hint is applied in
+ * the browser before the first paint: the inline script marks <html> and
+ * hands the texts to CSS, and until Clerk loads the header and the home
+ * page group carry both variants — so nothing jumps, and hydration finds
+ * exactly the markup it renders.
  */
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-vi.mock("@clerk/nextjs", () => ({ useUser: () => ({ isLoaded: false, user: undefined }) }));
+let clerkUser: unknown = undefined;
+vi.mock("@clerk/nextjs", () => ({ useUser: () => ({ isLoaded: clerkUser !== undefined, user: clerkUser }) }));
 
-const { encodeHint, hintCookie, parseHint, HINT_COOKIE } = await import("@/app/_zdroje/hint");
-const { HintProvider } = await import("@/app/_zdroje/store");
+const { applyHint, encodeHint, filesRowView, hintCookie, hintView, parseHint, readHint, HINT_COOKIE, HINT_SCRIPT } = await import("@/app/_zdroje/hint");
+const store = await import("@/app/_zdroje/store");
 const { AccountControl } = await import("@/app/_zdroje/account");
+const { OwnSourcesGroup } = await import("@/app/_zdroje/own-sources");
 
 const LIB: LibrarySummary = {
   id: "user_a",
@@ -72,38 +76,111 @@ describe("hint cookie", () => {
   });
 });
 
-describe("header before Clerk loads", () => {
-  let host: HTMLDivElement;
-  let root: Root;
-  beforeEach(() => {
-    host = document.createElement("div");
-    document.body.appendChild(host);
-    root = createRoot(host);
-  });
-  afterEach(async () => {
-    await act(async () => root.unmount());
-    host.remove();
+/** A fresh <html> stand-in for applyHint, with the given cookie. */
+function fakeDocument(cookie: string): Document {
+  const doc = document.implementation.createHTMLDocument("t");
+  Object.defineProperty(doc, "cookie", { value: cookie });
+  return doc;
+}
+
+function cssVar(doc: Document, name: string): string {
+  return doc.documentElement.style.getPropertyValue(name);
+}
+
+describe("the cookie keeps what the hint shows", () => {
+  it("the view: crown with Pro, the files line, the lock without Pro", () => {
+    expect(hintView(SUMMARY)).toEqual({ pro: true, files: { desc: "2 dokumenty · 12 stran", locked: false } });
+    const noPro = { ...SUMMARY, libraries: [{ ...LIB, pro: false }] };
+    expect(hintView(noPro)).toEqual({ pro: false, files: { desc: "Jen v režimu Pro. Přiděluji ho ručně a zdarma.", locked: true } });
+    expect(filesRowView(null)).toEqual({ desc: "Načítám…", locked: false });
+    expect(filesRowView({ state: "unavailable", mode: "on" })).toEqual({ desc: "Teď dočasně vypnuté.", locked: false });
+    const empty = { ...SUMMARY, libraries: [{ ...LIB, counts: { ...LIB.counts!, total: 0 } }] };
+    expect(filesRowView(empty).desc).toBe("Zatím žádné dokumenty");
   });
 
-  it("the server renders the remembered initials with the Pro crown", () => {
-    const html = renderToString(createElement(HintProvider, { children: null, hint: { initials: "DZ", summary: SUMMARY } }, createElement(AccountControl)));
-    expect(html).toContain("DZ");
-    expect(html).toContain("zd-pro-badge");
-    expect(html).toContain("Účet (Pro)");
-    expect(html).not.toContain("Přihlásit se");
+  it("readHint finds it among other cookies", () => {
+    const value = encodeHint({ initials: "DZ", summary: SUMMARY });
+    expect(readHint(`a=1; ${HINT_COOKIE}=${value}; b=2`)).toEqual({ initials: "DZ", summary: SUMMARY });
+    expect(readHint("a=1")).toBeNull();
+    expect(readHint(`x${HINT_COOKIE}=${value}`)).toBeNull();
+  });
+});
+
+describe("before the first paint (applyHint, HINT_SCRIPT)", () => {
+  it("marks <html> and hands the initials and the files line to CSS", () => {
+    const doc = fakeDocument(`a=1; ${HINT_COOKIE}=${encodeHint({ initials: "DZ", summary: SUMMARY })}`);
+    applyHint(doc, HINT_COOKIE);
+    const root = doc.documentElement;
+    expect(root.getAttribute("data-hint")).toBe("in");
+    expect(root.hasAttribute("data-hint-pro")).toBe(true);
+    expect(root.hasAttribute("data-hint-files-locked")).toBe(false);
+    expect(cssVar(doc, "--hint-initials")).toBe('"DZ"');
+    expect(cssVar(doc, "--hint-files")).toBe('"2 dokumenty · 12 stran"');
   });
 
-  it("no crown without Pro; without a hint the visitor's sign-in button", () => {
-    const plain = renderToString(
-      createElement(HintProvider, { children: null, hint: { initials: "DZ", summary: { ...SUMMARY, libraries: [{ ...LIB, pro: false }] } } }, createElement(AccountControl)),
-    );
-    expect(plain).toContain("DZ");
-    expect(plain).not.toContain("zd-pro-badge");
-    expect(renderToString(createElement(HintProvider, { children: null, hint: null }, createElement(AccountControl)))).toContain("Přihlásit se");
+  it("without Pro: no crown, the lock and its line", () => {
+    const doc = fakeDocument(`${HINT_COOKIE}=${encodeHint({ initials: "DZ", summary: { ...SUMMARY, libraries: [{ ...LIB, pro: false }] } })}`);
+    applyHint(doc, HINT_COOKIE);
+    expect(doc.documentElement.hasAttribute("data-hint-pro")).toBe(false);
+    expect(doc.documentElement.hasAttribute("data-hint-files-locked")).toBe(true);
+    expect(cssVar(doc, "--hint-files")).toBe('"Jen v režimu Pro. Přiděluji ho ručně a zdarma."');
   });
 
-  it("hydrates to the same markup (no jump)", async () => {
-    const tree = createElement(HintProvider, { children: null, hint: { initials: "DZ", summary: SUMMARY } }, createElement(AccountControl));
+  it("anything that is not exactly a hint leaves the visitor's page", () => {
+    const old = encodeURIComponent(JSON.stringify({ i: "DZ", s: SUMMARY })); // from before `v`
+    for (const cookie of ["", "a=1", `${HINT_COOKIE}=%7Bnot json`, `${HINT_COOKIE}=${old}`, `${HINT_COOKIE}=null`]) {
+      const doc = fakeDocument(cookie);
+      applyHint(doc, HINT_COOKIE);
+      expect(doc.documentElement.hasAttribute("data-hint")).toBe(false);
+    }
+  });
+
+  it("a tampered text stays one CSS string; markup never reaches the initials", () => {
+    const evil = encodeURIComponent(JSON.stringify({ i: "<b>", v: { p: false, l: false, f: 'x" ; } body { color: red } a::before { content: "\\' } }));
+    const doc = fakeDocument(`${HINT_COOKIE}=${evil}`);
+    applyHint(doc, HINT_COOKIE);
+    expect(cssVar(doc, "--hint-initials")).toBe('"b"');
+    expect(cssVar(doc, "--hint-files")).toBe('"x\\" ; } body { color: red } a::before { content: \\"\\\\"');
+  });
+
+  it("the inline script is self-contained and does the same", () => {
+    const doc = fakeDocument(`${HINT_COOKIE}=${encodeHint({ initials: "JN", summary: null })}`);
+    new Function("document", HINT_SCRIPT)(doc);
+    expect(doc.documentElement.getAttribute("data-hint")).toBe("in");
+    expect(cssVar(doc, "--hint-initials")).toBe('"JN"');
+    expect(cssVar(doc, "--hint-files")).toBe('"Načítám…"');
+  });
+});
+
+describe("until Clerk loads: both variants, CSS picks", () => {
+  afterEach(() => {
+    store.setAuth("loading");
+    clerkUser = undefined;
+    document.cookie = hintCookie(null, false);
+    store.rereadHint();
+  });
+
+  it("the header: the sign-in button for visitors, the hinted avatar for the signed in", () => {
+    const html = renderToString(createElement(AccountControl));
+    expect(html).toContain('class="zd-signin zd-hint-out"');
+    expect(html).toContain("zd-account zd-hint-in");
+    expect(html).toContain("zd-hint-initials");
+    expect(html).toContain("zd-pro-badge zd-hint-pro");
+  });
+
+  it("the home page group: the locked invitation and the hinted rows", () => {
+    const html = renderToString(createElement(OwnSourcesGroup, { zotero: true }));
+    expect(html).toContain("source-group locked zd-own zd-hint-out");
+    expect(html).toContain("source-group zd-own zd-hint-in");
+    expect(html).toContain("zd-hint-files-desc");
+    expect(html).toContain("Spravovat");
+  });
+
+  it("hydrates over the hinted page without a mismatch", async () => {
+    document.cookie = hintCookie({ initials: "DZ", summary: SUMMARY }, false);
+    store.rereadHint();
+    applyHint(document, HINT_COOKIE);
+    const tree = createElement("div", null, createElement(AccountControl), createElement(OwnSourcesGroup, { zotero: true }));
     const box = document.createElement("div");
     document.body.appendChild(box);
     box.innerHTML = renderToString(tree);
@@ -118,5 +195,37 @@ describe("header before Clerk loads", () => {
     expect(box.innerHTML).toBe(before);
     await act(async () => hydrated!.unmount());
     box.remove();
+    for (const name of ["data-hint", "data-hint-pro", "data-hint-files-locked", "style"]) document.documentElement.removeAttribute(name);
+  });
+});
+
+describe("once Clerk says signed in, the hint's texts stay until the real ones come", () => {
+  let host: HTMLDivElement;
+  let root: Root;
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => undefined)));
+    document.cookie = hintCookie({ initials: "DZ", summary: SUMMARY }, false);
+    store.rereadHint();
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+  });
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    host.remove();
+    store.setAuth("loading");
+    document.cookie = hintCookie(null, false);
+    store.rereadHint();
+    vi.unstubAllGlobals();
+  });
+
+  it("the avatar shows the remembered initials and crown, the row the remembered line", async () => {
+    store.setAuth("signed_in");
+    await act(async () => root.render(createElement("div", null, createElement(AccountControl), createElement(OwnSourcesGroup, { zotero: false }))));
+    const avatar = host.querySelector(".zd-avatar-button")!;
+    expect(avatar.textContent).toBe("DZ");
+    expect(avatar.querySelector(".zd-pro-badge")).not.toBeNull();
+    expect(host.querySelector(".zd-hint-in, .zd-hint-out")).toBeNull();
+    expect(host.querySelector(".source-desc")?.textContent).toBe(hintView(SUMMARY).files.desc);
   });
 });

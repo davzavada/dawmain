@@ -129,10 +129,10 @@ export function ZoteroModal({ stav }: { stav: string | null }) {
     dropZoteroStav();
   }, [stav]);
 
-  // Signed out (known from Clerk) or no Clerk at all: nothing to ask the server. Signing in
-  // from here flips signed_out to signed_in and loads the status; loading → signed_in does not
-  // load it twice (the first request already carried the session cookie).
-  const authKey = auth === "signed_out" ? "out" : auth === "none" ? "none" : "in";
+  // Signed out (known from Clerk) or no Clerk at all: nothing to ask the server. Until Clerk has
+  // loaded, wait ("Načítám…"): the page is static, so only Clerk brings the session cookie up to
+  // date (./clerk-bridge.tsx), and asking with a stale one would read as signed out.
+  const authKey = auth === "signed_in" ? "in" : auth === "signed_out" ? "out" : auth === "none" ? "none" : "wait";
   useEffect(() => {
     if (authKey !== "in") return;
     const ctrl = new AbortController();

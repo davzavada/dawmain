@@ -1,8 +1,8 @@
 "use client";
 
-import { createContext, createElement, useContext, useSyncExternalStore, type ReactNode } from "react";
+import { useSyncExternalStore } from "react";
 import type { SummaryResponse } from "@/src/files/web-types";
-import { hintCookie, type Hint } from "./hint";
+import { hintCookie, readHint, type Hint } from "./hint";
 
 /**
  * Client state shared by every Vlastní soubory surface — the header's
@@ -16,10 +16,12 @@ import { hintCookie, type Hint } from "./hint";
  *   clerk     actions registered by the bridge (sign in, profile, sign out),
  *             so components outside ClerkProvider's hooks can call them
  *
- * Until Clerk has loaded, the sign-in hint (./hint.ts — a cookie the
- * layout reads and passes down through HintProvider) stands in for the
- * account state and the summary, so the server renders what the page will
- * look like and nothing jumps; the store keeps that cookie up to date.
+ * Until Clerk has loaded, auth is "loading": the header and the home page
+ * group then render both the visitor's and the signed-in variant and the
+ * sign-in hint (./hint.ts — a cookie applied before the first paint)
+ * decides which one shows, so nothing jumps. Once Clerk says signed in, the
+ * hint's summary stands in until the real one arrives; the store keeps
+ * that cookie up to date.
  *
  * The modals are driven by the URL (?soubory=1, ?zotero=1): links work,
  * the back button closes them. history.pushState integrates with Next's
@@ -50,11 +52,18 @@ function set(patch: Partial<State>): void {
 // ---------------------------------------------------------------------------
 // The sign-in hint (see ./hint.ts)
 
-const HintContext = createContext<Hint | null>(null);
+/** The hint as this page load found it (undefined: not read yet). Browser only. */
+let loadedHint: Hint | null | undefined;
 
-/** Wraps the page (root layout) with the hint the server read from the cookie. */
-export function HintProvider({ hint, children }: { hint: Hint | null; children: ReactNode }) {
-  return createElement(HintContext.Provider, { value: hint }, children);
+function pageHint(): Hint | null {
+  if (loadedHint === undefined) {
+    try {
+      loadedHint = typeof document === "undefined" ? null : readHint(document.cookie);
+    } catch {
+      loadedHint = null;
+    }
+  }
+  return loadedHint;
 }
 
 let hintInitials: string | null = null;
@@ -91,10 +100,9 @@ function subscribe(listener: () => void): () => void {
 const SERVER_STATE: State = { auth: "loading", summary: null, failed: false };
 
 /**
- * The shared state (server render: loading), with the sign-in hint filling
- * in until Clerk and the summary answer: "loading" reads as signed in with
- * the remembered summary, and a signed-in state still loading its summary
- * shows the remembered one.
+ * The shared state (server render and hydration: loading). Signed in and
+ * still loading the summary, it shows the one the sign-in hint remembered —
+ * what the page already showed before Clerk loaded.
  */
 export function useZdroje(): State {
   const real = useSyncExternalStore(
@@ -102,16 +110,21 @@ export function useZdroje(): State {
     () => state,
     () => SERVER_STATE,
   );
-  const hint = useContext(HintContext);
-  if (!hint) return real;
-  if (real.auth === "loading") return { ...real, auth: "signed_in", summary: hint.summary };
-  if (real.auth === "signed_in" && real.summary === null && !real.failed) return { ...real, summary: hint.summary };
+  if (real.auth === "signed_in" && real.summary === null && !real.failed) {
+    const hinted = pageHint()?.summary;
+    if (hinted) return { ...real, summary: hinted };
+  }
   return real;
 }
 
-/** The remembered initials while Clerk's user is not loaded yet. */
+/** The remembered initials while Clerk's user is not loaded yet (signed in only, so never during hydration). */
 export function useHintInitials(): string | null {
-  return useContext(HintContext)?.initials ?? null;
+  return pageHint()?.initials ?? null;
+}
+
+/** Tests: forget the hint read from the cookie, so the next read sees the current one. */
+export function rereadHint(): void {
+  loadedHint = undefined;
 }
 
 let inflight: Promise<void> | null = null;

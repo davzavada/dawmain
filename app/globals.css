@@ -1226,12 +1226,34 @@ main > footer a {
 }
 
 .zd-row-locked .source-title,
-.zd-row-locked .source-desc {
+.zd-row-locked .source-desc,
+:root[data-hint-files-locked] .zd-hint-files .source-title,
+:root[data-hint-files-locked] .zd-hint-files .source-desc {
   color: var(--faint);
 }
 .zd-own .zd-row-locked > .icon,
+:root[data-hint-files-locked] .zd-own .zd-hint-files > .icon,
 .source-group.locked .zd-group-lock {
   color: var(--idle);
+}
+
+/*
+ * The sign-in hint (app/_zdroje/hint.ts). Until Clerk loads, the header and
+ * the home page group carry both variants: the visitor's (.zd-hint-out) and
+ * the signed-in one (.zd-hint-in), whose initials, files line, crown and
+ * lock the inline <head> script sets on <html> before the first paint.
+ */
+:root:not([data-hint]) .zd-hint-in,
+:root[data-hint] .zd-hint-out,
+:root:not([data-hint-pro]) .zd-hint-pro,
+:root:not([data-hint-files-locked]) .zd-hint-files-lock {
+  display: none;
+}
+.zd-hint-initials::before {
+  content: var(--hint-initials, "?");
+}
+.zd-hint-files-desc::before {
+  content: var(--hint-files, "Načítám…");
 }
 
 /* The modal shell (2b, 3d; phones: full-screen sheet, 2e, 3f) */

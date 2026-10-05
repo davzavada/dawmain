@@ -2,7 +2,6 @@ import { ClerkProvider } from "@clerk/nextjs";
 import { csCZ } from "@clerk/localizations";
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { cookies } from "next/headers";
 import Link from "next/link";
 import { Suspense, type ReactNode } from "react";
 import { clerkConfigured } from "@/src/mcp/config";
@@ -10,9 +9,8 @@ import { DATABASES } from "@/src/mcp/databases";
 import { SiteHeader } from "./_header";
 import { SiteNav } from "./_nav";
 import { ClerkBridge, NoClerk } from "./_zdroje/clerk-bridge";
-import { HINT_COOKIE, parseHint } from "./_zdroje/hint";
+import { HINT_SCRIPT } from "./_zdroje/hint";
 import { ZdrojeModals } from "./_zdroje/modals";
-import { HintProvider } from "./_zdroje/store";
 import "./globals.css";
 
 // Self-hosted by next/font at build time: the browser never asks Google.
@@ -35,17 +33,18 @@ export const viewport: Viewport = { themeColor: "#0E1938" };
  * without keys ClerkProvider would throw (or start keyless mode), so the
  * site then renders without it and the account control stays hidden.
  *
- * The sign-in hint cookie (app/_zdroje/hint.ts) lets the server render the
- * signed-in header, nav and home page group straight away, so the page
- * does not change shape when Clerk loads. Reading it makes every page
- * request-time, but cheap: nothing on the server side of a page waits on
- * the network (the source checks are fetched by the browser).
+ * Every page is static: built once, served from the CDN, nothing on the
+ * server runs for a visit (the source checks, the summary and the Zotero
+ * status are fetched by the browser afterwards). What differs for a
+ * signed-in user is applied before the first paint by the sign-in hint's
+ * inline script in <head> (app/_zdroje/hint.ts) — it marks <html>, which is
+ * why <html> does not warn about attributes React did not render — so the
+ * page does not change shape when Clerk loads.
  */
-export default async function RootLayout({ children }: { children: ReactNode }) {
+export default function RootLayout({ children }: { children: ReactNode }) {
   const clerk = clerkConfigured();
-  const hint = clerk ? parseHint((await cookies()).get(HINT_COOKIE)?.value) : null;
   const page = (
-    <HintProvider hint={hint}>
+    <>
       {clerk ? <ClerkBridge /> : <NoClerk />}
       <SiteHeader />
       <div className="shell">
@@ -62,10 +61,11 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       <Suspense fallback={null}>
         <ZdrojeModals />
       </Suspense>
-    </HintProvider>
+    </>
   );
   return (
-    <html lang="cs" className={`${geist.variable} ${geistMono.variable}`}>
+    <html lang="cs" className={`${geist.variable} ${geistMono.variable}`} suppressHydrationWarning>
+      <head>{clerk ? <script dangerouslySetInnerHTML={{ __html: HINT_SCRIPT }} /> : null}</head>
       <body>{clerk ? <ClerkProvider afterSignOutUrl="/" localization={csCZ}>{page}</ClerkProvider> : page}</body>
     </html>
   );

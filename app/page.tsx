@@ -1,22 +1,24 @@
-import { headers } from "next/headers";
 import { Guide } from "./_guide";
 import { Mail } from "./_legal";
 import { SourceList } from "./_source-status";
 import { OwnSourcesGroup } from "./_zdroje/own-sources";
 import { zoteroConfigured } from "@/src/zotero/config";
 
-export const dynamic = "force-dynamic";
-
 /** The author's other project, linked from the intro. */
 const OWL_URL = "https://owl.davidzavada.cz/";
 
-export default async function Home() {
-  const headerList = await headers();
-  const host = headerList.get("x-forwarded-host") ?? headerList.get("host") ?? "localhost:3000";
-  const proto =
-    headerList.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
-  const endpoint = `${proto}://${host}/api/mcp`;
+/**
+ * The MCP address the guide offers, fixed at build (the page is static): the
+ * production domain Vercel names. The guide swaps in the address the browser
+ * is actually on (a preview, localhost) — on production it is the same.
+ */
+function endpoint(): string {
+  const production = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
+  const origin = production && /^[a-z0-9.-]+$/i.test(production) ? `https://${production}` : "https://dawmain.davidzavada.cz";
+  return `${origin}/api/mcp`;
+}
 
+export default function Home() {
   return (
     <div className="home">
       <section id="uvod" className="intro">
@@ -59,7 +61,7 @@ export default async function Home() {
 
       <section id="pripojeni" className="connect">
         <h2>Jak se připojit</h2>
-        <Guide endpoint={endpoint} />
+        <Guide endpoint={endpoint()} />
         <p className="muted small">
           Kdyby cokoli nešlo, napište mi na <Mail />.
         </p>

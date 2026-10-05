@@ -3,6 +3,7 @@
 import { useUser } from "@clerk/nextjs";
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { initials } from "./format";
+import { hasPro } from "./hint";
 import { ZIcon } from "./icons";
 import { manageAccount, openZotero, rememberInitials, requestSignIn, signOut, useHintInitials, useZdroje } from "./store";
 
@@ -15,19 +16,46 @@ import { manageAccount, openZotero, rememberInitials, requestSignIn, signOut, us
  * reached from the home page's source list. A menu button in the WAI-ARIA sense: arrow
  * keys move between items, Escape and a click outside close it. Nothing
  * at all on a deployment without Clerk.
+ *
+ * Until Clerk loads (the static page and hydration), both: the sign-in
+ * button and the avatar the sign-in hint fills in, and CSS shows the one the
+ * hint says (./hint.ts) — so the page never switches between them.
  */
 export function AccountControl({ zotero = false }: { zotero?: boolean }) {
   const { auth } = useZdroje();
   if (auth === "none") return null;
-  // Still loading without a sign-in hint: most likely a visitor — show what they will see (nothing jumps).
-  if (auth === "signed_out" || auth === "loading") {
+  if (auth === "signed_out") return <SignInButton />;
+  if (auth === "loading") {
     return (
-      <button type="button" className="zd-signin" onClick={requestSignIn}>
-        Přihlásit se
-      </button>
+      <>
+        <SignInButton className="zd-hint-out" />
+        <HintedAvatar />
+      </>
     );
   }
   return <AccountMenu zotero={zotero} />;
+}
+
+function SignInButton({ className }: { className?: string }) {
+  return (
+    <button type="button" className={className ? `zd-signin ${className}` : "zd-signin"} onClick={requestSignIn}>
+      Přihlásit se
+    </button>
+  );
+}
+
+/** The menu button as the hint draws it: the initials and the crown come from CSS. Inert until Clerk loads. */
+function HintedAvatar() {
+  return (
+    <span className="zd-account zd-hint-in">
+      <button type="button" className="zd-avatar zd-avatar-button" aria-label="Účet" title="Účet">
+        <span className="zd-hint-initials" aria-hidden="true" />
+        <span className="zd-pro-badge zd-hint-pro" aria-hidden="true">
+          <ZIcon name="crown" size={10} />
+        </span>
+      </button>
+    </span>
+  );
 }
 
 function AccountMenu({ zotero }: { zotero: boolean }) {
@@ -44,7 +72,7 @@ function AccountMenu({ zotero }: { zotero: boolean }) {
   const email = user?.primaryEmailAddress?.emailAddress ?? "";
   // Before Clerk's user loads, the initials remembered from the last visit (no jump from "Ú" to "DZ").
   const shown = user ? initials(name) : (hinted ?? initials(name));
-  const pro = summary?.state === "ok" && summary.libraries.some((l) => l.pro);
+  const pro = hasPro(summary);
 
   useEffect(() => {
     if (user) rememberInitials(initials(name));

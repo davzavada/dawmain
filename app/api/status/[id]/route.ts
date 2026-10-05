@@ -12,14 +12,15 @@ type Ctx = { params: Promise<{ id: string }> };
  * the pages do not wait on any of them.
  *
  * Public and the same for everyone, so the CDN keeps it for a minute and
- * serves the previous answer while it asks again: most visitors never reach
- * the function at all, and the canary behind it is cached on top
- * (src/mcp/status.ts).
+ * then, for up to an hour, serves the previous answer at once while it asks
+ * again in the background: the badges fill in without waiting even after a
+ * quiet spell, and the time each badge shows says how old its check is. The
+ * canary behind it is cached on top (src/mcp/status.ts).
  */
 export async function GET(_request: Request, ctx: Ctx): Promise<Response> {
   const status = await databaseStatus((await ctx.params).id);
   if (!status) return Response.json({ error: "Neznámý zdroj." }, { status: 404 });
   return Response.json(status, {
-    headers: { "Cache-Control": "public, max-age=0, s-maxage=60, stale-while-revalidate=300" },
+    headers: { "Cache-Control": "public, max-age=0, s-maxage=60, stale-while-revalidate=3600" },
   });
 }

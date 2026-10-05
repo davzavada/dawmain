@@ -30,8 +30,25 @@ export function ClerkBridge() {
   }, [clerk]);
 
   useEffect(() => {
-    if (isLoaded) setAuth(isSignedIn ? "signed_in" : "signed_out");
-  }, [isLoaded, isSignedIn]);
+    if (!isLoaded) return;
+    if (!isSignedIn) {
+      setAuth("signed_out");
+      return;
+    }
+    // Pages are static and skip Clerk's proxy (proxy.ts), so nothing refreshed the short-lived
+    // session cookie on the way in: get a current token (Clerk writes it to the cookie) before
+    // "signed in" lets the summary, the Zotero status and the modals call the API with it.
+    let live = true;
+    void Promise.resolve()
+      .then(() => clerk.session?.getToken())
+      .catch(() => null)
+      .then(() => {
+        if (live) setAuth("signed_in");
+      });
+    return () => {
+      live = false;
+    };
+  }, [clerk, isLoaded, isSignedIn]);
 
   return null;
 }

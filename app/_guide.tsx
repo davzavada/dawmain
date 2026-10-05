@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useSyncExternalStore, type ReactNode } from "react";
 import { CopyField } from "./_copy";
 import { platformFromHash, setPlatform, usePlatform, type PlatformId } from "./_platform";
 
@@ -150,8 +150,25 @@ const PLATFORMS: Platform[] = [
   },
 ];
 
-export function Guide({ endpoint }: { endpoint: string }) {
+const noSubscription = () => () => {};
+
+/**
+ * The MCP address on the origin the browser is on. The static page carries the production
+ * address (`fallback`), which is also what hydration renders; on production the two are the
+ * same, so only a preview or localhost ever sees it change.
+ */
+function useEndpoint(fallback: string): string {
+  const origin = useSyncExternalStore(
+    noSubscription,
+    () => window.location.origin,
+    () => null,
+  );
+  return origin ? `${origin}/api/mcp` : fallback;
+}
+
+export function Guide({ endpoint: fallback }: { endpoint: string }) {
   const active = usePlatform();
+  const endpoint = useEndpoint(fallback);
 
   // Open the guide a shared link names (#chatgpt) and bring it into view.
   useEffect(() => {
