@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Suspense, type ReactNode } from "react";
 import { clerkConfigured } from "@/src/mcp/config";
 import { DATABASES } from "@/src/mcp/databases";
+import { LEGAL_PUBLISHED } from "./_legal";
 import { SiteHeader } from "./_header";
 import { SiteNav } from "./_nav";
 import { ClerkBridge, NoClerk } from "./_zdroje/clerk-bridge";
@@ -51,10 +52,12 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <SiteNav sourceCount={DATABASES.length} />
         <main>
           {children}
-          <footer>
-            <Link href="/podminky">Podmínky užití</Link>
-            <Link href="/soukromi">Ochrana osobních údajů</Link>
-          </footer>
+          {LEGAL_PUBLISHED ? (
+            <footer>
+              <Link href="/podminky">Podmínky užití</Link>
+              <Link href="/soukromi">Ochrana osobních údajů</Link>
+            </footer>
+          ) : null}
         </main>
       </div>
       {/* useSearchParams: its own Suspense boundary keeps static pages prerenderable. */}

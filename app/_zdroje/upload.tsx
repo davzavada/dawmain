@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type DragEvent } from "react";
+import { LEGAL_PUBLISHED } from "@/app/_legal";
 import { LIMITS } from "@/src/files/config";
 import type { ConvertOptions, ConvertResult } from "@/src/files/convert/types";
 import { parseDmd } from "@/src/files/dmd/parse";
@@ -232,11 +233,17 @@ export function Uploader({ library, onUploaded }: { library: LibrarySummary; onU
         />
       </div>
       <p className="zd-muted zd-small zd-upload-rules">
-        Nahráním potvrzujete, že k textu máte právo a že nejde o spisy klientů ani neveřejné osobní údaje (
-        <a href="/podminky" target="_blank" rel="noopener">
-          pravidla
-        </a>
-        ). Typ a údaje změníte po rozkliknutí řádku.
+        Nahráním potvrzujete, že k textu máte právo a že nejde o spisy klientů ani neveřejné osobní údaje
+        {LEGAL_PUBLISHED ? (
+          <>
+            {" "}(
+            <a href="/podminky" target="_blank" rel="noopener">
+              pravidla
+            </a>
+            )
+          </>
+        ) : null}
+        . Typ a údaje změníte po rozkliknutí řádku.
       </p>
       {current ? (
         <div className="zd-row zd-upload-current">

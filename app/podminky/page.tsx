@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { LegalHeader, Mail, Section } from "../_legal";
+import { notFound } from "next/navigation";
+import { LEGAL_PUBLISHED, LegalHeader, Mail, Section } from "../_legal";
 
 export const metadata = {
   title: "Podmínky užití - Dawmain",
@@ -7,7 +8,13 @@ export const metadata = {
     "Dawmain je zdarma a nekomerčně. Co to znamená, co od služby čekat a jaká pravidla platí pro Vlastní soubory a Zotero.",
 };
 
-export default function Podminky() {
+export default function PodminkyPage() {
+  if (!LEGAL_PUBLISHED) notFound();
+  return <Podminky />;
+}
+
+/** The text itself, rendered by the tests whether or not the page is published. */
+export function Podminky() {
   return (
     <article className="legal">
       <LegalHeader title="Podmínky užití" />

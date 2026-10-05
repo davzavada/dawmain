@@ -1,12 +1,19 @@
 import Link from "next/link";
-import { LegalHeader, Mail, Section } from "../_legal";
+import { notFound } from "next/navigation";
+import { LEGAL_PUBLISHED, LegalHeader, Mail, Section } from "../_legal";
 
 export const metadata = {
   title: "Zásady ochrany osobních údajů - Dawmain",
   description: "Jaké osobní údaje Dawmain zpracovává, proč, jak dlouho a jaká máte práva.",
 };
 
-export default function Soukromi() {
+export default function SoukromiPage() {
+  if (!LEGAL_PUBLISHED) notFound();
+  return <Soukromi />;
+}
+
+/** The text itself, rendered by the tests whether or not the page is published. */
+export function Soukromi() {
   return (
     <article className="legal">
       <LegalHeader title="Zásady ochrany osobních údajů" />
