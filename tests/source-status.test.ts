@@ -4,7 +4,7 @@ import { revalidate } from "@/app/api/status/route";
 
 /**
  * GET /api/status (app/api/status/route.ts): every listed database, one
- * canary each, regenerated at most once a day. Red only when the source
+ * canary each, regenerated at most once an hour. Red only when the source
  * answered wrong; a request that died is "neověřeno" (ok: null).
  */
 
@@ -34,7 +34,7 @@ describe("allDatabaseStatuses", () => {
     expect(by.nalus).toMatchObject({ ok: null, at: null, via: null });
   });
 
-  it("is regenerated at most once a day", () => {
-    expect(revalidate).toBe(86400);
+  it("is regenerated at most once an hour", () => {
+    expect(revalidate).toBe(3600);
   });
 });

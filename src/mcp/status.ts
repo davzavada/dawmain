@@ -13,15 +13,15 @@ export {
  * The green/red light next to each database on the home page.
  *
  * One canary per database, all at once, behind GET /api/status - a static
- * Route Handler that Next regenerates in the background at most once a day
+ * Route Handler that Next regenerates in the background at most once an hour
  * (app/api/status/route.ts). The CDN serves the last answer to every
  * visitor without running a function, and outside Clerk's proxy, so no
  * visitor ever waits on a canary, and no cron is needed: the first request
- * after the day is up gets the old answer and triggers the next check.
+ * after the hour is up gets the old answer and triggers the next check.
  *
  * Nobody waits on a regeneration, so the canaries keep the probe tool's
  * full timeout: a slow source gets time to answer instead of being written
- * off as "neověřeno" for a whole day.
+ * off as "neověřeno" for a whole hour.
  */
 
 /**
