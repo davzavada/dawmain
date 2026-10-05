@@ -94,11 +94,9 @@ export const DATABASES: Array<{
   },
 ];
 
-/** "5. 10. 14:07" in Prague time - what the light is as of (checks run daily, so the day matters). */
+/** "14:07" in Prague time - what the light is as of. */
 export function formatTime(at: number): string {
   return new Intl.DateTimeFormat("cs-CZ", {
-    day: "numeric",
-    month: "numeric",
     hour: "2-digit",
     minute: "2-digit",
     timeZone: "Europe/Prague",
