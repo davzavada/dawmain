@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState, type MouseEvent } from "react";
 import { Icon, type IconName } from "./_icons";
 import { setPlatform, usePlatform, type PlatformId } from "./_platform";
+import { LEGAL_PUBLISHED } from "./_legal";
 
 /**
  * Site navigation: a sticky sidebar on wide screens, a sticky tab strip on
@@ -107,14 +108,16 @@ export function SiteNav({ sourceCount }: { sourceCount: number }) {
           ))}
         </div>
 
-        <div className="nav-group nav-legal">
-          {LEGAL.map(({ href, label, icon }) => (
-            <Link key={href} href={href} className="nav-item" {...current(pathname === href)}>
-              <Icon name={icon} />
-              <span>{label}</span>
-            </Link>
-          ))}
-        </div>
+        {LEGAL_PUBLISHED ? (
+          <div className="nav-group nav-legal">
+            {LEGAL.map(({ href, label, icon }) => (
+              <Link key={href} href={href} className="nav-item" {...current(pathname === href)}>
+                <Icon name={icon} />
+                <span>{label}</span>
+              </Link>
+            ))}
+          </div>
+        ) : null}
       </nav>
 
       <div className="topbar">

@@ -19,8 +19,8 @@ vi.mock("next/link", () => ({
 }));
 vi.mock("next/navigation", () => ({ usePathname: () => pathname }));
 
-const { default: Soukromi } = await import("@/app/soukromi/page");
-const { default: Podminky } = await import("@/app/podminky/page");
+const { Soukromi } = await import("@/app/soukromi/page");
+const { Podminky } = await import("@/app/podminky/page");
 const { SiteNav } = await import("@/app/_nav");
 const { CONTACT, EFFECTIVE } = await import("@/app/_legal");
 const { PAGE_CHARS, metaModel } = await import("@/src/files/config");

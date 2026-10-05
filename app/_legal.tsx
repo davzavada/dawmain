@@ -6,6 +6,13 @@ import type { ReactNode } from "react";
  * never routes it: a component file that happens to live in app/.
  */
 
+/**
+ * Whether /podminky and /soukromi are published. While false, both routes
+ * 404 and no page links to them; the texts stay in the repo (and in the
+ * tests) until they are fixed up and switched back on.
+ */
+export const LEGAL_PUBLISHED = false;
+
 /** Both documents state the same effective date; bump it when they change. */
 export const EFFECTIVE = "1. 11. 2026";
 
