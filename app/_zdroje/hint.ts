@@ -17,21 +17,52 @@ import { countDocuments, countPages } from "./format";
  * the signed-in variant and CSS shows the one the hint says.
  *
  * The cookie holds only what the header and the home page group show
- * (initials, the library summary and `v`, the texts derived from it by
- * hintView — the same function the components render with, so the hinted
- * page and the real one match); it is never trusted for access — every API
- * call is authorized by Clerk. A value that does not parse exactly is
- * ignored. Pure: used by the layout (server) and the store (browser).
+ * (initials, the account's picture, the library summary and `v`, the texts
+ * derived from it by hintView — the same function the components render
+ * with, so the hinted page and the real one match); it is never trusted for
+ * access — every API call is authorized by Clerk. A value that does not
+ * parse exactly is ignored. Pure: used by the layout (server) and the store
+ * (browser).
  */
 
 export const HINT_COOKIE = "dz_hint";
-/** Browsers keep ~4 KB per cookie; a bigger summary is left out and the initials alone go. */
+/** Browsers keep ~4 KB per cookie; a bigger summary is left out (then the picture) and the initials alone go. */
 const MAX_COOKIE_CHARS = 3_000;
 const MAX_AGE_S = 60 * 60 * 24 * 30;
 
 export interface Hint {
   initials: string;
+  /** The account's picture as Clerk serves it (user.imageUrl), or null. */
+  image: string | null;
   summary: SummaryResponse | null;
+}
+
+/**
+ * Clerk serves every account picture (an uploaded photo, the sign-in
+ * provider's, or its generated default) from img.clerk.com. Only such an
+ * address is kept: it has no quotes, brackets or spaces, so it is safe
+ * inside url("…") in CSS.
+ */
+const CLERK_IMAGE = /^https:\/\/img\.clerk\.com\/[\w.~+/=%-]+$/;
+const MAX_IMAGE_CHARS = 1_000;
+
+function clerkImage(v: unknown): string | null {
+  return isStr(v, MAX_IMAGE_CHARS) && CLERK_IMAGE.test(v) ? v : null;
+}
+
+/** The picture's width Clerk's own avatar asks for (2 × its 80 px), so both share the cached file. */
+const AVATAR_FETCH_WIDTH = 160;
+
+/** The address the avatar loads: a Clerk picture at the avatar's size, anything else as it is. */
+export function avatarSrc(image: string): string {
+  try {
+    const url = new URL(image);
+    if (url.hostname !== "img.clerk.com") return image;
+    url.searchParams.set("width", String(AVATAR_FETCH_WIDTH));
+    return url.href;
+  } catch {
+    return image;
+  }
 }
 
 const MODES = new Set(["on", "readonly", "off"]);
@@ -108,15 +139,20 @@ export function parseHint(raw: string | undefined | null): Hint | null {
   const o = data as Record<string, unknown>;
   if (!isStr(o.i, 4)) return null;
   const initials = o.i.replace(/[^\p{L}\p{N}]/gu, "").slice(0, 3);
-  return { initials: initials || "?", summary: summary(o.s) };
+  return { initials: initials || "?", image: clerkImage(o.m), summary: summary(o.s) };
 }
 
-/** A hint → the cookie value (URI-encoded JSON); the summary is dropped when it would not fit. */
+/** A hint → the cookie value (URI-encoded JSON); the summary, then the picture, is dropped when it would not fit. */
 export function encodeHint(hint: Hint): string {
-  const encode = (summary: SummaryResponse | null) =>
-    encodeURIComponent(JSON.stringify({ i: hint.initials.slice(0, 4), s: summary, v: compactView(hintView(summary)) }));
-  const full = encode(hint.summary);
-  return full.length <= MAX_COOKIE_CHARS ? full : encode(null);
+  const encode = (image: string | null, summary: SummaryResponse | null) =>
+    encodeURIComponent(
+      JSON.stringify({ i: hint.initials.slice(0, 4), ...(image ? { m: image } : {}), s: summary, v: compactView(hintView(summary)) }),
+    );
+  const image = clerkImage(hint.image);
+  const full = encode(image, hint.summary);
+  if (full.length <= MAX_COOKIE_CHARS) return full;
+  const lean = encode(image, null);
+  return lean.length <= MAX_COOKIE_CHARS ? lean : encode(null, null);
 }
 
 /** document.cookie → the hint in it, or null. */
@@ -179,10 +215,11 @@ function compactView(view: HintView): { p: boolean; f: string; l: boolean } {
 /**
  * Runs in the browser while it parses <head> (inlined by the root layout as
  * HINT_SCRIPT, so it must stay self-contained: no imports, no outer names).
- * With a signed-in hint: <html data-hint="in">, data-hint-pro and
- * data-hint-files-locked when they apply, and the initials and the files
- * line as CSS strings in --hint-initials and --hint-files. Anything that is
- * not exactly a hint leaves the page as the visitor's. Exported for tests.
+ * With a signed-in hint: <html data-hint="in">, data-hint-image,
+ * data-hint-pro and data-hint-files-locked when they apply, the initials and
+ * the files line as CSS strings in --hint-initials and --hint-files, and the
+ * picture as a CSS url() in --hint-image. Anything that is not exactly a
+ * hint leaves the page as the visitor's. Exported for tests.
  */
 export function applyHint(doc: Document, name: string): void {
   try {
@@ -193,11 +230,19 @@ export function applyHint(doc: Document, name: string): void {
     if (typeof hint.i !== "string" || hint.i.length > 4 || !view || typeof view.f !== "string" || view.f.length > 200) return;
     // As parseHint: letters and digits only, at most three.
     const initials = hint.i.replace(new RegExp("[^\\p{L}\\p{N}]", "gu"), "").slice(0, 3) || "?";
+    // As parseHint: only a picture on Clerk's image host, an address that can stand in url("…") as it is.
+    const image =
+      typeof hint.m === "string" && hint.m.length <= 1000 && /^https:\/\/img\.clerk\.com\/[\w.~+/=%-]+$/.test(hint.m) ? hint.m : null;
     // A CSS string: quoted, with quotes, backslashes and line breaks escaped, so it never becomes anything else.
     const css = (text: string) => '"' + text.replace(/[\\"]/g, "\\$&").replace(/[\n\r\f]/g, " ") + '"';
     const root = doc.documentElement;
     root.style.setProperty("--hint-initials", css(initials));
     root.style.setProperty("--hint-files", css(view.f));
+    if (image) {
+      // As avatarSrc(): the very address the avatar loads once Clerk is up, so it comes from the cache.
+      root.style.setProperty("--hint-image", 'url("' + image + '?width=160")');
+      root.setAttribute("data-hint-image", "");
+    }
     if (view.p === true) root.setAttribute("data-hint-pro", "");
     if (view.l === true) root.setAttribute("data-hint-files-locked", "");
     root.setAttribute("data-hint", "in");
