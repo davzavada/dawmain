@@ -2,7 +2,7 @@
  * The databases the home page lists, with the shape of their status and the
  * time format the badges use. Pure data and formatting, no I/O: the client
  * components that render the badges (app/_source-status.tsx) import it, the
- * checks themselves stay on the server (./status.ts, GET /api/status/[id]).
+ * checks themselves stay on the server (./status.ts, GET /api/status).
  */
 
 export interface DatabaseStatus {
@@ -16,8 +16,8 @@ export interface DatabaseStatus {
   ok: boolean | null;
   /** Epoch ms of the observation behind `ok`, null when unknown. */
   at: number | null;
-  /** "provoz" = seen on a real call, "kontrola" = canary, null = unknown. */
-  via: "provoz" | "kontrola" | null;
+  /** "kontrola" = canary, null = unknown. */
+  via: "kontrola" | null;
   detail?: string;
 }
 
@@ -94,9 +94,11 @@ export const DATABASES: Array<{
   },
 ];
 
-/** "14:07" in Prague time - what the light is as of. */
+/** "5. 10. 14:07" in Prague time - what the light is as of (checks run daily, so the day matters). */
 export function formatTime(at: number): string {
   return new Intl.DateTimeFormat("cs-CZ", {
+    day: "numeric",
+    month: "numeric",
     hour: "2-digit",
     minute: "2-digit",
     timeZone: "Europe/Prague",

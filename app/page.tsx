@@ -55,7 +55,7 @@ export default function Home() {
           CREDENTIALS_SECRET) and Vlastní soubory, counts from GET /api/files/summary.
         */}
         <OwnSourcesGroup zotero={zoteroConfigured()} />
-        {/* Client island: the badges come from GET /api/status/[id], one per source, after the page is up. */}
+        {/* Client island: the badges come from GET /api/status (static, checked daily) after the page is up. */}
         <SourceList />
       </section>
 

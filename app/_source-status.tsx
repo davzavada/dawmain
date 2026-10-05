@@ -11,18 +11,18 @@ import { Icon, type IconName } from "./_icons";
 
 /**
  * The source checks in the browser: the summary in the header and the
- * badges on the home page. Each badge asks GET /api/status/[id] for its own
- * source after the page is up, so a slow source delays only its own badge,
- * never the page or the other badges.
+ * badges on the home page. Both read GET /api/status once the page is up -
+ * a static answer the CDN serves at once, regenerated at most daily
+ * (app/api/status/route.ts) - so no page waits on it.
  */
 
 /** undefined while loading, null when the check could not be read. */
 type Answer = DatabaseStatus | null | undefined;
 type Answers = Record<string, Answer>;
 
-/** One request per source and page load, shared by the header and the list; reused this long across client navigations. */
+/** One request per page load, shared by the header and the list; reused this long across client navigations. */
 const REUSE_MS = 60 * 1000;
-const asked = new Map<string, { at: number; answer: Promise<DatabaseStatus | null> }>();
+let asked: { at: number; answer: Promise<Answers> } | undefined;
 
 function isStatus(v: unknown): v is DatabaseStatus {
   if (!v || typeof v !== "object") return false;
@@ -35,27 +35,30 @@ function isStatus(v: unknown): v is DatabaseStatus {
   );
 }
 
-function load(id: string): Promise<DatabaseStatus | null> {
-  const hit = asked.get(id);
-  if (hit && Date.now() - hit.at <= REUSE_MS) return hit.answer;
-  const answer = fetch(`/api/status/${encodeURIComponent(id)}`)
+/** Every database's answer by canary id; null for one the server did not report. */
+function toAnswers(body: unknown): Answers {
+  const list = Array.isArray(body) ? body.filter(isStatus) : [];
+  return Object.fromEntries(DATABASES.map(({ canaryId }) => [canaryId, list.find((s) => s.id === canaryId) ?? null]));
+}
+
+function load(): Promise<Answers> {
+  if (asked && Date.now() - asked.at <= REUSE_MS) return asked.answer;
+  const answer = fetch("/api/status")
     .then((r) => (r.ok ? r.json() : null))
-    .then((body: unknown) => (isStatus(body) ? body : null))
-    .catch(() => null);
-  asked.set(id, { at: Date.now(), answer });
+    .catch(() => null)
+    .then(toAnswers);
+  asked = { at: Date.now(), answer };
   return answer;
 }
 
-/** Every database's answer, filled in one by one as they arrive. */
+/** Every database's answer; empty (all pending) until the one request returns. */
 function useStatuses(): Answers {
   const [answers, setAnswers] = useState<Answers>({});
   useEffect(() => {
     let live = true;
-    for (const { canaryId } of DATABASES) {
-      load(canaryId).then((status) => {
-        if (live) setAnswers((prev) => ({ ...prev, [canaryId]: status }));
-      });
-    }
+    load().then((all) => {
+      if (live) setAnswers(all);
+    });
     return () => {
       live = false;
     };
@@ -77,7 +80,6 @@ function Summary({ state, text }: { state: "ok" | "down" | "pending"; text: stri
 
 export function StatusSummary() {
   const answers = useStatuses();
-  // The summary speaks for all sources, so it waits for all of them (each at most a few seconds).
   if (DATABASES.some((db) => answers[db.canaryId] === undefined)) return <Summary state="pending" text="Ověřuji zdroje…" />;
   const known = DATABASES.map((db) => answers[db.canaryId]).filter((s): s is DatabaseStatus => !!s && s.ok !== null);
   if (known.length === 0) return <Summary state="pending" text="Stav zdrojů neověřen" />;

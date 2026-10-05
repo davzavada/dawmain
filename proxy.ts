@@ -26,8 +26,10 @@ export default clerkConfigured ? clerkMiddleware() : () => NextResponse.next();
 
 export const config = {
   matcher: [
-    // The API routes (MCP, /api/files/*, /api/zotero/*, webhooks, cron).
-    "/(api|trpc)(.*)",
+    // The API routes (MCP, /api/files/*, /api/zotero/*, webhooks, cron) — except
+    // /api/status: public, static and served by the CDN, which a proxy in front
+    // would turn into a function call per request (app/api/status/route.ts).
+    "/((?!api/status(?:/|$))(?:api|trpc).*)",
     // The operator page and its Server Functions (auth() on the server); :path* includes the page itself.
     "/vlastni-zdroje/provoz/:path*",
     // Clerk's own auto-proxy path.
