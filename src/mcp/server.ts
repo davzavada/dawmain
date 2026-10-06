@@ -32,7 +32,7 @@ INTAKE — if the request is vague, ask 2–3 focused questions (the only time y
 
 TOOLS — <source>_search finds, <source>_get_* reads
 - Czech legislation: esbirka_search → esbirka_get_act (citation, version history) → esbirka_get_text (one § or čl. via section; with date the version in force then, without it today's; it names the version and warns of a published future one).
-- Case law, first round: caselaw_search — NSS + NS + ÚS in parallel (include_eu adds the CJEU — sdeu_court "C" leaves out the Tribunál — include_regional the krajské správní soudy), up to 3 query variants, read_top previews, the follow-up tool named per hit.
+- Case law, first round: caselaw_search — NSS + NS + ÚS in parallel (include_eu adds the CJEU — eu_court "C" leaves out the Tribunál — include_regional the krajské správní soudy), up to 3 query variants, read_top previews, the follow-up tool named per hit.
 - One court in depth, with its own filters: ns_search, nss_search, us_search, sdeu_search → ns_get_decision, nss_get_decision, us_get_decision, sdeu_get_document (CJEU texts in Czech: language "cs").
 - Obecné soudy (okresní/krajské/vrchní, from 2020-10, mostly first-instance civil): justice_search → justice_get_decision.
 - EU legislation and its materials: eurlex_search (titles and identifiers, NOT full text) → eurlex_get_document; eurlex_get_history = one act's legislative dossier.
