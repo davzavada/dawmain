@@ -45,9 +45,11 @@ můžete stáhnout. Pravidla jsou v
 **Zotero (Pro).** S režimem Pro a přihlášením vlastním účtem si na webu
 (tlačítko „Připojit Zotero“) propojíte svou knihovnu na zotero.org. Asistent
 v ní pak hledá a čte vedle oficiálních databází: záznamy, poznámky, anotace a
-text příloh, v osobní knihovně i ve skupinách. Přístup je jen ke čtení -
-Dawmain v Zoteru nic nezmění; klíč s právem zápisu odmítne. Když Zotero text
-PDF nezaindexoval, Dawmain si soubor na dotaz stáhne, přečte a neuloží.
+text příloh, v osobní knihovně i ve skupinách. Při připojení si vyberete
+„Jen číst“, nebo „Číst a ukládat“ - pak asistent na požádání přidá do osobní
+knihovny jednu novou položku (`zotero_save`). Nic existujícího Dawmain nikdy
+nezmění ani nesmaže a do skupin nezapisuje. Když Zotero text PDF
+nezaindexoval, Dawmain si soubor na dotaz stáhne, přečte a neuloží.
 Odpojit jde kdykoli na webu nebo smazáním klíče na zotero.org. Skupina
 „Zotero“ na hlavní stránce (pod Vlastními zdroji), položka v nabídce účtu
 a nástroje `zotero_*` se objeví, až bude Zotero na webu zapnuté.
