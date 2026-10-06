@@ -66,9 +66,10 @@ describe("privacy policy (/soukromi)", () => {
 
   it("states the retention the code applies", () => {
     expect(USAGE_KEEP_DAYS).toBe(365);
-    expect(privacy).toContain("počty volání nejdéle 12 měsíců");
+    expect(privacy).toContain("počty volání u účtu nejdéle 12 měsíců");
     // Webhook / cron mark a library for purge 6 days out; the daily run adds at most a day.
-    expect(privacy).toContain("po zrušení účtu nebo odebrání Pro je do týdne smažu");
+    expect(privacy).toContain("nejdéle však do zrušení účtu nebo odebrání Pro. Pak knihovnu do týdne smažu");
+    expect(privacy).toContain("nejdéle 6 hodin");
     expect(terms).toContain("do týdne smažu");
     expect(privacy).not.toContain("90 dní");
     expect(terms).not.toContain("90 dní");
@@ -83,6 +84,17 @@ describe("privacy policy (/soukromi)", () => {
   it("discloses the internal usage overview, not for marketing", () => {
     expect(privacy).toContain("kdo službu používá, jak často a které nástroje");
     expect(privacy).toContain("k marketingu ho nepoužívám");
+  });
+
+  it("states which data are required and which are voluntary (čl. 13 odst. 2 písm. e))", () => {
+    expect(privacy).toContain("bez nich účet nelze vytvořit");
+    expect(privacy).toContain("Nahrávání dokumentů a připojení Zotera jsou dobrovolné");
+  });
+
+  it("describes what goes to Gemini: an excerpt capped like the code, not the whole text", () => {
+    expect(privacy).toContain("výňatek z dokumentu, ne celý text");
+    expect(privacy).toContain("nejvýš 16 000 znaků");
+    expect(privacy).toContain("dostane jen pseudonym");
   });
 
   it("has no DPO section", () => {
