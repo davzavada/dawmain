@@ -67,14 +67,22 @@ describe("privacy policy (/soukromi)", () => {
   it("states the retention the code applies", () => {
     expect(USAGE_KEEP_DAYS).toBe(365);
     expect(privacy).toContain("počty volání nejdéle 12 měsíců");
-    expect(privacy).toContain("nejpozději do 8 dnů");
-    expect(privacy).toContain("90 dní");
+    // Webhook / cron mark a library for purge 6 days out; the daily run adds at most a day.
+    expect(privacy).toContain("po zrušení účtu nebo odebrání Pro je do týdne smažu");
+    expect(terms).toContain("do týdne smažu");
+    expect(privacy).not.toContain("90 dní");
+    expect(terms).not.toContain("90 dní");
     expect(privacy).toContain("dokud Zotero neodpojíte nebo nezrušíte účet");
   });
 
   it("uses only sign-in cookies and stores the Zotero key encrypted", () => {
     expect(privacy).toContain("jen cookies nezbytné pro přihlášení");
     expect(privacy).toContain("zašifrovaný klíč k vaší knihovně");
+  });
+
+  it("discloses the internal usage overview, not for marketing", () => {
+    expect(privacy).toContain("kdo službu používá, jak často a které nástroje");
+    expect(privacy).toContain("k marketingu ho nepoužívám");
   });
 
   it("has no DPO section", () => {
@@ -147,8 +155,8 @@ describe("terms of use (/podminky)", () => {
     expect(paragraph).toContain("česky nebo anglicky");
   });
 
-  it("keeps the text export open after Pro is revoked and names it next to the no-backup rule", () => {
-    expect(terms).toContain("90 dní k prohlížení, mazání a stažení textu");
+  it("names the text export next to the no-backup rule and before a revoked library goes", () => {
+    expect(terms).toContain("text svých dokumentů včas stáhněte");
     expect(terms).toContain("„Stáhnout text“ u dokumentu v seznamu souborů");
   });
 });

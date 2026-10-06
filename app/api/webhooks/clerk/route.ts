@@ -11,7 +11,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /** Soft delete: the library is purged by the daily cron after this grace period. */
-const PURGE_GRACE_DAYS = 7;
+const PURGE_GRACE_DAYS = 6;
 const ORG_ID_RE = /^org_[A-Za-z0-9]+$/;
 
 /**

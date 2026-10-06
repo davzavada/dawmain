@@ -25,8 +25,9 @@ export default function Soukromi() {
             přihlášení účtem Google je předá Google).
           </li>
           <li>
-            <strong>Provozní záznamy</strong> - čas požadavku, volaný nástroj, výsledek a IP adresa;
-            počty volání pro hlídání limitů.
+            <strong>Provozní záznamy a přehled o používání</strong> - čas požadavku, volaný
+            nástroj, výsledek a IP adresa; počty volání u účtu, ze kterých vidím, kdo službu
+            používá, jak často a které nástroje.
           </li>
           <li>
             <strong>Vlastní soubory (Pro)</strong> - dokumenty, které nahrajete, a záznam o tom,
@@ -48,7 +49,10 @@ export default function Soukromi() {
           </li>
           <li>
             <strong>oprávněný zájem</strong> (čl. 6 odst. 1 písm. f) GDPR): provozní záznamy,
-            hlídání limitů a ochrana služby před zneužitím; proti tomu můžete vznést námitku.
+            hlídání limitů, ochrana služby před zneužitím a přehled o tom, kdo a jak službu
+            používá, abych ji mohl rozvíjet. Přehled je jen pro mě, k marketingu ho nepoužívám,
+            nikomu ho nedávám a nepoužívám žádné analytické nástroje třetích stran. Proti tomu
+            můžete vznést námitku.
           </li>
         </ul>
       </Section>
@@ -58,8 +62,8 @@ export default function Soukromi() {
           <li>Údaje o účtu - dokud účet trvá; o jeho smazání můžete kdykoli požádat e-mailem.</li>
           <li>Provozní záznamy - dny až týdny; počty volání nejdéle 12 měsíců.</li>
           <li>
-            Vlastní soubory - dokud je nesmažete; po zrušení účtu je smažu nejpozději do 8 dnů. Po
-            odebrání Pro je ještě 90 dní uvidíte na webu a můžete si stáhnout jejich text.
+            Vlastní soubory - dokud je nesmažete; po zrušení účtu nebo odebrání Pro je do týdne
+            smažu.
           </li>
           <li>Klíč k Zoteru - dokud Zotero neodpojíte nebo nezrušíte účet.</li>
         </ul>
