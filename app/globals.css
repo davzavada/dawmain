@@ -735,6 +735,16 @@ main > footer a {
   line-height: 1.35;
   letter-spacing: -0.01em;
 }
+.legal-activity {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+}
+.legal-activity h3 {
+  font-size: 16px;
+  line-height: 1.35;
+}
 .legal ul {
   margin: 0;
   padding-left: 1.2rem;

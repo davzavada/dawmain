@@ -120,9 +120,12 @@ describe("privacy policy (/soukromi)", () => {
     expect(privacy).toContain("jsou tedy nezbytné");
   });
 
-  it("makes the uploader the controller of personal data in uploads", () => {
-    expect(privacy).toContain("Jejich správcem jste vy");
-    expect(privacy).toContain("jen jako zpracovatel");
+  it("makes the operator the controller, with no processing contract for uploads", () => {
+    expect(privacy).toContain("David Závada");
+    expect(privacy).not.toContain("Jejich správcem jste vy");
+    expect(privacy).not.toContain("jen jako zpracovatel");
+    expect(terms).not.toContain("čl. 28 GDPR");
+    expect(terms).not.toContain("jste správcem vy");
   });
 
   it("shows the shared effective date", () => {
@@ -134,14 +137,13 @@ describe("privacy policy (/soukromi)", () => {
 describe("Zotero in the legal texts", () => {
   it("lists the stored key and the library content read on request", () => {
     expect(privacy).toContain("klíč k vaší knihovně Zotero");
-    expect(privacy).toContain("Ukládám ho zašifrovaný u vašeho účtu v Clerku");
+    expect(privacy).toContain("ukládám ho zašifrovaný u vašeho účtu v Clerku");
     expect(privacy).toContain("obsah knihovny, na který se váš asistent zeptá");
   });
 
   it("keeps Zotero out of the processor list: it is the user's own service", () => {
     expect(privacy).toContain("tři zpracovatelé");
     expect(privacy).toContain("není můj zpracovatel");
-    expect(privacy).toContain("Totéž platí pro osobní údaje v knihovně Zotero");
   });
 
   it("states that a PDF may be fetched when Zotero has no text, and is never stored", () => {
