@@ -175,6 +175,12 @@ export function registerCzCaselaw(server: McpServer): void {
           .boolean()
           .default(false)
           .describe("Also search the CJEU (InfoCuria) in the same parallel fan-out."),
+        sdeu_court: z
+          .enum(["C", "T"])
+          .optional()
+          .describe(
+            "Only with the CJEU lane: C = Court of Justice only (leaves out the General Court / Tribunál), T = General Court only. Default: both.",
+          ),
         include_regional: z
           .boolean()
           .default(false)
@@ -237,7 +243,7 @@ export function registerCzCaselaw(server: McpServer): void {
       }),
       annotations: READ_ONLY,
     },
-    async ({ query, queries, date_from, date_to, per_source_limit, sources, include_eu, include_regional, read_top }) => {
+    async ({ query, queries, date_from, date_to, per_source_limit, sources, include_eu, sdeu_court, include_regional, read_top }) => {
       const variants = uniqueQueries(query, queries);
       if (!variants.length) {
         return {
@@ -343,7 +349,11 @@ export function registerCzCaselaw(server: McpServer): void {
           // One hit per CASE, standing for it by its best document (the
           // judgment, not the summary or an OJ notice upstream may list
           // first — whose link and date would be cited as the decision's).
-          const result = await searchCuria({ query: variant, dateFrom: date_from, dateTo: date_to }, 0, per_source_limit);
+          const result = await searchCuria(
+            { query: variant, dateFrom: date_from, dateTo: date_to, ...(sdeu_court ? { court: sdeu_court } : {}) },
+            0,
+            per_source_limit,
+          );
           return {
             total: result.total,
             hits: result.affairs.map((affair) => {

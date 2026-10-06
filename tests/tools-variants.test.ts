@@ -300,6 +300,14 @@ describe("caselaw_search", () => {
       );
     });
 
+    it("passes sdeu_court on to InfoCuria, and asks for both courts without it", async () => {
+      vi.mocked(searchCuria).mockResolvedValue(curiaPage([]));
+      await caselaw({ query: "safe harbour", sources: ["sdeu"], sdeu_court: "C" });
+      expect(vi.mocked(searchCuria).mock.calls[0][0]).toMatchObject({ court: "C" });
+      await caselaw({ query: "safe harbour", sources: ["sdeu"] });
+      expect(vi.mocked(searchCuria).mock.calls[1][0]).not.toHaveProperty("court");
+    });
+
     it("merges a case found by two variants into one hit", async () => {
       vi.mocked(searchCuria).mockResolvedValue(
         curiaPage([affair("C-311/18", [{ ecli: "ECLI:EU:C:2020:559", docType: "ARRET", logicDocId: "id_9" }])]),

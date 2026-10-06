@@ -172,7 +172,8 @@ Each court's variants are merged round-robin — every variant gets its place on
 page — and the court's status line says what each variant found: a variant with 0 is a
 formulation to drop, a failed one is named while the rest still answer. `read_top: 2`
 adds short previews of the leading hits: search and first screening in one round.
-`include_eu: true` when the issue has an EU dimension.
+`include_eu: true` when the issue has an EU dimension; `sdeu_court: "C"` keeps only the
+Soudní dvůr (no Tribunál decisions).
 
 **Distinctive phrases beat common words.** A two- or three-word term of art discriminates;
 "náhrada škody" alone matches half the database.
