@@ -97,16 +97,13 @@ export default function Podminky() {
           souborů (s denním limitem).
         </p>
         <p>
-          <strong>Osobní údaje v dokumentech.</strong> U osobních údajů v tom, co nahrajete, jste
-          správcem vy a já zpracovatelem (čl. 28 GDPR); tento oddíl je naší smlouvou o zpracování.
-          Zpracovávám je jen podle vašich pokynů - uložím je, zaindexuji a zpřístupním vašemu
-          asistentovi - a k ničemu jinému je nepoužiji. Zachovám o nich mlčenlivost a
-          chráním je, jak popisují Zásady ochrany osobních údajů. Tam je i seznam zpracovatelů,
-          kterým je svěřuji (Vercel a přes něj Google, Neon); přibrání dalšího vám oznámím e-mailem
-          aspoň měsíc předem, a když nebudete souhlasit, můžete Vlastní soubory opustit. Pomůžu vám
-          vyřídit žádosti lidí, o kterých dokumenty jsou, i s dalšími povinnostmi správce, o
-          porušení zabezpečení vám dám vědět bez zbytečného odkladu a na požádání vám doložím, jak
-          s údaji zacházím. Když Vlastní soubory skončí, údaje smažu tak, jak uvádějí Zásady.
+          <strong>Osobní údaje v dokumentech.</strong> Správcem osobních údajů v tom, co nahrajete
+          (třeba jmen autorů nebo účastníků v rozhodnutí), jsem já. Jak s nimi zacházím a co může
+          člověk, o kterém dokument je, žádat, popisují{" "}
+          <Link href="/soukromi">Zásady ochrany osobních údajů</Link>. Vy odpovídáte za to, že
+          dokument smíte nahrát a že v něm nejsou údaje, které sem podle tohoto oddílu nepatří.
+          Požádá-li mě někdo o výmaz údajů o sobě nebo vznese-li námitku, můžu dokument nebo jeho
+          část smazat; dám vám o tom vědět.
         </p>
         <p>
           <strong>Nezákonný obsah.</strong> Máte-li za to, že je ve Vlastních souborech nezákonný
@@ -153,12 +150,10 @@ export default function Podminky() {
         </p>
         <p>
           Zotero se řídí vlastními podmínkami. Za jeho dostupnost ani za obsah vaší knihovny
-          neručím. U osobních údajů v připojené knihovně (třeba jména v rozhodnutích nebo v
-          poznámkách) jste správcem vy a já zpracovatelem, stejně jako u Vlastních souborů. Platí
-          pro ně přiměřeně odstavec „Osobní údaje v dokumentech“ výše, s tím, že je nikam
-          neukládám (kromě nových záznamů, které asistent při volbě „Číst a ukládat“ uloží přímo
-          do vaší knihovny v Zoteru) a jediným zpracovatelem, kterému je svěřuji, je Vercel
-          (hosting).
+          neručím. Obsah knihovny nikam neukládám, projde jen dočasnou pamětí serveru; nové
+          záznamy, které asistent při volbě „Číst a ukládat“ uloží, žijí jen ve vaší knihovně v
+          Zoteru. Jak zacházím s osobními údaji, které knihovna obsahuje, popisují Zásady ochrany
+          osobních údajů.
         </p>
       </Section>
 

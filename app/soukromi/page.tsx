@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { LegalHeader, Mail, Section } from "../_legal";
 
 export const metadata = {
@@ -6,236 +7,332 @@ export const metadata = {
   description: "Jaké osobní údaje Dawmain zpracovává, proč, jak dlouho a jaká máte práva.",
 };
 
+/** One processing activity: what, why, on what basis, how long (čl. 13 GDPR). */
+function Activity({
+  heading,
+  data,
+  purpose,
+  basis,
+  retention,
+  children,
+}: {
+  heading: string;
+  data: ReactNode;
+  purpose: ReactNode;
+  basis: ReactNode;
+  retention: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="legal-activity">
+      <h3>{heading}</h3>
+      <p>
+        <strong>Údaje:</strong>
+      </p>
+      {data}
+      <p>
+        <strong>Účel:</strong> {purpose}
+      </p>
+      <p>
+        <strong>Právní základ:</strong> {basis}
+      </p>
+      <p>
+        <strong>Doba uchování:</strong>
+      </p>
+      {retention}
+      {children}
+    </div>
+  );
+}
+
+const CONTRACT = "plnění smlouvy (čl. 6 odst. 1 písm. b) GDPR)";
+const INTEREST = "oprávněný zájem (čl. 6 odst. 1 písm. f) GDPR)";
+
 export default function Soukromi() {
   return (
     <article className="legal">
       <LegalHeader title="Zásady ochrany osobních údajů" />
 
-      <Section heading="1. Správce osobních údajů">
+      <Section heading="1. Kdo je správce">
         <p>
-          <strong>David Závada</strong>, fyzická osoba, služba je provozována mimo rámec
-          podnikatelské činnosti.
+          <strong>David Závada</strong>, fyzická osoba; službu provozuji mimo rámec podnikání.
+          Ve všech věcech osobních údajů mi pište na <Mail />.
         </p>
         <p>
-          E-mail: <Mail />
+          Správcem jsem u všech osobních údajů, které Dawmain zpracovává: o vás jako uživateli i o
+          lidech zmíněných v dokumentech, které nahrajete do Vlastních souborů, nebo v knihovně
+          Zotero, kterou k Dawmainu připojíte (bod 3). Jejich správcem jsem já, ne vy: co se s nimi
+          v Dawmainu děje, jak dlouho tu jsou a komu je svěřuji, určuji já. Vy jen odpovídáte za
+          to, že dokument smíte nahrát a že neobsahuje nic, co sem podle{" "}
+          <Link href="/podminky">Podmínek užití</Link> nepatří.
         </p>
         <p>
-          Výjimkou jsou osobní údaje v dokumentech, které nahrajete do Vlastních souborů - třeba
-          jména účastníků v rozhodnutí nebo autorů článku. Jejich správcem jste vy: vy rozhodujete,
-          co nahrajete. Já je zpracovávám jen jako zpracovatel, podle
-          vašich pokynů a <Link href="/podminky">Podmínek užití</Link>. Totéž platí pro osobní
-          údaje v knihovně Zotero, kterou k Dawmainu připojíte (záznamy, poznámky, přílohy).
+          Pověřence pro ochranu osobních údajů jmenovat nemusím a nejmenoval jsem ho.
         </p>
       </Section>
 
-      <Section heading="2. Jaké údaje zpracovávám">
-        <p>Při přihlášení a používání služby zpracovávám tyto údaje:</p>
-        <ul>
-          <li>
-            <strong>e-mailová adresa</strong> - pro rozlišení uživatelů a komunikaci s vámi,
-          </li>
-          <li>
-            <strong>identifikátor účtu</strong> - pro jednoznačné přiřazení uživatele,
-          </li>
-          <li>
-            <strong>strojová volání nástrojů a odpovědi zdrojů</strong> - krátce v dočasné paměti
-            serveru, aby opakovaný dotaz nezatěžoval veřejné zdroje,
-          </li>
-          <li>
-            <strong>údaje o používání služby</strong> - která volání server odbaví, kolik jich je a
-            jak dopadnou,
-          </li>
-          <li>
-            <strong>provozní záznamy hostingu</strong> - IP adresa, čas, typ požadavku, chybová
-            hlášení.
-          </li>
-        </ul>
-        <p>Máte-li Vlastní soubory (režim Pro), přibývá k tomu:</p>
-        <ul>
-          <li>
-            <strong>text nahraných dokumentů</strong> - dokumenty se na text převádějí přímo ve
-            vašem prohlížeči; původní soubor vaše zařízení neopustí a na server jde jen převedený
-            text,
-          </li>
-          <li>
-            <strong>metadata dokumentů</strong> - název, autoři, rok, typ dokumentu a podobně, a
-            také název a velikost původního souboru,
-          </li>
-          <li>
-            <strong>vyhledávací index</strong> - z textu odvozená slova, strany, oddíly, poznámky a
-            identifikátory (spisové značky, paragrafy), ve kterých asistent hledá,
-          </li>
-          <li>
-            <strong>kdo co udělal</strong> - kdy jste dokument nahráli, upravili, stáhli nebo
-            smazali, název knihovny a záznam, že jste přijali pravidla Vlastních souborů,
-          </li>
-          <li>
-            <strong>denní počítadla</strong> - kolik jste za den v dokumentech četli a kolik jste
-            si z nich stáhli; hlídají limity, díky kterým může služba běžet zdarma.
-          </li>
-        </ul>
-        <p>Připojíte-li v režimu Pro svou knihovnu Zotero, přibývá ještě:</p>
-        <ul>
-          <li>
-            <strong>klíč k vaší knihovně Zotero</strong> - vydá ho Zotero, když připojení na jeho
-            stránce potvrdíte. Ukládám ho zašifrovaný u vašeho účtu v Clerku, spolu s vaším
-            uživatelským jménem a číselným identifikátorem v Zoteru, datem připojení, vaší volbou
-            („Jen číst“, nebo „Číst a ukládat“) a tím, k čemu klíč opravňuje (čtení knihovny,
-            poznámek a skupin, případně zápis do vaší osobní knihovny),
-          </li>
-          <li>
-            <strong>obsah knihovny, na který se váš asistent zeptá</strong> - záznamy (název,
-            autoři, další údaje, štítky, kolekce), poznámky, anotace a text příloh. Neukládám ho,
-            projde jen dočasnou pamětí (bod 5). Nemá-li Zotero text přílohy zaindexovaný, stáhnu
-            na dotaz asistenta PDF přílohu z úložiště Zotera, převedu ji na text a soubor hned
-            zahodím,
-          </li>
-          <li>
-            <strong>záznamy, které asistent uloží</strong> - zvolíte-li „Číst a ukládat“, pošlu na
-            pokyn asistenta do vaší knihovny nový záznam (typ, název, autoři, datum, odkaz na zdroj
-            a podobně). U sebe ho neuchovávám; žije ve vaší knihovně v Zoteru.
-          </li>
-        </ul>
+      <Section heading="2. Co zpracovávám, proč, na jakém základě a jak dlouho">
         <p>
-          Účty vede poskytovatel přihlášení Clerk; drží e-mailovou adresu, identifikátor účtu a
-          jméno, pokud ho vyplníte. Přihlásíte-li se přes účet jiné služby (např. Google), předá do
-          Clerku zpravidla totéž. Žádné další
-          údaje z vašeho účtu nezpracovávám a hesla u sebe neuchovávám.
-        </p>
-        <p>
-          Vaši konverzaci s AI asistentem server nevidí - nedostává ji. Dostane jen strojové
-          volání, které asistent provede. Obsah rešerší v oficiálních zdrojích - dotazy a odpovědi
-          - si trvale neukládám; trvale ukládám jen to, co sami nahrajete do Vlastních souborů, a u
-          připojeného Zotera klíč k němu.
           Reklamu nemám, údaje neprodávám a nepředávám je pro marketing. Nic o vás automaticky
-          nevyhodnocuji ani neprofiluji.
+          nevyhodnocuji ani neprofiluji. Vaši konverzaci s AI asistentem server nevidí - nedostává
+          ji. Dostane jen strojové volání, které asistent provede.
+        </p>
+
+        <Activity
+          heading="Účet a přihlášení"
+          data={
+            <ul>
+              <li>
+                <strong>e-mailová adresa</strong>, <strong>identifikátor účtu</strong> a jméno,
+                pokud ho vyplníte. Účty vede poskytovatel přihlášení Clerk. Přihlásíte-li se účtem
+                jiné služby (např. Google), předá do Clerku zpravidla totéž. Hesla u sebe
+                neuchovávám,
+              </li>
+              <li>
+                <strong>přihlašovací relace</strong> (cookies, bod 6) a u účtu poznámka, zda máte
+                režim Pro.
+              </li>
+            </ul>
+          }
+          purpose="přihlášení a přístup ke službě, rozlišení uživatelů a komunikace s vámi."
+          basis={`${CONTRACT}. Skutečnost, že je služba bezúplatná, na tom nic nemění.`}
+          retention={
+            <ul>
+              <li>údaje o účtu - dokud účet trvá,</li>
+              <li>přihlašovací relace - do svého vypršení.</li>
+            </ul>
+          }
+        />
+
+        <Activity
+          heading="Rešerše v oficiálních zdrojích"
+          data={
+            <ul>
+              <li>
+                <strong>strojová volání nástrojů a odpovědi zdrojů</strong> - krátce v dočasné
+                paměti serveru, aby opakovaný dotaz nezatěžoval veřejné zdroje. S vaším účtem
+                spojená nejsou.
+              </li>
+            </ul>
+          }
+          purpose="vyřízení dotazu vašeho asistenta; krátká mezipaměť šetří zdroje, ze kterých se čerpá."
+          basis={`${CONTRACT}.`}
+          retention={
+            <ul>
+              <li>
+                dočasná paměť - vyhledávání nejdéle 5 minut, texty rozhodnutí a předpisů nejdéle 10
+                minut. Obsah rešerší - dotazy a odpovědi - si trvale neukládám.
+              </li>
+            </ul>
+          }
+        />
+
+        <Activity
+          heading="Vlastní soubory (režim Pro)"
+          data={
+            <ul>
+              <li>
+                <strong>text nahraných dokumentů</strong> - dokumenty se na text převádějí přímo ve
+                vašem prohlížeči; původní soubor vaše zařízení neopustí a na server jde jen
+                převedený text,
+              </li>
+              <li>
+                <strong>metadata dokumentů</strong> - název, autoři, rok, typ dokumentu a podobně,
+                a také název a velikost původního souboru,
+              </li>
+              <li>
+                <strong>vyhledávací index</strong> - z textu odvozená slova, strany, oddíly,
+                poznámky a identifikátory (spisové značky, paragrafy), ve kterých asistent hledá,
+              </li>
+              <li>
+                <strong>kdo co udělal</strong> - kdy jste dokument nahráli, upravili, stáhli nebo
+                smazali, název knihovny a záznam, že jste přijali pravidla Vlastních souborů,
+              </li>
+              <li>
+                <strong>denní počítadla</strong> - kolik jste za den v dokumentech četli a kolik
+                jste si z nich stáhli; hlídají limity, díky kterým může služba běžet zdarma.
+              </li>
+            </ul>
+          }
+          purpose="uložení vašich dokumentů, jejich zpracování do vyhledávacího indexu, návrh typu dokumentu a metadat (bod 4), hledání a čtení v nich vaším asistentem a doložení, co se s knihovnou dělo."
+          basis={`${CONTRACT}. Záznam o tom, že jsem knihovnu vymazal, uchovávám na základě ${INTEREST} - abych mohl doložit, že jsem výmaz provedl. K osobním údajům třetích osob v dokumentech viz bod 3.`}
+          retention={
+            <ul>
+              <li>
+                dokumenty (text, index a metadata) - dokud je nesmažete. Smazaný dokument zmizí
+                hned; jen v historii změn, kterou Neon drží pro obnovu databáze po havárii,
+                vydrží nejdéle 6 hodin,
+              </li>
+              <li>
+                text dokumentu, který se nepodařilo zpracovat - 7 dní, abych ho mohl zkusit
+                zpracovat znovu. Pak ho smažu; v seznamu zůstane jen záznam o chybě, dokud ho
+                nesmažete,
+              </li>
+              <li>
+                text poslaný k návrhu metadat (bod 4) - Vercel ho smaže hned po vyřízení požadavku,
+              </li>
+              <li>
+                záznamy o tom, co jste v knihovně nahráli, upravili, stáhli nebo smazali - dokud
+                knihovna trvá. Po jejím výmazu zůstane jen její interní označení a záznam, kdy a
+                kolik dokumentů jsem vymazal, bez jména a bez obsahu,
+              </li>
+              <li>
+                denní počítadla čtení a stažení - 2 dny; ostatní počítadla knihovny (nahrání,
+                strany, spotřeba) nejdéle 12 měsíců,
+              </li>
+              <li>záznam o přijetí pravidel Vlastních souborů - dokud trvá účet,</li>
+              <li>
+                po odebrání režimu Pro - asistent v knihovně přestane hledat, ale ještě 90 dní ji
+                uvidíte na webu, můžete dokumenty mazat a jejich text s metadaty si stáhnout (odkaz
+                „Stáhnout text“ u dokumentu v seznamu souborů; kdyby to nešlo, napište mi a pomůžu
+                vám). Pak knihovnu smažu; předem vám o tom napíšu,
+              </li>
+              <li>
+                po zrušení účtu - knihovnu i s dokumenty smažu automaticky, nejpozději do 8 dnů.
+              </li>
+            </ul>
+          }
+        />
+
+        <Activity
+          heading="Zotero (režim Pro)"
+          data={
+            <ul>
+              <li>
+                <strong>klíč k vaší knihovně Zotero</strong> - vydá ho Zotero, když připojení na
+                jeho stránce potvrdíte. Ukládám ho zašifrovaný u vašeho účtu v Clerku, spolu s
+                vaším uživatelským jménem a číselným identifikátorem v Zoteru, datem připojení,
+                vaší volbou („Jen číst“, nebo „Číst a ukládat“) a tím, k čemu klíč opravňuje
+                (čtení knihovny, poznámek a skupin, případně zápis do vaší osobní knihovny),
+              </li>
+              <li>
+                <strong>obsah knihovny, na který se váš asistent zeptá</strong> - záznamy (název,
+                autoři, další údaje, štítky, kolekce), poznámky, anotace a text příloh. Neukládám
+                ho, projde jen dočasnou pamětí. Nemá-li Zotero text přílohy zaindexovaný, stáhnu na
+                dotaz asistenta PDF přílohu z úložiště Zotera, převedu ji na text a soubor hned
+                zahodím,
+              </li>
+              <li>
+                <strong>záznamy, které asistent uloží</strong> - zvolíte-li „Číst a ukládat“, pošlu
+                na pokyn asistenta do vaší knihovny nový záznam (typ, název, autoři, datum, odkaz
+                na zdroj a podobně). U sebe ho neuchovávám; žije ve vaší knihovně v Zoteru.
+              </li>
+            </ul>
+          }
+          purpose="připojení vaší knihovny, hledání a čtení v ní vaším asistentem a při volbě „Číst a ukládat“ ukládání nových záznamů do ní."
+          basis={`${CONTRACT}. K osobním údajům třetích osob v knihovně viz bod 3.`}
+          retention={
+            <ul>
+              <li>
+                klíč a údaje o připojení - dokud Zotero neodpojíte nebo nezrušíte účet. Odpojením
+                klíč smažu a požádám Zotero, aby ho zrušilo. Přestane-li klíč platit (třeba když ho
+                smažete v Zoteru), smažu ho také a do dalšího připojení si nechám jen vaše
+                uživatelské jméno v Zoteru a čas, kdy klíč přestal platit,
+              </li>
+              <li>
+                po zrušení účtu klíč smažu spolu s účtem; v Zoteru ale zůstane, dokud ho nesmažete
+                v jeho nastavení (zotero.org/settings/keys),
+              </li>
+              <li>
+                obsah knihovny - jen v dočasné paměti: seznamy skupin a kolekcí, údaje k hledání
+                podle spisové značky a texty příloh nejdéle 10 minut. Stažené PDF neukládám vůbec,
+                zahodím ho hned po převodu na text,
+              </li>
+              <li>
+                záznamy, které asistent do Zotera uložil - zůstávají ve vaší knihovně, dokud je tam
+                nesmažete; u sebe je neuchovávám.
+              </li>
+            </ul>
+          }
+        />
+
+        <Activity
+          heading="Provoz, bezpečnost a statistiky"
+          data={
+            <ul>
+              <li>
+                <strong>údaje o používání služby</strong> - která volání server odbaví, kolik jich
+                je a jak dopadnou,
+              </li>
+              <li>
+                <strong>provozní záznamy hostingu</strong> - IP adresa, čas, typ požadavku, chybová
+                hlášení.
+              </li>
+            </ul>
+          }
+          purpose="provoz a bezpečnost služby, hlídání limitů, díky kterým může běžet zdarma, prevence zneužití a přehled o tom, jak se služba používá, abych ji mohl zlepšovat."
+          basis={`${INTEREST} na tom, aby služba dobře fungovala a byla bezpečná.`}
+          retention={
+            <ul>
+              <li>údaje o používání služby - nejdéle 12 měsíců,</li>
+              <li>provozní záznamy hostingu - krátkodobě, v řádu dnů až týdnů.</li>
+            </ul>
+          }
+        />
+
+        <Activity
+          heading="Když mi napíšete"
+          data={
+            <ul>
+              <li>vaše e-mailová adresa, obsah zprávy a moje odpověď.</li>
+            </ul>
+          }
+          purpose="vyřízení toho, s čím se na mě obracíte (dotaz, žádost o Pro, uplatnění práv, oznámení nezákonného obsahu)."
+          basis={`${INTEREST} na tom, abych vaši věc vyřídil; u žádosti o uplatnění práv splnění právní povinnosti (čl. 6 odst. 1 písm. c) GDPR).`}
+          retention={
+            <ul>
+              <li>po dobu potřebnou k vyřízení věci, nejdéle rok.</li>
+            </ul>
+          }
+        />
+      </Section>
+
+      <Section heading="3. Lidé zmínění v nahraných dokumentech a v knihovně Zotero">
+        <p>
+          Dokumenty, které uživatelé nahrají do Vlastních souborů, a záznamy v připojené knihovně
+          Zotero mohou obsahovat osobní údaje dalších lidí - typicky jména autorů článků a knih,
+          soudců, advokátů nebo účastníků v rozhodnutích. Tyto údaje nezískávám od vás, ale od
+          uživatele, který dokument nahrál nebo knihovnu připojil.
+        </p>
+        <ul>
+          <li>
+            <strong>Účel:</strong> uložení dokumentu a hledání a čtení v něm asistentem
+            uživatele, který ho nahrál - jen pro jeho vlastní rešerše. Dokumenty nikomu dalšímu
+            nezpřístupňuji a k ničemu jinému je nepoužívám.
+          </li>
+          <li>
+            <strong>Právní základ:</strong> {INTEREST} - můj a uživatelův zájem na tom, aby mohl
+            ve svých podkladech k právní práci a studiu hledat. Jde převážně o údaje už veřejné
+            (publikovaná rozhodnutí a literatura) a Podmínky užití nahrávat neveřejné osobní
+            údaje, spisy klientů ani zvláštní kategorie údajů nedovolují.
+          </li>
+          <li>
+            <strong>Doba uchování:</strong> stejně jako dokument, v němž jsou (bod 2).
+          </li>
+          <li>
+            <strong>Příjemci a předávání:</strong> stejní zpracovatelé jako u Vlastních souborů a
+            Zotera (body 4 a 5).
+          </li>
+        </ul>
+        <p>
+          Každého, kdo je v nahraných dokumentech zmíněn, jednotlivě informovat nemohu: nevím, kdo
+          to je, a nemám na něj kontakt (čl. 14 odst. 5 písm. b) GDPR). Proto tyto zásady
+          zveřejňuji. Týká-li se vás nějaký dokument, napište mi - vyhledám ho, a vznesete-li
+          námitku nebo žádost o výmaz, dokument nebo jeho část smažu, ledaže by vážně převažoval
+          zájem na jeho ponechání. Zjistím-li, že dokument obsahuje údaje, které sem nepatří,
+          smažu ho i bez žádosti.
         </p>
       </Section>
 
-      <Section heading="3. Účel zpracování">
-        <ul>
-          <li>umožnění přihlášení a přístupu ke službě,</li>
-          <li>udržení přihlašovací relace,</li>
-          <li>vyřízení rešerše; krátká mezipaměť šetří zdroje, ze kterých se čerpá,</li>
-          <li>
-            u Vlastních souborů uložení vašich dokumentů, jejich zpracování do vyhledávacího indexu,
-            návrh typu dokumentu a metadat a hledání a čtení v nich vaším asistentem,
-          </li>
-          <li>
-            u Zotera připojení vaší knihovny, hledání a čtení v ní vaším asistentem a při volbě
-            „Číst a ukládat“ ukládání nových záznamů do ní,
-          </li>
-          <li>přehled o tom, jak se služba používá, a její další zlepšování,</li>
-          <li>
-            provoz a bezpečnost služby, hlídání limitů, díky kterým může běžet zdarma, a prevence
-            jejího zneužití.
-          </li>
-        </ul>
-      </Section>
-
-      <Section heading="4. Právní základ zpracování">
-        <p>
-          Účet, přihlašovací relaci a vyřízení rešerše včetně krátké dočasné paměti zpracovávám pro
-          plnění smlouvy (čl. 6 odst. 1 písm. b) GDPR). Stejně tak Vlastní soubory: uložení a
-          zpracování dokumentů, jejich zpřístupnění vám, návrh typu a metadat a záznamy o tom, co
-          jste nahráli. A také připojení Zotera: uložení klíče, čtení z vaší knihovny, když se na
-          ni váš asistent zeptá, a při volbě „Číst a ukládat“ zápis nových záznamů do ní. Skutečnost, že je služba bezúplatná, na
-          tom nic nemění.
-        </p>
-        <p>
-          Údaje o používání služby, provozní záznamy hostingu, zprávy, které mi napíšete, a záznam o
-          tom, že jsem knihovnu vymazal, zpracovávám na základě oprávněného zájmu (čl. 6 odst. 1
-          písm. f) GDPR) na tom, aby služba dobře fungovala, byla bezpečná, abych vyřídil, s čím se
-          na mě obracíte, a abych mohl doložit, že jsem výmaz provedl.
-        </p>
-        <p>
-          Na osobní údaje v nahraných dokumentech a v připojené knihovně Zotero se tento bod
-          nevztahuje. Právní základ k nim musí mít ten, kdo je nahrál nebo knihovnu připojil,
-          protože je jejich správcem (bod 1).
-        </p>
-      </Section>
-
-      <Section heading="5. Doba uchování">
-        <ul>
-          <li>údaje o účtu - dokud účet trvá,</li>
-          <li>přihlašovací relace - do svého vypršení,</li>
-          <li>dočasná paměť - vyhledávání nejdéle 5 minut, texty rozhodnutí a předpisů nejdéle 10 minut,</li>
-          <li>údaje o používání služby - nejdéle 12 měsíců,</li>
-          <li>provozní záznamy hostingu - krátkodobě, v řádu dnů až týdnů,</li>
-          <li>e-mailová korespondence - po dobu potřebnou k vyřízení věci, nejdéle rok.</li>
-        </ul>
-        <p>U Vlastních souborů platí:</p>
-        <ul>
-          <li>
-            dokumenty (text, index a metadata) - dokud je nesmažete. Smazaný
-            dokument zmizí hned; jen v historii změn, kterou Neon drží pro obnovu databáze po
-            havárii, vydrží nejdéle 6 hodin,
-          </li>
-          <li>
-            text dokumentu, který se nepodařilo zpracovat - 7 dní, abych ho mohl zkusit zpracovat
-            znovu. Pak ho smažu; v seznamu zůstane jen záznam o chybě, dokud ho nesmažete,
-          </li>
-          <li>
-            po zrušení účtu - knihovnu i s dokumenty smažu automaticky, nejpozději do 8 dnů,
-          </li>
-          <li>
-            po odebrání režimu Pro - asistent v knihovně přestane hledat, ale ještě 90 dní ji
-            uvidíte na webu, můžete dokumenty mazat a jejich text s metadaty si stáhnout (odkaz
-            „Stáhnout text“ u dokumentu v seznamu souborů; kdyby to nešlo, napište mi a pomůžu
-            vám). Pak
-            knihovnu smažu; předem vám o tom napíšu,
-          </li>
-          <li>
-            text poslaný k návrhu metadat (bod 6) - Vercel ho smaže hned po vyřízení požadavku,
-          </li>
-          <li>
-            záznamy o tom, co jste v knihovně nahráli, upravili, stáhli nebo smazali - dokud knihovna
-            trvá. Po jejím výmazu zůstane jen její interní označení a záznam, kdy a kolik dokumentů
-            jsem vymazal, bez jména a bez obsahu,
-          </li>
-          <li>
-            denní počítadla čtení a stažení - 2 dny; ostatní počítadla knihovny (nahrání, strany,
-            spotřeba) nejdéle 12 měsíců,
-          </li>
-          <li>záznam o přijetí pravidel Vlastních souborů - dokud trvá účet.</li>
-        </ul>
-        <p>U Zotera platí:</p>
-        <ul>
-          <li>
-            klíč a údaje o připojení - dokud Zotero neodpojíte nebo nezrušíte účet. Odpojením klíč
-            smažu a požádám Zotero, aby ho zrušilo. Přestane-li klíč platit (třeba když ho smažete
-            v Zoteru), smažu ho také a do dalšího připojení si nechám jen vaše uživatelské jméno v
-            Zoteru a čas, kdy klíč přestal platit,
-          </li>
-          <li>
-            po zrušení účtu klíč smažu spolu s účtem; v Zoteru ale zůstane, dokud ho nesmažete v
-            jeho nastavení (zotero.org/settings/keys),
-          </li>
-          <li>
-            obsah knihovny - jen v dočasné paměti: seznamy skupin a kolekcí, údaje k hledání podle
-            spisové značky a texty příloh nejdéle 10 minut. Stažené PDF neukládám vůbec, zahodím
-            ho hned po převodu na text,
-          </li>
-          <li>
-            záznamy, které asistent do Zotera uložil - zůstávají ve vaší knihovně, dokud je tam
-            nesmažete; u sebe je neuchovávám.
-          </li>
-        </ul>
-        <p>
-          O smazání účtu a všech souvisejících údajů můžete požádat na <Mail />. Provedu je bez
-          zbytečného odkladu.
-        </p>
-      </Section>
-
-      <Section heading="6. Sdílení údajů s třetími stranami">
+      <Section heading="4. Komu údaje svěřuji">
         <p>
           Vaše osobní údaje nepředávám nikomu k jeho vlastním účelům a neprodávám je. Na provozu se
           podílejí tři zpracovatelé, se kterými mám uzavřenou smlouvu o zpracování osobních údajů:
         </p>
         <ul>
           <li>
-            <strong>Clerk, Inc.</strong> - přihlašování a správa účtů; společnost sídlí v
-            USA a účty vede tam,
+            <strong>Clerk, Inc.</strong> - přihlašování a správa účtů; společnost sídlí v USA a
+            účty vede tam,
           </li>
           <li>
             <strong>Vercel, Inc.</strong> - hosting serveru; server běží v evropském regionu
@@ -243,8 +340,8 @@ export default function Soukromi() {
             Gateway mi Vercel také zprostředkuje jazykový model pro návrh metadat (viz níže),
           </li>
           <li>
-            <strong>Neon, Inc.</strong> (skupina Databricks) - databáze Vlastních souborů; data leží
-            v evropském regionu (Frankfurt), společnost je ale americká.
+            <strong>Neon, Inc.</strong> (skupina Databricks) - databáze Vlastních souborů; data
+            leží v evropském regionu (Frankfurt), společnost je ale americká.
           </li>
         </ul>
         <p>
@@ -255,38 +352,43 @@ export default function Soukromi() {
           strany, tiráž, osnovu nadpisů a záhlaví stran (dohromady nejvýš asi 16 000 znaků) a
           název souboru, u PDF i s údaji z jeho vlastností, jazykovému modelu Gemini. Model z toho
           jen navrhne typ dokumentu, název, autory, rok a podobné údaje, které pak sami můžete
-          opravit. Vercel ani
-          Google text nepoužijí k trénování modelů a Vercel ho po vyřízení požadavku smaže. Kdo
-          dokument nahrál, s požadavkem neposílám: AI Gateway kvůli rozpočtu spotřeby dostane jen
-          pseudonym, ze kterého se váš účet vyčíst nedá.
+          opravit. Vercel ani Google text nepoužijí k trénování modelů a Vercel ho po vyřízení
+          požadavku smaže. Kdo dokument nahrál, s požadavkem neposílám: AI Gateway kvůli rozpočtu
+          spotřeby dostane jen pseudonym, ze kterého se váš účet vyčíst nedá.
         </p>
-        <p>
-          Své dokumenty vidíte jen vy. Co si z vašich dokumentů přečte váš AI asistent, dostane i jeho poskytovatel
-          (např. Anthropic nebo OpenAI) podle smlouvy, kterou s ním máte vy - to je vaše volba, ne
-          předání z mé strany. Totéž platí pro obsah připojené knihovny Zotero.
-        </p>
-        <p>
-          <strong>Zotero</strong> (Corporation for Digital Scholarship, USA) není můj zpracovatel.
-          Je to služba, kterou máte vy a kterou jste k Dawmainu sami připojili. Na pokyn vašeho
-          asistenta do ní s vaším klíčem posílám jeho dotazy, načítám z ní záznamy a přílohy a při
-          volbě „Číst a ukládat“ do ní zapisuji nové záznamy.
-          Zotero vede vaši knihovnu podle svých{" "}
-          <a href="https://www.zotero.org/support/privacy">zásad ochrany soukromí</a>.
-        </p>
-        <p>
-          Poskytovatel přihlášení účtem jiné služby (např. Google) je samostatný správce - ověří
-          vaši totožnost sám za sebe a řídí se{" "}
-          <a href="https://policies.google.com/privacy">vlastními zásadami ochrany soukromí</a>.
-        </p>
-        <p>
-          Do veřejných databází (e-Sbírka, Nejvyšší soud, Nejvyšší správní soud, Ústavní soud,
-          rozhodnuti.justice.cz, InfoCuria, EUR-Lex) a knihovního katalogu UKAŽ Univerzity
-          Karlovy (Primo) putuje pouze samotný dotaz, nikoli to, kdo jste. Údaje dále předám jen
-          tehdy, uloží-li mi to zákon.
-        </p>
+        <p>Mimo moje zpracovatele se údaje dostanou jen sem:</p>
+        <ul>
+          <li>
+            <strong>poskytovatel vašeho AI asistenta</strong> (např. Anthropic nebo OpenAI) - co si
+            z oficiálních zdrojů, vašich dokumentů nebo knihovny Zotero asistent přečte, dostane i
+            on, podle smlouvy, kterou s ním máte vy. Je to vaše volba, ne předání z mé strany,
+          </li>
+          <li>
+            <strong>Zotero</strong> (Corporation for Digital Scholarship, USA) - není můj
+            zpracovatel. Je to služba, kterou máte vy a kterou jste k Dawmainu sami připojili. Na
+            pokyn vašeho asistenta do ní s vaším klíčem posílám jeho dotazy, načítám z ní záznamy a
+            přílohy a při volbě „Číst a ukládat“ do ní zapisuji nové záznamy. Zotero vede vaši
+            knihovnu podle svých{" "}
+            <a href="https://www.zotero.org/support/privacy">zásad ochrany soukromí</a>,
+          </li>
+          <li>
+            <strong>poskytovatel přihlášení účtem jiné služby</strong> (např. Google) - samostatný
+            správce, ověří vaši totožnost sám za sebe a řídí se{" "}
+            <a href="https://policies.google.com/privacy">vlastními zásadami ochrany soukromí</a>,
+          </li>
+          <li>
+            <strong>veřejné databáze</strong> (e-Sbírka, Nejvyšší soud, Nejvyšší správní soud,
+            Ústavní soud, rozhodnuti.justice.cz, InfoCuria, EUR-Lex) a knihovní katalog UKAŽ
+            Univerzity Karlovy (Primo) - putuje do nich pouze samotný dotaz, nikoli to, kdo jste,
+          </li>
+          <li>
+            <strong>soudy a úřady</strong> - jen tehdy, uloží-li mi to zákon, a jen v nezbytném
+            rozsahu.
+          </li>
+        </ul>
       </Section>
 
-      <Section heading="7. Předávání do třetích zemí">
+      <Section heading="5. Předávání mimo Evropskou unii">
         <p>
           Rešerše v oficiálních zdrojích Evropskou unii neopouští. Server běží v evropském regionu
           (Frankfurt) a databáze, do kterých se dotazuje, jsou české a unijní. Totéž platí pro
@@ -298,7 +400,7 @@ export default function Soukromi() {
           <li>údaje o vašem účtu, které Clerk vede ve Spojených státech,</li>
           <li>přístup k platformám Vercel a Neon, spravovaným rovněž odtamtud,</li>
           <li>
-            část textu dokumentu k návrhu metadat (bod 6), kterou může Google zpracovat v USA.
+            část textu dokumentu k návrhu metadat (bod 4), kterou může Google zpracovat v USA.
           </li>
         </ul>
         <p>
@@ -308,20 +410,20 @@ export default function Soukromi() {
         </p>
         <p>
           Připojíte-li Zotero, putují dotazy vašeho asistenta, váš klíč a případně nové záznamy do
-          Zotera, které data vede
-          v USA. Nejde o předání, o kterém bych rozhodoval já: jde jen na váš pokyn, do služby,
-          kterou jste si sami vybrali a připojili.
+          Zotera, které data vede v USA. Děje se to jen na váš pokyn, do služby, kterou jste si sami
+          vybrali a připojili, a je to nezbytné k tomu, abych vám připojení Zotera mohl poskytnout
+          (čl. 49 odst. 1 písm. b) GDPR).
         </p>
       </Section>
 
-      <Section heading="8. Cookies">
+      <Section heading="6. Cookies">
         <p>
           Kvůli přihlášení nastavuje na všech stránkách tohoto webu (v záhlaví je vidět, kdo je
-          přihlášen) poskytovatel přihlášení Clerk cookies{" "}
-          <code>__session</code>, <code>__client_uat</code> a několik souvisejících (jejich
-          varianty s příponou a krátkodobé cookies pro obnovení relace). Bez nich by přihlášení
-          nefungovalo, jsou tedy nezbytné a souhlas k nim nepotřebuji. Další cookies nutné k
-          udržení přihlášení nastavuje Clerk na své vlastní adrese.
+          přihlášen) poskytovatel přihlášení Clerk cookies <code>__session</code>,{" "}
+          <code>__client_uat</code> a několik souvisejících (jejich varianty s příponou a
+          krátkodobé cookies pro obnovení relace). Bez nich by přihlášení nefungovalo, jsou tedy
+          nezbytné a souhlas k nim nepotřebuji. Další cookies nutné k udržení přihlášení nastavuje
+          Clerk na své vlastní adrese.
         </p>
         <p>
           Když připojujete Zotero, nastavím na nejvýš 10 minut ještě cookie{" "}
@@ -331,7 +433,7 @@ export default function Soukromi() {
         <p>Analytické, reklamní ani jiné sledovací cookies nepoužívám.</p>
       </Section>
 
-      <Section heading="9. Zabezpečení a umístění dat">
+      <Section heading="7. Zabezpečení">
         <p>
           Server i databáze Vlastních souborů běží v evropském regionu (Frankfurt). Komunikace
           probíhá výhradně přes šifrované spojení (HTTPS) a server odmítá neověřené požadavky.
@@ -370,8 +472,8 @@ export default function Soukromi() {
             nastavení serveru, takže ze samotného záznamu v Clerku ho nikdo nepřečte,
           </li>
           <li>
-            <strong>přístup jen přes vaše přihlášení</strong> - stejně jako u Vlastních souborů jen s
-            vaším účtem v režimu Pro, ne přes sdílený přístupový kód.
+            <strong>přístup jen přes vaše přihlášení</strong> - stejně jako u Vlastních souborů jen
+            s vaším účtem v režimu Pro, ne přes sdílený přístupový kód.
           </li>
         </ul>
         <p>
@@ -380,21 +482,14 @@ export default function Soukromi() {
           na disk ani do databáze ho neukládám.
         </p>
         <p>
-          Kromě mě mají k údajům přístup jen poskytovatelé uvedení výše a jejich dodavatelé, a to v
-          rozsahu nutném k tomu, aby služba běžela. Do
-          obsahu vašich dokumentů se nedívám, ledaže mě o to požádáte (třeba kvůli chybě převodu)
-          nebo to vyžaduje oznámení nezákonného obsahu či zákon.
+          Kromě mě mají k údajům přístup jen zpracovatelé uvedení v bodě 4 a jejich dodavatelé, a
+          to v rozsahu nutném k tomu, aby služba běžela. Do obsahu vašich dokumentů se nedívám,
+          ledaže mě o to požádáte (třeba kvůli chybě převodu), vyřizuji žádost člověka, kterého se
+          dokument týká (bod 3), nebo to vyžaduje oznámení nezákonného obsahu či zákon.
         </p>
       </Section>
 
-      <Section heading="10. Pověřenec pro ochranu osobních údajů">
-        <p>
-          Vzhledem k povaze a rozsahu zpracování nemám povinnost jmenovat pověřence a nejmenoval
-          jsem jej. Ve všech věcech ochrany osobních údajů se obracejte přímo na <Mail />.
-        </p>
-      </Section>
-
-      <Section heading="11. Vaše práva">
+      <Section heading="8. Vaše práva">
         <p>V souvislosti se svými údaji můžete uplatnit tato práva:</p>
         <ul>
           <li>
@@ -425,8 +520,10 @@ export default function Soukromi() {
           </li>
           <li>
             <strong>Právo vznést námitku.</strong> Proti zpracování, které stojí na oprávněném
-            zájmu - údaje o používání služby, provozní záznamy a vaše zprávy - můžete kdykoli
-            vznést námitku.
+            zájmu - údaje o používání služby, provozní záznamy, vaše zprávy a údaje o vás v
+            dokumentech jiných uživatelů (bod 3) - můžete kdykoli vznést námitku. Údaje pak dál
+            zpracovávat nebudu, ledaže prokážu závažné oprávněné důvody, které převažují nad vašimi
+            zájmy, právy a svobodami.
           </li>
           <li>
             <strong>Právo podat stížnost.</strong> Se stížností na to, jak s vašimi údaji
@@ -443,17 +540,9 @@ export default function Soukromi() {
           odkladu, nejpozději do měsíce od doručení žádosti. Je-li žádost složitá, mohu lhůtu
           prodloužit až o další dva měsíce; do měsíce vám pak dám vědět, že ji prodlužuji a proč.
         </p>
-        <p>
-          Vznesete-li námitku, údaje dál zpracovávat nebudu, ledaže prokážu závažné oprávněné
-          důvody, které převažují nad vašimi zájmy, právy a svobodami.
-        </p>
-        <p>
-          Týká-li se vás dokument, který sem nahrál někdo jiný, je správcem on (bod 1). Napíšete-li
-          mi, žádost mu předám a pomohu mu ji vyřídit.
-        </p>
       </Section>
 
-      <Section heading="12. Změny těchto zásad">
+      <Section heading="9. Změny těchto zásad">
         <p>
           Zásady mohu upravit, změní-li se fungování služby nebo právní úprava. Aktuální znění je
           vždy na této stránce a o podstatné změně vás budu informovat e-mailem.
