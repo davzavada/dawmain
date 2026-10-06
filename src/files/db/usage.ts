@@ -177,13 +177,13 @@ export async function audit(
 }
 
 // ---------------------------------------------------------------------------
-// Retention (/soukromi, bod 5)
+// Retention (/soukromi, bod 4)
 
-/** Usage data: "nejdéle 12 měsíců". */
+/** Usage data: "počty volání nejdéle 12 měsíců". */
 export const USAGE_KEEP_DAYS = 365;
 /**
  * Per-user read / export counters: only today's row is ever consulted (the daily caps), so the
- * daily cron keeps today's and yesterday's rows and drops older ones — /soukromi says "2 dny".
+ * daily cron keeps today's and yesterday's rows and drops older ones.
  */
 export const READ_COUNTER_KEEP_DAYS = 1;
 /** db_activity feeds the estimate of the current month; the previous one is kept for comparison. */
