@@ -109,7 +109,7 @@ export default function Soukromi() {
           </li>
         </ul>
         <p>
-          Pro uplatnění svých práv mě kontaktujte na <Mail />.
+          Pro uplatnění svých práv mě kontaktujte na <Mail />; odpovím do měsíce.
         </p>
       </Section>
     </article>
