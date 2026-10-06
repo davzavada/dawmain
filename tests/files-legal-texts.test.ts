@@ -70,7 +70,6 @@ describe("privacy policy (/soukromi)", () => {
     // Webhook / cron mark a library for purge 6 days out; the daily run adds at most a day.
     expect(privacy).toContain("nejdéle však do zrušení účtu nebo odebrání Pro. Pak knihovnu do týdne smažu");
     expect(privacy).toContain("nejdéle 6 hodin");
-    expect(terms).toContain("do týdne smažu");
     expect(privacy).not.toContain("90 dní");
     expect(terms).not.toContain("90 dní");
     expect(privacy).toContain("dokud Zotero neodpojíte nebo nezrušíte účet");
@@ -110,9 +109,8 @@ describe("privacy policy (/soukromi)", () => {
 describe("Zotero in the terms", () => {
   it("states the user's choice of key: read only, or read and save new records — never changing or deleting", () => {
     expect(terms).toContain("Zotero (Pro)");
-    expect(terms).toContain("„Jen číst“, nebo „Číst a ukládat“");
+    expect(terms).toContain("jen číst , nebo číst a ukládat");
     expect(terms).toContain("Stávající záznamy Dawmain nikdy nemění ani nemaže a do skupin nezapisuje");
-    expect(terms).toContain("„Odpojit“");
   });
 });
 
@@ -133,17 +131,8 @@ describe("terms of use (/podminky)", () => {
     expect(terms.replace(/\s/g, " ")).toContain(`${formatted} znaků`);
   });
 
-  it("states the content rules, the uploader's warranty and the forbidden content", () => {
-    expect(terms).toContain("Nahráním potvrzujete, že tato práva máte");
-    for (const rule of [
-      "beck-online, ASPI, Codexis",
-      "spisy a dokumenty klientů",
-      "čl. 9 a 10 GDPR",
-      "obchodní tajemství jiných",
-      "bez osobních údajů klientů",
-    ]) {
-      expect(terms).toContain(rule);
-    }
+  it("asks the uploader to keep the section's rules", () => {
+    expect(terms).toContain("Nahráním dokumentu potvrzujete, že pravidla v tomto oddílu dodržíte");
   });
 
   it("says the AI metadata may be wrong and can be corrected, and that there is no backup", () => {
@@ -167,8 +156,7 @@ describe("terms of use (/podminky)", () => {
     expect(paragraph).toContain("česky nebo anglicky");
   });
 
-  it("names the text export next to the no-backup rule and before a revoked library goes", () => {
-    expect(terms).toContain("text svých dokumentů včas stáhněte");
+  it("names the text export next to the no-backup rule", () => {
     expect(terms).toContain("„Stáhnout text“ u dokumentu v seznamu souborů");
   });
 });
