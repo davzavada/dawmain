@@ -15,7 +15,7 @@ export default function Podminky() {
       <p>
         Dawmain provozuji zdarma a ve volném čase jako nekomerční projekt. Napsat mi můžete na{" "}
         <Mail />. Smlouva mezi námi vzniká založením uživatelského účtu, a připojíte-li se starším
-        sdíleným přístupovým kódem, prvním použitím služby. Tak jako tak je bezúplatná.
+        sdíleným přístupovým kódem, prvním použitím služby. Tak jako tak je bezplatná.
       </p>
 
       <Section heading="Účet a slušné užívání">
@@ -40,11 +40,14 @@ export default function Podminky() {
 
       <Section heading="Vlastní soubory (Pro)">
         <p>
-          V režimu Pro si na webu nahrajete vlastní dokumenty - knihy, články, komentáře nebo vzory
-          - a váš asistent v nich pak hledá vedle oficiálních databází. Pro je zdarma a přiděluji ho
-          ručně; stačí mi napsat na <Mail />. Můžu ho kdykoli odebrat; vaši knihovnu pak do týdne smažu, takže si text svých
-          dokumentů včas stáhněte. Nahráním dokumentu
-          potvrzujete, že pravidla v tomto oddílu dodržíte - web na ně upozorňuje přímo u nahrávání.
+          V režimu Pro si na webu nahrajete vlastní dokumenty a váš asistent v nich pak hledá vedle
+          oficiálních databází. Pro je zdarma s dobrovolným příspěvkem ve výši jednoho (1) piva dle
+          volby uživatele a přiděluji ho ručně; stačí mi napsat na <Mail />. Můžu ho kdykoli
+          odebrat.
+        </p>
+        <p>
+          Nahráním dokumentu potvrzujete, že pravidla v tomto oddílu dodržíte - web na ně upozorňuje
+          přímo u nahrávání.
         </p>
         <p>
           <strong>Kvóty.</strong> Místo se počítá ve stranách: jedna strana je 3 600 znaků
@@ -55,37 +58,10 @@ export default function Podminky() {
           se na čas vypnou.
         </p>
         <p>
-          <strong>Co sem smíte nahrát.</strong> Vlastní díla a poznámky, veřejné materiály
-          (předpisy, rozhodnutí soudů a úřadů, texty s otevřenou licencí) a další texty, které máte
-          právo si takto uložit. Nahráním potvrzujete, že tato
-          práva máte. Pozor hlavně na licencované databáze: podmínky beck-online, ASPI, Codexis a
-          podobných služeb obvykle zakazují budovat si z jejich obsahu vlastní databázi. A výjimka
-          pro osobní potřebu (§ 30 autorského zákona) se na práci pro klienty, kancelář nebo firmu
-          nevztahuje.
-        </p>
-        <p>
-          <strong>Co sem nepatří:</strong>
-        </p>
-        <ul>
-          <li>spisy a dokumenty klientů,</li>
-          <li>osobní údaje, které nejsou veřejné,</li>
-          <li>
-            zvláštní kategorie osobních údajů a údaje o rozsudcích v trestních věcech a trestných
-            činech (čl. 9 a 10 GDPR),
-          </li>
-          <li>obchodní tajemství jiných,</li>
-          <li>cokoli nezákonného.</li>
-        </ul>
-        <p>
-          Vzory nahrávejte bez osobních údajů klientů - vzor z konkrétní věci nejdřív anonymizujte.
-        </p>
-        <p>
           <strong>AI a citace.</strong> Typ dokumentu (komentář, článek, kniha…), název, autory a
           další metadata navrhne jazykový model podle začátku dokumentu a asistent v dokumentu hledá
           hned po zpracování. Návrh se může splést: po rozkliknutí dokumentu v seznamu souborů ho
-          kdykoli opravíte. Převod na text i čísla stran, poznámek a marginálních čísel dělá automat
-          a může se splést. Vlastní dokument není oficiální zdroj - citace z něj si před použitím
-          ověřte v tištěném vydání nebo v oficiálním textu.
+          kdykoli opravíte.
         </p>
         <p>
           <strong>Záloha není.</strong> Originály si nechte u sebe: server je nikdy nedostane, takže
@@ -116,8 +92,7 @@ export default function Podminky() {
         <p>
           <strong>Žádosti úřadů.</strong> Požádá-li o údaje nebo dokumenty soud, policie či jiný
           orgán, vyhovím jen tak, jak to ukládá zákon, a jen v nezbytném rozsahu. Dám vám o tom
-          vědět, pokud mi to zákon nezakazuje. U dokumentů advokátů budu trvat na postupu, který
-          zákon předepisuje k ochraně advokátního tajemství (§ 85b trestního řádu).
+          vědět, pokud mi to zákon nezakazuje.
         </p>
       </Section>
 
@@ -130,22 +105,7 @@ export default function Podminky() {
           nalezené dokumenty uložit do vaší osobní knihovny jako nové záznamy. Stávající záznamy
           Dawmain nikdy nemění ani nemaže a do skupin nezapisuje.
         </p>
-        <p>
-          Připojíte ji v nabídce účtu (položka Zotero): zvolíte „Jen číst“, nebo „Číst a ukládat“,
-          a tlačítkem „Připojit Zotero“ přejdete na zotero.org. Zotero vás tam požádá o souhlas s
-          klíčem v rozsahu podle vaší volby; rozsah tam můžete i zúžit. Volbu změníte tak, že Zotero
-          připojíte znovu. Odpojit můžete kdykoli tamtéž tlačítkem „Odpojit“, nebo klíč smazat
-          přímo v nastavení Zotera.
-        </p>
-        <p>
-          Text příloh beru z indexu Zotera. Když tam chybí nebo je neúplný, převedu PDF přílohu na
-          text sám. Převod dělá automat a může se splést, takže citace si ověřte v originálu. PDF
-          uložená mimo úložiště Zotera (WebDAV, odkazované soubory) přečíst nejde.
-        </p>
-        <p>
-          Zotero se řídí vlastními podmínkami. Za jeho dostupnost ani za obsah vaší knihovny
-          neručím. Obsah knihovny nikam neukládám, projde jen dočasnou pamětí serveru.
-        </p>
+        <p>Zotero se řídí vlastními podmínkami.</p>
       </Section>
 
       <Section heading="Ukončení a změny">
@@ -155,7 +115,7 @@ export default function Podminky() {
         <p>
           Podmínky můžu přiměřeně změnit, když se změní fungování služby nebo právní úprava. Nové
           znění dám sem a o důležité změně napíšu e-mailem s měsíčním předstihem. Když se vám změna
-          nelíbí, můžete kdykoli do jejího účinku odejít; když zůstanete, platí, že vám nevadí.
+          nelíbí, můžete kdykoli do jejího účinku účet zrušit.
         </p>
       </Section>
 
