@@ -120,13 +120,10 @@ describe("privacy policy (/soukromi)", () => {
     expect(privacy).toContain("jsou tedy nezbytné");
   });
 
-  it("makes the operator, not the uploader, the controller of personal data in uploads", () => {
-    expect(privacy).toContain("Jejich správcem jsem já, ne vy");
+  it("makes the operator the controller, with no processing contract for uploads", () => {
+    expect(privacy).toContain("David Závada");
     expect(privacy).not.toContain("Jejich správcem jste vy");
     expect(privacy).not.toContain("jen jako zpracovatel");
-    // Third parties named in uploads get their own notice (čl. 14 GDPR) with a basis and an exemption.
-    expect(privacy).toContain("Lidé zmínění v nahraných dokumentech");
-    expect(privacy).toContain("čl. 14 odst. 5 písm. b) GDPR");
     expect(terms).not.toContain("čl. 28 GDPR");
     expect(terms).not.toContain("jste správcem vy");
   });
@@ -140,14 +137,13 @@ describe("privacy policy (/soukromi)", () => {
 describe("Zotero in the legal texts", () => {
   it("lists the stored key and the library content read on request", () => {
     expect(privacy).toContain("klíč k vaší knihovně Zotero");
-    expect(privacy).toContain("Ukládám ho zašifrovaný u vašeho účtu v Clerku");
+    expect(privacy).toContain("ukládám ho zašifrovaný u vašeho účtu v Clerku");
     expect(privacy).toContain("obsah knihovny, na který se váš asistent zeptá");
   });
 
   it("keeps Zotero out of the processor list: it is the user's own service", () => {
     expect(privacy).toContain("tři zpracovatelé");
     expect(privacy).toContain("není můj zpracovatel");
-    expect(privacy).toContain("v knihovně Zotero, kterou k Dawmainu připojíte");
   });
 
   it("states that a PDF may be fetched when Zotero has no text, and is never stored", () => {

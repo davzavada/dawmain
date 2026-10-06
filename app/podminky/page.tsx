@@ -97,13 +97,9 @@ export default function Podminky() {
           souborů (s denním limitem).
         </p>
         <p>
-          <strong>Osobní údaje v dokumentech.</strong> Správcem osobních údajů v tom, co nahrajete
-          (třeba jmen autorů nebo účastníků v rozhodnutí), jsem já. Jak s nimi zacházím a co může
-          člověk, o kterém dokument je, žádat, popisují{" "}
-          <Link href="/soukromi">Zásady ochrany osobních údajů</Link>. Vy odpovídáte za to, že
-          dokument smíte nahrát a že v něm nejsou údaje, které sem podle tohoto oddílu nepatří.
-          Požádá-li mě někdo o výmaz údajů o sobě nebo vznese-li námitku, můžu dokument nebo jeho
-          část smazat; dám vám o tom vědět.
+          <strong>Osobní údaje.</strong> Jak s nimi zacházím, popisují{" "}
+          <Link href="/soukromi">Zásady ochrany osobních údajů</Link>. Požádá-li mě někdo o výmaz
+          údajů o sobě z nahraného dokumentu, dokument smažu a dám vám vědět.
         </p>
         <p>
           <strong>Nezákonný obsah.</strong> Máte-li za to, že je ve Vlastních souborech nezákonný
@@ -150,10 +146,7 @@ export default function Podminky() {
         </p>
         <p>
           Zotero se řídí vlastními podmínkami. Za jeho dostupnost ani za obsah vaší knihovny
-          neručím. Obsah knihovny nikam neukládám, projde jen dočasnou pamětí serveru; nové
-          záznamy, které asistent při volbě „Číst a ukládat“ uloží, žijí jen ve vaší knihovně v
-          Zoteru. Jak zacházím s osobními údaji, které knihovna obsahuje, popisují Zásady ochrany
-          osobních údajů.
+          neručím. Obsah knihovny nikam neukládám, projde jen dočasnou pamětí serveru.
         </p>
       </Section>
 

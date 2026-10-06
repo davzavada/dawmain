@@ -7,7 +7,7 @@ import type { ReactNode } from "react";
  */
 
 /** Both documents state the same effective date; bump it when they change. */
-export const EFFECTIVE = "1. 11. 2026";
+export const EFFECTIVE = "6. 10. 2026";
 
 /** Where the controller / operator is reachable: the one contact for both. */
 export const CONTACT = "davzavada@gmail.com";
