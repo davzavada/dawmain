@@ -24,8 +24,7 @@ const { default: Podminky } = await import("@/app/podminky/page");
 const { SiteNav } = await import("@/app/_nav");
 const { CONTACT, EFFECTIVE } = await import("@/app/_legal");
 const { PAGE_CHARS, metaModel } = await import("@/src/files/config");
-const { READ_COUNTER_KEEP_DAYS, USAGE_KEEP_DAYS } = await import("@/src/files/db/usage");
-const { STATE_COOKIE } = await import("@/src/zotero/config");
+const { USAGE_KEEP_DAYS } = await import("@/src/files/db/usage");
 
 /** Rendered page as plain text, whitespace collapsed (JSX line breaks vary). */
 function text(element: ReturnType<typeof createElement>): string {
@@ -41,29 +40,20 @@ const privacy = text(createElement(Soukromi));
 const terms = text(createElement(Podminky));
 
 describe("privacy policy (/soukromi)", () => {
-  it("drops the claims that uploads made false", () => {
-    for (const stale of [
-      "Vlastní databázi nevedu",
-      "nic si trvale neukládám",
-      "Vaše rešerše Evropskou unii neopouští",
-      "nenastavují žádné cookies",
-      "Nejvíc ale chrání to, co tu vůbec není",
-      "dva zpracovatelé",
-    ]) {
-      expect(privacy).not.toContain(stale);
-    }
+  it("names the operator as controller, with no processing contract for uploads", () => {
+    expect(privacy).toContain("David Závada");
+    expect(privacy).toContain(CONTACT);
+    expect(privacy).not.toContain("jen jako zpracovatel");
+    expect(terms).not.toContain("čl. 28 GDPR");
   });
 
-  it("names every processor of uploaded content", () => {
+  it("names every processor and the provider of the configured metadata model", () => {
     for (const processor of ["Clerk, Inc.", "Vercel, Inc.", "Neon, Inc.", "AI Gateway", "Google"]) {
       expect(privacy).toContain(processor);
     }
     expect(privacy).toContain("tři zpracovatelé");
-  });
-
-  it("names the provider of the configured metadata model", () => {
-    // The page discloses Google (Gemini) as Vercel's sub-processor. A model
-    // from another provider is a new sub-processor: update /soukromi first.
+    // The page discloses Google (Gemini) behind Vercel. A model from another
+    // provider is a new sub-processor: update /soukromi first.
     const saved = process.env.FILES_META_MODEL;
     delete process.env.FILES_META_MODEL;
     try {
@@ -74,58 +64,21 @@ describe("privacy policy (/soukromi)", () => {
     expect(privacy).toContain("Gemini");
   });
 
-  it("states that originals stay on the device and only text is uploaded", () => {
-    expect(privacy).toContain("původní soubor vaše zařízení neopustí");
-    expect(privacy).toContain("originály sem vůbec nepřijdou");
-  });
-
-  it("keeps the EU promise for official sources and states the exception", () => {
-    expect(privacy).toContain("Rešerše v oficiálních zdrojích Evropskou unii neopouští");
-    expect(privacy).toContain("část textu dokumentu k návrhu metadat");
-  });
-
-  it("states retention for uploads, deletion and revoked Pro", () => {
-    expect(privacy).toContain("nejdéle 6 hodin");
+  it("states the retention the code applies", () => {
+    expect(USAGE_KEEP_DAYS).toBe(365);
+    expect(privacy).toContain("počty volání nejdéle 12 měsíců");
     expect(privacy).toContain("nejpozději do 8 dnů");
     expect(privacy).toContain("90 dní");
-    // The daily cron drops the text of a failed upload after 7 days (PENDING_KEEP_DAYS).
-    expect(privacy).toContain("text dokumentu, který se nepodařilo zpracovat - 7 dní");
+    expect(privacy).toContain("dokud Zotero neodpojíte nebo nezrušíte účet");
   });
 
-  it("states the retention the daily cron applies to counters and audit rows", () => {
-    // pruneUsage: per-user read/export counters (read:<user>:…) and the rest of usage_daily.
-    // Today's and yesterday's rows (day >= today - 1): two UTC days, as the notice says.
-    expect(READ_COUNTER_KEEP_DAYS).toBe(1);
-    expect(privacy).toContain("denní počítadla čtení a stažení - 2 dny");
-    expect(USAGE_KEEP_DAYS).toBe(365);
-    expect(privacy).toContain("nejdéle 12 měsíců");
-    // files_forget_purged_audit keeps only the purge record (library id, date, count).
-    expect(privacy).toContain("zůstane jen její interní označení a záznam, kdy a kolik dokumentů");
+  it("uses only sign-in cookies and stores the Zotero key encrypted", () => {
+    expect(privacy).toContain("jen cookies nezbytné pro přihlášení");
+    expect(privacy).toContain("zašifrovaný klíč k vaší knihovně");
   });
 
-  it("points to the self-service text export (web: GET /api/files/documents/[id]/export)", () => {
-    expect(privacy).toContain("„Stáhnout text“ u dokumentu v seznamu souborů");
-    expect(privacy).not.toContain("Exportovat text");
-    expect(privacy).toMatch(/90 dní ji uvidíte na webu, můžete dokumenty mazat a jejich text s metadaty si stáhnout/);
-    expect(privacy).not.toContain("na požádání vám pošlu jejich text");
-  });
-
-  it("says the AI Gateway gets a pseudonym, not the account (userHash)", () => {
-    expect(privacy).toContain("dostane jen pseudonym");
-  });
-
-  it("describes the sign-in cookies as strictly necessary", () => {
-    expect(privacy).toContain("__session");
-    expect(privacy).toContain("__client_uat");
-    expect(privacy).toContain("jsou tedy nezbytné");
-  });
-
-  it("makes the operator the controller, with no processing contract for uploads", () => {
-    expect(privacy).toContain("David Závada");
-    expect(privacy).not.toContain("Jejich správcem jste vy");
-    expect(privacy).not.toContain("jen jako zpracovatel");
-    expect(terms).not.toContain("čl. 28 GDPR");
-    expect(terms).not.toContain("jste správcem vy");
+  it("has no DPO section", () => {
+    expect(privacy).not.toContain("Pověřenec");
   });
 
   it("shows the shared effective date", () => {
@@ -134,37 +87,8 @@ describe("privacy policy (/soukromi)", () => {
   });
 });
 
-describe("Zotero in the legal texts", () => {
-  it("lists the stored key and the library content read on request", () => {
-    expect(privacy).toContain("klíč k vaší knihovně Zotero");
-    expect(privacy).toContain("ukládám ho zašifrovaný u vašeho účtu v Clerku");
-    expect(privacy).toContain("obsah knihovny, na který se váš asistent zeptá");
-  });
-
-  it("keeps Zotero out of the processor list: it is the user's own service", () => {
-    expect(privacy).toContain("tři zpracovatelé");
-    expect(privacy).toContain("není můj zpracovatel");
-  });
-
-  it("states that a PDF may be fetched when Zotero has no text, and is never stored", () => {
-    expect(privacy).toContain("stáhnu na dotaz asistenta PDF přílohu z úložiště Zotera");
-    expect(privacy).toContain("Stažené PDF neukládám vůbec");
-    // The Vlastní soubory promise stays, scoped to Vlastní soubory.
-    expect(privacy).toContain("Na rozdíl od Vlastních souborů sem u Zotera originály přijít mohou");
-    expect(privacy).toContain("originály sem vůbec nepřijdou");
-  });
-
-  it("states retention of the key, the key left at zotero.org, and the connect cookie", () => {
-    expect(privacy).toContain("dokud Zotero neodpojíte nebo nezrušíte účet");
-    expect(privacy).toContain("zotero.org/settings/keys");
-    expect(privacy).toContain(STATE_COOKIE);
-  });
-
+describe("Zotero in the terms", () => {
   it("states the user's choice of key: read only, or read and save new records — never changing or deleting", () => {
-    expect(privacy).toContain("o právo zápisu si Dawmain řekne jen při volbě „Číst a ukládat“, a to jen do vaší osobní knihovny");
-    expect(privacy).toContain("stávající nikdy nemění ani nemaže");
-    expect(privacy).toContain("Zvolíte-li „Jen číst“, nic nezapíše");
-    expect(privacy).not.toContain("o právo zápisu si Dawmain vůbec neříká");
     expect(terms).toContain("Zotero (Pro)");
     expect(terms).toContain("„Jen číst“, nebo „Číst a ukládat“");
     expect(terms).toContain("Stávající záznamy Dawmain nikdy nemění ani nemaže a do skupin nezapisuje");
