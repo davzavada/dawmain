@@ -36,8 +36,11 @@ export const maxDuration = 300;
 const PURGE_PER_RUN = 5;
 /** Clerk lookups per run (the Backend API budget is shared with OAuth verification). */
 const OWNER_CHECKS_PER_RUN = 50;
-/** Pro revoked this long → the library is purged (plan: 90 days of read/delete/export). */
-const REVOKED_PURGE_DAYS = 90;
+/**
+ * Pro revoked this long → the library is purged. With the daily run that is
+ * within a week, as /soukromi and /podminky promise ("do týdne").
+ */
+const REVOKED_PURGE_DAYS = 6;
 /** Failed uploads keep their text this long (for an operator requeue), then it is dropped. */
 const PENDING_KEEP_DAYS = 7;
 /** Libraries whose failed uploads are swept per run. */
@@ -59,13 +62,13 @@ const DAY_MS = 86_400_000;
  *   1. guards: measure DB size, pages and the compute-hour estimate, store
  *      the snapshot (system_state "guards") — the automatic read-only mode
  *      itself is applied live by effectiveMode();
- *   2. purge libraries whose purge date passed (Clerk deletion + 7 days,
- *      or Pro revoked for 90 days) — with their counters and their audit
+ *   2. purge libraries whose purge date passed (Clerk deletion + 6 days,
+ *      or Pro revoked for 6 days) — with their counters and their audit
  *      rows but the purge record;
  *   3. owners and Pro: ≤ 50 Clerk lookups, rotating through the libraries —
  *      a deleted owner (missed webhook) schedules a purge and, for a user,
  *      drops their terms acceptance and read counters as the webhook would;
- *      a lost Pro sets pro_revoked_at (restored Pro clears it), 90 days
+ *      a lost Pro sets pro_revoked_at (restored Pro clears it), 6 days
  *      revoked → purge; Pro restored before that purge ran revives the
  *      library (the mark is cleared);
  *   4. ingest queue: documents over their attempts are failed (reservation
@@ -196,7 +199,7 @@ async function runMaintenance(started: number): Promise<Summary> {
 
   await task("owners", async () => {
     // Unmarked libraries, plus those marked because Pro stayed revoked for
-    // 90 days: restored Pro before the purge runs revives them. (A library
+    // 6 days: restored Pro before the purge runs revives them. (A library
     // marked because its owner was deleted cannot get Pro back.)
     const checked = libraries.filter((l) => !purgedNow.has(l.id) && (!l.purge_after || l.pro_revoked_at));
     for (const lib of rotate(checked, OWNER_CHECKS_PER_RUN, Math.floor(started / DAY_MS))) {
@@ -219,7 +222,7 @@ async function runMaintenance(started: number): Promise<Summary> {
           return;
         }
         if (state === "gone") {
-          await markLibraryForPurge(db, lib.id, new Date(Date.now() + 7 * DAY_MS));
+          await markLibraryForPurge(db, lib.id, new Date(Date.now() + 6 * DAY_MS));
           if (lib.id.startsWith("user_")) {
             // The user.deleted webhook was missed: what goes with the account goes now.
             await forgetTermsAcceptance(db, lib.id);

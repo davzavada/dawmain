@@ -246,14 +246,14 @@ describe("POST /api/webhooks/clerk", () => {
   const purgeAfter = async (id: string) =>
     (await t.owner.query<{ purge_after: Date | null }>("SELECT purge_after FROM libraries WHERE id = $1", [id])).rows[0]?.purge_after;
 
-  it("user.deleted schedules the purge in 7 days, drops terms, audits — idempotently", async () => {
+  it("user.deleted schedules the purge in 6 days (purged within a week), drops terms, audits — idempotently", async () => {
     await t.owner.query("INSERT INTO libraries (id) VALUES ('user_a')");
     mocks.verifyWebhook.mockResolvedValue({ type: "user.deleted", data: { id: "user_a", deleted: true, object: "user" } });
     const res = await hook();
     expect(res.status).toBe(200);
     const first = await purgeAfter("user_a");
-    expect(first!.getTime() - Date.now()).toBeGreaterThan(6.9 * 86_400_000);
-    expect(first!.getTime() - Date.now()).toBeLessThan(7.1 * 86_400_000);
+    expect(first!.getTime() - Date.now()).toBeGreaterThan(5.9 * 86_400_000);
+    expect(first!.getTime() - Date.now()).toBeLessThan(6.1 * 86_400_000);
     expect((await t.owner.query("SELECT 1 FROM terms_acceptance WHERE user_id = 'user_a'")).rows).toHaveLength(0);
     expect((await hook()).status).toBe(200);
     expect((await purgeAfter("user_a"))!.getTime()).toBe(first!.getTime());

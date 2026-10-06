@@ -478,7 +478,7 @@ export function exportHeader(row: DocumentRow, libraryName: string, exportedAt: 
 
 /**
  * The stored text of one document as a download, for GDPR portability and
- * for a library that lost Pro (the 90 days before its purge). Ownership
+ * for a library that lost Pro (the days before its purge). Ownership
  * only, Pro not required (canDeleteDocument: the uploader or owner/admin —
  * a member does not export a colleague's upload); allowed in any mode
  * except the deployment having the feature off. `libraryId` narrows

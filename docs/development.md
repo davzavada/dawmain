@@ -495,8 +495,9 @@ přepsat v Clerku (níže).
    Logika je v `buildAccess` (`src/files/access.ts`, `featureOff`), brána
    nástrojů v `personalProCaller(ctx, feature)` (`src/mcp/pro-caller.ts`).
 5. **Odebrání Pro**: smaž `pro`. Denní cron to zaznamená (`pro_revoked_at`);
-   asistent v knihovně přestane hledat, uživatel ji 90 dní vidí, může mazat
-   a stahovat text svých dokumentů („Exportovat text“), pak se smaže. Vrátí-li
+   asistent v knihovně přestane hledat, uživatel ji do výmazu (6 dní + nejvýš
+   den do cronu, `/soukromi` říká „do týdne“) vidí, může mazat a stahovat
+   text svých dokumentů, pak se smaže. Vrátí-li
    se Pro dřív, než výmaz proběhne, cron označení zruší (nahrání do knihovny
    ji oživí hned). **Před smazáním mu napiš** (slibují to zásady ochrany
    osobních údajů); knihovny s odebraným Pro ukazuje stránka provozu.
@@ -574,7 +575,7 @@ nejdřív uprav `/soukromi` a dej uživatelům vědět (viz Právní texty níž
 - Denní cron (`/api/cron/files`, 03:00 UTC; Hobby smí jednou denně s
   přesností na hodinu): pojistky a velikost DB; výmaz knihoven po lhůtě
   (knihovnu, kterou mezitím nahrání oživilo, nechá být); kontrola Pro (≤ 50
-  dotazů do Clerku; obnovené Pro u knihovny označené k výmazu po 90 dnech
+  dotazů do Clerku; obnovené Pro u knihovny označené k výmazu po 6 dnech
   označení zruší; u smazaného účtu, který minul webhook, zahodí i souhlas s
   podmínkami a počítadla čtení); restart zaseknutých zpracování; dohnání
   odložených přeindexování (≤ 30 za běh, jen v režimu „on“ a jen s volnou
@@ -639,8 +640,8 @@ z uloženého textu na kliknutí; mimo režim „on“ odmítnuto, nad 60 % DB n
 Kdo dokument nahrál, a správce týmu u všech týmových, si v detailu stáhne jeho
 uložený text („Exportovat text“, `GET /api/files/documents/[id]/export?lib=`):
 DMD s hlavičkou metadat (název, autoři, rok, typ, původní soubor, knihovna,
-data). Pro není potřeba — tak se plní slib `/soukromi` na 90 dní po odebrání
-Pro i právo na přenositelnost; nejde jen při `FILES_MODE=off`. Stropy: jeden
+data). Pro není potřeba — tak si uživatel text stáhne i po odebrání Pro
+než se knihovna smaže, a plní se právo na přenositelnost; nejde jen při `FILES_MODE=off`. Stropy: jeden
 dokument nejvýš 10× za den (`EXPORTS_PER_DOC_PER_DAY`) a jeden uživatel za den
 tolik stran, kolik má největší kvóta knihovny (`max(FILES_PERSONAL_PAGES,
 FILES_TEAM_PAGES)`) — jinak 429. Počítadla `read:<uživatel>:…` maže cron po 2
@@ -675,8 +676,8 @@ ty, které jdou přečíst z kódu.
 - zpracovatelé: Clerk, Vercel (+ Google přes AI Gateway), Neon — jiný model
   nebo nová služba = nový subdodavatel; Gateway dostává jen pseudonym
   nahrávajícího (`FILES_USER_HASH_SECRET`);
-- výmaz knihovny 7 dní po smazání účtu/týmu (+ nejvýš den do cronu → text
-  říká „do 8 dnů“), 90 dní po odebrání Pro, 6 h historie Neonu; po výmazu
+- výmaz knihovny 6 dní po smazání účtu/týmu nebo po odebrání Pro (+ nejvýš
+  den do cronu → text říká „do týdne“), 6 h historie Neonu; po výmazu
   zůstane řádek knihovny bez jména a auditní záznam `library.purged`;
 - retence v cronu: text neúspěšného nahrání 7 dní, počítadla čtení a stažení
   2 dny, ostatní počítadla 12 měsíců, audit do výmazu knihovny;

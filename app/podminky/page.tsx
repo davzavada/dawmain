@@ -42,10 +42,8 @@ export default function Podminky() {
         <p>
           V režimu Pro si na webu nahrajete vlastní dokumenty - knihy, články, komentáře nebo vzory
           - a váš asistent v nich pak hledá vedle oficiálních databází. Pro je zdarma a přiděluji ho
-          ručně; stačí mi napsat na <Mail />. Můžu ho kdykoli odebrat. Pokud
-          nejde o porušení těchto pravidel, zůstane vám knihovna ještě 90 dní k prohlížení, mazání a
-          stažení textu (podrobnosti v{" "}
-          <Link href="/soukromi">Zásadách ochrany osobních údajů</Link>). Nahráním dokumentu
+          ručně; stačí mi napsat na <Mail />. Můžu ho kdykoli odebrat; vaši knihovnu pak do týdne smažu, takže si text svých
+          dokumentů včas stáhněte. Nahráním dokumentu
           potvrzujete, že pravidla v tomto oddílu dodržíte - web na ně upozorňuje přímo u nahrávání.
         </p>
         <p>

@@ -12,7 +12,7 @@ export default function Soukromi() {
 
       <Section heading="1. Správce osobních údajů">
         <p>
-          <strong>David Závada</strong>, fyzická osoba (služba je provozována mimo podnikání)
+          <strong>David Závada</strong>, fyzická osoba
           <br />
           E-mail: <Mail />
         </p>
@@ -25,30 +25,43 @@ export default function Soukromi() {
             přihlášení účtem Google je předá Google).
           </li>
           <li>
-            <strong>Provozní záznamy</strong> - čas požadavku, volaný nástroj, výsledek a IP adresa;
-            počty volání pro hlídání limitů.
+            <strong>Provozní záznamy a přehled o používání</strong> - čas požadavku, volaný
+            nástroj, výsledek a IP adresa; počty volání u účtu, ze kterých vidím, kdo službu
+            používá, jak často a které nástroje.
           </li>
           <li>
-            <strong>Vlastní soubory (Pro)</strong> - dokumenty, které nahrajete, a záznam o tom,
-            kdy jste je nahráli, upravili, stáhli nebo smazali.
+            <strong>Vlastní soubory (Pro)</strong> - text dokumentů, které nahrajete, jejich
+            metadata (název, autoři, rok, typ, název souboru) a záznam o tom, kdy jste je
+            nahráli, upravili, stáhli nebo smazali. Dokumenty mohou obsahovat i osobní údaje
+            jiných lidí, například jména autorů.
           </li>
           <li>
             <strong>Zotero (Pro)</strong> - zašifrovaný klíč k vaší knihovně a vaše uživatelské
-            jméno v Zoteru.
+            jméno a identifikátor v Zoteru.
           </li>
         </ul>
-        <p>Obsah rešerší si neukládám a s vaším účtem ho nespojuji.</p>
+        <p>
+          Údaje o účtu jsou pro poskytování služby nezbytné; bez nich účet nelze vytvořit.
+          Provozní záznamy vznikají automaticky při každém použití služby. Nahrávání dokumentů a
+          připojení Zotera jsou dobrovolné. Obsah rešerší si neukládám a s vaším účtem ho
+          nespojuji.
+        </p>
       </Section>
 
       <Section heading="3. Účel a právní základ">
         <ul>
           <li>
             <strong>plnění smlouvy</strong> (čl. 6 odst. 1 písm. b) GDPR): vedení účtu, přihlášení,
-            Vlastní soubory a připojení Zotera;
+            Vlastní soubory včetně návrhu metadat (bod 5) a připojení Zotera;
           </li>
           <li>
             <strong>oprávněný zájem</strong> (čl. 6 odst. 1 písm. f) GDPR): provozní záznamy,
-            hlídání limitů a ochrana služby před zneužitím; proti tomu můžete vznést námitku.
+            hlídání limitů, ochrana služby před zneužitím, záznam o provedeném výmazu a přehled o
+            tom, kdo a jak službu používá, abych ji mohl rozvíjet. Přehled je jen pro mě, k
+            marketingu ho nepoužívám, nikomu ho nedávám a nepoužívám žádné analytické nástroje
+            třetích stran. Na oprávněném zájmu stojí i zpracování osobních údajů jiných lidí v
+            nahraných dokumentech - jen v rozsahu potřebném k tomu, aby v nich váš asistent mohl
+            hledat. Proti zpracování na základě oprávněného zájmu můžete vznést námitku.
           </li>
         </ul>
       </Section>
@@ -56,12 +69,24 @@ export default function Soukromi() {
       <Section heading="4. Doba uchování">
         <ul>
           <li>Údaje o účtu - dokud účet trvá; o jeho smazání můžete kdykoli požádat e-mailem.</li>
-          <li>Provozní záznamy - dny až týdny; počty volání nejdéle 12 měsíců.</li>
           <li>
-            Vlastní soubory - dokud je nesmažete; po zrušení účtu je smažu nejpozději do 8 dnů. Po
-            odebrání Pro je ještě 90 dní uvidíte na webu a můžete si stáhnout jejich text.
+            Provozní záznamy hostingu (včetně IP adresy) - nejdéle 30 dní; počty volání u účtu
+            nejdéle 12 měsíců.
           </li>
-          <li>Klíč k Zoteru - dokud Zotero neodpojíte nebo nezrušíte účet.</li>
+          <li>
+            Vlastní soubory a záznamy o práci s nimi - dokud dokument nesmažete, nejdéle však do
+            zrušení účtu nebo odebrání Pro. Pak knihovnu do týdne smažu (do té doby si po odebrání
+            Pro můžete stáhnout text svých dokumentů). Smazaný dokument zůstane nejdéle 6 hodin v
+            historii změn databáze pro obnovu po havárii. Po výmazu knihovny si ponechám jen
+            záznam o výmazu (identifikátor knihovny, datum a počet smazaných dokumentů), dokud
+            může být potřeba výmaz doložit.
+          </li>
+          <li>
+            Klíč k Zoteru, uživatelské jméno a identifikátor - dokud Zotero neodpojíte nebo
+            nezrušíte účet. Přestane-li klíč platit, smažu ho a do opětovného připojení,
+            odpojení nebo zrušení účtu si ponechám jen uživatelské jméno a čas, kdy klíč přestal
+            platit.
+          </li>
         </ul>
       </Section>
 
@@ -72,13 +97,24 @@ export default function Soukromi() {
             <strong>Clerk, Inc.</strong> - přihlašování a správa účtů,
           </li>
           <li>
-            <strong>Vercel, Inc.</strong> - hosting (Frankfurt); přes AI Gateway také model Gemini
-            od Google, který navrhuje metadata nahraných dokumentů (bez vazby na váš účet),
+            <strong>Vercel, Inc.</strong> - hosting (Frankfurt) a služba AI Gateway, přes kterou
+            využívám jazykový model Gemini od Google (viz níže),
           </li>
           <li>
             <strong>Neon, Inc.</strong> - databáze Vlastních souborů (Frankfurt).
           </li>
         </ul>
+        <p>
+          <strong>Návrh metadat přes Gemini.</strong> Po nahrání dokumentu pošlu přes AI Gateway
+          modelu Gemini (Google, dodavatel Vercelu) výňatek z dokumentu, ne celý text: úvodní
+          strany, tiráž, seznam autorů, osnovu nadpisů a záhlaví stran (dohromady nejvýš 16 000
+          znaků), název souboru a u PDF údaje z jeho vlastností. Účelem je jen navrhnout typ
+          dokumentu, název, autory, rok a podobné údaje, které pak můžete opravit. Právní základ
+          je stejný jako u Vlastních souborů (bod 3). Výňatek může obsahovat osobní údaje lidí
+          uvedených v dokumentu, typicky jména autorů. Vaše jméno ani e-mail s ním neposílám;
+          AI Gateway dostane jen pseudonym kvůli rozpočtu spotřeby. Text se nepoužije k
+          trénování modelů a Vercel ho po vyřízení požadavku smaže.
+        </p>
         <p>
           Jde o americké společnosti; předávání do USA se opírá o EU-US Data Privacy Framework.
           Jinak údaje předám jen orgánům veřejné moci, ukládá-li mi to zákon. Přihlášení účtem
