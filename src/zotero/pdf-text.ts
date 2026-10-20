@@ -91,8 +91,14 @@ class Stop extends Error {
 
 export async function pdfText(
   bytes: ArrayBuffer,
-  opts: { pageRange?: [number, number]; signal?: AbortSignal } = {},
+  opts: {
+    pageRange?: [number, number];
+    signal?: AbortSignal;
+    /** Pages a file may have at all before it is refused (default: what Vlastní zdroje accept). A sněmovní tisk (src/sources/psp.ts) raises it. */
+    maxTotalPages?: number;
+  } = {},
 ): Promise<PdfTextResult> {
+  const maxTotalPages = opts.maxTotalPages ?? MAX_TOTAL_PAGES;
   const [from, askedTo] = requestedRange(opts.pageRange);
   const to = Math.min(askedTo, from + LIMITS.maxPdfPages - 1);
 
@@ -119,7 +125,7 @@ export async function pdfText(
     const reading = readPdf(
       bytes,
       (_done, total) => {
-        if (total > MAX_TOTAL_PAGES) throw new Stop("too-many-pages");
+        if (total > maxTotalPages) throw new Stop("too-many-pages");
         if (stopped()) throw new Stop("timeout");
       },
       { pageRange: [from, to] },
@@ -129,7 +135,7 @@ export async function pdfText(
     if (doc === "timeout" || stopped()) return { unavailable: "timeout" };
 
     const total = doc.pages.length;
-    if (total > MAX_TOTAL_PAGES) return { unavailable: "too-many-pages" };
+    if (total > maxTotalPages) return { unavailable: "too-many-pages" };
     if (from > total) {
       return {
         text: "",

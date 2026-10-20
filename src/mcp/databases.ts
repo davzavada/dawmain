@@ -79,6 +79,13 @@ export const DATABASES: Array<{
     canaryId: "esbirka-api",
   },
   {
+    label: "Poslanecká sněmovna",
+    group: "Předpisy",
+    href: "https://www.psp.cz/sqw/tisky.sqw",
+    source: "Poslanecká sněmovna (psp.cz)",
+    canaryId: "psp",
+  },
+  {
     label: "EUR-Lex",
     group: "Předpisy",
     href: "https://eur-lex.europa.eu",

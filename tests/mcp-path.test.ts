@@ -12,6 +12,7 @@ import { registerCzCaselaw } from "@/src/mcp/tools/cz-caselaw";
 import { registerJustice } from "@/src/mcp/tools/justice";
 import { registerCuria } from "@/src/mcp/tools/curia";
 import { registerEurlex } from "@/src/mcp/tools/eurlex";
+import { registerPsp } from "@/src/mcp/tools/psp";
 import { registerDoctrine } from "@/src/mcp/tools/doctrine";
 import { registerFiles } from "@/src/mcp/tools/files";
 import { registerZotero } from "@/src/mcp/tools/zotero";
@@ -52,6 +53,7 @@ function registerTheOldWay(server: McpServer, zotero: boolean): void {
     registerJustice,
     registerCuria,
     registerEurlex,
+    registerPsp,
     registerDoctrine,
     registerFiles,
   ]) {

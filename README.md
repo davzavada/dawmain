@@ -20,8 +20,11 @@ nic si z nich nekopíruje. Konkrétně je napojený na judikaturu:
 - obecných soudů - dostupné [zde](https://rozhodnuti.justice.cz)
 - Soudního dvora EU (InfoCuria) - dostupné [zde](https://infocuria.curia.europa.eu)
 
-Právní předpisy: [e-Sbírka](https://www.e-sbirka.cz), unijní legislativa,
-judikatura a legislativní materiály: [EUR-Lex](https://eur-lex.europa.eu).
+Právní předpisy: [e-Sbírka](https://www.e-sbirka.cz); české legislativní
+materiály (sněmovní tisky s důvodovou zprávou, rozdílovou tabulkou, RIA a
+průběhem projednávání): [Poslanecká sněmovna](https://www.psp.cz/sqw/tisky.sqw);
+unijní legislativa, judikatura a legislativní materiály:
+[EUR-Lex](https://eur-lex.europa.eu).
 
 Doktrína (knihy, kapitoly, články) přes
 [UKAŽ](https://cuni.primo.exlibrisgroup.com/discovery/search?vid=420CKIS_INST:UKAZ)
