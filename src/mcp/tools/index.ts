@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { CALL_BUDGET_MS, callStartedAt, runWithCallClock } from "@/src/sources/shared/clock";
 import { registerPing } from "./ping";
 import { registerProbe } from "./probe";
+import { registerGuide } from "./guide";
 import { registerEsbirka } from "./esbirka";
 import { registerNs } from "./ns";
 import { registerNalus } from "./nalus";
@@ -33,6 +34,7 @@ import { zoteroConfigured } from "@/src/zotero/config";
 const registrars: Array<(server: McpServer) => void> = [
   registerPing,
   registerProbe,
+  registerGuide,
   registerEsbirka,
   registerNs,
   registerNalus,

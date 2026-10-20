@@ -71,16 +71,18 @@ const PLATFORMS: Platform[] = [
       },
       loginStep,
       {
-        title: "Nahrajte skill",
+        title: "Skill (nepovinné)",
         body: (
           <>
             <p>
-              Skill asistenta naučí, jak s databázemi pracovat a jak citovat. Stáhněte si ho:
+              Rešeršní návod – jak s databázemi pracovat a jak citovat – si asistent vyžádá od
+              konektoru sám, vždy v aktuální verzi. Nic dalšího instalovat nemusíte. Chcete-li ho
+              mít i jako skill, stáhněte si ho:
             </p>
             {skillDownload}
             <p>
-              Pak otevřete <strong>Nastavení → Funkce</strong>, v části <strong>Skills</strong>{" "}
-              zvolte <strong>Nahrát skill</strong> a vyberte stažený soubor.
+              a v <strong>Nastavení → Funkce</strong>, v části <strong>Skills</strong>, zvolte{" "}
+              <strong>Nahrát skill</strong>. Po změnách na webu ho pak musíte nahrát znovu.
             </p>
           </>
         ),
@@ -128,7 +130,9 @@ const PLATFORMS: Platform[] = [
         body: (
           <>
             <p>
-              Skill asistenta naučí, jak s databázemi pracovat a jak citovat. Stáhněte si ho:
+              Rešeršní návod – jak s databázemi pracovat a jak citovat – nabízí konektor i sám
+              (nástroj <em>dawmain_guide</em>); ChatGPT se ale instrukcemi konektoru neřídí tak
+              spolehlivě jako Claude, proto doporučujeme nahrát ho i jako skill. Stáhněte si ho:
             </p>
             {skillDownload}
             <p>

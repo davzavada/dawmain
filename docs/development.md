@@ -32,6 +32,7 @@ Uživatelský popis je v [README](../README.md).
 | `zotero_list` | Zotero | knihovny (osobní + skupiny klíče), kolekce a štítky; `query`, `limit` (≤ 100), `page` |
 | `dawmain_ping` | — | které nasazení odpovědělo |
 | `dawmain_probe_sources` | — | diagnostika všech upstreamů z nasazené funkce; `include_raw` pro záchyt fixtures, `discover` pro hledání neověřených endpointů |
+| `dawmain_guide` | — | rešeršní návod (`skills/dawmain-reserse/SKILL.md` bez front matter) vcelku, čtený ze stromu repa za běhu (`outputFileTracingIncludes` v `next.config.ts` ho přibalí do funkce); instrukce serveru říkají modelu zavolat ho jednou na začátku každé rešerše — skill v claude.ai tak nikdo instalovat nemusí a každá konverzace čte nasazenou verzi; test hlídá velikost pod `SKILL_MAX_CHARS` |
 
 Nástroje `files_*` sáhnou do databáze až po třech kontrolách, které se jí
 nedotknou, v tomto pořadí: režim z env (`FILES_MODE`) → přihlášení OAuth
@@ -263,9 +264,18 @@ soudu, kdy přestat hledat a jak vypadá výstupní memo. Instrukce serveru
 (`src/mcp/server.ts`) klient cachuje od initialize, skill se dá měnit hned —
 proto v něm žije to, co se ladí často.
 
-Instalace: nahrát adresář jako skill v claude.ai (Nastavení → Capabilities →
-Skills). Skill předpokládá připojený konektor Dawmain; bez něj se má ozvat,
-ne hádat.
+Model ho dostane od konektoru samotného: instrukce serveru (ty čte na
+začátku každé konverzace se zapnutým konektorem, stejně jako popisy
+nástrojů) nesou spouštěcí fráze ze skillu a pokyn zavolat `dawmain_guide`
+jednou před první rešerší; nástroj vrátí celý návod (~57 tis. znaků, ~15
+tis. tokenů — zhruba jedna stránka rozsudku) ve verzi, která je nasazená.
+Nic se neinstaluje a nic nezastarává; merge do main = aktualizovaný návod
+pro všechny. Soubor se do funkce dostane přes `outputFileTracingIncludes`
+(route `/dawmain-reserse.md` pro stažení ho čte při buildu, nástroj za běhu).
+
+Ruční instalace v claude.ai (Nastavení → Capabilities → Skills, nahrát
+adresář) dál funguje jako volitelný spouštěč, nic na ní ale nezávisí; kdo ji
+má, nese si vlastní kopii, kterou musí sám obnovovat.
 
 ## Výkon a šetrnost ke zdrojům
 
