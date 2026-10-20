@@ -9,6 +9,7 @@ import { registerNss } from "./nss";
 import { registerCzCaselaw } from "./cz-caselaw";
 import { registerCuria } from "./curia";
 import { registerEurlex } from "./eurlex";
+import { registerPsp } from "./psp";
 import { registerJustice } from "./justice";
 import { registerDoctrine } from "./doctrine";
 import { registerFiles } from "./files";
@@ -40,6 +41,7 @@ const registrars: Array<(server: McpServer) => void> = [
   registerJustice,
   registerCuria,
   registerEurlex,
+  registerPsp,
   registerDoctrine,
   // Vlastní zdroje — the user's own uploads; gated per call (registration does no I/O).
   registerFiles,

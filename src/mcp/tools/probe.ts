@@ -114,6 +114,16 @@ export function canaries(): Canary[] {
       marker: /"rok"/,
     },
     {
+      id: "psp",
+      source: "Poslanecká sněmovna (psp.cz)",
+      note: "historie.sqw of a known tisk (9. období, tisk 1) — the document links the parsers key on",
+      request: () => ({
+        url: "https://www.psp.cz/sqw/historie.sqw?o=9&t=1",
+        init: { headers: { accept: "text/html", "accept-language": "cs" } },
+      }),
+      marker: /tiskt\.sqw|orig2\.sqw|historie\.sqw/,
+    },
+    {
       id: "curia",
       source: "CJEU (InfoCuria)",
       note: "elastic-connector search, 1 hit",
@@ -281,7 +291,7 @@ export async function runCanary(
  * the Discoveries JSON reads the same whichever answered first.
  */
 async function discover(): Promise<Record<string, unknown>> {
-  const [justice, nss] = await Promise.all([
+  const [justice, nss, psp] = await Promise.all([
     (async (): Promise<unknown> => {
       // rozhodnuti.justice.cz — scan the SPA bundles for /api/ paths (the search
       // endpoint the open-data API lacks must be in there).
@@ -360,8 +370,58 @@ async function discover(): Promise<Record<string, unknown>> {
         return { error: error instanceof Error ? error.message : String(error) };
       }
     })(),
+    (async (): Promise<unknown> => {
+      // psp.cz — the tisky search form as psp_search reads it at run time
+      // (src/sources/psp.ts parseListingForm: action, fields, which field the
+      // labels identify as název/období/číslo), every form's raw fields, and
+      // the first listing rows and page links — written without a live
+      // capture, so this is how the assumptions get checked from fra1.
+      try {
+        const { CURRENT_PERIOD, listingUrl, parseListing, parseListingForm, parsePageLinks } = await import("@/src/sources/psp");
+        const { loadHtml, decodeHtmlBody } = await import("@/src/sources/shared/html");
+        const url = listingUrl(CURRENT_PERIOD);
+        const response = await fetch(url, {
+          headers: { "user-agent": USER_AGENT, accept: "text/html", "accept-language": "cs" },
+          signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+        });
+        const html = await decodeHtmlBody(response);
+        const $ = loadHtml(html);
+        const forms = $("form")
+          .map((_, form) => ({
+            action: $(form).attr("action") ?? "",
+            method: $(form).attr("method") ?? "get",
+            fields: $(form)
+              .find("input, select, textarea")
+              .map((__, el) => ({
+                name: $(el).attr("name") ?? "",
+                type: ($(el).attr("type") ?? el.tagName).toLowerCase(),
+                value: ($(el).attr("value") ?? "").slice(0, 40),
+                options: $(el)
+                  .find("option")
+                  .map((___, option) => `${$(option).attr("value") ?? ""}=${$(option).text().trim().slice(0, 40)}`)
+                  .get()
+                  .slice(0, 15),
+              }))
+              .get()
+              .slice(0, 40),
+          }))
+          .get()
+          .slice(0, 6);
+        return {
+          url,
+          http_status: response.status,
+          charset: response.headers.get("content-type"),
+          inferred_form: parseListingForm(html, url),
+          forms,
+          rows: parseListing(html, url, CURRENT_PERIOD).slice(0, 5),
+          page_links: [...parsePageLinks(html, url).entries()].slice(0, 8),
+        };
+      } catch (error) {
+        return { error: error instanceof Error ? error.message : String(error) };
+      }
+    })(),
   ]);
-  return { justice, nss };
+  return { justice, nss, psp };
 }
 
 /** fetch_url is restricted to the upstream hosts this server scrapes. */
@@ -373,6 +433,8 @@ const ALLOWED_FETCH_HOSTS = [
   "nalus.usoud.cz",
   "vyhledavac.nssoud.cz",
   "rozhodnuti.justice.cz",
+  "www.psp.cz",
+  "psp.cz",
   "infocuriaws.curia.europa.eu",
   "infocuria.curia.europa.eu",
   "curia.europa.eu",
@@ -426,7 +488,7 @@ const inputSchema = z.object({
     .array(z.string())
     .optional()
     .describe(
-      "Limit to these canary ids: esbirka-api, esbirka-cache, ns, nalus, nss, justice, curia, cellar-sparql, cellar, primo (zotero where configured). Default: all.",
+      "Limit to these canary ids: esbirka-api, esbirka-cache, ns, nalus, nss, justice, psp, curia, cellar-sparql, cellar, primo (zotero where configured). Default: all.",
     ),
   include_raw: z
     .boolean()
@@ -436,7 +498,7 @@ const inputSchema = z.object({
     .boolean()
     .default(false)
     .describe(
-      "Also hunt for unverified endpoints: justice.cz SPA search API (bundle scan) and the NSS search form field dump.",
+      "Also hunt for unverified endpoints: justice.cz SPA search API (bundle scan), the NSS search form field dump, and the psp.cz tisky search form (its fields as psp_search reads them, plus sample listing rows).",
     ),
   fetch_url: z
     .string()
@@ -453,7 +515,7 @@ export function registerProbe(server: McpServer): void {
     {
       title: "Probe upstream sources",
       description:
-        "Diagnose connectivity to the legal databases this server scrapes/queries, from the deployment itself. Each canary makes one real request and checks the response for a marker the parsers rely on. Use when any source tool fails unexpectedly, after deploying, or to capture raw upstream bodies as fixtures (include_raw). The discover mode scans for endpoints not yet wired up (justice.cz search, NSS form fields).",
+        "Diagnose connectivity to the legal databases this server scrapes/queries, from the deployment itself. Each canary makes one real request and checks the response for a marker the parsers rely on. Use when any source tool fails unexpectedly, after deploying, or to capture raw upstream bodies as fixtures (include_raw). The discover mode scans for endpoints not yet wired up (justice.cz search, NSS form fields, the psp.cz tisky form).",
       inputSchema,
       annotations: READ_ONLY,
     },

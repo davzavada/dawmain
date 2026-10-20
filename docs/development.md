@@ -17,6 +17,9 @@ Uživatelský popis je v [README](../README.md).
 | `justice_search` / `justice_get_decision` | rozhodnuti.justice.cz | obecné soudy (okresní/krajské/vrchní): fulltext (`match` všechna slova/jedno ze slov/fráze), spisová značka, kódy soudů, druh rozhodnutí, datum vydání i zveřejnění, aplikovaný předpis a § (`applies_act` + `applies_section`) — vše server-side přes `/api/finaldoc`, backend SPA zachycený z živého požadavku; hit nese i `affects` (co rozhodnutí udělalo s rozhodnutím nižšího soudu: CHANGE/CONFIRM/CANCEL…) |
 | `sdeu_search` / `sdeu_get_document` | InfoCuria + Cellar | FULLTEXT judikatury SDEU (C i T) přes vlastní index soudu — hledá napříč všemi jazykovými verzemi; typ dokumentu, stav věci, citovaný předpis a článek (`cites_celex`/`cites_article`), předběžné otázky podle předkládajícího státu (`referred_from`), datumy — vše server-side dle zachyceného payloadu SPA | 
 | `eurlex_search` / `eurlex_get_document` | Cellar SPARQL (Publications Office) | EU legislativa, judikatura i legislativní materiály (návrhy COM, sdělení, zelené/bílé knihy, SWD, impact assessmenty, stanoviska EHSV/VR, postoje EP a Rady) dle názvů, CELEX/ECLI, typů a dat; texty z oficiálního Cellaru |
+| `psp_search` | www.psp.cz | sněmovní tisky podle slov NÁZVU (ne fulltext — Sněmovna indexuje názvy), čísla tisku a volebního období (`period`, nebo `year` → období toho roku, ve volebním roce obě); formulář výpisu `tisky.sqw` se čte za běhu (akce, pole; pole pro název/období/číslo podle popisků), server se požádá o filtr a každý řádek se navíc filtruje lokálně (kmeny slov, bez diakritiky), takže odpověď sedí, ať už web filtr uplatnil nebo ne — pak se čtou další stránky výpisu podle odkazů, které výpis tiskne (nikdy podle tipovaného parametru), v dávkách po 4, nejvýš 12 stránek; hit nese číslo, období, název a ostatní buňky řádku |
+| `psp_get_tisk` | www.psp.cz | jeden tisk (`historie.sqw?o=&t=`): název, průběh projednávání jak ho Sněmovna zapisuje (čtení s daty, výbory, Senát, prezident, Sbírka) a všechny dokumenty z odkazů stránky — části tisku (`tiskt.sqw`, podčíslo) i přiložené originály (`orig2.sqw?idd=`), každý s druhem podle slov popisku (důvodová zpráva, rozdílová tabulka, RIA, platné znění s vyznačením změn, usnesení, pozměňovací návrhy, stanovisko) a s voláním `psp_get_text`, které ho přečte |
+| `psp_get_text` | www.psp.cz | text části tisku (`period` + `number` + `part`; část 0 vládního návrhu = návrh zákona + důvodová zpráva) nebo přiloženého souboru (`document_id`): formát podle prvních bajtů, ne hlavičky — PDF přes převodník Vlastních zdrojů (`pdfText`, 60 stran na volání, `pdf_pages` pro další), DOCX přes mammoth, HTML jako text; starý `.doc` se zkusí jako PDF rendice (`&pdf=1`), bez ní se vrátí odkaz; stránky 45k znaků, `find` |
 | `eurlex_get_history` | Cellar SPARQL (Publications Office) | travaux préparatoires aktu z dossieru interinstitucionálního postupu (`cdm:dossier_contains_work` — obsahuje i přijatý akt, takže kotví CELEX aktu i kteréhokoli dokumentu postupu, případně číslo postupu `2012/0011(COD)`); vrací návrh s důvodovou zprávou, impact assessmenty, stanoviska, postoje EP/Rady + číslo postupu, právní základ a stav (přijato/projednáváno/staženo) |
 | `doctrine_search` | cuni.primo.exlibrisgroup.com | doktrína: knihy, kapitoly a články z UKAŽ Univerzity Karlovy (Primo VE: katalog UK + Central Discovery Index licencovaných e-zdrojů); `query`/`queries` (≤ 3 varianty), `title`, `author`, `subject`, `language`, `year_from`/`year_to`; katalog stránkuje po 10, `limit` (≤ 20; nad 10 záznamy stručně, bez abstraktů) stáhne víc stránek v paralelní dávce a `page` kráčí dál (`total` = `total_local` + `total_central`) — vrací bibliografické záznamy s odkazem na záznam, abstraktem/obsahem a přístupovými odkazy, žádné plné texty; klient postavený na zachyceném požadavku SPA (HAR 2026-09), ověřený živě z produkce |
 | `doctrine_get_record` | cuni.primo.exlibrisgroup.com | jeden záznam v plném znění přes full-display endpoint Prima (ověřený živě): celý abstrakt, obsah (TOC), hesla, identifikátory a přístupové odkazy — hledání ukazuje jen začátek abstraktu a obsahu; text díla se nestahuje (k němu vede odkaz na záznam, licencované tituly si čtenář otevře sám přes vzdálený přístup UK) |
@@ -79,6 +82,18 @@ sám přes odkaz na záznam (u licencovaných přes vzdálený přístup UK v
 prohlížeči). Co se o Unpaywallu, o přihlašovacím řetězu CAS a o proxy
 `ezproxy.is.cuni.cz` (host potvrzený HARem zadavatele) zjistilo, zůstává v
 `docs/research/doctrine-sources.json`; v kódu nezůstal žádný spící zbytek.
+**Poslanecká sněmovna** (`psp_*`, 2026-10): psp.cz nebyl z vývojového sandboxu
+dosažitelný (proxy host odmítá), takže klient je napsaný podle adres, které web
+léta zveřejňuje (`historie.sqw?o=&t=`, `text/tiskt.sqw?O=&CT=&CT1=`,
+`text/orig2.sqw?idd=`), a parsery se drží jen hrefů, ne id a rozložení
+tabulek; názvy polí vyhledávacího formuláře se čtou z formuláře za běhu. Po
+nasazení ověřit `dawmain_probe_sources {sources: ["psp"]}` (kanárek =
+historie tisku 1/9) a `{discover: true}` (výpis formuláře `tisky.sqw`, jak ho
+`psp_search` pochopil, prvních pět řádků výpisu, odkazy na stránky), a
+syntetické fixtures v `tests/fixtures/psp/` nahradit záchyty (`include_raw`).
+Otevřená data Sněmovny (`hp.sqw?k=1300`, ZIP celé databáze) se záměrně
+nestahují — žádný dotaz nemá stahovat celou databázi. Senát (senat.cz) ani
+eKLEP pokryté nejsou.
 **EUIPO** (eSearchCLW i Guidelines) a **ÚPV** (isdv.upv.gov.cz) záměrně
 pokryté nejsou a kód pro ně v repu není: doložky EUIPO si vyhrazují zákaz TDM
 a scrapingu „jakýmikoli prostředky, včetně botů" mimo vědecký výzkum (bez
@@ -273,7 +288,7 @@ ne hádat.
   (neohraničený fulltext je nad výchozích 15 s).
 - Texty dokumentů se vracejí po stránkách 45 000 znaků (bezpečně pod limity klientů) — typické rozhodnutí
   v jedné odpovědi; delší texty nesou pokyn agentovi pokračovat bez ptaní.
-- Timeouty: výchozí 15 s/request; odchylky: NSS POST 25 s, Cellar retrieval 25 s,
+- Timeouty: výchozí 15 s/request; odchylky: NSS POST 25 s, psp.cz soubor 25 s, Cellar retrieval 25 s,
   Cellar SPARQL 30 s, justice.cz hledání 45 s, e-Sbírka SPARQL 20 s, katalogy
   doktríny 20 s.
 - Délka invokace: `/api/mcp` má `maxDuration = 60`. Hobby s Fluid compute by
@@ -887,6 +902,11 @@ Zároveň ověřit, zda Zotero vynucuje registrovaný callback (výše).
 
 ### Fixtures k nahrazení
 
+`tests/fixtures/psp/*.html` jsou **syntetické** (psp.cz nebyl ze sandboxu
+dosažitelný): nahradit záchyty z `dawmain_probe_sources {sources: ["psp"],
+include_raw: true}` (historie tisku), `fetch_url` na `tisky.sqw?o=10` (výpis s
+formulářem) a `text/tiskt.sqw?O=…` (text tisku); pak přepsat očekávání v
+`tests/psp.test.ts` (sloupce řádku, popisky dokumentů, pole formuláře).
 `tests/fixtures/zotero/*.json` jsou **ručně sestavené z dokumentace** (z
 vývojového kontejneru nebyl api.zotero.org dostupný). Na Preview je nahradit
 živými záchyty (klíče a tokeny vymazat): `keys-current*.json` (přesný tvar

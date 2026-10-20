@@ -1,0 +1,24 @@
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=windows-1250"><title>Sněmovní tisky</title></head>
+<body>
+<div id="menu"><ul><li><a href="/sqw/hp.sqw">Úvod</a></li><li><a href="/sqw/historie.sqw?o=9&t=999">Poslední tisk</a></li></ul></div>
+<div id="main">
+<h1>Sněmovní tisky</h1>
+<form action="/sqw/tisky.sqw" method="get">
+ <input type="hidden" name="f" value="N">
+ <table>
+  <tr><td>Volební období:</td><td><select name="o"><option value="10">10. (2025–)</option><option value="9" selected>9. (2021–2025)</option></select></td></tr>
+  <tr><td>Číslo tisku:</td><td><input type="text" name="ct" value=""></td></tr>
+  <tr><td>Název tisku obsahuje:</td><td><input type="text" name="nazev" value=""></td></tr>
+  <tr><td><label for="ft">Fulltext</label></td><td><input type="checkbox" id="ft" name="ft" value="1"></td></tr>
+  <tr><td></td><td><input type="submit" name="odeslat" value="Vyhledat"></td></tr>
+ </table>
+</form>
+<table class="tisky">
+ <tr><th>Číslo</th><th>Krátký název</th><th>Typ tisku</th><th>Stav projednávání</th></tr>
+ <tr><td><a href="historie.sqw?o=9&t=362">362/0</a></td><td><a href="text/tiskt.sqw?O=9&CT=362&CT1=0">Vládní návrh občanského zákoníku</a></td><td>Návrh zákona</td><td>Schváleno, 89/2012 Sb.</td></tr>
+ <tr><td><a href="historie.sqw?o=9&t=363">363/0</a></td><td>Vládní návrh zákona o obchodních korporacích</td><td>Návrh zákona</td><td>3. čtení</td></tr>
+ <tr><td><a href="historie.sqw?O=9&T=12">12/0</a></td><td>Zpráva o činnosti Úřadu pro ochranu osobních údajů</td><td>Zpráva</td><td>Vzato na vědomí</td></tr>
+</table>
+<div class="paging">Strana: <b>1</b> <a href="tisky.sqw?o=9&str=2">2</a> <a href="tisky.sqw?o=9&str=3">3</a> <a href="tisky.sqw?o=9&str=2">další</a></div>
+</div>
+</body></html>

@@ -229,6 +229,36 @@
         "https://github.com/strale-io/strale/blob/main/handoff/_general/from-code/2026-04-18-cz-notion-todos-queued.md",
         "https://msp.gov.cz/en/web/msp/rozhodnuti-soudu-judikatura-"
       ]
+    },
+    {
+      "source": "Poslanecká sněmovna Parlamentu ČR — www.psp.cz: sněmovní tisky (bills with důvodová zpráva, rozdílová tabulka, RIA, platné znění s vyznačením změn, usnesení výborů, pozměňovací návrhy) and the legislative history of each tisk (historie.sqw). Public, keyless, HTML; no search API.",
+      "access": [
+        {
+          "kind": "html-listing-and-pages",
+          "base_url": "https://www.psp.cz/sqw/",
+          "auth": "none",
+          "detail": "Address patterns the site has published for years (o = volební období 1–10, 1 = 1993–1996 … 9 = 2021–2025, 10 = 2025–; t/CT = číslo tisku; CT1 = podčíslo of a part; idd = id of an attached original file):\n  listing + search form   tisky.sqw?o=9\n  one tisk, its history   historie.sqw?o=9&t=1234  (params are case-insensitive: O=/T= seen too)\n  text of a tisk part     text/tiskt.sqw?O=9&CT=1234&CT1=0  (part 0 of a government bill = návrh zákona followed by the důvodová zpráva, obecná + zvláštní část; further parts = usnesení výborů, pozměňovací návrhy, Senate returns)\n  attached original file  text/orig2.sqw?idd=123456  (the .doc/.docx/.pdf as submitted; &pdf=1 = the site's PDF rendition where offered)\nThe search form of tisky.sqw filters by název (title words), číslo tisku, typ tisku, předkladatel, stav; the Chamber indexes TITLES only — there is no full-text search of the tisky's texts. Listing pagination links carry a page parameter (believed `str`); the client reads the page links the listing prints instead of assuming it. Pages have been served both as windows-1250 (the legacy /cgi-bin/win/sqw/ tree) and UTF-8; the client decodes by the header charset, else the <meta charset>.\n\nSTATUS 2026-10: NOT VERIFIED LIVE — www.psp.cz was unreachable from the development sandbox (egress proxy refuses the host; WebFetch resolved no address either). The client (src/sources/psp.ts) therefore (a) keys its parsers on the hrefs above, never on ids or table layout, (b) reads the search form's action and field names from the form at run time (label text 'název'/'období'/'číslo', field names na/nazev, o, ct as a second clue), (c) filters every listing row locally as well, so an ignored server filter costs extra listing pages, not correctness. To verify from the deployment: dawmain_probe_sources {sources: ['psp']} (canary = historie.sqw?o=9&t=1, marker = tiskt.sqw/orig2.sqw/historie.sqw links) and {discover: true} (dumps every form of tisky.sqw?o=10 with field names, types and options, the form as parseListingForm inferred it, the first five parsed rows and the page links). Then replace tests/fixtures/psp/*.html (synthetic) with captures."
+        },
+        {
+          "kind": "opendata-dump",
+          "base_url": "https://www.psp.cz/sqw/hp.sqw?k=1300",
+          "auth": "none",
+          "detail": "'Poskytování dat' — whole-database ZIP exports refreshed daily (tisky.zip with pipe-delimited .unl tables in windows-1250: tisky, their states and history, document types; documentation pages hp.sqw?k=1301–1305). Deliberately NOT used: the server never downloads a whole dataset per call (fetchUpstream caps bodies at 12 MB), and the dump carries metadata only — the texts still come from tiskt.sqw / orig2.sqw. A future offline index could be built from it if title search through the HTML listing proves too slow."
+        }
+      ],
+      "confidence": "medium for the address patterns (long-lived, widely linked from e-Sbírka, courts and commentaries), low for the listing form's exact field names and the pagination parameter until the discover dump from the deployment confirms them",
+      "caveats": [
+        "Title search only; the texts of tisky are not full-text searchable on psp.cz.",
+        "An act is debated in the period before its publication year; psp_search takes `year` and searches both periods of an election year.",
+        "Attached originals are .doc/.docx/.pdf; the client reads PDF (pdf.js, 60 pages per call) and DOCX (mammoth), asks for the &pdf=1 rendition of a legacy .doc, and otherwise hands back the link.",
+        "Senát (senat.cz) and eKLEP/ODok (the government's pre-parliamentary process) are not covered."
+      ],
+      "references": [
+        "https://www.psp.cz/sqw/tisky.sqw?o=9",
+        "https://www.psp.cz/sqw/historie.sqw?o=6&t=362 (občanský zákoník, 89/2012 Sb.)",
+        "https://www.psp.cz/sqw/text/tiskt.sqw?O=6&CT=362&CT1=0",
+        "https://www.psp.cz/sqw/hp.sqw?k=1300"
+      ]
     }
   ]
 }

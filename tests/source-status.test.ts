@@ -22,7 +22,7 @@ describe("allDatabaseStatuses", () => {
         if (url.includes("usoud.cz")) throw new TypeError("fetch failed");
         // A body carrying every canary's marker.
         return new Response(
-          'Výsledky lblRegistrySign "rok" totalHits "nazev" results "totalResultsLocal" __RequestVerificationToken',
+          'Výsledky lblRegistrySign "rok" totalHits "nazev" results "totalResultsLocal" __RequestVerificationToken historie.sqw tiskt.sqw',
         );
       }),
     );
