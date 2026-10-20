@@ -69,6 +69,11 @@ vložit adresu výše.
 Po přidání konektoru se otevře přihlášení - stačí registrace e-mailem.
 Starší přístupové kódy fungují dál.
 
+Rešeršní návod (jak se ptát soudů, které filtry zužují hledání, jak číst a
+citovat) si asistent vyžádá od konektoru sám (`dawmain_guide`) na začátku
+každé rešerše, vždy v aktuální verzi - nic dalšího není třeba instalovat.
+Kdo chce, může si ho nahrát i jako skill (odkaz ke stažení je na webu).
+
 ---
 
 Technická dokumentace: [docs/development.md](docs/development.md)

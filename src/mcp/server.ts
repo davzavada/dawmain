@@ -28,6 +28,10 @@ export function buildInstructions(zotero: boolean): string {
   const z = (text: string): string => (zotero ? text : "");
   return `Czech & EU legal research server: live queries into official databases — every hit carries a public URL to cite — plus, for a user signed in personally with Pro, their own uploaded documents (Vlastní soubory: books, commentaries, articles, templates)${z(" and their connected Zotero library (read; saving new items only when connected with „Číst a ukládat“)")}.
 
+USE IT whenever the user asks what Czech or EU law, the courts or the doctrine say — "právní rešerše", "rešerše k", "co na to judikatura", "najdi judikaturu k § X", "jak to soudy vykládají", "je na to nějaký rozsudek", "platí ještě", "co říká zákon o", "najdi mi rozhodnutí", "co na to doktrína", "najdi důvodovou zprávu", "co chtěl zákonodárce" — or describes a legal problem expecting an answer grounded in statute, case law and literature. Never answer such a question from memory while these tools are available.
+
+MANUAL — at the start of every legal research call dawmain_guide ONCE, before the first search: it returns the research manual whole (the brief, query craft, each source's fields, reading and citation rules, the memo layout). Nothing needs to be installed; the manual is always the deployed version. A lookup that needs no research (one § by number, one decision by sp. zn.) can skip it.
+
 INTAKE — if the request is vague, ask 2–3 focused questions (the only time you stop to ask): the exact legal question; scope (which courts, CZ / EU) and the user's side (žalobce/žalovaný, zaměstnavatel/zaměstnanec…); the time frame as concrete dates (turn "loni", "nedávno" into dates yourself and say which you used); the output form (memo, summary, argumentation, citations only).
 
 TOOLS — <source>_search finds, <source>_get_* reads

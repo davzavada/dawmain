@@ -21,6 +21,12 @@ const privateArea = [
 const nextConfig: NextConfig = {
   // The MCP route is pure server code — nothing to prerender.
   poweredByHeader: false,
+  // dawmain_guide reads the research manual from the repository tree at
+  // call time (src/mcp/tools/guide.ts); the file is not imported anywhere,
+  // so the function bundle would not carry it without this.
+  outputFileTracingIncludes: {
+    "/api/mcp": ["./skills/dawmain-reserse/SKILL.md"],
+  },
   async headers() {
     return [
       { source: "/:path*", headers: everywhere },

@@ -4,6 +4,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { CALL_BUDGET_MS, registerAllTools, runWithCallClock } from "@/src/mcp/tools";
 import { registerPing } from "@/src/mcp/tools/ping";
 import { registerProbe } from "@/src/mcp/tools/probe";
+import { registerGuide } from "@/src/mcp/tools/guide";
 import { registerEsbirka } from "@/src/mcp/tools/esbirka";
 import { registerNs } from "@/src/mcp/tools/ns";
 import { registerNalus } from "@/src/mcp/tools/nalus";
@@ -45,6 +46,7 @@ function registerTheOldWay(server: McpServer, zotero: boolean): void {
   for (const register of [
     registerPing,
     registerProbe,
+    registerGuide,
     registerEsbirka,
     registerNs,
     registerNalus,
