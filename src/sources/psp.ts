@@ -15,21 +15,22 @@ import type { CheerioAPI } from "cheerio";
  * open data (hp.sqw?k=1300) are whole-database ZIP dumps, which this server
  * does not download per call.
  *
- * Addresses, as the site has published them for years (verbatim patterns
- * seen on live pages; o = volební období, t/CT = číslo tisku, CT1 = podčíslo
- * of the tisk's parts, idd = id of an attached original document):
- *   listing + search form   /sqw/tisky.sqw?o=9
- *   one tisk, its history   /sqw/historie.sqw?o=9&t=1234
- *   text of a tisk part     /sqw/text/tiskt.sqw?O=9&CT=1234&CT1=0
- *   attached original file  /sqw/text/orig2.sqw?idd=123456  (+&pdf=1 = PDF rendition)
- *
- * Written against those patterns without a live capture (psp.cz was not
- * reachable from the development sandbox), so the parsers lean on what
- * cannot drift — the anchors' hrefs — rather than on ids or table layout,
- * and the search form's field names are READ FROM THE FORM at run time
- * instead of being assumed. dawmain_probe_sources (canary `psp`, and
- * `discover` for the form dump) verifies them from the deployment; the
- * synthetic fixtures in tests/psp.test.ts are to be replaced by captures.
+ * Addresses (o = volební období, t/T/CT = číslo tisku, CT1 = podčíslo of the
+ * tisk's parts, idd = id of an attached original document):
+ *   search form            /sqw/sntisk.sqw?o=9  (tabs F=N návrhy zákonů, S smlouvy, R rozpočty, I interpelace, Z zprávy)
+ *   search results         /sqw/tisky.sqw?tqb1=2&utq=2&o=9&na=…&tqb25=…&tqa27=on…&ra=20   (captured, HAR 2026-10)
+ *   results by Sbírka no.  /sqw/tisky.sqw?tqb1=1&utq=2&o=9&tqb18=221&tqb19=2006&ra=20     (captured: answered tisk 1110 of the 4th period although o=9 — the Sbírka lookup spans periods)
+ *   one tisk, its history  /sqw/historie.sqw?o=4&t=1110
+ *   text of a tisk part    /sqw/text/tiskt.sqw?O=4&CT=1110&CT1=0  (captured; for older tisky the text is not inline — only "Originál dokumentu" / "Verze PDF" and "Přílohy dokumentu")
+ *   attached original file /sqw/text/orig2.sqw?idd=14683  (+&pdf=1 = "Verze PDF", captured)
+ * Pages come as text/html; charset=Windows-1250 (header), content in
+ * <div id="main-content">. The search form (tisky.sqw, GET) and its fields,
+ * a results page and a tiskt.sqw page were captured live (HAR 2026-10,
+ * fixtures in tests/fixtures/psp/tisky-search-*.html, tiskt-4-1110.html);
+ * the historie.sqw page has NOT been captured yet, so its parser keys on
+ * the anchors' hrefs only, and the result-list pagination markup is
+ * unseen (ra=100 rows per request keeps most searches on one page).
+ * dawmain_probe_sources: canary `psp`, `discover` dumps the live form.
  * See docs/research/cz-sources.json.
  */
 
@@ -80,8 +81,92 @@ export function documentUrl(id: number, pdf = false): string {
   return `${ORIGIN}/sqw/text/orig2.sqw?idd=${id}${pdf ? "&pdf=1" : ""}`;
 }
 
+/** The search form page (the entry psp.cz links as "sněmovní tisky"). */
 export function listingUrl(period: number): string {
-  return `${ORIGIN}/sqw/tisky.sqw?o=${period}`;
+  return `${ORIGIN}/sqw/sntisk.sqw?o=${period}`;
+}
+
+/**
+ * Druh tisku — the checkboxes of the "Vše" tab of the search form, verbatim
+ * (captured 2026-10). All on = the form's default.
+ */
+export const PSP_TYPES = {
+  bills: ["tqa27", "návrhy zákonů"],
+  treaties: ["tqa28", "mezinárodní smlouvy"],
+  budgets: ["tqa29", "rozpočty"],
+  eu_documents: ["tqa64", "dokumenty EU"],
+  interpellations: ["tqa30", "písemné interpelace"],
+  reports: ["tqa31", "zprávy"],
+  government_opinions: ["tqa32", "stanoviska vlády"],
+  counter_reports: ["tqa63", "oponentní zprávy"],
+  committee_resolutions: ["tqa33", "usnesení výborů"],
+  amendments: ["tqa34", "pozměňovací návrhy"],
+  other_opinions: ["tqa62", "ostatní stanoviska"],
+  other: ["tqa35", "další"],
+} as const;
+export type PspType = keyof typeof PSP_TYPES;
+
+/** Rows one results page shows (the form's `ra`, "Zobrazit N tisků současně"; the site's default is 20). */
+export const RESULTS_PER_PAGE = 100;
+
+export interface PspSearchInput {
+  /** Název tisku (the form's `na`) — the site's own title filter. */
+  query?: string;
+  /** Číslo tisku (`tqb25`); `part` = the number after the slash (`tqb26`). */
+  number?: number;
+  part?: number;
+  /** "221/2006" — číslo a rok Sbírky (`tqb18`/`tqb19`, the návrhy-zákonů tab): the tisk an act came from. */
+  act?: string;
+  /** Volební období the form is opened in (`o`). Hits carry their own period; the act lookup answers across periods. */
+  period: number;
+  types?: PspType[];
+  /** Pouze neukončené (`tqa17`). */
+  onlyPending?: boolean;
+}
+
+/** "221/2006", "221/2006 Sb.", "č. 221/2006 Sb." → number and year. Pure — unit-tested. */
+export function parseActNumber(act: string): { number: string; year: string } {
+  const m = /(\d{1,4})\s*\/\s*(\d{4})/.exec(act);
+  if (!m) {
+    throw new SourceError(SOURCE, "INPUT_INVALID", `"${act}" is not a Sbírka citation.`, 'Pass the act as "221/2006" (číslo/rok Sbírky zákonů).');
+  }
+  return { number: m[1], year: m[2] };
+}
+
+/**
+ * The results request, as the browser sends the form (HAR 2026-10) — the
+ * "Vše" tab for title/number searches, the "Návrhy zákonů" tab for the
+ * Sbírka-number lookup (only that tab has the Číslo sbírky fields; its
+ * other criteria are inactive without their tqa* checkbox and are sent with
+ * the captured defaults). Pure — unit-tested.
+ */
+export function buildSearchUrl(input: PspSearchInput): string {
+  const params = new URLSearchParams();
+  if (input.act) {
+    const { number, year } = parseActNumber(input.act);
+    params.set("tqb1", "1");
+    params.set("utq", "2");
+    params.set("o", String(input.period));
+    for (const [k, v] of [["tqb2", "0"], ["tqb3", "15"], ["tqb21", "1"], ["tqb7", "1761"], ["tqb23", "1"], ["tqb24", "1"], ["tqb8", "1"], ["tqb9", "1"], ["tqb10", "1"], ["tqb11", "1"], ["tqb12", "1"], ["tqb13", "1"], ["tqb14", "1"], ["tqb20", "1"], ["tqb22", "1"], ["tqb16", "7"]]) {
+      params.set(k, v);
+    }
+    params.set("tqb18", number);
+    params.set("tqb19", year);
+    if (input.onlyPending) params.set("tqa17", "on");
+    params.set("ra", String(RESULTS_PER_PAGE));
+    return `${ORIGIN}/sqw/tisky.sqw?${params}`;
+  }
+  params.set("tqb1", "2");
+  params.set("utq", "2");
+  params.set("o", String(input.period));
+  params.set("na", input.query?.trim() ?? "");
+  params.set("tqb25", input.number !== undefined ? String(input.number) : "");
+  params.set("tqb26", input.part !== undefined ? String(input.part) : "");
+  const types = input.types?.length ? input.types : (Object.keys(PSP_TYPES) as PspType[]);
+  for (const type of Object.keys(PSP_TYPES) as PspType[]) if (types.includes(type)) params.set(PSP_TYPES[type][0], "on");
+  if (input.onlyPending) params.set("tqa17", "on");
+  params.set("ra", String(RESULTS_PER_PAGE));
+  return `${ORIGIN}/sqw/tisky.sqw?${params}`;
 }
 
 // ---------- parse (pure) ----------
@@ -110,9 +195,37 @@ export interface PspHit {
   number: number;
   /** Název tisku as the listing shows it. */
   title: string;
-  /** The row's other cells (druh tisku, stav projednávání, předkladatel …), as printed. */
+  /** The row's other cells (druh tisku, stav projednávání or the Sbírka number), as printed. */
   cells: string[];
   url: string;
+}
+
+export interface PspSearchPage {
+  /** "Celkem nalezen N tisk(ů)": the site's own count; null when the page names none. */
+  total: number | null;
+  hits: PspHit[];
+}
+
+/**
+ * A tisky.sqw results page: the count the page states, and the rows. A page
+ * without either the count line, the "nebyl nalezen žádný tisk" line or
+ * the search form is not a results page as known (drift). Pure — unit-tested.
+ */
+export function parseSearchResults(html: string, pageUrl: string, fallbackPeriod: number): PspSearchPage {
+  const hits = parseListing(html, pageUrl, fallbackPeriod);
+  const text = html.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ");
+  const count = /Celkem\s+nalezen[oay]?\s+(\d+)\s+tisk/i.exec(text);
+  if (count) return { total: Number(count[1]), hits };
+  if (/nebyl\s+nalezen\s+žádný\s+tisk/i.test(text)) return { total: 0, hits: [] };
+  if (!hits.length && !/form-press-search|name="na"/.test(html)) {
+    throw new SourceError(
+      SOURCE,
+      "PARSE_DRIFT",
+      "The psp.cz results page carries neither a result count nor the search form.",
+      "psp.cz may have changed tisky.sqw — run dawmain_probe_sources {discover: true} and compare the form with src/sources/psp.ts.",
+    );
+  }
+  return { total: hits.length ? null : 0, hits };
 }
 
 /**
@@ -154,7 +267,10 @@ export function parseListing(html: string, pageUrl: string, fallbackPeriod: numb
 export function parsePageLinks(html: string, pageUrl: string): Map<number, string> {
   const $ = loadHtml(html);
   const out = new Map<number, string>();
-  $('a[href*="tisky.sqw"]').each((_, el) => {
+  const script = absolute(pageUrl, pageUrl)?.pathname ?? "";
+  $("a[href]").each((_, el) => {
+    const target = absolute($(el).attr("href") ?? "", pageUrl);
+    if (!target || target.pathname !== script) return;
     const text = clean($(el).text());
     if (!/^\d{1,4}$/.test(text)) return;
     const href = $(el).attr("href");
@@ -208,14 +324,14 @@ export function parseListingForm(html: string, pageUrl: string): ListingForm | n
       } else {
         fields[name] = $el.attr("value") ?? "";
       }
-      // A hidden field is never the one the user types a title into.
-      if (type === "hidden") return;
-      // The label first, the field's own name second (na/nazev, o/obdobi, ct/cislo are what the site has used).
-      const label = foldText(labelOf($, el));
+      // A hidden field has no label of its own (its container's text is not one); its name still counts.
+      const label = type === "hidden" ? "" : foldText(labelOf($, el));
       const fname = foldText(name);
       if (!candidate.nameField && (/nazev|nazv/.test(label) || /^na(zev)?$/.test(fname))) candidate.nameField = name;
       else if (!candidate.periodField && (/obdobi/.test(label) || /^o$|obdobi/.test(fname))) candidate.periodField = name;
       else if (!candidate.numberField && (/cislo/.test(label) || /^ct$|cislo/.test(fname))) candidate.numberField = name;
+      // The captured form (2026-10): "Číslo tisku:" labels tqb25, with tqb26 for the number after the slash.
+      else if (!candidate.numberField && fname === "tqb25") candidate.numberField = name;
     });
     if (candidate.nameField && !best) best = candidate;
   });
@@ -306,11 +422,8 @@ export interface PspTisk {
 
 const DOCUMENT_HREF = /tiskt\.sqw|orig2\.sqw|text2\.sqw|\.pdf(?:$|[?#])|\.docx?(?:$|[?#])|\.rtf(?:$|[?#])/i;
 
-/** The historie.sqw page of one tisk. Pure — unit-tested. */
-export function parseTisk(html: string, pageUrl: string, period: number, number: number): PspTisk {
-  const $ = loadHtml(html);
-  const h1 = clean($("h1").first().text());
-  const title = h1 || clean($("title").text());
+/** Every document link of a page, deduplicated by URL, labelled and classified. */
+function extractDocuments($: CheerioAPI, pageUrl: string, period: number, number: number): PspDocument[] {
   const documents: PspDocument[] = [];
   const seen = new Set<string>();
   $("a[href]").each((_, el) => {
@@ -320,9 +433,12 @@ export function parseTisk(html: string, pageUrl: string, period: number, number:
     if (!url || seen.has(url.href)) return;
     seen.add(url.href);
     const own = clean($(el).text());
+    // "(DOC, 171.5 KB)" next to the link on tiskt.sqw.
+    const info = clean($(el).nextAll(".media-info").first().text());
     const line = clean($(el).closest("li, tr, p, div").first().text()).slice(0, 200);
     const generic = !own || own.length < 12 || /^(pdf|doc|docx|html|text|dokument|soubor|zde|odkaz)$/i.test(own);
-    const label = generic && line ? line : own || line || url.pathname;
+    const base = generic && line ? line : own || line || url.pathname;
+    const label = info && !base.includes(info) ? `${base} ${info}` : base;
     const doc: PspDocument = {
       label,
       kind: classifyDocument(label),
@@ -341,6 +457,15 @@ export function parseTisk(html: string, pageUrl: string, period: number, number:
     }
     documents.push(doc);
   });
+  return documents;
+}
+
+/** The historie.sqw page of one tisk. Pure — unit-tested. */
+export function parseTisk(html: string, pageUrl: string, period: number, number: number): PspTisk {
+  const $ = loadHtml(html);
+  const h1 = clean($("h1").not(".department-title").first().text());
+  const title = h1 || clean($("title").text());
+  const documents = extractDocuments($, pageUrl, period, number);
   const text = htmlToText(mainContent($));
   if (!documents.length && !/tisk/i.test(text)) {
     throw new SourceError(
@@ -353,17 +478,38 @@ export function parseTisk(html: string, pageUrl: string, period: number, number:
   return { period, number, title, url: pageUrl, text, documents };
 }
 
-/** The text of a tiskt.sqw page (one part of a tisk). Pure — unit-tested. */
-export function parseTiskText(html: string): string {
+export interface PspTiskText {
+  /** The h1: "Sněmovní tisk 1110/0, část č. 1/3 Vl.n.z. o …". */
+  title: string;
+  /** The document's own text — empty when the page only links the original files (older tisky). */
+  text: string;
+  /** "Originál dokumentu", "Verze PDF", "Přílohy dokumentu" — the files, by document_id. */
+  documents: PspDocument[];
+}
+
+/**
+ * A tiskt.sqw page (one part of a tisk): its title, the text set inline
+ * (minus the file boxes) and the original files. Captured 2026-10 (tisk
+ * 1110/4): the content sits in #main-content, the files in
+ * .document-media and .attachments, and that older tisk has no inline text
+ * at all. Pure — unit-tested.
+ */
+export function parseTiskText(html: string, pageUrl: string, period: number, number: number): PspTiskText {
   const $ = loadHtml(html);
-  return htmlToText(mainContent($));
+  const title = clean($("h1").not(".department-title").first().text());
+  const documents = extractDocuments($, pageUrl, period, number).filter((doc) => doc.documentId !== undefined || doc.format !== "HTML");
+  const content = mainContent($);
+  const $content = loadHtml(content);
+  $content(".document-media, .attachments, .page-title, h1").remove();
+  const text = htmlToText($content.root().html() ?? "");
+  return { title, text, documents };
 }
 
 // ---------- fetch (I/O) ----------
 
 const pageCache = new TtlCache<string>(SEARCH_TTL_MS, 60);
 const searchCache = new TtlCache<PspSearchResult>(SEARCH_TTL_MS);
-const textCache = new TtlCache<string>(DOCUMENT_TTL_MS, 24);
+const textCache = new TtlCache<PspTiskText>(DOCUMENT_TTL_MS, 24);
 const tiskCache = new TtlCache<PspTisk>(DOCUMENT_TTL_MS, 24);
 const fileCache = new TtlCache<ExtractedDocument>(DOCUMENT_TTL_MS, 6);
 
@@ -387,132 +533,70 @@ async function fetchHtml(url: string, init: { method?: "GET" | "POST"; body?: st
 
 const cachedPage = (url: string) => pageCache.through(url, async () => (await fetchHtml(url)).html);
 
-export interface PspSearchInput {
-  query?: string;
-  /** Exact tisk number — the listing is skipped, the tisk's own page answers. */
-  number?: number;
-  period: number;
-}
-
 export interface PspSearchResult {
-  period: number;
+  /** The site's own count of matches, when it states one. */
+  total: number | null;
   hits: PspHit[];
-  /** Listing pages read. */
+  /** Results pages read. */
   pagesScanned: number;
-  /** The listing had further pages the scan did not reach (page cap or time). */
-  listingTruncated: boolean;
-  /** The filter psp.cz was asked to apply, if its form was found. */
-  serverFilter: "form" | "query-param";
+  /** Matches the scan did not reach (the site's count exceeds the rows read and no further page could be followed). */
+  truncated: boolean;
+  /** The request sent (for diagnosis). */
+  url: string;
 }
 
-/** Listing pages one search may read; the rest is reported as not scanned. */
-export const MAX_LISTING_PAGES = 12;
-const LISTING_BATCH = 4;
+/** Results pages one search may read. */
+export const MAX_LISTING_PAGES = 6;
+const LISTING_BATCH = 3;
 const SEARCH_BUDGET_MS = 30_000;
 
-/** The query's words as stems: the last two letters optional for long words,
- * the last one for medium ones — "občanský zákoník" meets "občanského
- * zákoníku". A trailing * is an explicit prefix. Pure — unit-tested. */
-export function queryStems(query: string): string[] {
-  return foldText(query)
-    .split(/\s+/)
-    .map((word) => word.replace(/[",.;:()]/g, ""))
-    .filter(Boolean)
-    .map((word) => {
-      if (word.endsWith("*")) return word.slice(0, -1);
-      if (word.length >= 6) return word.slice(0, -2);
-      if (word.length >= 4) return word.slice(0, -1);
-      return word;
-    })
-    .filter(Boolean);
-}
-
-/** Whether a hit carries every stem (in its title or other cells). Pure. */
-export function matchesQuery(hit: PspHit, stems: string[]): boolean {
-  const haystack = foldText([hit.title, ...hit.cells].join(" "));
-  return stems.every((stem) => haystack.includes(stem));
-}
-
-/** The listing's first page for a query: the site's own form when the page
- * has one (its action and fields, the název and období fields filled), else
- * the plain `?o=&na=` address. */
-async function firstListingPage(period: number, query: string): Promise<{ html: string; url: string; serverFilter: "form" | "query-param" }> {
-  const home = listingUrl(period);
-  const homeHtml = await cachedPage(home);
-  const form = parseListingForm(homeHtml, home);
-  if (form) {
-    const fields = { ...form.fields, [form.nameField!]: query };
-    if (form.periodField) fields[form.periodField] = String(period);
-    const params = new URLSearchParams(fields);
-    if (form.method === "POST") {
-      const key = `POST ${form.action} ${params}`;
-      const html = await pageCache.through(key, async () => (await fetchHtml(form.action, { method: "POST", body: params.toString() })).html);
-      return { html, url: form.action, serverFilter: "form" };
-    }
-    const url = `${form.action}${form.action.includes("?") ? "&" : "?"}${params}`;
-    return { html: await cachedPage(url), url, serverFilter: "form" };
-  }
-  const url = `${home}&na=${encodeURIComponent(query)}`;
-  return { html: await cachedPage(url), url, serverFilter: "query-param" };
-}
-
 /**
- * Tisky whose title carries every word of the query, in one period. The
- * listing is asked to filter (its form), and every row is checked here as
- * well — so the answer is right whether or not the site applied the filter,
- * at the price of reading further listing pages when it did not. Pages are
- * read in small parallel batches from the page links the listing prints
- * (never from an assumed page parameter), up to MAX_LISTING_PAGES and the
- * call's budget; `needed` rows end the scan early.
+ * Sněmovní tisky matching the form's criteria, as the site answers them —
+ * its own title filter (`na`), tisk number, druh tisku, or the Sbírka number
+ * of the resulting act. RESULTS_PER_PAGE rows per request; when the site
+ * counts more, the page links the results print are followed (never an
+ * assumed page parameter) up to MAX_LISTING_PAGES and the call's budget,
+ * and whatever is left is reported as truncated.
  */
 export async function searchPsp(input: PspSearchInput, needed: number): Promise<PspSearchResult> {
-  const key = memoKey("psp-search", { ...input, needed });
+  if (!input.query?.trim() && input.number === undefined && !input.act?.trim()) {
+    throw new SourceError(SOURCE, "INPUT_INVALID", "Neither query, number nor act was given.", "Pass title words (query), a tisk number (number) or a Sbírka citation (act).");
+  }
+  const url = buildSearchUrl(input);
+  const key = memoKey("psp-search", { url, needed });
   return searchCache.through(key, async () => {
-    const { period } = input;
-    if (input.number !== undefined) {
-      const tisk = await getPspTisk(period, input.number);
-      return { period, hits: [{ period, number: tisk.number, title: tisk.title, cells: [], url: tisk.url }], pagesScanned: 0, listingTruncated: false, serverFilter: "form" };
-    }
-    const query = input.query?.trim() ?? "";
-    const stems = queryStems(query);
-    if (!stems.length) {
-      throw new SourceError(SOURCE, "INPUT_INVALID", "The query has no searchable word.", "Pass title words (query) or a tisk number (number).");
-    }
     const deadline = callDeadline(SEARCH_BUDGET_MS);
-    const first = await firstListingPage(period, query);
+    const firstHtml = await cachedPage(url);
+    const first = parseSearchResults(firstHtml, url, input.period);
     const hits: PspHit[] = [];
     const seen = new Set<string>();
-    const take = (page: string, url: string) => {
-      for (const hit of parseListing(page, url, period)) {
+    const take = (page: PspSearchPage) => {
+      for (const hit of page.hits) {
         const k = `${hit.period}/${hit.number}`;
-        if (seen.has(k) || !matchesQuery(hit, stems)) continue;
+        if (seen.has(k)) continue;
         seen.add(k);
         hits.push(hit);
       }
     };
-    take(first.html, first.url);
+    take(first);
     let pagesScanned = 1;
-    const links = parsePageLinks(first.html, first.url);
+    const links = parsePageLinks(firstHtml, url);
     const done = new Set<number>([1]);
-    let listingTruncated = false;
-    while (hits.length < needed) {
+    const total = first.total;
+    while (hits.length < needed && (total === null || hits.length < total)) {
       const pending = [...links.entries()].filter(([n]) => !done.has(n)).sort((a, b) => a[0] - b[0]);
-      if (!pending.length) break;
-      if (pagesScanned >= MAX_LISTING_PAGES || Date.now() > deadline) {
-        listingTruncated = true;
-        break;
-      }
+      if (!pending.length || pagesScanned >= MAX_LISTING_PAGES || Date.now() > deadline) break;
       const batch = pending.slice(0, Math.min(LISTING_BATCH, MAX_LISTING_PAGES - pagesScanned));
-      const pages = await Promise.all(batch.map(async ([n, url]) => ({ n, url, html: await cachedPage(url) })));
+      const pages = await Promise.all(batch.map(async ([n, href]) => ({ n, href, html: await cachedPage(href) })));
       for (const page of pages) {
         done.add(page.n);
         pagesScanned++;
-        take(page.html, page.url);
-        for (const [n, url] of parsePageLinks(page.html, page.url)) if (!links.has(n)) links.set(n, url);
+        take(parseSearchResults(page.html, page.href, input.period));
+        for (const [n, href] of parsePageLinks(page.html, page.href)) if (!links.has(n)) links.set(n, href);
       }
     }
-    if (!listingTruncated && hits.length >= needed && [...links.keys()].some((n) => !done.has(n))) listingTruncated = true;
-    return { period, hits, pagesScanned, listingTruncated, serverFilter: first.serverFilter };
+    const truncated = total !== null ? hits.length < total : [...links.keys()].some((n) => !done.has(n));
+    return { total, hits, pagesScanned, truncated, url };
   });
 }
 
@@ -523,24 +607,24 @@ export async function getPspTisk(period: number, number: number): Promise<PspTis
     const page = await fetchHtml(url);
     const tisk = parseTisk(page.html, url, period, number);
     if (!tisk.documents.length && tisk.text.length < 400) {
-      throw new SourceError(SOURCE, "NOT_FOUND", `psp.cz shows no sněmovní tisk ${number} in the ${periodLabel(period)}.`, "Check the number and the period (psp_search with year finds the period); the tisk's number is printed as 1234/0 — pass 1234.");
+      throw new SourceError(SOURCE, "NOT_FOUND", `psp.cz shows no sněmovní tisk ${number} in the ${periodLabel(period)}.`, "Check the number and the period (psp_search with year or act finds them); the tisk's number is printed as 1234/0 — pass 1234.");
     }
     return tisk;
   });
 }
 
-/** The text of one part of a tisk (tiskt.sqw). */
-export async function getPspTiskText(period: number, number: number, part: number): Promise<{ url: string; text: string }> {
+/** The text of one part of a tisk (tiskt.sqw), with the files it links. */
+export async function getPspTiskText(period: number, number: number, part: number): Promise<PspTiskText & { url: string }> {
   const url = tiskTextUrl(period, number, part);
-  const text = await textCache.through(url, async () => {
+  const parsed = await textCache.through(url, async () => {
     const page = await fetchHtml(url);
-    const text = parseTiskText(page.html);
-    if (text.length < 200 && /nenalezen|neexistuje|nebyl nalezen|chyba/i.test(text)) {
-      throw new SourceError(SOURCE, "NOT_FOUND", `psp.cz has no text for tisk ${number}/${part} in the ${periodLabel(period)}.`, "psp_get_tisk lists the parts the tisk has (part numbers) and its attached documents (document_id).");
+    const result = parseTiskText(page.html, url, period, number);
+    if (!result.text && !result.documents.length) {
+      throw new SourceError(SOURCE, "NOT_FOUND", `psp.cz has no text and no files for tisk ${number}/${part} in the ${periodLabel(period)}.`, "psp_get_tisk lists the parts the tisk has (part numbers) and its attached documents (document_id).");
     }
-    return text;
+    return result;
   });
-  return { url, text };
+  return { url, ...parsed };
 }
 
 // ---------- attached documents (orig2.sqw): PDF, DOCX, HTML ----------

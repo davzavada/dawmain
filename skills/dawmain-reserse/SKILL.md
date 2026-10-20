@@ -245,19 +245,23 @@ datum", not "in force on" — for the law as of a date use `esbirka_get_text` wi
 
 | Chci | Volání |
 |---|---|
-| tisk k zákonu | `psp_search` + `query: "občanský zákoník"` and the `period` the bill was debated in (`year: 2011` picks it; an election year gives both periods) |
+| tisk k vyhlášenému zákonu | `psp_search` + `act: "89/2012"` — the Sbírka number finds the bill in whatever period (the one lookup that needs no period) |
+| tisk podle názvu | `psp_search` + `query: "občanský zákoník"` and the `period` the bill was debated in (`year: 2011` picks it; an election year gives both periods); `types: ["bills"]` keeps only návrhy zákonů |
 | tisk podle čísla | `psp_search` + `number: 362`, `period: 6` — the number is the 362 of "362/0" |
 | průběh projednávání a dokumenty | `psp_get_tisk {period: 6, number: 362}` — čtení with dates, výbory, Senát, prezident, číslo ve Sbírce, and every document with the call that reads it |
 | důvodová zpráva | `psp_get_text {period: 6, number: 362, part: 0}` — a bill's own text carries the návrh zákona and then the důvodová zpráva (obecná, zvláštní část); `find: "K § 2201"` jumps to the provision |
 | rozdílová tabulka, RIA, platné znění s vyznačením změn, stanovisko vlády | `psp_get_text {document_id: 71124}` — the idd from `psp_get_tisk`'s list; a PDF comes 60 pages per call (`pdf_pages: "61-120"` for the rest) |
 | usnesení výboru, pozměňovací návrhy | the tisk's further parts: `psp_get_text {period: 6, number: 362, part: 2}` |
 
-**The search matches titles, not texts.** The Chamber indexes the názvy tisků: use
-the words of the act's official title or its short name, two or three of them; words
-match as stems, so inflection does not matter. A query that finds nothing usually has
+**The search matches titles, not texts.** `query` is the Chamber's own "Název tisku"
+filter: a short phrase as it stands in the title ("občanský zákoník", "zákoník práce",
+"trestní řád"), not a list of words. For an act already in the Sbírka, `act` is the
+surer path — it answers across periods. A title query that finds nothing usually has
 the wrong period — an act published in year Y was debated in the period sitting in
 Y−1 (zákon č. 89/2012 Sb. = tisk 362 of the 6th period, 2011); pass `year` with the
 year of the bill, or the `period` from the table in the parameter description.
+Older tisky have no text set in the page: `psp_get_text` then names the
+`document_id` of the original file (its PDF rendition first) — read that one.
 
 **Cite the material, not the search.** A důvodová zpráva is quoted like a decision —
 blockquote, then "důvodová zpráva k vládnímu návrhu občanského zákoníku, sněmovní
