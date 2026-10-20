@@ -248,20 +248,27 @@ datum", not "in force on" — for the law as of a date use `esbirka_get_text` wi
 | tisk k vyhlášenému zákonu | `psp_search` + `act: "89/2012"` — the Sbírka number finds the bill in whatever period (the one lookup that needs no period) |
 | tisk podle názvu | `psp_search` + `query: "občanský zákoník"` and the `period` the bill was debated in (`year: 2011` picks it; an election year gives both periods); `types: ["bills"]` keeps only návrhy zákonů |
 | tisk podle čísla | `psp_search` + `number: 362`, `period: 6` — the number is the 362 of "362/0" |
-| průběh projednávání a dokumenty | `psp_get_tisk {period: 6, number: 362}` — čtení with dates, výbory, Senát, prezident, číslo ve Sbírce, and every document with the call that reads it |
-| důvodová zpráva | `psp_get_text {period: 6, number: 362, part: 0}` — a bill's own text carries the návrh zákona and then the důvodová zpráva (obecná, zvláštní část); `find: "K § 2201"` jumps to the provision |
-| rozdílová tabulka, RIA, platné znění s vyznačením změn, stanovisko vlády | `psp_get_text {document_id: 71124}` — the idd from `psp_get_tisk`'s list; a PDF comes 60 pages per call (`pdf_pages: "61-120"` for the rest) |
-| usnesení výboru, pozměňovací návrhy | the tisk's further parts: `psp_get_text {period: 6, number: 362, part: 2}` |
+| průběh projednávání a dokumenty | `psp_get_tisk {period: 6, number: 362}` — the stage line (✓ done, ▶ current), the sections with dates (předkladatel, čtení, výbory, vláda, Senát, prezident, Sbírka), the acts amended, and every document with the call that reads it |
+| důvodová zpráva | `psp_get_text {period: 6, number: 362, part: 0}` — reads the part's main file: the návrh zákona followed by its důvodová zpráva (obecná, zvláštní část) in one document; `find: "K § 2201"` jumps to the provision; a PDF comes 60 pages per call (`pdf_pages: "61-120"` for the rest), a DOCX whole |
+| rozdílová tabulka, RIA, platné znění s vyznačením změn, celý tisk | the part's other files, listed in that answer: `psp_get_text {document_id: 266806}` |
+| stanovisko vlády, usnesení výborů, pozměňovací návrhy | the tisk's further parts (`part: 1`, …) as `psp_get_tisk` lists them |
 
 **The search matches titles, not texts.** `query` is the Chamber's own "Název tisku"
-filter: a short phrase as it stands in the title ("občanský zákoník", "zákoník práce",
-"trestní řád"), not a list of words. For an act already in the Sbírka, `act` is the
-surer path — it answers across periods. A title query that finds nothing usually has
-the wrong period — an act published in year Y was debated in the period sitting in
-Y−1 (zákon č. 89/2012 Sb. = tisk 362 of the 6th period, 2011); pass `year` with the
-year of the bill, or the `period` from the table in the parameter description.
-Older tisky have no text set in the page: `psp_get_text` then names the
-`document_id` of the original file (its PDF rendition first) — read that one.
+filter — a diacritics-insensitive substring of the title ("obcansky zakonik" finds
+"Novela z. - občanský zákoník"), so a short phrase as it stands in the title, not a
+list of words; a bare "zákon" matches almost everything. For an act already in the
+Sbírka, `act` is the surer path — it answers across periods. A title query that
+finds nothing usually has the wrong period — an act published in year Y was debated
+in the period sitting in Y−1 (zákon č. 89/2012 Sb. = tisk 362 of the 6th period,
+2011); pass `year` with the year of the bill, or the `period` from the table in the
+parameter description. Hits come per part: "11/0" is the bill, "11/1" the
+stanovisko vlády to it.
+
+**The text is a file.** psp.cz does not print a tisk's text on the page; `psp_get_text`
+on a part reads its main file for you (the bill with its důvodová zpráva) and names
+the part's other files — rozdílová tabulka, RIA, platné znění s vyznačením změn,
+"Celý sněmovní tisk" — by `document_id`. Follow its continuation lines (`page`,
+`pdf_pages`) without asking.
 
 **Cite the material, not the search.** A důvodová zpráva is quoted like a decision —
 blockquote, then "důvodová zpráva k vládnímu návrhu občanského zákoníku, sněmovní

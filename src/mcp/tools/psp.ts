@@ -11,6 +11,7 @@ import {
   getPspDocument,
   getPspTisk,
   getPspTiskText,
+  mainDocument,
   periodLabel,
   periodsForYear,
   searchPsp,
@@ -82,7 +83,7 @@ export function pspSearchText(hits: PspHit[], result: Pick<PspSearchResult, "tot
   }
   const lines = shown.map((hit, i) => {
     const meta = hit.cells.filter((cell) => cell.length <= 80).slice(0, 4);
-    return `${offset + i + 1}. Tisk ${hit.number} (${hit.period}. období) — ${snippet(hit.title, 200)}${meta.length ? ` · ${meta.join(" · ")}` : ""}\n   ${hit.url}`;
+    return `${offset + i + 1}. Tisk ${hit.number}/${hit.part} (${hit.period}. období) — ${snippet(hit.title, 200)}${meta.length ? ` · ${meta.join(" · ")}` : ""}\n   ${hit.url}`;
   });
   const count = result.total !== null && result.total > hits.length ? `${result.total} (${hits.length} read)` : String(hits.length);
   const truncatedNote = result.truncated
@@ -100,14 +101,17 @@ export function pspSearchText(hits: PspHit[], result: Pick<PspSearchResult, "tot
 export function pspTiskText(tisk: PspTisk, body: string): string {
   const docs = documentLines(tisk.documents);
   return [
-    `Sněmovní tisk ${tisk.number}, ${periodLabel(tisk.period)} — ${tisk.title}`,
+    `${tisk.title} (${periodLabel(tisk.period)})`,
     tisk.url,
+    ...(tisk.asOf ? [tisk.asOf] : []),
+    ...(tisk.stages ? [`Fáze: ${tisk.stages}`] : []),
     "",
     body,
     "",
     docs.length
-      ? `Documents (${docs.length}) — the důvodová zpráva of a government bill is usually inside the tisk's own text (part 0), the rozdílová tabulka, RIA and platné znění s vyznačením změn are attached files:\n${docs.join("\n")}`
+      ? `Documents (${docs.length}) — part 0 is the bill with its důvodová zpráva (psp_get_text reads its file), further parts are stanoviska and usnesení; rozdílová tabulka, RIA and platné znění s vyznačením změn are files of the part (listed in its psp_get_text answer):\n${docs.join("\n")}`
       : "No document links on this page.",
+    ...(tisk.amendedActsUrl ? [`Navržené změny předpisů (the acts this tisk amends): ${tisk.amendedActsUrl}`] : []),
   ].join("\n");
 }
 
@@ -137,7 +141,7 @@ export function registerPsp(server: McpServer): void {
         count: z.number(),
         truncated: z.boolean(),
         other_periods: z.number(),
-        items: z.array(z.object({ period: z.number(), number: z.number(), title: z.string(), cells: z.array(z.string()), url: z.string() })),
+        items: z.array(z.object({ period: z.number(), number: z.number(), part: z.number(), title: z.string(), cells: z.array(z.string()), url: z.string() })),
       }),
       annotations: READ_ONLY,
     },
@@ -203,7 +207,7 @@ export function registerPsp(server: McpServer): void {
     {
       title: "Poslanecká sněmovna: a tisk's legislative history and documents",
       description:
-        "One sněmovní tisk from psp.cz: its title, the legislative process as the Chamber records it (předložení, 1.–3. čtení with dates, výbory and their usnesení, Senát, prezident, vyhlášení ve Sbírce zákonů) and every document linked — the tisk's own parts (text of the bill with its důvodová zpráva; usnesení výborů and pozměňovací návrhy as further parts) and the original files (rozdílová tabulka, RIA, platné znění s vyznačením navrhovaných změn, stanovisko vlády …), each with the psp_get_text call that reads it. Number and period come from psp_search (or from citations like 'sněmovní tisk 362/0, 6. volební období').",
+        "One sněmovní tisk from psp.cz: its title, the legislative process as the Chamber records it (předložení, 1.–3. čtení with dates, výbory and their usnesení, Senát, prezident, vyhlášení ve Sbírce zákonů) the legislative-process schema (which stage is current), the acts it amends, and every document linked — the tisk's parts (0 = the bill with its důvodová zpráva; stanovisko vlády, usnesení výborů and pozměňovací návrhy as further parts), committee resolutions and the Parlamentní institut opinion — each with the psp_get_text call that reads it. The files of a part (rozdílová tabulka, RIA, platné znění s vyznačením změn) are listed by psp_get_text on that part. Number and period come from psp_search (or from citations like 'sněmovní tisk 362/0, 6. volební období').",
       inputSchema: z.object({
         period: periodSchema,
         number: z.number().int().min(1).describe("Číslo tisku (the 1234 of '1234/0')."),
@@ -214,6 +218,8 @@ export function registerPsp(server: McpServer): void {
         number: z.number(),
         title: z.string(),
         url: z.string(),
+        as_of: z.string().optional(),
+        stages: z.string().optional(),
         page: z.number(),
         total_pages: z.number(),
         has_more: z.boolean(),
@@ -227,6 +233,7 @@ export function registerPsp(server: McpServer): void {
             document_id: z.number().optional(),
           }),
         ),
+        amended_acts_url: z.string().optional(),
       }),
       annotations: READ_ONLY,
     },
@@ -239,10 +246,13 @@ export function registerPsp(server: McpServer): void {
           number: tisk.number,
           title: tisk.title,
           url: tisk.url,
+          as_of: tisk.asOf,
+          stages: tisk.stages,
           page: paged.page,
           total_pages: paged.total_pages,
           has_more: paged.has_more,
           documents: tisk.documents.map(({ documentId, ...doc }) => ({ ...doc, ...(documentId !== undefined ? { document_id: documentId } : {}) })),
+          amended_acts_url: tisk.amendedActsUrl,
         };
         return {
           content: [{ type: "text", text: pspTiskText(tisk, `${paged.text}${continuationHint(paged)}`) }],
@@ -259,7 +269,7 @@ export function registerPsp(server: McpServer): void {
     {
       title: "Poslanecká sněmovna: text of a tisk or an attached document",
       description:
-        `Text from psp.cz: either a PART of a sněmovní tisk by period + number (+ part: 0 = the tisk as submitted — for a bill the návrh zákona followed by its DŮVODOVÁ ZPRÁVA, obecná and zvláštní část; further parts are usnesení výborů, pozměňovací návrhy, Senate returns) — or an ATTACHED ORIGINAL FILE by document_id (from psp_get_tisk or from a part's answer: 'Originál dokumentu', 'Verze PDF', rozdílová tabulka, RIA, platné znění s vyznačením změn, stanovisko vlády), read as PDF (the first ${PDF_PAGES_PER_CALL} pages per call; pdf_pages for the rest), DOCX or HTML. Older tisky have no text set inline: the part's answer then lists the files to read by document_id. ${READING_DESCRIPTION}`,
+        `Text from psp.cz: a PART of a sněmovní tisk by period + number (+ part: 0 = the tisk as submitted — for a bill the návrh zákona followed by its DŮVODOVÁ ZPRÁVA, obecná and zvláštní část, in one file; further parts are stanovisko vlády, usnesení výborů, pozměňovací návrhy), or an attached FILE by document_id. psp.cz keeps the text in files, not on the page: a part's answer reads the part's main file (the bill with its důvodová zpráva — DOCX whole, else PDF in windows of ${PDF_PAGES_PER_CALL} pages, pdf_pages for the rest) and lists the part's other files (rozdílová tabulka, RIA, platné znění s vyznačením změn, "Celý sněmovní tisk") with their document_id. ${READING_DESCRIPTION}`,
       inputSchema: z.object({
         period: periodSchema.optional(),
         number: z.number().int().min(1).optional().describe("Číslo tisku, with period."),
@@ -324,28 +334,44 @@ export function registerPsp(server: McpServer): void {
         const result = await getPspTiskText(period, number!, part);
         const documents = result.documents.map(({ documentId, part: _part, ...doc }) => ({ ...doc, ...(documentId !== undefined ? { document_id: documentId } : {}) }));
         const files = result.documents.length ? `Files of this part:\n${documentLines(result.documents).join("\n")}` : "";
-        if (!result.text.trim()) {
-          // Older tisky: psp.cz sets no text inline, only the original file (and its PDF rendition).
-          const pdf = result.documents.find((doc) => doc.format === "PDF" && doc.documentId !== undefined) ?? result.documents.find((doc) => doc.documentId !== undefined);
-          const text = [
-            result.url,
-            result.title,
-            "",
-            "This part has no text set inline on psp.cz — its text is the original file. Read it without asking the user:" + (pdf ? ` ${readingCall(pdf)}` : ""),
-            files,
-          ]
-            .filter(Boolean)
-            .join("\n");
+        if (result.text.trim()) {
+          // A part with text on the page itself (none captured so far, kept for the day psp.cz sets one inline).
+          const paged = pageOrExcerpt(result.text, page, find);
+          const head = [result.url, result.title, paged.page === 1 && paged.mode === "page" ? files : ""].filter(Boolean).join("\n");
           return {
-            content: [{ type: "text", text }],
-            structuredContent: { url: result.url, format: "html", page: 1, total_pages: 1, has_more: false, documents, text: "" },
+            content: [{ type: "text", text: `${head}\n\n${paged.text}${continuationHint(paged)}` }],
+            structuredContent: { url: result.url, format: "html", page: paged.page, total_pages: paged.total_pages, has_more: paged.has_more, matches: paged.matches, documents, text: paged.text },
           };
         }
-        const paged = pageOrExcerpt(result.text, page, find);
-        const head = [result.url, result.title, paged.page === 1 && paged.mode === "page" ? files : ""].filter(Boolean).join("\n");
+        const main = mainDocument(result.documents);
+        if (!main?.documentId) {
+          throw new SourceError(SOURCE, "NOT_FOUND", `psp.cz sets no text and links no readable file for tisk ${number}/${part} (${periodLabel(period)}).`, `Open ${result.url} yourself; psp_get_tisk lists the tisk's parts.`);
+        }
+        const range = parsePdfPages(pdf_pages);
+        const doc = await getPspDocument(main.documentId, range);
+        const paged = pageOrExcerpt(doc.text, page, find);
+        const notes: string[] = [`Read from: ${snippet(main.label, 160)} (${doc.format.toUpperCase()}) — ${doc.url}`];
+        if (doc.pdf) {
+          const [from, to] = doc.pdf.range;
+          notes.push(`PDF: pages ${from}–${to} of ${doc.pdf.pages} converted${doc.pdf.warnings.length ? `; ${doc.pdf.warnings.join(" ")}` : ""}.`);
+          if (to < doc.pdf.pages && !paged.has_more) {
+            notes.push(`(continue without asking the user: pdf_pages: "${to + 1}-${Math.min(to + PDF_PAGES_PER_CALL, doc.pdf.pages)}")`);
+          }
+        }
+        const head = [result.url, result.title, ...notes, paged.page === 1 && paged.mode === "page" ? files : ""].filter(Boolean).join("\n");
         return {
           content: [{ type: "text", text: `${head}\n\n${paged.text}${continuationHint(paged)}` }],
-          structuredContent: { url: result.url, format: "html", page: paged.page, total_pages: paged.total_pages, has_more: paged.has_more, matches: paged.matches, documents, text: paged.text },
+          structuredContent: {
+            url: doc.url,
+            format: doc.format,
+            page: paged.page,
+            total_pages: paged.total_pages,
+            has_more: paged.has_more,
+            matches: paged.matches,
+            ...(doc.pdf ? { pdf: { pages: doc.pdf.pages, range: doc.pdf.range } } : {}),
+            documents,
+            text: paged.text,
+          },
         };
       } catch (error) {
         return fail(error);

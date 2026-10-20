@@ -18,8 +18,8 @@ Uživatelský popis je v [README](../README.md).
 | `sdeu_search` / `sdeu_get_document` | InfoCuria + Cellar | FULLTEXT judikatury SDEU (C i T) přes vlastní index soudu — hledá napříč všemi jazykovými verzemi; typ dokumentu, stav věci, citovaný předpis a článek (`cites_celex`/`cites_article`), předběžné otázky podle předkládajícího státu (`referred_from`), datumy — vše server-side dle zachyceného payloadu SPA | 
 | `eurlex_search` / `eurlex_get_document` | Cellar SPARQL (Publications Office) | EU legislativa, judikatura i legislativní materiály (návrhy COM, sdělení, zelené/bílé knihy, SWD, impact assessmenty, stanoviska EHSV/VR, postoje EP a Rady) dle názvů, CELEX/ECLI, typů a dat; texty z oficiálního Cellaru |
 | `psp_search` | www.psp.cz | sněmovní tisky přes vlastní formulář Sněmovny (`tisky.sqw`, GET, zachycený HAR 2026-10): název tisku (`na` — filtr webu, ne fulltext textů), číslo tisku (`tqb25`), druh tisku (`types` → zaškrtávátka `tqa27…`), jen neukončené (`tqa17`), a hledání podle čísla Sbírky (`act: "221/2006"` → záložka návrhů zákonů, `tqb18`/`tqb19`) — to jediné prokazatelně odpovídá napříč obdobími (živě: o=9, výsledek tisk 1110/4); `period` nebo `year` (ve volebním roce obě období) určí, v kterém období se formulář otevře a která období se v odpovědi nechají (ostatní se spočítají); `ra=100` řádků na požadavek, celkový počet z řádku „Celkem nalezen N tisk“, další stránky jen podle odkazů, které výpis tiskne (markup stránkování nezachycen), nejvýš 6; hit nese číslo, období z odkazu řádku, název a ostatní buňky (druh, stav / číslo Sb.) |
-| `psp_get_tisk` | www.psp.cz | jeden tisk (`historie.sqw?o=&t=`): název, průběh projednávání jak ho Sněmovna zapisuje (čtení s daty, výbory, Senát, prezident, Sbírka) a všechny dokumenty z odkazů stránky — části tisku (`tiskt.sqw`, podčíslo) i přiložené originály (`orig2.sqw?idd=`), každý s druhem podle slov popisku (důvodová zpráva, rozdílová tabulka, RIA, platné znění s vyznačením změn, usnesení, pozměňovací návrhy, stanovisko) a s voláním `psp_get_text`, které ho přečte |
-| `psp_get_text` | www.psp.cz | text části tisku (`period` + `number` + `part`; část 0 vládního návrhu = návrh zákona + důvodová zpráva) nebo přiloženého souboru (`document_id`): formát podle prvních bajtů, ne hlavičky — PDF přes převodník Vlastních zdrojů (`pdfText`, 60 stran na volání, `pdf_pages` pro další), DOCX přes mammoth, HTML jako text; starý `.doc` se zkusí jako PDF rendice (`&pdf=1` = „Verze PDF“ na webu, zachyceno), bez ní se vrátí odkaz; u starších tisků stránka `tiskt.sqw` žádný text nenese (zachyceno u 1110/4: jen „Originál dokumentu“, „Verze PDF“ a „Přílohy dokumentu“) — odpověď pak rovnou jmenuje `document_id` k přečtení; stránky 45k znaků, `find` |
+| `psp_get_tisk` | www.psp.cz | jeden tisk (`historie.sqw?o=&t=`, zachyceno 50/10): název, „Stav projednávání ke dni“, schéma legislativního procesu v jednom řádku (✓ hotovo, ▶ aktuální fáze), text sekcí (Předkladatel, Poslanecká sněmovna, Vláda, Senát…) s daty, odkaz „Navržené změny předpisů“ a dokumenty z odkazů stránky — části tisku (`tiskt.sqw?O=&CT=&CT1=`, popsané větou, která je v průběhu jmenuje), stanovisko Parlamentního institutu (`text2.sqw?idd=`), usnesení výborů (`tiskt.sqw?v=ORGV&ct=` — není částí tisku, jen odkaz), každý s druhem podle slov popisku a s voláním `psp_get_text` |
+| `psp_get_text` | www.psp.cz | text části tisku (`period` + `number` + `part`) nebo souboru (`document_id`). psp.cz text do stránky `tiskt.sqw` nevkládá (zachyceno u 50/10, 362/6 i 1110/4): stránka nese jen `#main-content` s nadpisem, box „Celý sněmovní tisk“ / „Verze PDF“ / „Originál dokumentu“ a tabulku souborů seskupenou nadpisy („Návrh zákona včetně důvodové zprávy“, „Platné znění s vyznačením změn“; PDF i DOCX). U části proto nástroj sám vybere hlavní soubor (`mainDocument`: první skupina, DOCX před PDF; bez skupin celý tisk, PDF rendice před originálem), přečte ho a ostatní soubory vypíše s `document_id`. Formát podle prvních bajtů — PDF přes převodník Vlastních zdrojů (`pdfText` s `maxTotalPages` 5 000, 60 stran na volání, `pdf_pages` pro další), DOCX přes mammoth, HTML jako text; starý `.doc` se znovu stáhne jako `&pdf=1`; stránky 45k znaků, `find` |
 | `eurlex_get_history` | Cellar SPARQL (Publications Office) | travaux préparatoires aktu z dossieru interinstitucionálního postupu (`cdm:dossier_contains_work` — obsahuje i přijatý akt, takže kotví CELEX aktu i kteréhokoli dokumentu postupu, případně číslo postupu `2012/0011(COD)`); vrací návrh s důvodovou zprávou, impact assessmenty, stanoviska, postoje EP/Rady + číslo postupu, právní základ a stav (přijato/projednáváno/staženo) |
 | `doctrine_search` | cuni.primo.exlibrisgroup.com | doktrína: knihy, kapitoly a články z UKAŽ Univerzity Karlovy (Primo VE: katalog UK + Central Discovery Index licencovaných e-zdrojů); `query`/`queries` (≤ 3 varianty), `title`, `author`, `subject`, `language`, `year_from`/`year_to`; katalog stránkuje po 10, `limit` (≤ 20; nad 10 záznamy stručně, bez abstraktů) stáhne víc stránek v paralelní dávce a `page` kráčí dál (`total` = `total_local` + `total_central`) — vrací bibliografické záznamy s odkazem na záznam, abstraktem/obsahem a přístupovými odkazy, žádné plné texty; klient postavený na zachyceném požadavku SPA (HAR 2026-09), ověřený živě z produkce |
 | `doctrine_get_record` | cuni.primo.exlibrisgroup.com | jeden záznam v plném znění přes full-display endpoint Prima (ověřený živě): celý abstrakt, obsah (TOC), hesla, identifikátory a přístupové odkazy — hledání ukazuje jen začátek abstraktu a obsahu; text díla se nestahuje (k němu vede odkaz na záznam, licencované tituly si čtenář otevře sám přes vzdálený přístup UK) |
@@ -83,22 +83,23 @@ prohlížeči). Co se o Unpaywallu, o přihlašovacím řetězu CAS a o proxy
 `ezproxy.is.cuni.cz` (host potvrzený HARem zadavatele) zjistilo, zůstává v
 `docs/research/doctrine-sources.json`; v kódu nezůstal žádný spící zbytek.
 **Poslanecká sněmovna** (`psp_*`, 2026-10): psp.cz není z vývojového sandboxu
-dosažitelný (proxy host odmítá); vyhledávací formulář (`sntisk.sqw` →
-`tisky.sqw`, pole `na`, `tqb25`/`tqb26`, `tqa27–35/62–64`, `tqa17`, `ra`;
-záložka návrhů zákonů s `tqb18`/`tqb19` = číslo Sbírky), stránka výsledků
-(řádek „Celkem nalezen N tisk“, tabulka Číslo / Krátký název / Typ tisku /
-Předpis, odkazy `historie.sqw?o=&T=` a `text/tiskt.sqw?O=&CT=&CT1=`) a
-stránka `tiskt.sqw` (obsah v `#main-content`, soubory `orig2.sqw?idd=` a
-`&pdf=1`, hlavička `charset=Windows-1250`) jsou **zachycené z prohlížeče
-(HAR) a leží ve fixtures**. Nezachycené zůstávají stránka `historie.sqw`
-(parser se drží jen hrefů), stránkování výsledků nad `ra` řádků a `tiskt.sqw`
-novějšího tisku s textem vloženým do stránky. Po nasazení:
-`dawmain_probe_sources {sources: ["psp"]}` (kanárek = historie tisku 1/9),
-`{discover: true}` (výpis formuláře, jak ho `parseListingForm` pochopil —
-má hlásit `na`/`o`/`tqb25`) a `fetch_url` na `historie.sqw?o=6&t=362`; pak
-nahradit syntetické `historie.html` a `tiskt.html` záchyty. Otevřená data
-Sněmovny (`hp.sqw?k=1300`, ZIP celé databáze) se záměrně nestahují — žádný
-dotaz nemá stahovat celou databázi. Senát (senat.cz) ani eKLEP pokryté nejsou.
+dosažitelný (proxy host odmítá); všechny stránky, na kterých klient stojí,
+jsou ale **zachycené z prohlížeče (HAR) a leží ve `tests/fixtures/psp/`**:
+vstup formuláře `sntisk.sqw?o=10`, výsledky `tisky.sqw` (jeden hit podle
+čísla Sbírky, prázdný výsledek, 2. strana hledání `na=zakon` s 1 856 hity a
+stránkováním `str=` v `p.paging`), `historie.sqw?o=10&t=50` a `tiskt.sqw` tří
+tisků (50/10, 362/6, 1110/4). Z nich: formulář má pole `na`, `tqb25`/`tqb26`,
+`tqa27–35/62–64`, `tqa17`, `ra`, záložka návrhů zákonů `tqb18`/`tqb19` (číslo
+Sbírky, odpovídá napříč obdobími); `na` je filtr názvu bez diakritiky
+(„zakon“ našel i „zákoník“); řádek výsledků nese podčíslo (11/0 a stanovisko
+vlády 11/1 zvlášť); stránky chodí jako `charset=Windows-1250` s obsahem v
+`#main-content`; **`tiskt.sqw` text nikdy nenese**, jen soubory — proto
+`psp_get_text` u části čte hlavní soubor sám. Po nasazení stačí
+`dawmain_probe_sources {sources: ["psp"]}` a živý průchod
+`psp_search {act: "89/2012"}` → `psp_get_tisk` → `psp_get_text` (ověří
+převod PDF/DOCX, který se ze záchytů ověřit nedá). Otevřená data Sněmovny
+(`hp.sqw?k=1300`, ZIP celé databáze) se záměrně nestahují — žádný dotaz nemá
+stahovat celou databázi. Senát (senat.cz) ani eKLEP pokryté nejsou.
 **EUIPO** (eSearchCLW i Guidelines) a **ÚPV** (isdv.upv.gov.cz) záměrně
 pokryté nejsou a kód pro ně v repu není: doložky EUIPO si vyhrazují zákaz TDM
 a scrapingu „jakýmikoli prostředky, včetně botů" mimo vědecký výzkum (bez
@@ -907,12 +908,6 @@ Zároveň ověřit, zda Zotero vynucuje registrovaný callback (výše).
 
 ### Fixtures k nahrazení
 
-`tests/fixtures/psp/historie.html` a `tiskt.html` jsou **syntetické**
-(`tisky-search-*.html` a `tiskt-4-1110.html` jsou živé záchyty z HAR 2026-10):
-nahradit záchyty z `dawmain_probe_sources {sources: ["psp"], include_raw:
-true}` (historie tisku 1/9) či `fetch_url` na `historie.sqw?o=6&t=362` a na
-`text/tiskt.sqw?O=9&CT=…&CT1=0` novějšího tisku s vloženým textem; pak
-přepsat očekávání v `tests/psp.test.ts` (popisky dokumentů, průběh).
 `tests/fixtures/zotero/*.json` jsou **ručně sestavené z dokumentace** (z
 vývojového kontejneru nebyl api.zotero.org dostupný). Na Preview je nahradit
 živými záchyty (klíče a tokeny vymazat): `keys-current*.json` (přesný tvar

@@ -9,6 +9,7 @@ import {
   buildSearchUrl,
   classifyDocument,
   getPspDocument,
+  mainDocument,
   parseActNumber,
   parseListing,
   parseListingForm,
@@ -19,6 +20,7 @@ import {
   periodLabel,
   periodsForYear,
   searchPsp,
+  setDocumentConverters,
   sniffDocument,
   tiskTextUrl,
   tiskUrl,
@@ -27,22 +29,25 @@ import { decodeHtmlBody, metaCharset } from "@/src/sources/shared/html";
 import { parsePdfPages, registerPsp } from "@/src/mcp/tools/psp";
 
 /**
- * Fixtures: tisky-search-sbirka.html, tisky-search-empty.html and
- * tiskt-4-1110.html are LIVE CAPTURES (HAR, 2026-10 — the search form of
- * tisky.sqw with its field names, a results page with one hit, an empty
- * one, and the tiskt.sqw page of tisk 1110/4, which sets no text inline).
- * historie.html and tiskt.html are SYNTHETIC: the historie.sqw page has not
- * been captured yet, so its parser keys on the anchors' hrefs only; replace
- * them with `dawmain_probe_sources {sources: ["psp"], include_raw: true}`
- * and `fetch_url` on a tiskt.sqw page of a current bill (inline text).
+ * Every fixture in tests/fixtures/psp/ is a LIVE CAPTURE (HAR from the
+ * user's browser, 2026-10): the search form page (sntisk-10.html), a
+ * results page with one hit (tisky-search-sbirka.html), an empty one
+ * (tisky-search-empty.html), page 2 of a 1 856-hit search
+ * (tisky-search-page2.html), the historie.sqw page of tisk 50/10
+ * (historie-10-50.html) and the tiskt.sqw pages of tisky 50/10, 362/6 and
+ * 1110/4 (tiskt-*.html — none sets text inline; the text is the file).
  */
 
 const fixture = (name: string) => readFileSync(path.join(__dirname, "fixtures", "psp", name), "utf8");
 const SBIRKA = fixture("tisky-search-sbirka.html");
 const EMPTY = fixture("tisky-search-empty.html");
 const TISKT_1110 = fixture("tiskt-4-1110.html");
-const HISTORIE = fixture("historie.html");
-const TISKT = fixture("tiskt.html");
+const TISKT_50 = fixture("tiskt-10-50.html");
+const TISKT_362 = fixture("tiskt-6-362.html");
+const HISTORIE_50 = fixture("historie-10-50.html");
+const PAGE2 = fixture("tisky-search-page2.html");
+const PAGE2_URL = "https://www.psp.cz/sqw/tisky.sqw?str=2&o=9&utq=1&tqq=1:2,27:1,28:1,29:1,30:1,31:1,32:1,33:1,34:1,35:1,62:1,63:1,64:1&na=zakon";
+const SNTISK = fixture("sntisk-10.html");
 const SBIRKA_URL =
   "https://www.psp.cz/sqw/tisky.sqw?tqb1=1&utq=2&o=9&tqb2=0&tqb3=15&tqb21=1&tqb7=1761&tqb23=1&tqb24=1&tqb8=1&tqb9=1&tqb10=1&tqb11=1&tqb12=1&tqb13=1&tqb14=1&tqb20=1&tqb22=1&tqb16=7&tqb18=221&tqb19=2006&ra=20";
 
@@ -54,7 +59,10 @@ registerPsp({ registerTool: (name: string, _config: unknown, handler: Handler) =
 /** A fetch stub answering with a captured page as psp.cz serves it (Windows-1250 header; the fixtures are stored as UTF-8). */
 const html = (body: string, status = 200) => new Response(new TextEncoder().encode(body), { status, headers: { "content-type": "text/html; charset=utf-8" } });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  setDocumentConverters();
+});
 
 describe("periods and addresses", () => {
   it("maps a year to its period, two in an election year, none before 1993", () => {
@@ -110,6 +118,7 @@ describe("parseSearchResults — captured pages", () => {
       {
         period: 4,
         number: 1110,
+        part: 0,
         title: "Vl.n.z. o vymáhání práv z průmyslového vlastnictví - EU",
         cells: ["Vládní návrh zákona", "221/2006 Sb."],
         url: "https://www.psp.cz/sqw/historie.sqw?o=4&t=1110",
@@ -132,24 +141,61 @@ describe("parseSearchResults — captured pages", () => {
     expect(form!.fields).not.toHaveProperty("tqa17");
   });
 
-  it("page links: numeric anchors to the same script only", () => {
-    const page = '<a href="tisky.sqw?o=9&str=2">2</a> <a href="sntisk.sqw?o=9">3</a> <a href="tisky.sqw?o=9&str=3">3</a>';
-    expect([...parsePageLinks(page, "https://www.psp.cz/sqw/tisky.sqw?o=9").entries()]).toEqual([
-      [2, "https://www.psp.cz/sqw/tisky.sqw?o=9&str=2"],
-      [3, "https://www.psp.cz/sqw/tisky.sqw?o=9&str=3"],
+  it("page 2 of a 1 856-hit search: the count, 20 rows with their parts (11/0 and the stanovisko vlády 11/1 apart), the page links as printed", () => {
+    const page = parseSearchResults(PAGE2, PAGE2_URL, 9);
+    expect(page.total).toBe(1856);
+    expect(page.hits).toHaveLength(20);
+    expect(page.hits.slice(0, 2)).toEqual([
+      { period: 9, number: 11, part: 0, title: "Novela z. - občanský zákoník", cells: ["Poslanecký návrh zákona", "1. čtení"], url: "https://www.psp.cz/sqw/historie.sqw?o=9&t=11" },
+      { period: 9, number: 11, part: 1, title: "Stanovisko vlády k tisku 11/0", cells: ["Návrh zákona", "Nesouhlas"], url: "https://www.psp.cz/sqw/historie.sqw?o=9&t=11" },
     ]);
+    // Numeric anchors to the same script (str=1, 3–6); "<<", ">" and ">>" are not pages.
+    const links = parsePageLinks(PAGE2, PAGE2_URL);
+    expect([...links.keys()]).toEqual([1, 3, 4, 5, 6]);
+    expect(links.get(3)).toBe("https://www.psp.cz/sqw/tisky.sqw?str=3&o=9&utq=1&tqq=1:2,27:1,28:1,29:1,30:1,31:1,32:1,33:1,34:1,35:1,62:1,63:1,64:1&na=zakon");
+  });
+
+  it("the search form page (sntisk.sqw) reads the same way, with every druh tisku on", () => {
+    const form = parseListingForm(SNTISK, "https://www.psp.cz/sqw/sntisk.sqw?o=10");
+    expect(form).toMatchObject({ action: "https://www.psp.cz/sqw/tisky.sqw", nameField: "na", periodField: "o", numberField: "tqb25" });
+    expect(form!.fields).toMatchObject({ o: "10", tqa27: "on", tqa35: "on", ra: "20" });
   });
 
   it("parseListing tolerates a row whose number anchor has no title cell", () => {
     const hits = parseListing('<ul><li><a href="historie.sqw?o=9&t=5">Zpráva o stavu</a></li></ul>', "https://www.psp.cz/sqw/tisky.sqw", 9);
-    expect(hits).toEqual([{ period: 9, number: 5, title: "Zpráva o stavu", cells: [], url: "https://www.psp.cz/sqw/historie.sqw?o=9&t=5" }]);
+    expect(hits).toEqual([{ period: 9, number: 5, part: 0, title: "Zpráva o stavu", cells: [], url: "https://www.psp.cz/sqw/historie.sqw?o=9&t=5" }]);
   });
 });
 
-describe("parseTiskText — captured tiskt.sqw of tisk 1110/4 (no inline text)", () => {
-  it("title from #main-content, empty text, the original file and its PDF rendition and the attachments by document_id", () => {
+describe("parseTiskText — captured tiskt.sqw pages: the text is a file, never on the page", () => {
+  it("tisk 50/10: the whole-tisk PDF and the files grouped under their headings; the DOCX of the first group is the text", () => {
+    const result = parseTiskText(TISKT_50, tiskTextUrl(10, 50, 0), 10, 50);
+    expect(result.title).toBe("Sněmovní tisk 50/0 — Novela z. o důchodovém pojištění");
+    expect(result.text).toBe("");
+    expect(result.documents.map((d) => [d.documentId, d.format, d.kind, d.label])).toEqual([
+      [266807, "PDF", "celý tisk", "Celý sněmovní tisk (PDF, 1 MB)"],
+      [266804, "PDF", "návrh zákona s důvodovou zprávou", "Návrh zákona včetně důvodové zprávy — t005000.pdf (Dokument PDF, 1 MB)"],
+      [266803, "DOCX", "návrh zákona s důvodovou zprávou", "Návrh zákona včetně důvodové zprávy — t005000.docx (Dokument DOCX, 52 KB)"],
+      [266806, "PDF", "platné znění s vyznačením změn", "Platné znění s vyznačením změn — t0050a0.pdf (Dokument PDF, 234 KB)"],
+      [266805, "DOCX", "platné znění s vyznačením změn", "Platné znění s vyznačením změn — t0050a0.docx (Dokument DOCX, 28 KB)"],
+    ]);
+    expect(mainDocument(result.documents)?.documentId).toBe(266803);
+  });
+
+  it("tisk 362/6 (občanský zákoník): a PDF rendition and bare .doc files — the PDF rendition is the text", () => {
+    const result = parseTiskText(TISKT_362, tiskTextUrl(6, 362, 0), 6, 362);
+    expect(result.title).toBe("Sněmovní tisk 362/0 — Vl.n.z. - občanský zákoník - EU");
+    expect(result.documents.map((d) => [d.documentId, d.format, d.kind, d.label])).toEqual([
+      [71122, "PDF", "celý tisk", "Verze PDF (9.6 MB)"],
+      [71122, "soubor", "dokument", "t036200.doc"],
+      [71123, "soubor", "dokument", "t0362a0.doc"],
+    ]);
+    expect(mainDocument(result.documents)?.url).toBe("https://www.psp.cz/sqw/text/orig2.sqw?idd=71122&pdf=1");
+  });
+
+  it("tisk 1110/4: 'Originál dokumentu' with its size, 'Verze PDF', and the attachments by document_id", () => {
     const result = parseTiskText(TISKT_1110, tiskTextUrl(4, 1110, 0), 4, 1110);
-    expect(result.title).toBe("Sněmovní tisk 1110/0, část č. 1/3Vl.n.z. o vymáhání práv z průmyslového vlastnictví - EU");
+    expect(result.title).toBe("Sněmovní tisk 1110/0, část č. 1/3 — Vl.n.z. o vymáhání práv z průmyslového vlastnictví - EU");
     expect(result.text).toBe("");
     expect(result.documents.map((d) => [d.documentId, d.format, d.label])).toEqual([
       [14683, "soubor", "Originál dokumentu (DOC, 171.5 KB)"],
@@ -157,36 +203,45 @@ describe("parseTiskText — captured tiskt.sqw of tisk 1110/4 (no inline text)",
       [14687, "soubor", "t1110a0.doc"],
       [14688, "soubor", "t1110b0.doc"],
     ]);
+    expect(mainDocument(result.documents)?.documentId).toBe(14683);
   });
 
-  it("a synthetic page with inline text returns the bill and its důvodová zpráva without the menu", () => {
-    const result = parseTiskText(TISKT, tiskTextUrl(6, 362, 0), 6, 362);
-    expect(result.text).toContain("§ 1 (1) Ustanovení právního řádu");
+  it("a page with text set inline (none captured) keeps it, without the menu", () => {
+    const inline = '<html><body><div id="menu"><a href="/sqw/hp.sqw">Úvod</a></div><div id="main-content"><h1>Sněmovní tisk 1/0</h1><p>§ 1 Text návrhu zákona, který je delší než osmdesát znaků, aby se počítal za obsah stránky.</p><h2>DŮVODOVÁ ZPRÁVA</h2><p>K § 1: Ustanovení vymezuje předmět úpravy.</p></div></body></html>';
+    const result = parseTiskText(inline, tiskTextUrl(9, 1, 0), 9, 1);
     expect(result.text).toContain("K § 1: Ustanovení vymezuje předmět úpravy.");
     expect(result.text).not.toContain("Úvod");
     expect(result.documents).toEqual([]);
   });
 });
 
-describe("parseTisk (historie.sqw — synthetic until captured)", () => {
-  it("title, the process text, and every document with the call that reads it", () => {
-    const tisk = parseTisk(HISTORIE, tiskUrl(6, 362), 6, 362);
-    expect(tisk.title).toBe("Sněmovní tisk 362");
-    expect(tisk.text).toContain("1. čtení");
-    expect(tisk.text).toContain("pod číslem 89/2012 Sb.");
-    expect(tisk.text).not.toContain("Kancelář Poslanecké sněmovny");
-    const kinds = tisk.documents.map((d) => [d.kind, d.format, d.part?.part ?? d.documentId]);
-    expect(kinds).toEqual([
-      ["text tisku", "HTML", 0],
-      ["návrh zákona", "soubor", 71122],
-      ["návrh zákona", "PDF", 71122],
-      ["důvodová zpráva", "soubor", 71123],
-      ["rozdílová tabulka", "PDF", 71124],
-      ["platné znění s vyznačením změn", "soubor", 71125],
-      ["usnesení", "HTML", 2],
+describe("parseTisk — captured historie.sqw of tisk 50/10", () => {
+  it("title, the date of the state, the stage line, the sections' text without the stage marks, the acts amended", () => {
+    const tisk = parseTisk(HISTORIE_50, tiskUrl(10, 50), 10, 50);
+    expect(tisk.title).toBe("Sněmovní tisk 50 — Novela z. o důchodovém pojištění");
+    expect(tisk.asOf).toBe("Stav projednávání ke dni: 20. října 2026");
+    expect(tisk.stages).toBe(
+      "Předkladatel → PS: Předseda sněmovny ✓ → Vláda: Vláda ✓ → Poslanecká sněmovna: Organizační výbor ▶, 1. čtení, Výbory, 2. čtení, Garanční výbor, 3. čtení → Senát: Předseda Senátu, Organizační výbor, Výbory, Senát → Prezident: Prezident → Zákon",
+    );
+    expect(tisk.text).toContain("Předkladatel\nSkupina poslanců předložila sněmovně návrh zákona 5. 12. 2025.");
+    expect(tisk.text).toContain("Stanovisko vlády rozesláno poslancům 17. 2. 2026 jako tisk 50/1 (nesouhlas).");
+    expect(tisk.text).toContain("Organizační výbor projednání návrhu zákona doporučil 19. 2. 2026 (usnesení č. 31).");
+    expect(tisk.text).not.toMatch(/\bPSNávrh|\bVL Návrh|\bO Organizační/);
+    expect(tisk.text).not.toContain("Vysvětlení legislativního procesu");
+    expect(tisk.amendedActsUrl).toBe("https://www.psp.cz/sqw/historie.sqw?o=10&t=50&snzp=1");
+  });
+
+  it("documents: the parts by the sentence that names them, the Parlamentní institut opinion, a committee resolution (v=ORGV) is no part", () => {
+    const tisk = parseTisk(HISTORIE_50, tiskUrl(10, 50), 10, 50);
+    expect(tisk.documents.map((d) => [d.kind, d.format, d.part?.part ?? d.documentId ?? null, d.label])).toEqual([
+      ["návrh zákona", "HTML", 0, "tisk 50/0 — Návrh zákona rozeslán poslancům jako tisk 50/0 dne 16. 1. 2026."],
+      ["stanovisko", "HTML", 268537, "Parlamentní institut vypracoval stanovisko ke kompatibilitě tisku s právem EU 0050."],
+      ["stanovisko", "HTML", 1, "tisk 50/1 — Stanovisko vlády rozesláno poslancům 17. 2. 2026 jako tisk 50/1 (nesouhlas)."],
+      ["usnesení", "HTML", null, "Organizační výbor projednání návrhu zákona doporučil 19. 2. 2026 (usnesení č. 31)."],
     ]);
-    expect(tisk.documents[0].part).toEqual({ period: 6, number: 362, part: 0 });
-    expect(tisk.documents[4].label).toMatch(/^Rozdílová tabulka/);
+    expect(tisk.documents[0].part).toEqual({ period: 10, number: 50, part: 0 });
+    expect(tisk.documents[2].part).toEqual({ period: 10, number: 50, part: 1 });
+    expect(tisk.documents[3].url).toBe("https://www.psp.cz/sqw/text/tiskt.sqw?o=10&v=ORGV&ct=31");
   });
 
   it("refuses a page with neither document links nor the word tisk as drift", () => {
@@ -195,6 +250,7 @@ describe("parseTisk (historie.sqw — synthetic until captured)", () => {
 
   it("classifies labels by their words", () => {
     expect(classifyDocument("RIA - závěrečná zpráva z hodnocení dopadů regulace")).toBe("RIA");
+    expect(classifyDocument("Rozdílová tabulka — t0050b0.docx")).toBe("rozdílová tabulka");
     expect(classifyDocument("Pozměňovací návrhy přednesené ve druhém čtení")).toBe("pozměňovací návrhy");
     expect(classifyDocument("Stanovisko vlády")).toBe("stanovisko");
     expect(classifyDocument("Příloha č. 3")).toBe("dokument");
@@ -248,7 +304,7 @@ describe("searchPsp and psp_search", () => {
     expect(new URL(urls[0]).searchParams.get("tqb18")).toBe("221");
     const text = result.content[0].text;
     expect(text).toContain("1 sněmovní tisky with the bill of act 221/2006 Sb. — hits 1–1 (page 1):");
-    expect(text).toContain("1. Tisk 1110 (4. období) — Vl.n.z. o vymáhání práv z průmyslového vlastnictví - EU · Vládní návrh zákona · 221/2006 Sb.\n   https://www.psp.cz/sqw/historie.sqw?o=4&t=1110");
+    expect(text).toContain("1. Tisk 1110/0 (4. období) — Vl.n.z. o vymáhání práv z průmyslového vlastnictví - EU · Vládní návrh zákona · 221/2006 Sb.\n   https://www.psp.cz/sqw/historie.sqw?o=4&t=1110");
     expect(text).toContain("psp_get_tisk {period, number}");
     expect(result.structuredContent).toMatchObject({ total: 1, count: 1, truncated: false, other_periods: 0 });
   });
@@ -308,38 +364,71 @@ describe("searchPsp and psp_search", () => {
 });
 
 describe("psp_get_tisk and psp_get_text", () => {
-  it("lists the process and every document with its reading call", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => html(HISTORIE)));
-    const result = await tools.psp_get_tisk({ period: 6, number: 362, page: 1 });
+  const converters = {
+    pdf: vi.fn(async (_bytes: ArrayBuffer, range: [number, number]) => ({ text: `⟦s. ${range[0]}⟧ ZÁKON … DŮVODOVÁ ZPRÁVA … K § 1`, pages: 130, range, warnings: [] })),
+    docx: vi.fn(async () => "ZÁKON\n\n§ 1\n\nDŮVODOVÁ ZPRÁVA\n\nObecná část\n\nZvláštní část\n\nK § 1: Ustanovení vymezuje předmět úpravy."),
+  };
+
+  it("psp_get_tisk: the heading, the state, the stage line, the process and every document with its reading call", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => html(HISTORIE_50)));
+    const result = await tools.psp_get_tisk({ period: 10, number: 50, page: 1 });
     const text = result.content[0].text;
-    expect(text).toMatch(/^Sněmovní tisk 362, 6\. volební období \(2010–2013\) — Sněmovní tisk 362\nhttps:\/\/www\.psp\.cz\/sqw\/historie\.sqw\?o=6&t=362\n/);
-    expect(text).toContain("Zákon vyhlášen 22. 3. 2012");
-    expect(text).toContain("Documents (7)");
-    expect(text).toContain("1. [text tisku] Sněmovní tisk 362/0, část č. 1/12 (HTML) → psp_get_text {period: 6, number: 362, part: 0}");
-    expect(text).toContain("5. [rozdílová tabulka] Rozdílová tabulka — PDF (PDF) → psp_get_text {document_id: 71124}");
-    expect(result.structuredContent).toMatchObject({ number: 362, documents: expect.arrayContaining([expect.objectContaining({ document_id: 71124 })]) });
+    expect(text).toMatch(/^Sněmovní tisk 50 — Novela z\. o důchodovém pojištění \(10\. volební období \(2025–dosud\)\)\nhttps:\/\/www\.psp\.cz\/sqw\/historie\.sqw\?o=10&t=50\nStav projednávání ke dni: 20\. října 2026\nFáze: Předkladatel → PS: Předseda sněmovny ✓/);
+    expect(text).toContain("Stanovisko vlády rozesláno poslancům 17. 2. 2026 jako tisk 50/1 (nesouhlas).");
+    expect(text).toContain("Documents (4)");
+    expect(text).toContain("1. [návrh zákona] tisk 50/0 — Návrh zákona rozeslán poslancům jako tisk 50/0 dne 16. 1. 2026. (HTML) → psp_get_text {period: 10, number: 50, part: 0}");
+    expect(text).toContain("2. [stanovisko] Parlamentní institut vypracoval stanovisko ke kompatibilitě tisku s právem EU 0050. (HTML) → psp_get_text {document_id: 268537}");
+    expect(text).toContain("4. [usnesení] Organizační výbor projednání návrhu zákona doporučil 19. 2. 2026 (usnesení č. 31). (HTML) → (open the link — not readable here)");
+    expect(text).toContain("Navržené změny předpisů (the acts this tisk amends): https://www.psp.cz/sqw/historie.sqw?o=10&t=50&snzp=1");
+    expect(result.structuredContent).toMatchObject({ number: 50, as_of: "Stav projednávání ke dni: 20. října 2026", amended_acts_url: expect.stringContaining("snzp=1") });
   });
 
-  it("a part without inline text (captured 1110/4) sends the reader to the PDF rendition and lists the files", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => html(TISKT_1110)));
-    const result = await tools.psp_get_text({ period: 4, number: 1110, part: 0, page: 1 });
+  it("psp_get_text on a part reads the part's main file (the DOCX of 'Návrh zákona včetně důvodové zprávy') and lists the other files", async () => {
+    setDocumentConverters(converters);
+    const urls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL) => {
+        const url = String(input);
+        urls.push(url);
+        if (url.includes("tiskt.sqw")) return html(TISKT_50);
+        if (url.includes("idd=266803")) return new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04, 1, 2, 3]));
+        return new Response("?", { status: 404 });
+      }),
+    );
+    const result = await tools.psp_get_text({ period: 10, number: 50, part: 0, page: 1 });
     const text = result.content[0].text;
-    expect(text).toMatch(/^https:\/\/www\.psp\.cz\/sqw\/text\/tiskt\.sqw\?O=4&CT=1110&CT1=0\nSněmovní tisk 1110\/0, část č\. 1\/3/);
-    expect(text).toContain("This part has no text set inline on psp.cz — its text is the original file. Read it without asking the user: psp_get_text {document_id: 14683}");
-    expect(text).toContain("2. [dokument] Verze PDF (393.2 KB) (PDF) → psp_get_text {document_id: 14683}");
-    expect(text).toContain("4. [dokument] t1110b0.doc (soubor) → psp_get_text {document_id: 14688}");
-    expect(result.structuredContent).toMatchObject({ text: "", documents: expect.arrayContaining([expect.objectContaining({ document_id: 14688 })]) });
-    expect(result.isError).toBeUndefined();
-  });
-
-  it("reads a part with inline text, with find", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => html(TISKT)));
-    const whole = await tools.psp_get_text({ period: 6, number: 362, part: 0, page: 1 });
-    expect(whole.content[0].text).toMatch(/^https:\/\/www\.psp\.cz\/sqw\/text\/tiskt\.sqw\?O=6&CT=362&CT1=0\nSněmovní tisk 362\/0, část č\. 1\/12\n\n/);
-    expect(whole.content[0].text).toContain("DŮVODOVÁ ZPRÁVA");
-    const found = await tools.psp_get_text({ period: 6, number: 362, part: 0, page: 1, find: "predmet upravy" });
-    expect(found.content[0].text).toContain("K § 1: Ustanovení vymezuje předmět úpravy.");
+    expect(urls).toEqual(["https://www.psp.cz/sqw/text/tiskt.sqw?O=10&CT=50&CT1=0", "https://www.psp.cz/sqw/text/orig2.sqw?idd=266803"]);
+    expect(text).toMatch(/^https:\/\/www\.psp\.cz\/sqw\/text\/tiskt\.sqw\?O=10&CT=50&CT1=0\nSněmovní tisk 50\/0 — Novela z\. o důchodovém pojištění\nRead from: Návrh zákona včetně důvodové zprávy — t005000\.docx \(Dokument DOCX, 52 KB\) \(DOCX\) — https:\/\/www\.psp\.cz\/sqw\/text\/orig2\.sqw\?idd=266803\nFiles of this part:\n1\. \[celý tisk\] Celý sněmovní tisk \(PDF, 1 MB\) \(PDF\) → psp_get_text \{document_id: 266807\}/);
+    expect(text).toContain("4. [platné znění s vyznačením změn] Platné znění s vyznačením změn — t0050a0.pdf (Dokument PDF, 234 KB) (PDF) → psp_get_text {document_id: 266806}");
+    expect(text).toContain("K § 1: Ustanovení vymezuje předmět úpravy.");
+    expect(result.structuredContent).toMatchObject({ format: "docx", url: "https://www.psp.cz/sqw/text/orig2.sqw?idd=266803", documents: expect.arrayContaining([expect.objectContaining({ document_id: 266806 })]) });
+    // find works on the file's text.
+    const found = await tools.psp_get_text({ period: 10, number: 50, part: 0, page: 1, find: "predmet upravy" });
     expect(found.structuredContent).toMatchObject({ matches: 1 });
+  });
+
+  it("psp_get_text on an older part (362/6) reads the PDF rendition in page windows and says how to go on", async () => {
+    setDocumentConverters(converters);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL) => {
+        const url = String(input);
+        if (url.includes("tiskt.sqw")) return html(TISKT_362);
+        if (url.includes("idd=71122&pdf=1")) return new Response(new TextEncoder().encode("%PDF-1.4 oz"));
+        // The original is a legacy .doc: the client asks for the PDF rendition.
+        if (url.includes("idd=71122")) return new Response(new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]));
+        return new Response("?", { status: 404 });
+      }),
+    );
+    const result = await tools.psp_get_text({ period: 6, number: 362, part: 0, page: 1 });
+    const text = result.content[0].text;
+    expect(text).toContain("Read from: Verze PDF (9.6 MB) (PDF) — https://www.psp.cz/sqw/text/orig2.sqw?idd=71122&pdf=1");
+    expect(text).toContain(`PDF: pages 1–${PDF_PAGES_PER_CALL} of 130 converted.`);
+    expect(text).toContain(`(continue without asking the user: pdf_pages: "${PDF_PAGES_PER_CALL + 1}-${Math.min(2 * PDF_PAGES_PER_CALL, 130)}")`);
+    expect(text).toContain("⟦s. 1⟧ ZÁKON");
+    const next = await tools.psp_get_text({ period: 6, number: 362, part: 0, page: 1, pdf_pages: "61-120" });
+    expect(next.content[0].text).toContain("PDF: pages 61–120 of 130 converted.");
   });
 
   it("refuses a call with neither document_id nor number, and a number without its period", async () => {

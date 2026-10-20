@@ -193,6 +193,8 @@ function clean(text: string): string {
 export interface PspHit {
   period: number;
   number: number;
+  /** Podčíslo — the 1 of "11/1" (a stanovisko vlády or a committee's usnesení listed as its own row); 0 = the tisk as submitted. */
+  part: number;
   /** Název tisku as the listing shows it. */
   title: string;
   /** The row's other cells (druh tisku, stav projednávání or the Sbírka number), as printed. */
@@ -229,10 +231,12 @@ export function parseSearchResults(html: string, pageUrl: string, fallbackPeriod
 }
 
 /**
- * The tisky rows of a listing page: every anchor to historie.sqw with a
- * tisk number, one hit per (period, number). The title is the anchor's own
- * text unless that is just the number — then the longest cell of the row.
- * Pure — unit-tested.
+ * The tisky rows of a results page (captured 2026-10): <TR> with the number
+ * cell "<A HREF=historie.sqw?o=9&T=11>11</A>/1", the title cell (an anchor
+ * to tiskt.sqw), druh tisku and stav / Sbírka number. One hit per (period,
+ * number, part) — a stanovisko vlády "11/1" is its own row next to "11/0".
+ * The parser keys on the historie anchors; the part is read from the cell
+ * text after the anchor. Pure — unit-tested.
  */
 export function parseListing(html: string, pageUrl: string, fallbackPeriod: number): PspHit[] {
   const $ = loadHtml(html);
@@ -244,7 +248,6 @@ export function parseListing(html: string, pageUrl: string, fallbackPeriod: numb
     const number = Number(param(url, "t"));
     if (!Number.isInteger(number) || number <= 0) return;
     const period = Number(param(url, "o")) || fallbackPeriod;
-    const key = `${period}/${number}`;
     const row = $(el).closest("tr, li, article, p");
     const cells = (row.length ? row.find("td, th") : $())
       .map((_, cell) => clean($(cell).text()))
@@ -252,10 +255,15 @@ export function parseListing(html: string, pageUrl: string, fallbackPeriod: numb
       .filter(Boolean);
     const anchorText = clean($(el).text());
     const numberOnly = /^\d+(?:\/\d+)?$/.test(anchorText) || !anchorText;
+    // "11/1": the part follows the anchor in its own cell.
+    const cellText = clean($(el).closest("td").text());
+    const partMatch = new RegExp(`^${number}\\s*/\\s*(\\d+)`).exec(cellText) ?? /^\d+\/(\d+)$/.exec(anchorText);
+    const part = partMatch ? Number(partMatch[1]) : 0;
+    const key = `${period}/${number}/${part}`;
     const longest = cells.reduce((best, cell) => (cell.length > best.length ? cell : best), "");
     const title = numberOnly ? longest || anchorText : anchorText;
     const rest = cells.filter((cell) => cell !== title && !/^\d+(?:\/\d+)?$/.test(cell));
-    const hit: PspHit = { period, number, title, cells: rest, url: tiskUrl(period, number) };
+    const hit: PspHit = { period, number, part, title, cells: rest, url: tiskUrl(period, number) };
     const seen = byKey.get(key);
     // Two anchors per row (number and title): keep the fuller record.
     if (!seen || (seen.title.length < hit.title.length && !numberOnly)) byKey.set(key, hit);
@@ -359,10 +367,10 @@ function labelOf($: CheerioAPI, el: Parameters<CheerioAPI>[0]): string {
   return $el.attr("placeholder") ?? $el.attr("title") ?? "";
 }
 
-/** The main content of a psp.cz page: the first known container, else the body stripped of chrome. */
+/** The main content of a psp.cz page: <div id="main-content"> (captured on every page type), else the body stripped of chrome. */
 function mainContent($: CheerioAPI): string {
   $("script, style, noscript, iframe").remove();
-  for (const selector of ["main", "#main", "#content", "#main-content", "[role=main]", ".content", "#page-content"]) {
+  for (const selector of ["#main-content", "main", "#main", "#content", "[role=main]", ".content", "#page-content"]) {
     const node = $(selector).first();
     if (node.length && clean(node.text()).length > 80) return node.html() ?? "";
   }
@@ -370,7 +378,15 @@ function mainContent($: CheerioAPI): string {
   return $("body").html() ?? $.root().html() ?? "";
 }
 
+/** A heading's text with its <br> as " — " ("Sněmovní tisk 50 — Novela z. o důchodovém pojištění"). */
+function headingText($: CheerioAPI, selector: string): string {
+  const node = $(selector).not(".department-title").first().clone();
+  node.find("br").replaceWith(" — ");
+  return clean(node.text());
+}
+
 export type PspDocumentKind =
+  | "návrh zákona s důvodovou zprávou"
   | "návrh zákona"
   | "důvodová zpráva"
   | "rozdílová tabulka"
@@ -379,16 +395,20 @@ export type PspDocumentKind =
   | "usnesení"
   | "pozměňovací návrhy"
   | "stanovisko"
-  /** The tisk's own text (part 0) when its label says no more than its number. */
+  /** The whole tisk as one file ("Celý sněmovní tisk", "Verze PDF", "Originál dokumentu"). */
+  | "celý tisk"
+  /** A tisk part (tiskt.sqw) whose label says no more than its number. */
   | "text tisku"
   | "dokument";
 
 /** What a document is, from the words psp.cz labels it with. Pure — unit-tested. */
 export function classifyDocument(label: string): PspDocumentKind {
   const f = foldText(label);
+  if (/cely snemovni tisk|verze pdf|original dokumentu/.test(f)) return "celý tisk";
   if (/rozdilov/.test(f)) return "rozdílová tabulka";
+  if (/navrh zakona vcetne duvodov|navrh .{0,40}duvodov/.test(f)) return "návrh zákona s důvodovou zprávou";
   if (/duvodov/.test(f)) return "důvodová zpráva";
-  if (/\bria\b|hodnoceni dopad|dopad/.test(f)) return "RIA";
+  if (/\bria\b|hodnoceni dopad|zprava z hodnoceni|dopadu regulace/.test(f)) return "RIA";
   if (/platn[eé]\s*zn|vyznacen/.test(f)) return "platné znění s vyznačením změn";
   if (/pozmenovac|pozmen\./.test(f)) return "pozměňovací návrhy";
   if (/usnesen/.test(f)) return "usnesení";
@@ -398,15 +418,15 @@ export function classifyDocument(label: string): PspDocumentKind {
 }
 
 export interface PspDocument {
-  /** The link's own words (with the enclosing line when the link says only "PDF"). */
+  /** The file's group and name as psp.cz labels it ("Návrh zákona včetně důvodové zprávy — t005000.docx (Dokument DOCX, 52 KB)"). */
   label: string;
   kind: PspDocumentKind;
-  /** "HTML" (tiskt.sqw) | "PDF" | "soubor" (an original .doc/.docx/.rtf) */
-  format: "HTML" | "PDF" | "soubor";
+  /** "HTML" (a tiskt.sqw part, a text2.sqw rendering) | "PDF" | "DOCX" | "soubor" (an original .doc/.rtf) */
+  format: "HTML" | "PDF" | "DOCX" | "soubor";
   url: string;
-  /** For tiskt.sqw links: how psp_get_text addresses them. */
+  /** For tiskt.sqw parts: how psp_get_text addresses them. */
   part?: { period: number; number: number; part: number };
-  /** For orig2.sqw links: the idd psp_get_text takes as document_id. */
+  /** For original files (orig2.sqw / text2.sqw idd): the document_id psp_get_text takes. */
   documentId?: number;
 }
 
@@ -415,14 +435,33 @@ export interface PspTisk {
   number: number;
   title: string;
   url: string;
-  /** The page's text: the process stages with their dates, as printed. */
+  /** "Stav projednávání ke dni …" as the page states it. */
+  asOf?: string;
+  /** The legislative-process schema in one line: each block's stages, ✓ completed, ▶ current. */
+  stages?: string;
+  /** The page's text: the sections (Předkladatel, Poslanecká sněmovna, Vláda, Senát …) with their dates, as printed. */
   text: string;
   documents: PspDocument[];
+  /** "Navržené změny předpisů" sub-page, when the tisk has one. */
+  amendedActsUrl?: string;
 }
 
 const DOCUMENT_HREF = /tiskt\.sqw|orig2\.sqw|text2\.sqw|\.pdf(?:$|[?#])|\.docx?(?:$|[?#])|\.rtf(?:$|[?#])/i;
 
-/** Every document link of a page, deduplicated by URL, labelled and classified. */
+function formatOf(url: URL, label: string): PspDocument["format"] {
+  if (/tiskt\.sqw|text2\.sqw/i.test(url.pathname)) return "HTML";
+  if (/pdf/i.test(url.href) || /\bpdf\b/i.test(label)) return "PDF";
+  if (/docx/i.test(label)) return "DOCX";
+  return "soubor";
+}
+
+/**
+ * Every document link of a page, deduplicated by URL, labelled and
+ * classified. Labels come from what psp.cz prints around the link: the
+ * group heading of the files table ("Návrh zákona včetně důvodové zprávy"),
+ * the cell with the file name and size, the ".media-info" size, or — for a
+ * part linked from the process log — the sentence that names it.
+ */
 function extractDocuments($: CheerioAPI, pageUrl: string, period: number, number: number): PspDocument[] {
   const documents: PspDocument[] = [];
   const seen = new Set<string>();
@@ -432,26 +471,32 @@ function extractDocuments($: CheerioAPI, pageUrl: string, period: number, number
     const url = absolute(href, pageUrl);
     if (!url || seen.has(url.href)) return;
     seen.add(url.href);
-    const own = clean($(el).text());
-    // "(DOC, 171.5 KB)" next to the link on tiskt.sqw.
-    const info = clean($(el).nextAll(".media-info").first().text());
-    const line = clean($(el).closest("li, tr, p, div").first().text()).slice(0, 200);
-    const generic = !own || own.length < 12 || /^(pdf|doc|docx|html|text|dokument|soubor|zde|odkaz)$/i.test(own);
-    const base = generic && line ? line : own || line || url.pathname;
-    const label = info && !base.includes(info) ? `${base} ${info}` : base;
-    const doc: PspDocument = {
-      label,
-      kind: classifyDocument(label),
-      format: /tiskt\.sqw|text2\.sqw/i.test(url.pathname) ? "HTML" : /pdf/i.test(url.href) ? "PDF" : "soubor",
-      url: url.href,
-    };
+    const $el = $(el);
+    const own = clean($el.text());
+    const info = clean($el.nextAll(".media-info").first().text());
+    const cell = $el.closest("td, li, p, div").first();
+    const line = clean(cell.text()).slice(0, 200);
+    // The files table groups rows under <th> headings (captured: "Návrh zákona včetně důvodové zprávy", "Platné znění s vyznačením změn").
+    const group = clean($el.closest("tr").prevAll("tr").has("th").first().find("th").text());
+    const partNumber = /^\d+\/\d+$/.test(own);
+    // A short cell ("t005000.pdf (Dokument PDF, 1 MB)", "Celý sněmovní tisk (PDF, 1 MB)") is the label; in a
+    // process-log paragraph only the sentence that names the link is.
+    let base = line.length <= 120 ? line : sentenceAround(line, own);
+    if (!base) base = own || url.pathname;
+    if (partNumber) base = `tisk ${own} — ${base}`;
+    if (info && !base.includes(info)) base = `${base} ${info}`;
+    const label = group && !base.includes(group) ? `${group} — ${base}` : base;
+    const doc: PspDocument = { label, kind: classifyDocument(label), format: formatOf(url, label), url: url.href };
     if (/tiskt\.sqw/i.test(url.pathname)) {
       const ct = Number(param(url, "ct"));
-      if (Number.isInteger(ct) && ct > 0) {
+      // tiskt.sqw?o=10&v=ORGV&ct=31 is a committee's usnesení (v = výbor, ct = its number), not a part of this tisk.
+      if (param(url, "v")) {
+        if (doc.kind === "dokument") doc.kind = "usnesení";
+      } else if (Number.isInteger(ct) && ct > 0) {
         doc.part = { period: Number(param(url, "o")) || period, number: ct, part: Number(param(url, "ct1")) || 0 };
         if (doc.kind === "dokument" && doc.part.part === 0) doc.kind = "text tisku";
       }
-    } else if (/orig2\.sqw/i.test(url.pathname)) {
+    } else if (/orig2\.sqw|text2\.sqw/i.test(url.pathname)) {
       const idd = Number(param(url, "idd"));
       if (Number.isInteger(idd) && idd > 0) doc.documentId = idd;
     }
@@ -460,13 +505,57 @@ function extractDocuments($: CheerioAPI, pageUrl: string, period: number, number
   return documents;
 }
 
-/** The historie.sqw page of one tisk. Pure — unit-tested. */
+/** The sentence of `text` that contains `needle` (sentences end with a period before a capital letter — dates like "16. 1. 2026" stay whole). Pure. */
+function sentenceAround(text: string, needle: string): string {
+  const sentences = text.split(/(?<=\.)\s*(?=[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ])/);
+  return (needle && sentences.find((sentence) => sentence.includes(needle))) ?? sentences[0] ?? "";
+}
+
+/** The legislative-process schema of historie.sqw in one line. Pure. */
+function parseStages($: CheerioAPI): string | undefined {
+  const blocks: string[] = [];
+  $(".legislative-process").children().each((_, el) => {
+    const $el = $(el);
+    if ($el.hasClass("arrow")) return;
+    if (!$el.hasClass("legislative-block")) {
+      const text = clean($el.text());
+      if (text) blocks.push(text);
+      return;
+    }
+    const name = clean($el.clone().children().remove().end().text());
+    const marks = $el
+      .find("abbr.mark")
+      .map((__, mark) => {
+        const $mark = $(mark);
+        const title = $mark.attr("title") ?? clean($mark.text());
+        return $mark.hasClass("completed") ? `${title} ✓` : $mark.hasClass("current") ? `${title} ▶` : title;
+      })
+      .get();
+    blocks.push(marks.length ? `${name}: ${marks.join(", ")}` : name);
+  });
+  return blocks.length ? blocks.join(" → ") : undefined;
+}
+
+/**
+ * The historie.sqw page of one tisk (captured 2026-10, tisk 50/10): h1 with
+ * the number and short name, p.subtitle "Stav projednávání ke dni", the
+ * legislative-process schema, then .section blocks (Předkladatel,
+ * Poslanecká sněmovna, Vláda, …) whose document-log sentences carry the
+ * dates and link the parts (tiskt.sqw), committee resolutions
+ * (tiskt.sqw?v=…&ct=…), the Parlamentní institut opinion (text2.sqw?idd=),
+ * schůze and eKLEP. Pure — unit-tested.
+ */
 export function parseTisk(html: string, pageUrl: string, period: number, number: number): PspTisk {
   const $ = loadHtml(html);
-  const h1 = clean($("h1").not(".department-title").first().text());
-  const title = h1 || clean($("title").text());
+  const title = headingText($, "h1") || clean($("title").text());
+  const asOf = clean($("p.subtitle").first().text()) || undefined;
+  const stages = parseStages($);
   const documents = extractDocuments($, pageUrl, period, number);
-  const text = htmlToText(mainContent($));
+  const amended = $('a[href*="snzp=1"]').first().attr("href");
+  const amendedActsUrl = amended ? absolute(amended, pageUrl)?.href : undefined;
+  const $content = loadHtml(mainContent($));
+  $content(".legislative-process, .page-title, p.info, .marks").remove();
+  const text = htmlToText($content.root().html() ?? "");
   if (!documents.length && !/tisk/i.test(text)) {
     throw new SourceError(
       SOURCE,
@@ -475,34 +564,52 @@ export function parseTisk(html: string, pageUrl: string, period: number, number:
       `Open ${pageUrl} to check the tisk exists; if it does, psp.cz changed its layout — run dawmain_probe_sources with fetch_url on that address.`,
     );
   }
-  return { period, number, title, url: pageUrl, text, documents };
+  return { period, number, title, url: pageUrl, asOf, stages, text, documents, amendedActsUrl };
 }
 
 export interface PspTiskText {
-  /** The h1: "Sněmovní tisk 1110/0, část č. 1/3 Vl.n.z. o …". */
+  /** The h1: "Sněmovní tisk 50/0 — Novela z. o důchodovém pojištění". */
   title: string;
-  /** The document's own text — empty when the page only links the original files (older tisky). */
+  /** Text set inline on the page — empty on every page captured so far: psp.cz links the files instead. */
   text: string;
-  /** "Originál dokumentu", "Verze PDF", "Přílohy dokumentu" — the files, by document_id. */
+  /** The files: "Celý sněmovní tisk" / "Verze PDF" / "Originál dokumentu" and the grouped files table. */
   documents: PspDocument[];
 }
 
 /**
- * A tiskt.sqw page (one part of a tisk): its title, the text set inline
- * (minus the file boxes) and the original files. Captured 2026-10 (tisk
- * 1110/4): the content sits in #main-content, the files in
- * .document-media and .attachments, and that older tisk has no inline text
- * at all. Pure — unit-tested.
+ * A tiskt.sqw page (one part of a tisk). Captured 2026-10 on tisky 50/10,
+ * 362/6 and 1110/4: #main-content holds the h1, a .document-media box
+ * ("Celý sněmovní tisk" PDF / "Verze PDF" / "Originál dokumentu") and the
+ * .attachments table of files grouped by heading ("Návrh zákona včetně
+ * důvodové zprávy", "Platné znění s vyznačením změn") — and NO text of its
+ * own; the text is the file. Pure — unit-tested.
  */
 export function parseTiskText(html: string, pageUrl: string, period: number, number: number): PspTiskText {
   const $ = loadHtml(html);
-  const title = clean($("h1").not(".department-title").first().text());
+  const title = headingText($, "h1");
   const documents = extractDocuments($, pageUrl, period, number).filter((doc) => doc.documentId !== undefined || doc.format !== "HTML");
-  const content = mainContent($);
-  const $content = loadHtml(content);
-  $content(".document-media, .attachments, .page-title, h1").remove();
+  const $content = loadHtml(mainContent($));
+  $content(".document-media, .attachments, .page-title, h1, .aside").remove();
   const text = htmlToText($content.root().html() ?? "");
   return { title, text, documents };
+}
+
+/**
+ * The file that IS the part's text: the first group of the files table
+ * (the bill with its důvodová zpráva), DOCX before PDF (mammoth reads a
+ * whole DOCX at once; a PDF comes in page windows), else the whole-tisk
+ * file (PDF rendition before the original). Pure — unit-tested.
+ */
+export function mainDocument(documents: PspDocument[]): PspDocument | undefined {
+  const files = documents.filter((doc) => doc.documentId !== undefined);
+  const whole = files.filter((doc) => doc.kind === "celý tisk");
+  const others = files.filter((doc) => doc.kind !== "celý tisk");
+  // Files listed under a group heading ("Návrh zákona včetně důvodové zprávy — …"): the first group is the text.
+  const groupOf = (doc: PspDocument) => (doc.label.includes(" — ") ? doc.label.split(" — ")[0] : "");
+  const firstGroup = others.length && groupOf(others[0]) ? others.filter((doc) => groupOf(doc) === groupOf(others[0])) : [];
+  const pick = (list: PspDocument[]) => list.find((doc) => doc.format === "DOCX") ?? list.find((doc) => doc.format === "PDF") ?? list[0];
+  // Older tisky list bare file names (t036200.doc, t0362a0.doc): the whole-tisk file, its PDF rendition first.
+  return pick(firstGroup) ?? pick(whole.filter((doc) => doc.format === "PDF")) ?? pick(whole) ?? pick(others);
 }
 
 // ---------- fetch (I/O) ----------
@@ -572,7 +679,7 @@ export async function searchPsp(input: PspSearchInput, needed: number): Promise<
     const seen = new Set<string>();
     const take = (page: PspSearchPage) => {
       for (const hit of page.hits) {
-        const k = `${hit.period}/${hit.number}`;
+        const k = `${hit.period}/${hit.number}/${hit.part}`;
         if (seen.has(k)) continue;
         seen.add(k);
         hits.push(hit);
@@ -659,9 +766,12 @@ export interface DocumentConverters {
   docx: (bytes: ArrayBuffer) => Promise<string>;
 }
 
+/** A sněmovní tisk runs to thousands of pages (the občanský zákoník bill with its důvodová zpráva); the per-call window stays PDF_PAGES_PER_CALL. */
+export const PDF_MAX_TOTAL_PAGES = 5_000;
+
 const defaultConverters: DocumentConverters = {
   pdf: async (bytes, range) => {
-    const result = await (await import("@/src/zotero/pdf-text")).pdfText(bytes, { pageRange: range });
+    const result = await (await import("@/src/zotero/pdf-text")).pdfText(bytes, { pageRange: range, maxTotalPages: PDF_MAX_TOTAL_PAGES });
     return "unavailable" in result ? result : { text: result.text, pages: result.pages, range: result.pageRange, warnings: result.warnings };
   },
   docx: async (bytes) => {
@@ -700,10 +810,17 @@ async function fetchFile(url: string): Promise<{ bytes: ArrayBuffer; url: string
  * legacy .doc is asked for again as psp.cz's PDF rendition (&pdf=1); when
  * that is not a PDF either, the caller is told to open the file itself.
  */
+let activeConverters: DocumentConverters = defaultConverters;
+
+/** Tests swap the converters (pdf.js and mammoth are not exercised there); undefined restores the defaults. */
+export function setDocumentConverters(converters?: DocumentConverters): void {
+  activeConverters = converters ?? defaultConverters;
+}
+
 export async function getPspDocument(
   id: number,
   pdfRange: [number, number] = [1, PDF_PAGES_PER_CALL],
-  converters: DocumentConverters = defaultConverters,
+  converters: DocumentConverters = activeConverters,
 ): Promise<ExtractedDocument> {
   const key = memoKey("psp-doc", { id, pdfRange });
   return fileCache.through(key, async () => {
