@@ -190,6 +190,16 @@ export async function startRun(db: Queryable, source: MirrorSource, mode: RunMod
   return Number(rows[0].id);
 }
 
+/** Counts so far of a run still going — `mirror status` shows progress of a days-long backfill. */
+export async function updateRun(db: Queryable, id: number, counts: RunCounts): Promise<void> {
+  await db.query("UPDATE mirror.sync_run SET fetched = $2, changed = $3, failed = $4 WHERE id = $1", [
+    id,
+    counts.fetched,
+    counts.changed,
+    counts.failed,
+  ]);
+}
+
 export async function finishRun(db: Queryable, id: number, counts: RunCounts, error: string | null): Promise<void> {
   await db.query(
     "UPDATE mirror.sync_run SET finished_at = now(), fetched = $2, changed = $3, failed = $4, error = $5 WHERE id = $1",

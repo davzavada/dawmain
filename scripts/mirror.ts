@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { migrate } from "./db-migrate.mjs";
 import { closeMirrorPools, loadMirrorEnv, mirrorPool, mirrorUrl, poolDb } from "../src/mirror/db/client";
-import { finishRun, startRun, type RunCounts } from "../src/mirror/db/store";
+import { finishRun, startRun, updateRun, type RunCounts } from "../src/mirror/db/store";
 import { backfillUs, newUsPacer } from "../src/mirror/crawl/us";
 import { SourceStopped } from "../src/mirror/http";
 import { formatStatus, mirrorStatus } from "../src/mirror/status";
@@ -36,6 +36,13 @@ const MIRROR_MIGRATIONS_DIR = path.join(
   "db",
   "migrations",
 );
+
+/**
+ * Exit status of a run the source stopped (429/403). mirror-backfill@.service
+ * restarts after anything else (crash, network) but never after this one:
+ * a human looks first (v1-plan, pravidlo 5).
+ */
+const EXIT_SOURCE_STOPPED = 3;
 
 const PLANNED: Record<string, string> = {
   sync: "krok 6",
@@ -77,16 +84,25 @@ async function runBackfill(args: string[]): Promise<number> {
   const runId = await startRun(db, "us", "backfill");
   const log = (line: string) => console.log(`${new Date().toISOString().slice(11, 19)} ${line}`);
   let error: string | null = null;
+  let stopped = false;
+  let reported = 0;
+  const progress = async (c: RunCounts) => {
+    const done = c.fetched + c.failed;
+    if (done - reported < 50) return;
+    reported = done;
+    await updateRun(db, runId, c);
+  };
   try {
-    await backfillUs({ db, pacer: newUsPacer(), log }, { limit, quarters }, counts);
+    await backfillUs({ db, pacer: newUsPacer(), log, progress }, { limit, quarters }, counts);
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
+    stopped = e instanceof SourceStopped;
     log(e instanceof SourceStopped ? `us: ZASTAVENO — ${error}` : `us: běh selhal — ${error}`);
   } finally {
     await finishRun(db, runId, counts, error);
   }
   log(`us: hotovo — staženo ${counts.fetched}, nových/změněných ${counts.changed}, chyb ${counts.failed}`);
-  return error ? 1 : 0;
+  return stopped ? EXIT_SOURCE_STOPPED : error ? 1 : 0;
 }
 
 async function runStatus(): Promise<void> {

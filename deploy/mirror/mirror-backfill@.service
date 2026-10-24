@@ -1,0 +1,34 @@
+# Full backfill of one source (docs/infra/v1-plan.md, krok 5) on LXC `app`:
+#   systemctl enable --now mirror-backfill@us
+# Runs on its own: after a crash or a network failure it restarts in 60 s and
+# resumes from mirror.sync_cursor (decisions already stored are skipped), and
+# it starts again after a reboot. It never restarts after exit status 3: the
+# source answered 429/403, which stops it on purpose (v1-plan, pravidlo 5)
+# until a human looks — `mirror status`, `journalctl -u mirror-backfill@us`.
+# A finished backfill exits 0 and stays down; disable it then.
+[Unit]
+Description=Dawmain mirror backfill (%i)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=1h
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=mirror
+Group=mirror
+WorkingDirectory=/opt/dawmain
+EnvironmentFile=/etc/mirror/env
+Environment=NODE_ENV=production
+ExecStart=/opt/dawmain/node_modules/.bin/tsx scripts/mirror.ts backfill --source %i
+Restart=on-failure
+RestartSec=60
+RestartPreventExitStatus=3
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/tmp
+
+[Install]
+WantedBy=multi-user.target

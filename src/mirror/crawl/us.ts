@@ -33,6 +33,8 @@ export interface CrawlContext {
   db: Db;
   pacer: Pacer;
   log: (line: string) => void;
+  /** Called after every stored or failed decision (the CLI writes counts every 50). */
+  progress?: (counts: RunCounts) => Promise<void>;
 }
 
 export function newUsPacer(): Pacer {
@@ -162,6 +164,7 @@ async function fetchAndStore(ctx: CrawlContext, hits: UsHit[], counts: RunCounts
       ctx.log(`us: ${hit.sz}: ${message}`);
       await enqueue(ctx.db, "us", hit.sz, "decision", message);
     }
+    await ctx.progress?.(counts);
   }
 }
 
