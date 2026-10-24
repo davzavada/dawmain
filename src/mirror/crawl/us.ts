@@ -37,8 +37,10 @@ export interface CrawlContext {
   progress?: (counts: RunCounts) => Promise<void>;
 }
 
-export function newUsPacer(): Pacer {
-  return new Pacer(1_000);
+/** Requests per second across all workers (MIRROR_US_RPS; v1-plan default 1, set 4 on 24. 10.). */
+export function newUsPacer(rps = 1): Pacer {
+  if (!(rps > 0 && rps <= 10)) throw new Error(`requests per second must be in (0, 10], got ${rps}`);
+  return new Pacer(1_000 / rps);
 }
 
 // ---------- quarters ----------
@@ -146,26 +148,41 @@ export async function fetchUsDecision(ctx: CrawlContext, hit: UsHit) {
   return mapUs(hit, decision, abstract, usTextExtras(html));
 }
 
-/** Fetch and store `hits` (skipping those stored with text); failures go to fetch_queue. */
-async function fetchAndStore(ctx: CrawlContext, hits: UsHit[], counts: RunCounts): Promise<void> {
+/**
+ * Fetch and store `hits` (skipping those stored with text) with `concurrency`
+ * workers sharing ctx.pacer — the pacer, not the worker count, sets the
+ * rate; more workers only keep it up while NALUS answers slowly. Failures go
+ * to fetch_queue; a SourceStopped stops every worker and is rethrown.
+ */
+async function fetchAndStore(ctx: CrawlContext, hits: UsHit[], counts: RunCounts, concurrency: number): Promise<void> {
   const done = await idsWithText(ctx.db, "us", hits.map((h) => h.sz), US_PARSER_VERSION);
-  for (const hit of hits) {
-    if (done.has(hit.sz)) continue;
-    try {
-      const record = await fetchUsDecision(ctx, hit);
-      const saved = await saveDecision(ctx.db, record);
-      counts.fetched++;
-      if (saved.inserted || saved.textChanged) counts.changed++;
-      await dequeue(ctx.db, "us", hit.sz);
-    } catch (error) {
-      if (error instanceof SourceStopped) throw error;
-      counts.failed++;
-      const message = error instanceof Error ? error.message : String(error);
-      ctx.log(`us: ${hit.sz}: ${message}`);
-      await enqueue(ctx.db, "us", hit.sz, "decision", message);
+  const todo = hits.filter((h) => !done.has(h.sz));
+  let next = 0;
+  let stopped: SourceStopped | null = null;
+  const worker = async () => {
+    while (stopped === null && next < todo.length) {
+      const hit = todo[next++];
+      try {
+        const record = await fetchUsDecision(ctx, hit);
+        const saved = await saveDecision(ctx.db, record);
+        counts.fetched++;
+        if (saved.inserted || saved.textChanged) counts.changed++;
+        await dequeue(ctx.db, "us", hit.sz);
+      } catch (error) {
+        if (error instanceof SourceStopped) {
+          stopped = error;
+          return;
+        }
+        counts.failed++;
+        const message = error instanceof Error ? error.message : String(error);
+        ctx.log(`us: ${hit.sz}: ${message}`);
+        await enqueue(ctx.db, "us", hit.sz, "decision", message);
+      }
+      await ctx.progress?.(counts);
     }
-    await ctx.progress?.(counts);
-  }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, concurrency) }, worker));
+  if (stopped) throw stopped;
 }
 
 // ---------- backfill ----------
@@ -175,6 +192,8 @@ export interface UsBackfillOptions {
   quarters?: string[];
   /** At most this many decisions in total, spread evenly over the quarters and within each. */
   limit?: number;
+  /** Decisions fetched at once (MIRROR_US_CONCURRENCY); default 1. */
+  concurrency?: number;
 }
 
 /** Every k-th row so a sample spans the whole quarter (nálezy and usnesení alike). */
@@ -201,7 +220,7 @@ export async function backfillUs(ctx: CrawlContext, options: UsBackfillOptions, 
     const all = await discoverUs(ctx, from, to);
     const take = perQuarter ? spread(all, Math.min(perQuarter, left)) : all;
     ctx.log(`us: ${q}: ${all.length} rozhodnutí, stahuji ${take.length}`);
-    await fetchAndStore(ctx, take, counts);
+    await fetchAndStore(ctx, take, counts, options.concurrency ?? 1);
     left -= take.length;
     if (!pilot && !options.limit) await writeCursor(ctx.db, "us", { next: nextQuarter(q) });
   }

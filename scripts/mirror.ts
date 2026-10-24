@@ -93,7 +93,11 @@ async function runBackfill(args: string[]): Promise<number> {
     await updateRun(db, runId, c);
   };
   try {
-    await backfillUs({ db, pacer: newUsPacer(), log, progress }, { limit, quarters }, counts);
+    const rps = Number(process.env.MIRROR_US_RPS ?? "1");
+    const concurrency = Number(process.env.MIRROR_US_CONCURRENCY ?? "1");
+    if (!(Number.isInteger(concurrency) && concurrency >= 1 && concurrency <= 8)) throw new Error("MIRROR_US_CONCURRENCY must be 1–8");
+    log(`us: tempo ${rps} req/s, souběžně ${concurrency}`);
+    await backfillUs({ db, pacer: newUsPacer(rps), log, progress }, { limit, quarters, concurrency }, counts);
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
     stopped = e instanceof SourceStopped;
