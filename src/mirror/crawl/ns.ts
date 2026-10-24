@@ -10,9 +10,9 @@ import { fetchAndStore, spread, type CrawlContext } from "./workers";
  * NS backfill (v1-plan, zdroj 2). Discover: the Domino view behind the
  * search lists every document, `WebSearch?ReadViewEntries&OutputFormat=JSON`
  * — UNID and case number, up to 3,000 a request (165,460 on 24. 10. 2026),
- * ordered by UNID. Fetch: WebPrint/{UNID}, WebSearch/{UNID} when WebPrint
- * has no body (nsBodyMissing; the longer text wins, as getNsDecision does),
- * then the decision's own pictures (the state emblem…) one by one.
+ * ordered by UNID. Fetch: WebSearch/{UNID}, WebPrint/{UNID} when it has no
+ * body (nsBodyMissing; the longer text wins), then the decision's own
+ * pictures (the state emblem of older decisions) one by one.
  *
  * Domino answers a burst with HTTP 500 for minutes: the plan's 1 req/s and
  * at most 2 at once, plus the workers' cool-down after a run of failures.
@@ -72,14 +72,20 @@ async function fetchRendition(ctx: CrawlContext, unid: string, rendition: "WebPr
   return { ...parseNsMarked(html, unid, pictures.length), pictures };
 }
 
+/**
+ * WebSearch first: it alone carries "Zveřejněno na webu", and its text equals
+ * WebPrint's (pilot 24. 10.: 100/100 once the leading citation note is cut).
+ * WebPrint only when WebSearch has no body; the longer text wins, WebSearch's
+ * metadata where both have a field.
+ */
 export async function fetchNsDecision(ctx: CrawlContext, entry: NsEntry): Promise<DecisionRecord> {
-  let page = await fetchRendition(ctx, entry.unid, "WebPrint");
-  let textSource: "ns:webprint" | "ns:websearch" = "ns:webprint";
+  let page = await fetchRendition(ctx, entry.unid, "WebSearch");
+  let textSource: "ns:webprint" | "ns:websearch" = "ns:websearch";
   if (nsBodyMissing(page.decision.text)) {
-    const other = await fetchRendition(ctx, entry.unid, "WebSearch");
+    const other = await fetchRendition(ctx, entry.unid, "WebPrint");
     if (other.decision.text.length > page.decision.text.length) {
       page = { ...other, decision: { ...other.decision, metadata: { ...other.decision.metadata, ...page.decision.metadata } } };
-      textSource = "ns:websearch";
+      textSource = "ns:webprint";
     }
   }
   const images: DecisionImage[] = [];

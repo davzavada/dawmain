@@ -4,8 +4,8 @@ import { decisionType, type DecisionImage, type DecisionRecord } from "../types"
 
 /**
  * NS (rozhodnuti.nsoud.cz, Domino) → DecisionRecord. Identity is the UNID;
- * the base fields come from the decision page's metadata table (WebPrint,
- * WebSearch as the fallback rendition), the text from its body.
+ * the base fields come from the decision page's metadata table (WebSearch,
+ * WebPrint as the fallback rendition), the text from its body.
  *
  * Pictures: Domino serves the rich-text pictures of a decision (every one
  * carries the state emblem above "ČESKÁ REPUBLIKA") as separate GIF
@@ -15,7 +15,8 @@ import { decisionType, type DecisionImage, type DecisionRecord } from "../types"
  * precedes the judgment's opening) lands at offset 0. Pure — unit-tested.
  */
 
-export const NS_PARSER_VERSION = 1;
+/** 2: WebSearch first (publication date), leading citation note cut. */
+export const NS_PARSER_VERSION = 2;
 
 const BASE = "https://rozhodnuti.nsoud.cz";
 const MARK_OPEN = "";

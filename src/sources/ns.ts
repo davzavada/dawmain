@@ -505,6 +505,12 @@ export function parseNsDecision(html: string, unid: string): NsDecision {
   // WebPrint pages — cut it only when it trails the text.
   const end = text.lastIndexOf("Citace rozhodnutí");
   if (end > text.length / 2) text = text.slice(0, end);
+  // A leading note survives the opening cut when the decision opens another
+  // way — "Předseda senátu Nejvyššího soudu rozhodl …" (live 3 Tdo 1140/2023,
+  // 5 To 35/2016: WebSearch then carried 61 words WebPrint has not). It is
+  // one paragraph ending with the source ("… dostupné na www.nsoud.cz.").
+  const note = /^\s*Citace rozhodnutí Nejvyššího soudu by měla obsahovat[^\n]*?(?:nsoud\.cz\.?)[^\n]*\n/u.exec(text);
+  if (note) text = text.slice(note[0].length);
   text = text.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
 
   if (!text && !Object.keys(metadata).length) {
