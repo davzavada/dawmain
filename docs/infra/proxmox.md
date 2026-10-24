@@ -73,3 +73,19 @@ ssh pve pct exec 102 -- bash -c 'cd /opt/dawmain && npx tsx scripts/mirror.ts mi
 ```
 
 Návrat: `pct rollback 101 pre-<migrace>` (zahodí vše zapsané po snapshotu).
+
+## Cloudflare Tunnel (veřejný přístup k API)
+
+- `cloudflared` (balíček z pkg.cloudflare.com) v `app`, služba `cloudflared`,
+  konfigurace `/etc/cloudflared/config.yml`, tunel `dawmain-databaze`
+  (id `15254ebe-679c-44bb-b460-43b938865323`), přihlašovací soubor tunelu
+  v `/etc/cloudflared/` (600).
+- Ingress: jen `dawmain-databaze.davidzavada.cz` → `http://192.168.0.52:8080`
+  (API); vše ostatní 404. Postgres ani Proxmox tunelem nevedou. Spojení jde
+  jen ven, na routeru není otevřený žádný port.
+- Ochrana: Cloudflare Access (aplikace `dawmain-databaze`, politika Service
+  Auth se servisním tokenem `dawmain-vercel`) + bearer token API.
+  Klient posílá `CF-Access-Client-Id`, `CF-Access-Client-Secret` a
+  `Authorization: Bearer …`.
+- Kontrola: `cloudflared tunnel --config /etc/cloudflared/config.yml ingress validate`,
+  `journalctl -u cloudflared`.
