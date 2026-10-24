@@ -143,8 +143,8 @@ describe("type, dissent and pictures", () => {
 describe("reindex", () => {
   it("rebuilds chunks and every dissent from the stored text and pictures, without the source", async () => {
     const text = "Nález. ".repeat(100) + "\nV Brně\n\n1. S T A N O V I S K O\nsoudce X\n" + "Důvody. ".repeat(80) + "\n\nOdlišné stanovisko soudce Y\n\nNesouhlasím.";
-    const rule = { charAt: text.indexOf("\n\n1. S"), mime: "image/png" as const, width: 609, height: 1, bytes: Uint8Array.from([0x89, 0x50]) };
-    await saveDecision(db, record({ sourceId: "Pl-36-93", decisionType: "nalez", text: { body: text, source: "us:gettext-hidden" }, images: [rule] }));
+    const rule = (at: number) => ({ charAt: at, mime: "image/png" as const, width: 609, height: 1, bytes: Uint8Array.from([0x89, 0x50]) });
+    await saveDecision(db, record({ sourceId: "Pl-36-93", decisionType: "nalez", text: { body: text, source: "us:gettext-hidden" }, images: [rule(text.indexOf("\n\n1. S")), rule(text.indexOf("\n\nOdlišné"))] }));
     const id = (await pg.query<{ id: number }>("SELECT id FROM mirror.decision WHERE source_id = 'Pl-36-93'")).rows[0].id;
     const dissents = async () =>
       (await pg.query<{ heading: string }>("SELECT heading FROM mirror.decision_dissent WHERE decision_id = $1 ORDER BY ord", [id])).rows.map((r) => r.heading);
@@ -180,7 +180,7 @@ describe("fetch_queue and runs", () => {
     await finishRun(db, id, { fetched: 3, changed: 2, failed: 1 }, null);
     const status = await mirrorStatus(db);
     const us = status.sources.find((s) => s.source === "us")!;
-    expect(us).toMatchObject({ decisions: 4, withText: 3, withoutText: 1, shortText: 1, withLegalSentence: 1, withDissent: 2, dissents: 3, images: 1, queued: 1 });
+    expect(us).toMatchObject({ decisions: 4, withText: 3, withoutText: 1, shortText: 1, withLegalSentence: 1, withDissent: 2, dissents: 3, images: 2, queued: 1 });
     expect(us.types).toEqual({ usneseni: 2, nalez: 2 });
     expect(us.lastRun).toMatchObject({ mode: "backfill", fetched: 3, changed: 2, failed: 1, error: null });
     expect(status.sources.find((s) => s.source === "ns")).toMatchObject({ decisions: 0, lastRun: null });

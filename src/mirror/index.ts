@@ -115,21 +115,26 @@ export interface DissentSpan {
  * - or the text after a separator rule (isSeparatorRule) among `images`:
  *   NALUS draws one before each dissent, also before headings without the
  *   word "odlišné" (Pl. ÚS 36/93: "1. S T A N O V I S K O").
- * A rule and the heading just below it are one dissent. Each runs to the
- * next one or to the end of the text. Pure.
+ * Where the decision has separator rules they alone count: a heading-like
+ * line inside a dissent ("Odlišné stanovisko, podané k části výroku …" under
+ * "1. S T A N O V I S K O", Pl. ÚS 36/93) is not a new one. Headings count
+ * only in a text without rules. A rule and the heading just below it are
+ * one dissent. Each runs to the next one or to the end of the text. Pure.
  */
 export function findDissents(body: string, images: Array<{ charAt: number; width: number | null; height: number | null }> = []): DissentSpan[] {
   const starts: number[] = [];
-  for (const m of body.matchAll(/^[^\n]*$/gm)) {
-    const line = m[0].trim();
-    if (!line || line.length > MAX_DISSENT_HEADING) continue;
-    if (/^(?:\d{1,2}\.)?odlišn[éáý]stanovisk/i.test(line.replace(/\s+/g, ""))) starts.push(m.index + m[0].indexOf(line[0]));
-  }
   for (const img of images) {
     if (!isSeparatorRule(img)) continue;
     let at = Math.min(img.charAt, body.length);
     while (at < body.length && /\s/.test(body[at])) at++;
     if (at < body.length) starts.push(at);
+  }
+  if (starts.length === 0) {
+    for (const m of body.matchAll(/^[^\n]*$/gm)) {
+      const line = m[0].trim();
+      if (!line || line.length > MAX_DISSENT_HEADING) continue;
+      if (/^(?:\d{1,2}\.)?odlišn[éáý]stanovisk/i.test(line.replace(/\s+/g, ""))) starts.push(m.index + m[0].indexOf(line[0]));
+    }
   }
   starts.sort((a, b) => a - b);
   const merged: number[] = [];

@@ -83,6 +83,11 @@ describe("findDissents", () => {
     expect(findDissents(body).map((d) => d.start)).toEqual([body.indexOf("2. Odlišné")]);
     // With them both, and the rule + heading of the second one are one dissent.
     expect(findDissents(body, rules).map((d) => d.heading)).toEqual(["1. S T A N O V I S K O", "2. Odlišné stanovisko"]);
+    // With rules, a heading-like line inside a dissent is not a new one (Pl. ÚS 36/93).
+    const sub = body.replace("soudce X", "soudce X\n\n" + "Úvod. ".repeat(60) + "\nOdlišné stanovisko, podané k části výroku\n");
+    const subRules = [sub.indexOf("\n\n1. S"), sub.indexOf("\n\n2. O")].map((charAt) => ({ charAt, width: 609, height: 1 }));
+    expect(findDissents(sub, subRules)).toHaveLength(2);
+    expect(findDissents(sub)).toHaveLength(2); // without rules: the two "Odlišné stanovisko" lines
     // A picture that is not a thin rule says nothing.
     expect(findDissents(body, [{ ...rules[0], height: 200 }]).map((d) => d.start)).toEqual([body.indexOf("2. Odlišné")]);
   });
