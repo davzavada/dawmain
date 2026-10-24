@@ -17,7 +17,9 @@ leží jen v `/etc/mirror/env` a `/root/.pgpass` na LXC `app` (práva 600).
 
 ## Kontejnery
 
-Oba Debian 13, neprivilegované, `nesting=1`, start po bootu.
+Oba Debian 13, neprivilegované, `nesting=1`, start po bootu, časová zóna
+`Europe/Prague` (systemd timery). Postgres sám běží v UTC; časy jsou
+`timestamptz`, převádí se až při zobrazení.
 
 | CT | Jméno | RAM / vCPU / disk | LAN (`eth0`) | Vnitřní (`eth1`) |
 | --- | --- | --- | --- | --- |
