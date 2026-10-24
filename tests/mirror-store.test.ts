@@ -125,7 +125,7 @@ describe("type, dissent and pictures", () => {
     expect(r.decision_type).toBe("nalez");
     expect(r.dissent_at).toBe(dissentBody.indexOf("Odlišné stanovisko"));
     const img = await pg.query<{ ord: number; mime: string; width: number; bytes: Uint8Array; sha256: string }>(
-      "SELECT i.ord, i.mime, i.width, i.bytes, i.sha256 FROM mirror.decision_image i JOIN mirror.decision d ON d.id = i.decision_id WHERE d.source_id = '4-296-24_1'",
+      "SELECT i.ord, i.mime, i.width, b.bytes, i.sha256 FROM mirror.decision_image i JOIN mirror.image_blob b ON b.sha256 = i.sha256 JOIN mirror.decision d ON d.id = i.decision_id WHERE d.source_id = '4-296-24_1'",
     );
     expect(img.rows).toHaveLength(1);
     expect(img.rows[0]).toMatchObject({ ord: 0, mime: "image/png", width: 609 });
@@ -137,6 +137,21 @@ describe("type, dissent and pictures", () => {
     // A newer parser rewrites the pictures it read.
     await saveDecision(db, { ...base, parserVersion: 2, images: [] });
     expect((await pg.query("SELECT 1 FROM mirror.decision_image")).rows).toHaveLength(0);
+  });
+});
+
+describe("image blobs", () => {
+  it("stores the same picture once, however many decisions carry it", async () => {
+    const emblem = Uint8Array.from(Buffer.from("47494638396169007700", "hex"));
+    const img = { charAt: 0, mime: "image/gif" as const, width: 105, height: 119, bytes: emblem, sourceUrl: "https://example.test/emblem" };
+    for (const sid of ["NS-A", "NS-B", "NS-C"]) {
+      await saveDecision(db, record({ sourceId: sid, text: { body: `Rozsudek ${sid}.`, source: "ns:webprint" }, images: [img] }));
+    }
+    const sha = (await pg.query<{ sha256: string }>("SELECT DISTINCT sha256 FROM mirror.decision_image WHERE mime = 'image/gif'")).rows;
+    expect(sha).toHaveLength(1);
+    expect((await pg.query("SELECT 1 FROM mirror.image_blob WHERE sha256 = $1", [sha[0].sha256])).rows).toHaveLength(1);
+    expect((await pg.query("SELECT 1 FROM mirror.decision_image WHERE sha256 = $1", [sha[0].sha256])).rows).toHaveLength(3);
+    await pg.query("DELETE FROM mirror.decision WHERE source_id IN ('NS-A', 'NS-B', 'NS-C')");
   });
 });
 

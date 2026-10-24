@@ -34,7 +34,7 @@ function paragraphs(text: string): string {
 
 function image(img: RenderImage): string {
   if (isSeparatorRule(img)) return '<hr class="dissent">';
-  if (img.mime !== "image/png" && img.mime !== "image/jpeg") {
+  if (img.mime !== "image/png" && img.mime !== "image/jpeg" && img.mime !== "image/gif") {
     return `<p class="img-missing">[obrázek ${img.ord + 1}: ${escape(img.mime)} – prohlížeč ho neumí zobrazit]</p>`;
   }
   const size = img.width && img.height ? ` width="${img.width}" height="${img.height}"` : "";

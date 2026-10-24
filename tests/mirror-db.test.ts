@@ -73,6 +73,7 @@ describe("mirror schema", () => {
       "decision_image",
       "decision_text",
       "fetch_queue",
+      "image_blob",
       "sync_cursor",
       "sync_run",
     ]);

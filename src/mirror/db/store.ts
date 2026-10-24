@@ -125,10 +125,17 @@ export async function writeImages(tx: Queryable, images: DecisionImage[], id: nu
   await tx.query("DELETE FROM mirror.decision_image WHERE decision_id = $1", [id]);
   for (const [ord, img] of images.entries()) {
     const bytes = Buffer.from(img.bytes);
+    const sha = createHash("sha256").update(bytes).digest("hex");
+    // Stored once: the emblem of every NS decision is one row here.
+    await tx.query("INSERT INTO mirror.image_blob (sha256, mime, bytes) VALUES ($1, $2, $3) ON CONFLICT (sha256) DO NOTHING", [
+      sha,
+      img.mime,
+      bytes,
+    ]);
     await tx.query(
-      `INSERT INTO mirror.decision_image (decision_id, ord, char_at, mime, width, height, bytes, sha256)
+      `INSERT INTO mirror.decision_image (decision_id, ord, char_at, mime, width, height, sha256, source_url)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [id, ord, img.charAt, img.mime, img.width, img.height, bytes, createHash("sha256").update(bytes).digest("hex")],
+      [id, ord, img.charAt, img.mime, img.width, img.height, sha, img.sourceUrl ?? null],
     );
   }
 }

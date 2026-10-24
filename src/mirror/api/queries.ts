@@ -212,8 +212,8 @@ export async function getDecision(db: Queryable, source: MirrorSource, id: strin
                                                         'heading', x.heading) ORDER BY x.ord)
                       FROM mirror.decision_dissent x WHERE x.decision_id = d.id), '[]'::json) AS dissents,
             coalesce((SELECT json_agg(json_build_object('ord', i.ord, 'charAt', i.char_at, 'mime', i.mime, 'width', i.width,
-                                                        'height', i.height, 'bytes', length(i.bytes)) ORDER BY i.ord)
-                      FROM mirror.decision_image i WHERE i.decision_id = d.id), '[]'::json) AS images
+                                                        'height', i.height, 'bytes', length(b.bytes)) ORDER BY i.ord)
+                      FROM mirror.decision_image i JOIN mirror.image_blob b ON b.sha256 = i.sha256 WHERE i.decision_id = d.id), '[]'::json) AS images
      FROM mirror.decision d LEFT JOIN mirror.decision_text t ON t.decision_id = d.id
      WHERE d.source = $1 AND d.source_id = $2`,
     [source, id],
@@ -256,7 +256,8 @@ export async function getImage(
   ord: number,
 ): Promise<{ mime: string; bytes: Uint8Array; sha256: string } | null> {
   const { rows } = await db.query<{ mime: string; bytes: Uint8Array; sha256: string }>(
-    `SELECT i.mime, i.bytes, i.sha256 FROM mirror.decision_image i JOIN mirror.decision d ON d.id = i.decision_id
+    `SELECT i.mime, b.bytes, i.sha256 FROM mirror.decision_image i JOIN mirror.image_blob b ON b.sha256 = i.sha256
+     JOIN mirror.decision d ON d.id = i.decision_id
      WHERE d.source = $1 AND d.source_id = $2 AND i.ord = $3`,
     [source, id, ord],
   );
@@ -266,8 +267,8 @@ export async function getImage(
 /** All pictures with their bytes (for the HTML rendering, which inlines them). */
 export async function getImages(db: Queryable, source: MirrorSource, id: string) {
   const { rows } = await db.query<{ ord: number; char_at: number; mime: string; width: number | null; height: number | null; bytes: Uint8Array }>(
-    `SELECT i.ord, i.char_at, i.mime, i.width, i.height, i.bytes FROM mirror.decision_image i
-     JOIN mirror.decision d ON d.id = i.decision_id WHERE d.source = $1 AND d.source_id = $2 ORDER BY i.ord`,
+    `SELECT i.ord, i.char_at, i.mime, i.width, i.height, b.bytes FROM mirror.decision_image i
+     JOIN mirror.image_blob b ON b.sha256 = i.sha256 JOIN mirror.decision d ON d.id = i.decision_id WHERE d.source = $1 AND d.source_id = $2 ORDER BY i.ord`,
     [source, id],
   );
   return rows;

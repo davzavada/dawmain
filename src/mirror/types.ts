@@ -24,10 +24,12 @@ export function decisionType(raw: string | null | undefined): DecisionType | nul
 /** A picture embedded in the decision, at an offset into the text. */
 export interface DecisionImage {
   charAt: number;
-  mime: "image/png" | "image/jpeg" | "image/x-wmf" | "image/x-emf";
+  mime: "image/png" | "image/jpeg" | "image/gif" | "image/x-wmf" | "image/x-emf";
   width: number | null;
   height: number | null;
   bytes: Uint8Array;
+  /** Where a separately fetched picture came from (NS: the Domino element URL). */
+  sourceUrl?: string;
 }
 
 export interface DecisionRecord {

@@ -3,14 +3,14 @@
  * CLI of the case-law mirror (docs/infra/v1-plan.md), run on LXC `app`:
  *
  *   npx tsx scripts/mirror.ts migrate [--dry-run]   apply src/mirror/db/migrations as mirror_owner
- *   npx tsx scripts/mirror.ts backfill --source us [--limit N] [--quarters 2004Q2,2024Q2]
+ *   npx tsx scripts/mirror.ts backfill --source us|ns [--limit N] [--quarters 2004Q2,2024Q2 (us)]
  *                                                   without --quarters: from the cursor to today
  *   npx tsx scripts/mirror.ts reindex --source us   rebuild chunks and dissents from the stored text (no network)
  *   npx tsx scripts/mirror.ts status                per-source counts, last run, queue
  *   npx tsx scripts/mirror.ts api                   HTTP API on MIRROR_API_HOST:MIRROR_API_PORT
  *                                                   (default 127.0.0.1:8080), token MIRROR_API_TOKEN
  *
- * Planned (later steps of the plan): sync; backfill of ns, nss, justice.
+ * Planned (later steps of the plan): sync; backfill of nss, justice.
  *
  * Connection strings come from the environment or /etc/mirror/env
  * (MIRROR_ENV_FILE overrides the path).
@@ -25,6 +25,8 @@ import { finishRun, startRun, updateRun, type RunCounts, type RunMode } from "..
 import { reindexSource } from "../src/mirror/reindex";
 import { MIRROR_SOURCES, type MirrorSource } from "../src/mirror/types";
 import { backfillUs, newUsPacer } from "../src/mirror/crawl/us";
+import { backfillNs } from "../src/mirror/crawl/ns";
+import { newPacer } from "../src/mirror/crawl/workers";
 import { SourceStopped } from "../src/mirror/http";
 import { formatStatus, mirrorStatus } from "../src/mirror/status";
 import { serve } from "@hono/node-server";
@@ -69,23 +71,35 @@ async function runMigrate(args: string[]): Promise<void> {
   }
 }
 
+/**
+ * Rate of a source: MIRROR_<SOURCE>_RPS and MIRROR_<SOURCE>_CONCURRENCY in
+ * /etc/mirror/env, else the plan's defaults (1 req/s; NS at most 2 at once).
+ */
+function rate(source: "us" | "ns", log: (line: string) => void): { rps: number; concurrency: number } {
+  const key = source.toUpperCase();
+  const rps = Number(process.env[`MIRROR_${key}_RPS`] ?? "1");
+  const concurrency = Number(process.env[`MIRROR_${key}_CONCURRENCY`] ?? (source === "ns" ? "2" : "1"));
+  if (!(Number.isInteger(concurrency) && concurrency >= 1 && concurrency <= 8)) throw new Error(`MIRROR_${key}_CONCURRENCY must be 1–8`);
+  log(`${source}: tempo ${rps} req/s, souběžně ${concurrency}`);
+  return { rps, concurrency };
+}
+
 async function runBackfill(args: string[]): Promise<number> {
   const source = option(args, "--source");
-  if (source !== "us") {
-    console.error(`mirror backfill: zdroj ${source ?? "(chybí --source)"} zatím není (v1: us; ns, nss, justice v kroku 5)`);
+  if (source !== "us" && source !== "ns") {
+    console.error(`mirror backfill: zdroj ${source ?? "(chybí --source)"} zatím není (us, ns; nss a justice v kroku 5)`);
     return 2;
   }
   const limitArg = option(args, "--limit");
   const limit = limitArg ? Number(limitArg) : undefined;
   if (limit !== undefined && !(Number.isInteger(limit) && limit > 0)) throw new Error("--limit must be a positive integer");
   const quarters = option(args, "--quarters")?.split(",").map((q) => q.trim());
+  if (quarters && source !== "us") throw new Error("--quarters is for us only");
 
-  return runTracked("us", "backfill", async (ctx, counts) => {
-    const rps = Number(process.env.MIRROR_US_RPS ?? "1");
-    const concurrency = Number(process.env.MIRROR_US_CONCURRENCY ?? "1");
-    if (!(Number.isInteger(concurrency) && concurrency >= 1 && concurrency <= 8)) throw new Error("MIRROR_US_CONCURRENCY must be 1–8");
-    ctx.log(`us: tempo ${rps} req/s, souběžně ${concurrency}`);
-    await backfillUs({ ...ctx, pacer: newUsPacer(rps) }, { limit, quarters, concurrency }, counts);
+  return runTracked(source, "backfill", async (ctx, counts) => {
+    const { rps, concurrency } = rate(source, ctx.log);
+    if (source === "us") await backfillUs({ ...ctx, pacer: newUsPacer(rps) }, { limit, quarters, concurrency }, counts);
+    else await backfillNs({ ...ctx, pacer: newPacer(rps) }, { limit, concurrency }, counts);
   });
 }
 
@@ -186,7 +200,7 @@ async function main(argv: string[]): Promise<number> {
     console.error(`mirror ${command}: zatím neimplementováno (${PLANNED[command]} plánu)`);
     return 2;
   }
-  console.error("usage: mirror migrate [--dry-run] | backfill --source us [--limit N] [--quarters …] | reindex --source … | status | api");
+  console.error("usage: mirror migrate [--dry-run] | backfill --source us|ns [--limit N] [--quarters …] | reindex --source … | status | api");
   return 2;
 }
 
