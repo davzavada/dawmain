@@ -41,6 +41,8 @@ export interface DecisionRecord {
   caseNumber: string | null;
   caseNumbers: string[];
   decisionType: DecisionType | null;
+  /** Flags the source sets itself, verbatim (justice: specialType); absent = none. */
+  sourceFlags?: string[];
   decidedOn: string | null; // ISO date
   legalSentence: string | null;
   ecli: string | null;

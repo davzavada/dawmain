@@ -23,7 +23,7 @@ export async function reindexSource(ctx: ReindexContext, source: MirrorSource, c
   for (;;) {
     if (ctx.shouldStop?.()) return;
     const { rows } = await ctx.db.query<Record<string, unknown>>(
-      `SELECT d.id, d.source_id, d.url, d.court, d.case_number, d.case_numbers, d.decision_type, d.decided_on::text AS decided_on,
+      `SELECT d.id, d.source_id, d.url, d.court, d.case_number, d.case_numbers, d.decision_type, d.source_flags, d.decided_on::text AS decided_on,
               d.legal_sentence, d.ecli, d.published_on::text AS published_on, d.parser_version, t.body, t.text_source
        FROM mirror.decision d JOIN mirror.decision_text t ON t.decision_id = d.id
        WHERE d.source = $1 AND d.id > $2 ORDER BY d.id LIMIT $3`,
@@ -42,6 +42,7 @@ export async function reindexSource(ctx: ReindexContext, source: MirrorSource, c
         caseNumber: (r.case_number as string | null) ?? null,
         caseNumbers: (r.case_numbers as string[]) ?? [],
         decisionType: (r.decision_type as DecisionType | null) ?? null,
+        sourceFlags: (r.source_flags as string[]) ?? [],
         decidedOn: (r.decided_on as string | null) ?? null,
         legalSentence: (r.legal_sentence as string | null) ?? null,
         ecli: (r.ecli as string | null) ?? null,

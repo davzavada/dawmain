@@ -33,14 +33,15 @@ export async function saveDecision(db: Db, record: DecisionRecord, options: { re
     const { rows } = await tx.query<{ id: string | number; prev_sha: string | null; prev_parser: number | null; inserted: boolean }>(
       `WITH prev AS (SELECT text_sha256, parser_version FROM mirror.decision WHERE source = $1 AND source_id = $2)
        INSERT INTO mirror.decision AS d
-         (source, source_id, url, court, case_number, case_numbers, decided_on, legal_sentence, ecli, published_on, text_sha256, parser_version, decision_type)
-       VALUES ($1, $2, $3, $4, $5, $6::text[], $7::date, $8, $9, $10::date, $11, $12, $13)
+         (source, source_id, url, court, case_number, case_numbers, decided_on, legal_sentence, ecli, published_on, text_sha256, parser_version, decision_type, source_flags)
+       VALUES ($1, $2, $3, $4, $5, $6::text[], $7::date, $8, $9, $10::date, $11, $12, $13, $14::text[])
        ON CONFLICT (source, source_id) DO UPDATE SET
          url = EXCLUDED.url,
          court = EXCLUDED.court,
          case_number = EXCLUDED.case_number,
          case_numbers = EXCLUDED.case_numbers,
          decision_type = EXCLUDED.decision_type,
+         source_flags = EXCLUDED.source_flags,
          decided_on = EXCLUDED.decided_on,
          legal_sentence = EXCLUDED.legal_sentence,
          ecli = EXCLUDED.ecli,
@@ -50,10 +51,10 @@ export async function saveDecision(db: Db, record: DecisionRecord, options: { re
          last_seen_at = now(),
          gone_at = NULL,
          last_changed_at = CASE
-           WHEN (d.url, d.court, d.case_number, d.case_numbers, d.decision_type, d.decided_on, d.legal_sentence, d.ecli,
-                 d.published_on, d.text_sha256)
+           WHEN (d.url, d.court, d.case_number, d.case_numbers, d.decision_type, d.source_flags, d.decided_on, d.legal_sentence,
+                 d.ecli, d.published_on, d.text_sha256)
                 IS DISTINCT FROM
-                (EXCLUDED.url, EXCLUDED.court, EXCLUDED.case_number, EXCLUDED.case_numbers, EXCLUDED.decision_type,
+                (EXCLUDED.url, EXCLUDED.court, EXCLUDED.case_number, EXCLUDED.case_numbers, EXCLUDED.decision_type, EXCLUDED.source_flags,
                  EXCLUDED.decided_on, EXCLUDED.legal_sentence, EXCLUDED.ecli, EXCLUDED.published_on,
                  COALESCE(EXCLUDED.text_sha256, d.text_sha256))
            THEN now() ELSE d.last_changed_at END
@@ -73,6 +74,7 @@ export async function saveDecision(db: Db, record: DecisionRecord, options: { re
         sha,
         record.parserVersion,
         record.decisionType,
+        record.sourceFlags ?? [],
       ],
     );
     const id = Number(rows[0].id);
