@@ -3,14 +3,14 @@
  * CLI of the case-law mirror (docs/infra/v1-plan.md), run on LXC `app`:
  *
  *   npx tsx scripts/mirror.ts migrate [--dry-run]   apply src/mirror/db/migrations as mirror_owner
- *   npx tsx scripts/mirror.ts backfill --source us|ns [--limit N] [--quarters 2004Q2,2024Q2 (us)]
+ *   npx tsx scripts/mirror.ts backfill --source us|ns|nss [--limit N] [--quarters 2004Q2 (us)] [--months 2024-03 (nss)]
  *                                                   without --quarters: from the cursor to today
  *   npx tsx scripts/mirror.ts reindex --source us   rebuild chunks and dissents from the stored text (no network)
  *   npx tsx scripts/mirror.ts status                per-source counts, last run, queue
  *   npx tsx scripts/mirror.ts api                   HTTP API on MIRROR_API_HOST:MIRROR_API_PORT
  *                                                   (default 127.0.0.1:8080), token MIRROR_API_TOKEN
  *
- * Planned (later steps of the plan): sync; backfill of nss, justice.
+ * Planned (later steps of the plan): sync; backfill of justice.
  *
  * Connection strings come from the environment or /etc/mirror/env
  * (MIRROR_ENV_FILE overrides the path).
@@ -26,6 +26,7 @@ import { reindexSource } from "../src/mirror/reindex";
 import { MIRROR_SOURCES, type MirrorSource } from "../src/mirror/types";
 import { backfillUs, newUsPacer } from "../src/mirror/crawl/us";
 import { backfillNs } from "../src/mirror/crawl/ns";
+import { backfillNss } from "../src/mirror/crawl/nss";
 import { newPacer } from "../src/mirror/crawl/workers";
 import { SourceStopped } from "../src/mirror/http";
 import { formatStatus, mirrorStatus } from "../src/mirror/status";
@@ -75,7 +76,7 @@ async function runMigrate(args: string[]): Promise<void> {
  * Rate of a source: MIRROR_<SOURCE>_RPS and MIRROR_<SOURCE>_CONCURRENCY in
  * /etc/mirror/env, else the plan's defaults (1 req/s; NS at most 2 at once).
  */
-function rate(source: "us" | "ns", log: (line: string) => void): { rps: number; concurrency: number } {
+function rate(source: "us" | "ns" | "nss", log: (line: string) => void): { rps: number; concurrency: number } {
   const key = source.toUpperCase();
   const rps = Number(process.env[`MIRROR_${key}_RPS`] ?? "1");
   const concurrency = Number(process.env[`MIRROR_${key}_CONCURRENCY`] ?? (source === "ns" ? "2" : "1"));
@@ -86,8 +87,8 @@ function rate(source: "us" | "ns", log: (line: string) => void): { rps: number; 
 
 async function runBackfill(args: string[]): Promise<number> {
   const source = option(args, "--source");
-  if (source !== "us" && source !== "ns") {
-    console.error(`mirror backfill: zdroj ${source ?? "(chybí --source)"} zatím není (us, ns; nss a justice v kroku 5)`);
+  if (source !== "us" && source !== "ns" && source !== "nss") {
+    console.error(`mirror backfill: zdroj ${source ?? "(chybí --source)"} zatím není (us, ns, nss; justice v kroku 5)`);
     return 2;
   }
   const limitArg = option(args, "--limit");
@@ -95,11 +96,14 @@ async function runBackfill(args: string[]): Promise<number> {
   if (limit !== undefined && !(Number.isInteger(limit) && limit > 0)) throw new Error("--limit must be a positive integer");
   const quarters = option(args, "--quarters")?.split(",").map((q) => q.trim());
   if (quarters && source !== "us") throw new Error("--quarters is for us only");
+  const months = option(args, "--months")?.split(",").map((m) => m.trim());
+  if (months && source !== "nss") throw new Error("--months is for nss only");
 
   return runTracked(source, "backfill", async (ctx, counts) => {
     const { rps, concurrency } = rate(source, ctx.log);
     if (source === "us") await backfillUs({ ...ctx, pacer: newUsPacer(rps) }, { limit, quarters, concurrency }, counts);
-    else await backfillNs({ ...ctx, pacer: newPacer(rps) }, { limit, concurrency }, counts);
+    else if (source === "ns") await backfillNs({ ...ctx, pacer: newPacer(rps) }, { limit, concurrency }, counts);
+    else await backfillNss({ ...ctx, pacer: newPacer(rps) }, { limit, months, concurrency }, counts);
   });
 }
 
@@ -200,7 +204,7 @@ async function main(argv: string[]): Promise<number> {
     console.error(`mirror ${command}: zatím neimplementováno (${PLANNED[command]} plánu)`);
     return 2;
   }
-  console.error("usage: mirror migrate [--dry-run] | backfill --source us|ns [--limit N] [--quarters …] | reindex --source … | status | api");
+  console.error("usage: mirror migrate [--dry-run] | backfill --source us|ns|nss [--limit N] [--quarters …|--months …] | reindex --source … | status | api");
   return 2;
 }
 

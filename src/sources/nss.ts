@@ -439,6 +439,7 @@ export interface NssDecision {
  */
 const DETAIL_FIELDS: Record<string, string> = {
   oznacenivecivcelku: "Spisová značka",
+  cj: "Číslo jednací",
   ecli: "ECLI",
   soudsenat: "Soud (senát)",
   soudcezpravodaj: "Soudce zpravodaj",
@@ -448,6 +449,7 @@ const DETAIL_FIELDS: Record<string, string> = {
   stavrizeni: "Stav řízení",
   rozhodnutivevztahukrizeni: "Rozhodnutí ve vztahu k řízení",
   datumvydanirozhodnuti: "Datum vydání rozhodnutí",
+  aktualizovano: "Datum zpřístupnění",
   pravnivetaanv: "Právní věta",
   sbnsspublikovano: "Sb. NSS publikováno",
   oblastupravy: "Oblast úpravy",
@@ -1178,7 +1180,7 @@ function missingDocument(id: string): SourceError {
  * or BOM the bytes decide: UTF-8 markup never holds NUL bytes, UTF-16LE
  * markup has one after nearly every character.
  */
-async function decodeRendition(response: Response): Promise<string> {
+export async function decodeRendition(response: Response): Promise<string> {
   const buffer = await response.arrayBuffer();
   const head = new Uint8Array(buffer, 0, Math.min(buffer.byteLength, 512));
   let nuls = 0;
