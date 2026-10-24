@@ -60,11 +60,18 @@ describe("mapNs", () => {
       decisionType: "usneseni",
       decidedOn: "2026-06-17",
       ecli: "ECLI:CZ:NS:2026:4.TDO.466.2026.1",
-      parserVersion: 2,
+      parserVersion: 3,
       images: [],
     });
     expect(record.text?.source).toBe("ns:webprint");
     expect(record.text!.body).toMatch(/^Nejvyšší soud/);
+  });
+
+  it("takes the insolvency label 'Senátní značka' as the case number", () => {
+    const decision = parseNsDecision(fixture("ns-webprint-projednal.html"), "X");
+    const { ["Spisová značka"]: _omit, ...rest } = decision.metadata;
+    const record = mapNs("0".repeat(32), { ...decision, metadata: { ...rest, "Senátní značka": "29 ICdo 3/2017" } }, "ns:websearch", []);
+    expect(record.caseNumbers).toEqual(["29 ICdo 3/2017"]);
   });
 
   it("splits several case numbers", () => {

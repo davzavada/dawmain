@@ -15,8 +15,11 @@ import { decisionType, type DecisionImage, type DecisionRecord } from "../types"
  * precedes the judgment's opening) lands at offset 0. Pure — unit-tested.
  */
 
-/** 2: WebSearch first (publication date), leading citation note cut. */
-export const NS_PARSER_VERSION = 2;
+/**
+ * 2: WebSearch first (publication date), leading citation note cut.
+ * 3: "Senátní značka" (insolvency: ICdo, NSČR) read as the case number.
+ */
+export const NS_PARSER_VERSION = 3;
 
 const BASE = "https://rozhodnuti.nsoud.cz";
 const MARK_OPEN = "";
@@ -92,7 +95,8 @@ export function mapNs(
   images: DecisionImage[],
 ): DecisionRecord {
   const m = decision.metadata;
-  const caseNumbers = nsCaseNumbers(m["Spisová značka"]);
+  // Insolvency decisions label it "Senátní značka" (29 ICdo 3/2017, 29 NSČR 12/2022).
+  const caseNumbers = nsCaseNumbers(m["Spisová značka"] ?? m["Senátní značka"]);
   return {
     source: "ns",
     sourceId: unid.toUpperCase(),
