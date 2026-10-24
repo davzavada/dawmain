@@ -31,6 +31,22 @@ export function monthRange(month: string): { from: string; to: string } {
   return { from: `${month}-01`, to: `${month}-${String(last).padStart(2, "0")}` };
 }
 
+/**
+ * A month in four ranges of about eight days (1–8, 9–16, 17–24, 25–end): a
+ * whole month timed out in 9 of the 10 pilot months (24. 10.), ranges this
+ * short never did — four searches beat a minute-long timeout and a split.
+ */
+export function monthChunks(month: string): Array<{ from: string; to: string }> {
+  const { to: end } = monthRange(month);
+  const last = Number(end.slice(8));
+  return [
+    [1, 8],
+    [9, 16],
+    [17, 24],
+    [25, last],
+  ].map(([a, b]) => ({ from: `${month}-${String(a).padStart(2, "0")}`, to: `${month}-${String(b).padStart(2, "0")}` }));
+}
+
 export function nextMonth(month: string): string {
   const [y, m] = month.split("-").map(Number);
   return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
@@ -161,8 +177,8 @@ export async function backfillNss(ctx: CrawlContext, options: NssBackfillOptions
   let left = options.limit ?? Infinity;
   for (const month of months) {
     if (left <= 0 || ctx.shouldStop?.()) break;
-    const { from, to } = monthRange(month);
-    const all = await discoverNss(ctx, from, to);
+    const all: NssHit[] = [];
+    for (const chunk of monthChunks(month)) all.push(...(await discoverNss(ctx, chunk.from, chunk.to)));
     const take = perMonth ? spread(all, Math.min(perMonth, left)) : all;
     ctx.log(`nss: ${month}: ${all.length} rozhodnutí, stahuji ${take.length}`);
     await fetchAndStore(

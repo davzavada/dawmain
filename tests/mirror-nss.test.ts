@@ -3,7 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseNssDetail } from "@/src/sources/nss";
 import { mapNss, nssCaseNumbers, nssCourt } from "@/src/mirror/map/nss";
-import { monthRange, nextMonth } from "@/src/mirror/crawl/nss";
+import { monthChunks, monthRange, nextMonth } from "@/src/mirror/crawl/nss";
 
 const fixture = (name: string) => readFileSync(path.join(__dirname, "fixtures", name), "utf8");
 
@@ -47,5 +47,11 @@ describe("months", () => {
     expect(monthRange("2023-12")).toEqual({ from: "2023-12-01", to: "2023-12-31" });
     expect(nextMonth("2023-12")).toBe("2024-01");
     expect(() => monthRange("2024-13")).toThrow();
+    expect(monthChunks("2024-02")).toEqual([
+      { from: "2024-02-01", to: "2024-02-08" },
+      { from: "2024-02-09", to: "2024-02-16" },
+      { from: "2024-02-17", to: "2024-02-24" },
+      { from: "2024-02-25", to: "2024-02-29" },
+    ]);
   });
 });
