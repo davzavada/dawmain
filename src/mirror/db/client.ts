@@ -1,0 +1,57 @@
+import { existsSync } from "node:fs";
+import { Pool } from "pg";
+
+/**
+ * Connections of the case-law mirror (docs/infra/v1-plan.md). It runs on the
+ * home server under tsx, outside Next.js, against its own Postgres (LXC `pg`),
+ * with one role per job: owner (migrations), writer (crawler), reader (API).
+ * Connection strings live in /etc/mirror/env (mode 600) on LXC `app`, never
+ * in the repo; systemd passes them as EnvironmentFile, and a hand-run CLI
+ * loads the same file here.
+ */
+
+export type MirrorRole = "owner" | "writer" | "reader";
+
+export const MIRROR_ENV_FILE = "/etc/mirror/env";
+
+const URL_VARS: Record<MirrorRole, string> = {
+  owner: "MIRROR_OWNER_URL",
+  writer: "MIRROR_WRITER_URL",
+  reader: "MIRROR_READER_URL",
+};
+
+/** API queries give up after 5 s (plan: timeout dotazu 5 s); crawler and migrations do not. */
+export const READER_STATEMENT_TIMEOUT_MS = 5_000;
+
+/** Load MIRROR_ENV_FILE (or /etc/mirror/env) if present; variables already set win. */
+export function loadMirrorEnv(file = process.env.MIRROR_ENV_FILE ?? MIRROR_ENV_FILE): void {
+  if (existsSync(file)) process.loadEnvFile(file);
+}
+
+export function mirrorUrl(role: MirrorRole): string {
+  const url = process.env[URL_VARS[role]]?.trim();
+  if (!url) throw new Error(`${URL_VARS[role]} is not set (see ${MIRROR_ENV_FILE})`);
+  return url;
+}
+
+const pools = new Map<MirrorRole, Pool>();
+
+export function mirrorPool(role: Exclude<MirrorRole, "owner">): Pool {
+  let pool = pools.get(role);
+  if (!pool) {
+    pool = new Pool({
+      connectionString: mirrorUrl(role),
+      application_name: `mirror-${role}`,
+      max: role === "reader" ? 8 : 4,
+      ...(role === "reader" ? { statement_timeout: READER_STATEMENT_TIMEOUT_MS } : {}),
+    });
+    pools.set(role, pool);
+  }
+  return pool;
+}
+
+export async function closeMirrorPools(): Promise<void> {
+  const open = [...pools.values()];
+  pools.clear();
+  await Promise.all(open.map((p) => p.end()));
+}
