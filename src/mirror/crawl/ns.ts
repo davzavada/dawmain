@@ -64,6 +64,15 @@ export async function discoverNs(ctx: CrawlContext): Promise<NsEntry[]> {
   return unique;
 }
 
+/** GIF, PNG or JPEG by their magic bytes; null for anything else. Pure. */
+export function sniffImage(bytes: Uint8Array): "image/gif" | "image/png" | "image/jpeg" | null {
+  const head = Buffer.from(bytes.subarray(0, 8)).toString("latin1");
+  if (head.startsWith("GIF87a") || head.startsWith("GIF89a")) return "image/gif";
+  if (head.startsWith("\x89PNG\r\n\x1a\n")) return "image/png";
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  return null;
+}
+
 async function fetchRendition(ctx: CrawlContext, unid: string, rendition: "WebPrint" | "WebSearch") {
   const response = await pacedFetch(LABEL, ctx.pacer, `${DB}/${rendition}/${unid}?openDocument`);
   if (response.status === 404) throw new Error(`NS has no document ${unid} (404)`);
@@ -92,17 +101,12 @@ export async function fetchNsDecision(ctx: CrawlContext, entry: NsEntry): Promis
   for (const [i, pic] of page.pictures.entries()) {
     const response = await pacedFetch(LABEL, ctx.pacer, pic.url);
     if (!response.ok) throw new Error(`NS picture ${i} answered HTTP ${response.status}`);
+    const bytes = new Uint8Array(await response.arrayBuffer());
     const type = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
-    const mime = type === "image/png" || type === "image/jpeg" || type === "image/gif" ? type : null;
-    if (!mime) throw new Error(`NS picture ${i} is ${type || "untyped"}, not an image`);
-    images.push({
-      charAt: page.offsets[i] ?? 0,
-      mime,
-      width: pic.width,
-      height: pic.height,
-      bytes: new Uint8Array(await response.arrayBuffer()),
-      sourceUrl: pic.url,
-    });
+    // Domino labels some pictures application/octet-stream: the bytes say what they are.
+    const mime = sniffImage(bytes) ?? (type === "image/png" || type === "image/jpeg" || type === "image/gif" ? type : null);
+    if (!mime) throw new Error(`NS picture ${i} is ${type || "untyped"} and not a GIF, PNG or JPEG`);
+    images.push({ charAt: page.offsets[i] ?? 0, mime, width: pic.width, height: pic.height, bytes, sourceUrl: pic.url });
   }
   return mapNs(entry.unid, page.decision, textSource, images);
 }

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseNsViewPage } from "@/src/mirror/crawl/ns";
+import { parseNsViewPage, sniffImage } from "@/src/mirror/crawl/ns";
 import { mapNs, markNsPictures, nsCaseNumbers, parseNsMarked, takeNsMarkers } from "@/src/mirror/map/ns";
 import { parseNsDecision } from "@/src/sources/ns";
 
@@ -35,6 +35,15 @@ describe("NS pictures", () => {
     expect(text).toBe("Odůvodnění:\n\nTabulka níže.\nKonec.");
     expect(text.slice(0, offsets[0])).toBe("Odůvodnění:\n"); // on its own line
     expect(text.slice(offsets[1])).toBe("Konec.");
+  });
+});
+
+describe("sniffImage", () => {
+  it("knows GIF, PNG and JPEG by their bytes (Domino labels some application/octet-stream)", () => {
+    expect(sniffImage(Buffer.from("GIF89a\x01\x00", "latin1"))).toBe("image/gif");
+    expect(sniffImage(Buffer.from("89504e470d0a1a0a", "hex"))).toBe("image/png");
+    expect(sniffImage(Buffer.from("ffd8ffe000104a46", "hex"))).toBe("image/jpeg");
+    expect(sniffImage(Buffer.from("<html>", "latin1"))).toBeNull();
   });
 });
 
