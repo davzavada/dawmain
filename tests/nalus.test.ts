@@ -15,9 +15,11 @@ import {
   parseNalusAbstract,
   parseNalusDecision,
   parseNalusResults,
+  extractRtfPictures,
   stripRtfMarkers,
 } from "@/src/sources/nalus";
 import { SourceError } from "@/src/sources/shared/errors";
+import { loadHtml } from "@/src/sources/shared/html";
 
 const fixture = (name: string) =>
   readFileSync(path.join(__dirname, "fixtures", "nalus", name), "utf8");
@@ -396,5 +398,37 @@ describe("stripRtfMarkers", () => {
     expect(stripRtfMarkers("takto:\\par \\par Ochranné podání se odmítá. \\par \\par \\par Odůvodnění:")).toBe(
       "takto:\n\nOchranné podání se odmítá.\n\nOdůvodnění:",
     );
+  });
+
+  it("drops picture groups and group braces, keeps escaped braces as text", () => {
+    expect(stripRtfMarkers("senátu\\par {\\*\\shppict{\\pict\\pngblip 89504e47}}{\\nonshppict{\\pict\\wmetafile8 0100}} \\par {\\fs20 Odlišné stanovisko\\par }"))
+      .toBe("senátu\n\nOdlišné stanovisko");
+    expect(stripRtfMarkers("množina \\{a, b\\}")).toBe("množina {a, b}");
+  });
+
+  it("leaves no picture data in a live decision with an odlišné stanovisko (4-296-24_1)", () => {
+    const text = parseNalusDecision(fixture("gettext-dissent-4-296-24_1.html"), "4-296-24_1").text;
+    expect(text).not.toMatch(/[{}]|[0-9a-f]{32}|shapeType/);
+    expect(text).toMatch(/předseda senátu\n\nOdlišné stanovisko\n\nS nálezem nesouhlasím/);
+  });
+});
+
+describe("extractRtfPictures", () => {
+  it("keeps the PNG of a picture and drops its metafile fallback (live 4-296-24_1)", () => {
+    const hidden = loadHtml(fixture("gettext-dissent-4-296-24_1.html"))("input#docContentHidden").attr("value")!;
+    const pictures = extractRtfPictures(hidden);
+    expect(pictures).toHaveLength(1);
+    expect(pictures[0]).toMatchObject({ mime: "image/png", width: 609, height: 1 });
+    expect(Buffer.from(pictures[0].data.slice(0, 8)).toString("hex")).toBe("89504e470d0a1a0a");
+    const text = stripRtfMarkers(hidden);
+    expect(text.slice(0, pictures[0].offset)).toMatch(/předseda senátu$/);
+    expect(text.slice(pictures[0].offset)).toMatch(/^\n\nOdlišné stanovisko/);
+  });
+
+  it("finds nothing in plain text and reads \\picw/\\pich for a JPEG", () => {
+    expect(extractRtfPictures("text\\par bez obrázku")).toEqual([]);
+    const [jpeg] = extractRtfPictures("a\\par {\\pict\\jpegblip\\picw20\\pich10\\bliptag5{\\*\\blipuid 00ff}ffd8ffe000104a46}b");
+    expect(jpeg).toMatchObject({ mime: "image/jpeg", width: 20, height: 10, offset: 1 });
+    expect(Buffer.from(jpeg.data).toString("hex")).toBe("ffd8ffe000104a46");
   });
 });

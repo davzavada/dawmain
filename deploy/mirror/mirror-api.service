@@ -1,0 +1,28 @@
+# Mirror API v1 (docs/infra/v1-plan.md) on LXC `app`, LAN only.
+# Install: cp deploy/mirror/mirror-api.service /etc/systemd/system/ &&
+#          systemctl daemon-reload && systemctl enable --now mirror-api
+# Needs in /etc/mirror/env: MIRROR_READER_URL, MIRROR_API_TOKEN,
+# MIRROR_API_HOST (the LAN address, 192.168.0.52), MIRROR_API_PORT.
+[Unit]
+Description=Dawmain mirror API (v1)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mirror
+Group=mirror
+WorkingDirectory=/opt/dawmain
+EnvironmentFile=/etc/mirror/env
+Environment=NODE_ENV=production
+ExecStart=/opt/dawmain/node_modules/.bin/tsx scripts/mirror.ts api
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/tmp
+
+[Install]
+WantedBy=multi-user.target
