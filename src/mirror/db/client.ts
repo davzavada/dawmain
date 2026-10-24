@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { accessSync, constants } from "node:fs";
 import { Pool } from "pg";
 
 /**
@@ -23,9 +23,19 @@ const URL_VARS: Record<MirrorRole, string> = {
 /** API queries give up after 5 s (plan: timeout dotazu 5 s); crawler and migrations do not. */
 export const READER_STATEMENT_TIMEOUT_MS = 5_000;
 
-/** Load MIRROR_ENV_FILE (or /etc/mirror/env) if present; variables already set win. */
+/**
+ * Load MIRROR_ENV_FILE (or /etc/mirror/env) if present and readable;
+ * variables already set win. A systemd service runs as the unprivileged
+ * `mirror` user and gets the variables from EnvironmentFile (read by systemd
+ * as root), so an unreadable file is skipped, not an error.
+ */
 export function loadMirrorEnv(file = process.env.MIRROR_ENV_FILE ?? MIRROR_ENV_FILE): void {
-  if (existsSync(file)) process.loadEnvFile(file);
+  try {
+    accessSync(file, constants.R_OK);
+  } catch {
+    return;
+  }
+  process.loadEnvFile(file);
 }
 
 export function mirrorUrl(role: MirrorRole): string {

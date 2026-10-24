@@ -6,9 +6,11 @@
  *   npx tsx scripts/mirror.ts backfill --source us [--limit N] [--quarters 2004Q2,2024Q2]
  *                                                   without --quarters: from the cursor to today
  *   npx tsx scripts/mirror.ts status                per-source counts, last run, queue
+ *   npx tsx scripts/mirror.ts api                   HTTP API on MIRROR_API_HOST:MIRROR_API_PORT
+ *                                                   (default 127.0.0.1:8080), token MIRROR_API_TOKEN
  *
- * Planned (later steps of the plan): sync, reindex, api; backfill of ns,
- * nss, justice.
+ * Planned (later steps of the plan): sync, reindex; backfill of ns, nss,
+ * justice.
  *
  * Connection strings come from the environment or /etc/mirror/env
  * (MIRROR_ENV_FILE overrides the path).
@@ -23,6 +25,8 @@ import { finishRun, startRun, type RunCounts } from "../src/mirror/db/store";
 import { backfillUs, newUsPacer } from "../src/mirror/crawl/us";
 import { SourceStopped } from "../src/mirror/http";
 import { formatStatus, mirrorStatus } from "../src/mirror/status";
+import { serve } from "@hono/node-server";
+import { createMirrorApi } from "../src/mirror/api/server";
 
 const MIRROR_MIGRATIONS_DIR = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -36,7 +40,6 @@ const MIRROR_MIGRATIONS_DIR = path.join(
 const PLANNED: Record<string, string> = {
   sync: "krok 6",
   reindex: "krok 7",
-  api: "krok 4",
 };
 
 function option(args: string[], name: string): string | undefined {
@@ -90,9 +93,27 @@ async function runStatus(): Promise<void> {
   console.log(formatStatus(await mirrorStatus(mirrorPool("reader"))));
 }
 
+/** Runs until SIGTERM / SIGINT (systemd stop), then closes the pool. */
+async function runApi(): Promise<number> {
+  const token = process.env.MIRROR_API_TOKEN?.trim() ?? "";
+  const hostname = process.env.MIRROR_API_HOST?.trim() || "127.0.0.1";
+  const port = Number(process.env.MIRROR_API_PORT ?? "8080");
+  const app = createMirrorApi({ db: mirrorPool("reader"), token });
+  const server = serve({ fetch: app.fetch, hostname, port }, (info) =>
+    console.log(`mirror-api: listening on http://${info.address}:${info.port}`),
+  );
+  await new Promise<void>((resolve) => {
+    for (const signal of ["SIGTERM", "SIGINT"] as const) process.once(signal, () => resolve());
+  });
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  await closeMirrorPools();
+  return 0;
+}
+
 async function main(argv: string[]): Promise<number> {
   const [command, ...args] = argv;
   loadMirrorEnv();
+  if (command === "api") return runApi();
   try {
     if (command === "migrate") {
       await runMigrate(args);
@@ -110,7 +131,7 @@ async function main(argv: string[]): Promise<number> {
     console.error(`mirror ${command}: zatím neimplementováno (${PLANNED[command]} plánu)`);
     return 2;
   }
-  console.error("usage: mirror migrate [--dry-run] | backfill --source us [--limit N] [--quarters …] | status");
+  console.error("usage: mirror migrate [--dry-run] | backfill --source us [--limit N] [--quarters …] | status | api");
   return 2;
 }
 
