@@ -21,7 +21,9 @@
 >    před plným backfillem. Když zdroj začne vracet 429/403, zastav ho a hlas to.
 >    (24. 10.: pro backfill ÚS i NS zvýšeno na 4 req/s, 4 souběžně —
 >    `MIRROR_US_RPS`, `MIRROR_US_CONCURRENCY`, `MIRROR_NS_…` v `/etc/mirror/env`;
->    NS po kalibraci 300 rozhodnutí bez jediné 5xx; NSS 4 req/s po pilotu na 2.)
+>    NS po kalibraci 300 rozhodnutí bez jediné 5xx. Po hodině bez 429/403
+>    ÚS a NS na 6 req/s, 6 souběžně. NSS na 4 req/s vrátil po ~50 min
+>    HTTP 403 (blokace na ~13 min) → NSS běží na 2 req/s, 2 souběžně.)
 > 6. Kde plán nesedí na realitu (jiná verze balíčku, endpoint nefunguje),
 >    řekni to a navrhni úpravu, nehádej.
 
