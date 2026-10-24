@@ -1,7 +1,7 @@
 import { decodeBody } from "@/src/sources/shared/html";
 import { nsBodyMissing } from "@/src/sources/ns";
 import { readCursor, writeCursor, type RunCounts } from "../db/store";
-import { pacedFetch } from "../http";
+import { SourceStopped, pacedFetch } from "../http";
 import { NS_PARSER_VERSION, mapNs, markNsPictures, parseNsMarked } from "../map/ns";
 import type { DecisionImage, DecisionRecord } from "../types";
 import { fetchAndStore, spread, type CrawlContext } from "./workers";
@@ -97,16 +97,24 @@ export async function fetchNsDecision(ctx: CrawlContext, entry: NsEntry): Promis
       textSource = "ns:webprint";
     }
   }
+  // A picture the source cannot serve (live: HTTP 404 on an emblem) is its
+  // defect, not ours: the decision is stored with its text and without that
+  // picture, and the log says which. Only 429/403 (SourceStopped) propagates.
   const images: DecisionImage[] = [];
   for (const [i, pic] of page.pictures.entries()) {
-    const response = await pacedFetch(LABEL, ctx.pacer, pic.url);
-    if (!response.ok) throw new Error(`NS picture ${i} answered HTTP ${response.status}`);
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    const type = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
-    // Domino labels some pictures application/octet-stream: the bytes say what they are.
-    const mime = sniffImage(bytes) ?? (type === "image/png" || type === "image/jpeg" || type === "image/gif" ? type : null);
-    if (!mime) throw new Error(`NS picture ${i} is ${type || "untyped"} and not a GIF, PNG or JPEG`);
-    images.push({ charAt: page.offsets[i] ?? 0, mime, width: pic.width, height: pic.height, bytes, sourceUrl: pic.url });
+    try {
+      const response = await pacedFetch(LABEL, ctx.pacer, pic.url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      const type = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+      // Domino labels some pictures application/octet-stream: the bytes say what they are.
+      const mime = sniffImage(bytes) ?? (type === "image/png" || type === "image/jpeg" || type === "image/gif" ? type : null);
+      if (!mime) throw new Error(`${type || "untyped"}, not a GIF, PNG or JPEG`);
+      images.push({ charAt: page.offsets[i] ?? 0, mime, width: pic.width, height: pic.height, bytes, sourceUrl: pic.url });
+    } catch (error) {
+      if (error instanceof SourceStopped) throw error;
+      ctx.log(`ns: ${entry.unid}: obrázek ${i} nedostupný (${error instanceof Error ? error.message : String(error)}), ukládám bez něj`);
+    }
   }
   return mapNs(entry.unid, page.decision, textSource, images);
 }
