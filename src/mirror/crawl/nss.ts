@@ -73,19 +73,35 @@ async function searchRange(ctx: CrawlContext, from: string, to: string): Promise
   return { hits, total };
 }
 
-/** Every decision decided from..to; splits the range while rows and total disagree. */
+/**
+ * Every decision decided from..to. The range is split in half — down to
+ * single days — while its rows and total disagree, and also when its search
+ * fails: a whole month is a slow query for NSS (live 2007-06 ran past
+ * searchNss's timeout), a week or a day is not. Only a single day that
+ * fails is an error; a 429/403 (SourceStopped) is never split.
+ */
 export async function discoverNss(ctx: CrawlContext, from: string, to: string): Promise<NssHit[]> {
-  const { hits, total } = await searchRange(ctx, from, to);
-  const unique = [...new Map(hits.map((h) => [h.id, h])).values()];
-  if (unique.length === total) return unique;
   const days = Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
+  const halves = async () => {
+    const mid = addDays(from, Math.floor(days / 2));
+    return [...(await discoverNss(ctx, from, mid)), ...(await discoverNss(ctx, addDays(mid, 1), to))];
+  };
+  let found: { hits: NssHit[]; total: number };
+  try {
+    found = await searchRange(ctx, from, to);
+  } catch (error) {
+    if (error instanceof SourceStopped || days < 1) throw error;
+    ctx.log(`nss: ${from}..${to}: hledání selhalo (${error instanceof Error ? error.message : String(error)}), dělím interval`);
+    return halves();
+  }
+  const unique = [...new Map(found.hits.map((h) => [h.id, h])).values()];
+  if (unique.length === found.total) return unique;
   if (days < 1) {
-    ctx.log(`nss: ${from}: ${unique.length} řádků z ${total} (nejde dál dělit)`);
+    ctx.log(`nss: ${from}: ${unique.length} řádků z ${found.total} (nejde dál dělit)`);
     return unique;
   }
-  ctx.log(`nss: ${from}..${to}: ${unique.length} řádků z ${total}, dělím interval`);
-  const mid = addDays(from, Math.floor(days / 2));
-  return [...(await discoverNss(ctx, from, mid)), ...(await discoverNss(ctx, addDays(mid, 1), to))];
+  ctx.log(`nss: ${from}..${to}: ${unique.length} řádků z ${found.total}, dělím interval`);
+  return halves();
 }
 
 // ---------- fetch ----------
