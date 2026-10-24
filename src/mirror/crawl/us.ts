@@ -11,7 +11,7 @@ import {
 import type { Db } from "../db/client";
 import { dequeue, enqueue, idsWithText, readCursor, saveDecision, writeCursor, type RunCounts } from "../db/store";
 import { Pacer, SourceStopped, pacedFetch } from "../http";
-import { mapUs, parseUsPublishedDates, usTextSource, type UsHit } from "../map/us";
+import { mapUs, parseUsPublishedDates, US_PARSER_VERSION, usTextExtras, type UsHit } from "../map/us";
 
 /**
  * ÚS backfill (v1-plan, zdroj 1): Search.aspx by quarter of the decision date
@@ -141,12 +141,12 @@ export async function fetchUsDecision(ctx: CrawlContext, hit: UsHit) {
     if (error instanceof SourceStopped) throw error;
     ctx.log(`us: ${hit.sz}: GetAbstract selhal (${error instanceof Error ? error.message : String(error)}), ukládám bez právní věty`);
   }
-  return mapUs(hit, decision, abstract, usTextSource(html));
+  return mapUs(hit, decision, abstract, usTextExtras(html));
 }
 
 /** Fetch and store `hits` (skipping those stored with text); failures go to fetch_queue. */
 async function fetchAndStore(ctx: CrawlContext, hits: UsHit[], counts: RunCounts): Promise<void> {
-  const done = await idsWithText(ctx.db, "us", hits.map((h) => h.sz));
+  const done = await idsWithText(ctx.db, "us", hits.map((h) => h.sz), US_PARSER_VERSION);
   for (const hit of hits) {
     if (done.has(hit.sz)) continue;
     try {

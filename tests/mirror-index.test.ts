@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CHUNK_MAX, CHUNK_MIN, chunkText, deriveChunks } from "@/src/mirror/index";
+import { CHUNK_MAX, CHUNK_MIN, chunkText, deriveChunks, findDissentStart } from "@/src/mirror/index";
 
 const sentence = (i: number) => `Věta číslo ${i} o ústavní stížnosti a právu na spravedlivý proces. `;
 
@@ -59,5 +59,19 @@ describe("deriveChunks", () => {
 
   it("returns nothing without text", () => {
     expect(deriveChunks({ ...record, text: null })).toEqual([]);
+  });
+});
+
+describe("findDissentStart", () => {
+  it("finds a heading line, also letter-spaced or with the judge's name", () => {
+    const body = "Odůvodnění.\nV Brně dne 1. 1. 2025\n\nOdlišné stanovisko Daniely Zemanové\n\n1. Uplatňuji tímto odlišné stanovisko.";
+    expect(findDissentStart(body)).toBe(body.indexOf("Odlišné stanovisko Daniely"));
+    const spaced = "text\n  O d l i š n é   s t a n o v i s k o\nsoudce X";
+    expect(findDissentStart(spaced)).toBe(spaced.indexOf("O d l"));
+  });
+
+  it("ignores sentences that only mention one", () => {
+    expect(findDissentStart("1. Uplatňuji tímto odlišné stanovisko proti výroku.\nJak jsem popsal v disentu k nálezu.")).toBeNull();
+    expect(findDissentStart("přičemž odlišnost ručení od zástavního práva")).toBeNull();
   });
 });

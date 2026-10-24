@@ -88,6 +88,26 @@ export function chunkText(text: string): TextSpan[] {
   return spans;
 }
 
+/** A heading line is short: "Odlišné stanovisko soudce JUDr. Jana Musila k nálezu …". */
+const MAX_DISSENT_HEADING = 160;
+
+/**
+ * Offset of the first odlišné stanovisko: the start of a line that IS its
+ * heading — "Odlišné stanovisko", "Odlišné stanovisko Daniely Zemanové",
+ * letter-spaced "O d l i š n é  s t a n o v i s k o" — not a sentence that
+ * mentions one ("Uplatňuji tímto odlišné stanovisko …", "v disentu k nálezu").
+ * null when there is none. Pure.
+ */
+export function findDissentStart(body: string): number | null {
+  const lines = body.matchAll(/^[^\n]*$/gm);
+  for (const m of lines) {
+    const line = m[0].trim();
+    if (!line || line.length > MAX_DISSENT_HEADING) continue;
+    if (/^odlišn[éáý]stanovisk/i.test(line.replace(/\s+/g, ""))) return m.index + m[0].indexOf(line[0]);
+  }
+  return null;
+}
+
 /** Chunks of a record with text; [] when it has none. Pure. */
 export function deriveChunks(record: Pick<DecisionRecord, "text" | "caseNumbers" | "legalSentence" | "ecli">): DerivedChunk[] {
   const body = record.text?.body;

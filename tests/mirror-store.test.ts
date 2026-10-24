@@ -50,6 +50,7 @@ function record(overrides: Partial<DecisionRecord> = {}): DecisionRecord {
     court: "Ústavní soud – I. senát",
     caseNumber: "I. ÚS 1169/26",
     caseNumbers: ["I. ÚS 1169/26"],
+    decisionType: "usneseni",
     decidedOn: "2026-07-07",
     legalSentence: null,
     ecli: "ECLI:CZ:US:2026:1.US.1169.26.1",
@@ -62,7 +63,7 @@ function record(overrides: Partial<DecisionRecord> = {}): DecisionRecord {
 
 async function row(sourceId = "1-1169-26_1") {
   const { rows } = await pg.query<Record<string, unknown>>(
-    `SELECT d.*, t.char_count, t.text_source, (SELECT count(*) FROM mirror.decision_chunk c WHERE c.decision_id = d.id) AS chunks
+    `SELECT d.*, t.char_count, t.text_source, t.dissent_at, (SELECT count(*) FROM mirror.decision_chunk c WHERE c.decision_id = d.id) AS chunks
      FROM mirror.decision d LEFT JOIN mirror.decision_text t ON t.decision_id = d.id WHERE d.source = 'us' AND d.source_id = $1`,
     [sourceId],
   );
@@ -107,7 +108,34 @@ describe("saveDecision", () => {
 
   it("lists ids stored with text", async () => {
     await saveDecision(db, record({ sourceId: "2-1-26_1", text: null }));
-    expect([...(await idsWithText(db, "us", ["1-1169-26_1", "2-1-26_1", "3-9-26_1"]))]).toEqual(["1-1169-26_1"]);
+    expect([...(await idsWithText(db, "us", ["1-1169-26_1", "2-1-26_1", "3-9-26_1"], 1))]).toEqual(["1-1169-26_1"]);
+    expect((await idsWithText(db, "us", ["1-1169-26_1"], 2)).size).toBe(0); // a newer parser fetches it again
+  });
+});
+
+describe("type, dissent and pictures", () => {
+  const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const dissentBody = "Ústavní soud rozhodl takto. ".repeat(30) + "\npředseda senátu\n\nOdlišné stanovisko\n\nNesouhlasím.";
+
+  it("stores the type, the dissent offset and the pictures; a newer parser rewrites them", async () => {
+    const base = record({ sourceId: "4-296-24_1", decisionType: "nalez", text: { body: dissentBody, source: "us:gettext-hidden" } });
+    await saveDecision(db, { ...base, images: [{ charAt: dissentBody.indexOf("\n\nOdlišné"), mime: "image/png", width: 609, height: 1, bytes: png }] });
+    const r = await row("4-296-24_1");
+    expect(r.decision_type).toBe("nalez");
+    expect(r.dissent_at).toBe(dissentBody.indexOf("Odlišné stanovisko"));
+    const img = await pg.query<{ ord: number; mime: string; width: number; bytes: Uint8Array; sha256: string }>(
+      "SELECT i.ord, i.mime, i.width, i.bytes, i.sha256 FROM mirror.decision_image i JOIN mirror.decision d ON d.id = i.decision_id WHERE d.source_id = '4-296-24_1'",
+    );
+    expect(img.rows).toHaveLength(1);
+    expect(img.rows[0]).toMatchObject({ ord: 0, mime: "image/png", width: 609 });
+    expect(Buffer.from(img.rows[0].bytes).toString("hex")).toBe("89504e470d0a1a0a");
+
+    // Same text, same parser: nothing is rewritten, the picture stays.
+    await saveDecision(db, { ...base, images: [] });
+    expect((await pg.query("SELECT 1 FROM mirror.decision_image")).rows).toHaveLength(1);
+    // A newer parser rewrites the pictures it read.
+    await saveDecision(db, { ...base, parserVersion: 2, images: [] });
+    expect((await pg.query("SELECT 1 FROM mirror.decision_image")).rows).toHaveLength(0);
   });
 });
 
@@ -130,7 +158,8 @@ describe("fetch_queue and runs", () => {
     await finishRun(db, id, { fetched: 3, changed: 2, failed: 1 }, null);
     const status = await mirrorStatus(db);
     const us = status.sources.find((s) => s.source === "us")!;
-    expect(us).toMatchObject({ decisions: 2, withText: 1, withoutText: 1, shortText: 1, withLegalSentence: 1, queued: 1 });
+    expect(us).toMatchObject({ decisions: 3, withText: 2, withoutText: 1, shortText: 1, withLegalSentence: 1, withDissent: 1, images: 0, queued: 1 });
+    expect(us.types).toEqual({ usneseni: 2, nalez: 1 });
     expect(us.lastRun).toMatchObject({ mode: "backfill", fetched: 3, changed: 2, failed: 1, error: null });
     expect(status.sources.find((s) => s.source === "ns")).toMatchObject({ decisions: 0, lastRun: null });
   });

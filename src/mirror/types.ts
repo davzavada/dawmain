@@ -7,6 +7,29 @@ export type MirrorSource = "ns" | "nss" | "us" | "justice";
 
 export const MIRROR_SOURCES: readonly MirrorSource[] = ["us", "ns", "nss", "justice"];
 
+/** One vocabulary for the form of a decision across sources. */
+export type DecisionType = "rozsudek" | "usneseni" | "nalez" | "stanovisko" | "jine";
+
+/** "Nález", "USNESENÍ", "rozsudek" … → DecisionType; null when the source gives none. Pure. */
+export function decisionType(raw: string | null | undefined): DecisionType | null {
+  const folded = raw?.normalize("NFD").replace(/\p{M}/gu, "").trim().toLowerCase();
+  if (!folded) return null;
+  if (folded.startsWith("rozsud")) return "rozsudek";
+  if (folded.startsWith("usnes")) return "usneseni";
+  if (folded.startsWith("nalez")) return "nalez";
+  if (folded.startsWith("stanovis")) return "stanovisko";
+  return "jine";
+}
+
+/** A picture embedded in the decision, at an offset into the text. */
+export interface DecisionImage {
+  charAt: number;
+  mime: "image/png" | "image/jpeg" | "image/x-wmf" | "image/x-emf";
+  width: number | null;
+  height: number | null;
+  bytes: Uint8Array;
+}
+
 export interface DecisionRecord {
   source: MirrorSource;
   /** NS UNID, NSS numeric id, ÚS sz, justice UUID. */
@@ -15,6 +38,7 @@ export interface DecisionRecord {
   court: string | null;
   caseNumber: string | null;
   caseNumbers: string[];
+  decisionType: DecisionType | null;
   decidedOn: string | null; // ISO date
   legalSentence: string | null;
   ecli: string | null;
@@ -22,4 +46,6 @@ export interface DecisionRecord {
   parserVersion: number;
   /** The full text and the path that produced it; null = not obtained (goes to fetch_queue). */
   text: { body: string; source: string } | null;
+  /** Pictures of the decision; undefined = not read (a reindex from stored text leaves stored ones alone). */
+  images?: DecisionImage[];
 }

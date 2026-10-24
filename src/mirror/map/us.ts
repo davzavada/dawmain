@@ -1,8 +1,8 @@
 import { canonicalCaseNumber } from "@/src/files/index/identifiers";
 import { htmlToText, loadHtml } from "@/src/sources/shared/html";
 import { czechToIso } from "@/src/sources/shared/text";
-import { nalusEcli, type NalusAbstract, type NalusDecision, type NalusHit } from "@/src/sources/nalus";
-import type { DecisionRecord } from "../types";
+import { extractRtfPictures, nalusEcli, type NalusAbstract, type NalusDecision, type NalusHit } from "@/src/sources/nalus";
+import { decisionType, type DecisionImage, type DecisionRecord } from "../types";
 
 /**
  * ÚS (NALUS) → DecisionRecord. Identity is the sz ("1-3338-23_1"); the
@@ -11,8 +11,12 @@ import type { DecisionRecord } from "../types";
  * GetAbstract.aspx. Pure — unit-tested against fixtures.
  */
 
-/** Bump when the mapping changes what it stores: `mirror reindex` / re-fetch can target old rows. */
-export const US_PARSER_VERSION = 1;
+/**
+ * Bump when the mapping changes what it stores: a backfill re-fetches rows
+ * of an older version. 2: RTF pictures out of the text and into
+ * decision_image, decision_type.
+ */
+export const US_PARSER_VERSION = 2;
 
 /** A results row as the crawler needs it: parseNalusResults' hit + the date of publication. */
 export interface UsHit extends NalusHit {
@@ -61,12 +65,26 @@ export function usCaseNumber(raw: string): string {
   return canonicalCaseNumber(bare)?.display ?? bare;
 }
 
-/** Which GetText path gave the text: the hidden RTF-ish input or the rendered cell. */
-export function usTextSource(getTextHtml: string): string {
-  return loadHtml(getTextHtml)("input#docContentHidden").attr("value") ? "us:gettext-hidden" : "us:gettext-doccontent";
+/** What GetText.aspx gives besides parseNalusDecision: which path gave the text, and its pictures. */
+export interface UsTextExtras {
+  textSource: string;
+  images: DecisionImage[];
 }
 
-export function mapUs(hit: UsHit, decision: NalusDecision, abstract: NalusAbstract | null, textSource: string): DecisionRecord {
+/**
+ * The hidden RTF input (the text parseNalusDecision reads first) carries the
+ * pictures too; the rendered cell (fallback) has none we could take. Pure.
+ */
+export function usTextExtras(getTextHtml: string): UsTextExtras {
+  const hidden = loadHtml(getTextHtml)("input#docContentHidden").attr("value");
+  if (!hidden) return { textSource: "us:gettext-doccontent", images: [] };
+  const images = extractRtfPictures(hidden).map(
+    (p): DecisionImage => ({ charAt: p.offset, mime: p.mime, width: p.width ?? null, height: p.height ?? null, bytes: p.data }),
+  );
+  return { textSource: "us:gettext-hidden", images };
+}
+
+export function mapUs(hit: UsHit, decision: NalusDecision, abstract: NalusAbstract | null, extras: UsTextExtras): DecisionRecord {
   const caseNumber = usCaseNumber(hit.caseNumber);
   return {
     source: "us",
@@ -75,11 +93,13 @@ export function mapUs(hit: UsHit, decision: NalusDecision, abstract: NalusAbstra
     court: usCourt(hit.sz),
     caseNumber,
     caseNumbers: [caseNumber],
+    decisionType: decisionType(hit.form ?? decision.form),
     decidedOn: hit.date ?? null,
     legalSentence: abstract?.legalSentence ?? null,
     ecli: hit.ecli ?? nalusEcli(hit.sz, decision.registrySign) ?? null,
     publishedOn: hit.publishedOn ?? null,
     parserVersion: US_PARSER_VERSION,
-    text: decision.text ? { body: decision.text, source: textSource } : null,
+    text: decision.text ? { body: decision.text, source: extras.textSource } : null,
+    images: decision.text ? extras.images.map((img) => ({ ...img, charAt: Math.min(img.charAt, decision.text.length) })) : [],
   };
 }

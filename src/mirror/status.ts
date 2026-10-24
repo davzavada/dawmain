@@ -16,6 +16,10 @@ export interface SourceStatus {
   withoutText: number;
   shortText: number;
   withLegalSentence: number;
+  withDissent: number;
+  images: number;
+  /** decision_type → count; "?" = unknown. */
+  types: Record<string, number>;
   chunks: number;
   queued: number;
   newestDecidedOn: string | null;
@@ -38,6 +42,13 @@ export async function mirrorStatus(db: Queryable): Promise<{ sources: SourceStat
        (SELECT count(*) FROM mirror.decision d JOIN mirror.decision_text t ON t.decision_id = d.id
          WHERE d.source = s.source AND t.char_count < $1) AS short_text,
        (SELECT count(*) FROM mirror.decision d WHERE d.source = s.source AND d.legal_sentence IS NOT NULL) AS with_legal_sentence,
+       (SELECT count(*) FROM mirror.decision d JOIN mirror.decision_text t ON t.decision_id = d.id
+         WHERE d.source = s.source AND t.dissent_at IS NOT NULL) AS with_dissent,
+       (SELECT count(*) FROM mirror.decision d JOIN mirror.decision_image i ON i.decision_id = d.id
+         WHERE d.source = s.source) AS images,
+       (SELECT coalesce(jsonb_object_agg(t, n), '{}'::jsonb) FROM (
+          SELECT coalesce(decision_type, '?') AS t, count(*) AS n FROM mirror.decision d
+          WHERE d.source = s.source GROUP BY 1) x) AS types,
        (SELECT count(*) FROM mirror.decision_chunk c WHERE c.source = s.source) AS chunks,
        (SELECT count(*) FROM mirror.fetch_queue q WHERE q.source = s.source) AS queued,
        (SELECT max(decided_on)::text FROM mirror.decision d WHERE d.source = s.source) AS newest,
@@ -59,6 +70,9 @@ export async function mirrorStatus(db: Queryable): Promise<{ sources: SourceStat
       withoutText: decisions - withText,
       shortText: Number(r.short_text),
       withLegalSentence: Number(r.with_legal_sentence),
+      withDissent: Number(r.with_dissent),
+      images: Number(r.images),
+      types: Object.fromEntries(Object.entries((r.types as Record<string, unknown>) ?? {}).map(([k, v]) => [k, Number(v)])),
       chunks: Number(r.chunks),
       queued: Number(r.queued),
       newestDecidedOn: (r.newest as string | null) ?? null,
@@ -80,7 +94,7 @@ export async function mirrorStatus(db: Queryable): Promise<{ sources: SourceStat
 
 /** Plain-text table for the CLI. */
 export function formatStatus(status: { sources: SourceStatus[]; databaseBytes: number }): string {
-  const head = ["zdroj", "rozhodnutí", "s textem", "bez textu", "krátké", "práv. věta", "chunky", "fronta", "nejnovější"];
+  const head = ["zdroj", "rozhodnutí", "s textem", "bez textu", "krátké", "práv. věta", "disent", "obrázky", "chunky", "fronta", "nejnovější"];
   const lines = status.sources.map((s) => [
     s.source,
     s.decisions,
@@ -88,6 +102,8 @@ export function formatStatus(status: { sources: SourceStatus[]; databaseBytes: n
     s.withoutText,
     s.shortText,
     s.withLegalSentence,
+    s.withDissent,
+    s.images,
     s.chunks,
     s.queued,
     s.newestDecidedOn ?? "–",
@@ -96,6 +112,10 @@ export function formatStatus(status: { sources: SourceStatus[]; databaseBytes: n
   const row = (cells: string[]) => cells.map((c, i) => c.padEnd(widths[i])).join("  ");
   const out = [row(head), ...lines.map(row)];
   for (const s of status.sources) {
+    if (s.decisions > 0) {
+      const types = Object.entries(s.types).sort((a, b) => b[1] - a[1]).map(([t, n]) => `${t} ${n}`);
+      out.push(`${s.source}: typy — ${types.join(", ")}`);
+    }
     if (!s.lastRun) continue;
     const r = s.lastRun;
     out.push(

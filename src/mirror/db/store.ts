@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { deriveChunks } from "../index";
-import type { DecisionRecord, MirrorSource } from "../types";
+import { deriveChunks, findDissentStart } from "../index";
+import type { DecisionImage, DecisionRecord, MirrorSource } from "../types";
 import type { Db, Queryable } from "./client";
 
 /**
@@ -23,22 +23,24 @@ export interface SaveResult {
 /**
  * Upsert one decision. Base fields are overwritten with what the source says
  * now; last_changed_at moves only when one of them (or the text) differs. A
- * record without text never erases a stored text. The text and its chunks
- * are rewritten only when the text changed — or always with `reindex`.
+ * record without text never erases a stored text. The text, its chunks and
+ * the pictures are rewritten when the text changed or a newer parser read
+ * it — or always with `reindex`; pictures only when the record carries them.
  */
 export async function saveDecision(db: Db, record: DecisionRecord, options: { reindex?: boolean } = {}): Promise<SaveResult> {
   const sha = record.text ? textSha256(record.text.body) : null;
   return db.transaction(async (tx) => {
-    const { rows } = await tx.query<{ id: string | number; prev_sha: string | null; inserted: boolean }>(
-      `WITH prev AS (SELECT text_sha256 FROM mirror.decision WHERE source = $1 AND source_id = $2)
+    const { rows } = await tx.query<{ id: string | number; prev_sha: string | null; prev_parser: number | null; inserted: boolean }>(
+      `WITH prev AS (SELECT text_sha256, parser_version FROM mirror.decision WHERE source = $1 AND source_id = $2)
        INSERT INTO mirror.decision AS d
-         (source, source_id, url, court, case_number, case_numbers, decided_on, legal_sentence, ecli, published_on, text_sha256, parser_version)
-       VALUES ($1, $2, $3, $4, $5, $6::text[], $7::date, $8, $9, $10::date, $11, $12)
+         (source, source_id, url, court, case_number, case_numbers, decided_on, legal_sentence, ecli, published_on, text_sha256, parser_version, decision_type)
+       VALUES ($1, $2, $3, $4, $5, $6::text[], $7::date, $8, $9, $10::date, $11, $12, $13)
        ON CONFLICT (source, source_id) DO UPDATE SET
          url = EXCLUDED.url,
          court = EXCLUDED.court,
          case_number = EXCLUDED.case_number,
          case_numbers = EXCLUDED.case_numbers,
+         decision_type = EXCLUDED.decision_type,
          decided_on = EXCLUDED.decided_on,
          legal_sentence = EXCLUDED.legal_sentence,
          ecli = EXCLUDED.ecli,
@@ -48,12 +50,15 @@ export async function saveDecision(db: Db, record: DecisionRecord, options: { re
          last_seen_at = now(),
          gone_at = NULL,
          last_changed_at = CASE
-           WHEN (d.url, d.court, d.case_number, d.case_numbers, d.decided_on, d.legal_sentence, d.ecli, d.published_on, d.text_sha256)
+           WHEN (d.url, d.court, d.case_number, d.case_numbers, d.decision_type, d.decided_on, d.legal_sentence, d.ecli,
+                 d.published_on, d.text_sha256)
                 IS DISTINCT FROM
-                (EXCLUDED.url, EXCLUDED.court, EXCLUDED.case_number, EXCLUDED.case_numbers, EXCLUDED.decided_on,
-                 EXCLUDED.legal_sentence, EXCLUDED.ecli, EXCLUDED.published_on, COALESCE(EXCLUDED.text_sha256, d.text_sha256))
+                (EXCLUDED.url, EXCLUDED.court, EXCLUDED.case_number, EXCLUDED.case_numbers, EXCLUDED.decision_type,
+                 EXCLUDED.decided_on, EXCLUDED.legal_sentence, EXCLUDED.ecli, EXCLUDED.published_on,
+                 COALESCE(EXCLUDED.text_sha256, d.text_sha256))
            THEN now() ELSE d.last_changed_at END
-       RETURNING d.id, (SELECT text_sha256 FROM prev) AS prev_sha, NOT EXISTS (SELECT 1 FROM prev) AS inserted`,
+       RETURNING d.id, (SELECT text_sha256 FROM prev) AS prev_sha, (SELECT parser_version FROM prev) AS prev_parser,
+                 NOT EXISTS (SELECT 1 FROM prev) AS inserted`,
       [
         record.source,
         record.sourceId,
@@ -67,21 +72,38 @@ export async function saveDecision(db: Db, record: DecisionRecord, options: { re
         record.publishedOn,
         sha,
         record.parserVersion,
+        record.decisionType,
       ],
     );
     const id = Number(rows[0].id);
     const inserted = rows[0].inserted;
     const textChanged = sha !== null && sha !== rows[0].prev_sha;
-    if (record.text && (textChanged || options.reindex)) {
+    const newerParser = rows[0].prev_parser !== null && rows[0].prev_parser < record.parserVersion;
+    if (record.text && (textChanged || newerParser || options.reindex)) {
       await tx.query(
-        `INSERT INTO mirror.decision_text (decision_id, body, char_count, text_source) VALUES ($1, $2, $3, $4)
-         ON CONFLICT (decision_id) DO UPDATE SET body = EXCLUDED.body, char_count = EXCLUDED.char_count, text_source = EXCLUDED.text_source`,
-        [id, record.text.body, record.text.body.length, record.text.source],
+        `INSERT INTO mirror.decision_text (decision_id, body, char_count, text_source, dissent_at) VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (decision_id) DO UPDATE SET body = EXCLUDED.body, char_count = EXCLUDED.char_count,
+           text_source = EXCLUDED.text_source, dissent_at = EXCLUDED.dissent_at`,
+        [id, record.text.body, record.text.body.length, record.text.source, findDissentStart(record.text.body)],
       );
       await writeChunks(tx, record, id);
+      if (record.images) await writeImages(tx, record.images, id);
     }
     return { id, inserted, textChanged };
   });
+}
+
+/** Replace the pictures of decision `id`. */
+export async function writeImages(tx: Queryable, images: DecisionImage[], id: number): Promise<void> {
+  await tx.query("DELETE FROM mirror.decision_image WHERE decision_id = $1", [id]);
+  for (const [ord, img] of images.entries()) {
+    const bytes = Buffer.from(img.bytes);
+    await tx.query(
+      `INSERT INTO mirror.decision_image (decision_id, ord, char_at, mime, width, height, bytes, sha256)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [id, ord, img.charAt, img.mime, img.width, img.height, bytes, createHash("sha256").update(bytes).digest("hex")],
+    );
+  }
 }
 
 /** Replace the chunks of decision `id` with those derived from `record`. */
@@ -102,12 +124,16 @@ export async function writeChunks(tx: Queryable, record: DecisionRecord, id: num
   return chunks.length;
 }
 
-/** Source ids (of `ids`) already stored WITH text — a resumed backfill skips them. */
-export async function idsWithText(db: Queryable, source: MirrorSource, ids: string[]): Promise<Set<string>> {
+/**
+ * Source ids (of `ids`) already stored WITH text by parser `parserVersion`
+ * or newer — a resumed backfill skips them, an older parser's rows it fetches again.
+ */
+export async function idsWithText(db: Queryable, source: MirrorSource, ids: string[], parserVersion: number): Promise<Set<string>> {
   if (ids.length === 0) return new Set();
   const { rows } = await db.query<{ source_id: string }>(
-    "SELECT source_id FROM mirror.decision WHERE source = $1 AND source_id = ANY($2::text[]) AND text_sha256 IS NOT NULL",
-    [source, ids],
+    `SELECT source_id FROM mirror.decision
+     WHERE source = $1 AND source_id = ANY($2::text[]) AND text_sha256 IS NOT NULL AND parser_version >= $3`,
+    [source, ids, parserVersion],
   );
   return new Set(rows.map((r) => r.source_id));
 }

@@ -50,6 +50,13 @@ Syrové odpovědi zdrojů ani další metadata se **neukládají** (rozhodnutí
 2. ODVOZENÉ vyhledávací index; později AI shrnutí, vektory, citátor
 ```
 
+Doplněno 24. 10. po pilotu ÚS: do základu patří i **typ rozhodnutí**
+(`decision_type`: rozsudek | usneseni | nalez | stanovisko | jine) a
+**obrázky**, které zdroj do rozhodnutí vkládá (`decision_image`: bajty,
+MIME, rozměry, pozice v textu), aby šlo celé rozhodnutí vykreslit. Začátek
+prvního **odlišného stanoviska** (`decision_text.dissent_at`) je odvozený
+z textu. Formátování písma se neukládá.
+
 Vrstva 2 jde kdykoli přepočítat z textu (`reindex`, AI, vazby). Metadata,
 která nejsou v textu (hesla, soudce, dotčené předpisy, věcný rejstřík),
 budou později znamenat nové stažení dotčených rozhodnutí; to je vědomá cena

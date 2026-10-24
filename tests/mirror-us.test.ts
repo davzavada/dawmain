@@ -2,8 +2,9 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseNalusAbstract, parseNalusDecision, parseNalusResults } from "@/src/sources/nalus";
-import { mapUs, parseUsPublishedDates, usCaseNumber, usCourt, usTextSource, type UsHit } from "@/src/mirror/map/us";
+import { mapUs, parseUsPublishedDates, usCaseNumber, usCourt, usTextExtras, type UsHit } from "@/src/mirror/map/us";
 import { nextQuarter, quarterRange, spread } from "@/src/mirror/crawl/us";
+import { decisionType } from "@/src/mirror/types";
 
 const fixture = (dir: string, name: string) => readFileSync(path.join(__dirname, "fixtures", dir, name), "utf8");
 
@@ -32,7 +33,7 @@ describe("mapUs", () => {
   it("maps the row, the text and the právní věta to the base record", () => {
     const decision = parseNalusDecision(html, hit.sz);
     const abstract = parseNalusAbstract(fixture("mirror", "us-getabstract-1-1169-26_1.html"));
-    const record = mapUs(hit, decision, abstract, usTextSource(html));
+    const record = mapUs(hit, decision, abstract, usTextExtras(html));
     expect(record).toMatchObject({
       source: "us",
       sourceId: "1-1169-26_1",
@@ -43,7 +44,8 @@ describe("mapUs", () => {
       decidedOn: "2026-07-07",
       ecli: "ECLI:CZ:US:2026:1.US.1169.26.1",
       publishedOn: "2026-07-27",
-      parserVersion: 1,
+      parserVersion: 2,
+      images: [],
     });
     expect(record.text?.source).toBe("us:gettext-hidden");
     expect(record.text!.body.length).toBeGreaterThan(1000);
@@ -53,9 +55,34 @@ describe("mapUs", () => {
   });
 
   it("rebuilds a missing ECLI from sz and the registry sign", () => {
-    const record = mapUs({ ...hit, ecli: undefined }, parseNalusDecision(html, hit.sz), null, "us:gettext-hidden");
+    const record = mapUs({ ...hit, ecli: undefined }, parseNalusDecision(html, hit.sz), null, usTextExtras(html));
     expect(record.ecli).toBe("ECLI:CZ:US:2026:1.US.1169.26.1");
     expect(record.legalSentence).toBeNull();
+  });
+
+  it("keeps the decision's picture at its place in the text (live 4-296-24_1)", () => {
+    const dissent = fixture("nalus", "gettext-dissent-4-296-24_1.html");
+    const record = mapUs(
+      { ...hit, sz: "4-296-24_1", caseNumber: "IV.ÚS 296/24 #1", form: "nález", ecli: undefined },
+      parseNalusDecision(dissent, "4-296-24_1"),
+      null,
+      usTextExtras(dissent),
+    );
+    expect(record.decisionType).toBe("nalez");
+    expect(record.images).toHaveLength(1);
+    expect(record.images![0]).toMatchObject({ mime: "image/png", width: 609, height: 1 });
+    expect(record.text!.body.slice(record.images![0].charAt)).toMatch(/^\n\nOdlišné stanovisko/);
+  });
+
+  it("folds the form of a decision to one vocabulary", () => {
+    expect(["nález", "Usnesení", "ROZSUDEK", "stanovisko pléna", "opatření", undefined].map((f) => decisionType(f))).toEqual([
+      "nalez",
+      "usneseni",
+      "rozsudek",
+      "stanovisko",
+      "jine",
+      null,
+    ]);
   });
 
   it("names the court and the case number", () => {
