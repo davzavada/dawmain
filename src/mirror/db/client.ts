@@ -34,6 +34,39 @@ export function mirrorUrl(role: MirrorRole): string {
   return url;
 }
 
+/** What the mirror's queries need: pg's Pool / PoolClient and PGlite all fit. */
+export interface Queryable {
+  query<R extends Record<string, unknown> = Record<string, unknown>>(
+    text: string,
+    params?: unknown[],
+  ): Promise<{ rows: R[] }>;
+}
+
+/** A Queryable that can also run `fn` in one transaction on one connection. */
+export interface Db extends Queryable {
+  transaction<T>(fn: (tx: Queryable) => Promise<T>): Promise<T>;
+}
+
+export function poolDb(pool: Pool): Db {
+  return {
+    query: (text, params) => pool.query(text, params) as never,
+    async transaction(fn) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const result = await fn(client as unknown as Queryable);
+        await client.query("COMMIT");
+        return result;
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+  };
+}
+
 const pools = new Map<MirrorRole, Pool>();
 
 export function mirrorPool(role: Exclude<MirrorRole, "owner">): Pool {
