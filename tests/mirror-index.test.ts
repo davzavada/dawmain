@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CHUNK_MAX, CHUNK_MIN, chunkText, deriveChunks, findDissentStart } from "@/src/mirror/index";
+import { CHUNK_MAX, CHUNK_MIN, chunkText, deriveChunks, findDissents } from "@/src/mirror/index";
 
 const sentence = (i: number) => `Věta číslo ${i} o ústavní stížnosti a právu na spravedlivý proces. `;
 
@@ -62,26 +62,33 @@ describe("deriveChunks", () => {
   });
 });
 
-describe("findDissentStart", () => {
-  it("finds a heading line, also letter-spaced or with the judge's name", () => {
-    const body = "Odůvodnění.\nV Brně dne 1. 1. 2025\n\nOdlišné stanovisko Daniely Zemanové\n\n1. Uplatňuji tímto odlišné stanovisko.";
-    expect(findDissentStart(body)).toBe(body.indexOf("Odlišné stanovisko Daniely"));
-    const spaced = "text\n  O d l i š n é   s t a n o v i s k o\nsoudce X";
-    expect(findDissentStart(spaced)).toBe(spaced.indexOf("O d l"));
+describe("findDissents", () => {
+  it("finds every heading line, also letter-spaced, numbered or with the judge's name", () => {
+    const body =
+      "Odůvodnění.\nV Brně dne 1. 1. 2025\n\nOdlišné stanovisko Daniely Zemanové\n\n1. Uplatňuji tímto odlišné stanovisko." +
+      " Text ".repeat(80) + "\n\nO d l i š n é   s t a n o v i s k o\nsoudce X\n\nNesouhlasím.";
+    const first = body.indexOf("Odlišné stanovisko Daniely");
+    const second = body.indexOf("O d l i š n é");
+    expect(findDissents(body)).toEqual([
+      { start: first, end: second, heading: "Odlišné stanovisko Daniely Zemanové" },
+      { start: second, end: body.length, heading: "O d l i š n é   s t a n o v i s k o" },
+    ]);
   });
 
-  it("takes the text after a separator rule, also when the heading lacks 'odlišné' (Pl. ÚS 36/93)", () => {
-    const body = "V Brně dne 17. května 1994\n\n1. S T A N O V I S K O\nsoudce X\n\n2. Odlišné stanovisko\nsoudce Y";
-    const rule = { charAt: body.indexOf("\n\n1. S"), width: 609, height: 1 };
-    // Without the rule only the numbered "2. Odlišné stanovisko" heading is found.
-    expect(findDissentStart(body)).toBe(body.indexOf("2. Odlišné"));
-    expect(findDissentStart(body, [rule])).toBe(body.indexOf("1. S T A N"));
+  it("takes the text after each separator rule, also when the heading lacks 'odlišné' (Pl. ÚS 36/93)", () => {
+    const body =
+      "V Brně dne 17. května 1994\n\n1. S T A N O V I S K O\nsoudce X" + " Text ".repeat(80) + "\n\n2. Odlišné stanovisko\nsoudce Y";
+    const rules = [body.indexOf("\n\n1. S"), body.indexOf("\n\n2. O")].map((charAt) => ({ charAt, width: 609, height: 1 }));
+    // Without the rules only the numbered "2. Odlišné stanovisko" heading is found.
+    expect(findDissents(body).map((d) => d.start)).toEqual([body.indexOf("2. Odlišné")]);
+    // With them both, and the rule + heading of the second one are one dissent.
+    expect(findDissents(body, rules).map((d) => d.heading)).toEqual(["1. S T A N O V I S K O", "2. Odlišné stanovisko"]);
     // A picture that is not a thin rule says nothing.
-    expect(findDissentStart(body, [{ ...rule, height: 200 }])).toBe(body.indexOf("2. Odlišné"));
+    expect(findDissents(body, [{ ...rules[0], height: 200 }]).map((d) => d.start)).toEqual([body.indexOf("2. Odlišné")]);
   });
 
   it("ignores sentences that only mention one", () => {
-    expect(findDissentStart("1. Uplatňuji tímto odlišné stanovisko proti výroku.\nJak jsem popsal v disentu k nálezu.")).toBeNull();
-    expect(findDissentStart("přičemž odlišnost ručení od zástavního práva")).toBeNull();
+    expect(findDissents("1. Uplatňuji tímto odlišné stanovisko proti výroku.\nJak jsem popsal v disentu k nálezu.")).toEqual([]);
+    expect(findDissents("přičemž odlišnost ručení od zástavního práva")).toEqual([]);
   });
 });

@@ -49,6 +49,8 @@ export interface MirrorHit {
   highlights: Array<[number, number]>;
   /** The excerpt lies in an odlišné stanovisko. */
   inDissent: boolean;
+  /** Which one (0-based, as in DecisionView.dissents); null outside any. */
+  dissent: number | null;
 }
 
 export interface SearchResult {
@@ -72,7 +74,7 @@ interface ChunkRow {
   score: number;
   char_start: number;
   chunk: string;
-  dissent_at: number | null;
+  dissent_starts: number[] | null;
 }
 
 function plan(input: SearchInput): { tsAnd: string | null; tsOr: string | null; terms: string[]; keys: string[]; caseKeys: string[] } {
@@ -99,7 +101,8 @@ async function runChannel(db: Queryable, input: SearchInput, tsquery: string | n
        SELECT DISTINCT ON (m.decision_id) m.* FROM matched m ORDER BY m.decision_id, m.score DESC, m.char_start
      )
      SELECT d.source, d.source_id, d.case_number, d.court, d.decision_type, d.decided_on::text, d.published_on::text, d.ecli, d.url,
-            b.score::float8 AS score, b.char_start, t.dissent_at,
+            b.score::float8 AS score, b.char_start,
+            (SELECT array_agg(x.char_start ORDER BY x.ord) FROM mirror.decision_dissent x WHERE x.decision_id = d.id) AS dissent_starts,
             substr(t.body, b.char_start + 1, b.char_end - b.char_start) AS chunk
      FROM best b
      JOIN mirror.decision d ON d.id = b.decision_id
@@ -125,6 +128,9 @@ function toHit(row: ChunkRow, terms: string[], identKeys: string[]): MirrorHit {
   const excerpt = row.chunk.slice(start, end);
   const highlights = findMatches(excerpt, { terms, identKeys }).map((s): [number, number] => [s.start, s.end]);
   const at = row.char_start + start;
+  const starts = (row.dissent_starts ?? []).map(Number);
+  const inside = starts.filter((s) => at >= s).length;
+  const dissent = inside > 0 ? inside - 1 : null;
   return {
     source: row.source,
     id: row.source_id,
@@ -138,7 +144,8 @@ function toHit(row: ChunkRow, terms: string[], identKeys: string[]): MirrorHit {
     score: Math.round(Number(row.score) * 1000) / 1000,
     excerpt,
     highlights,
-    inDissent: row.dissent_at !== null && at >= row.dissent_at,
+    inDissent: dissent !== null,
+    dissent,
   };
 }
 
@@ -181,7 +188,7 @@ export interface DecisionView {
   legalSentence: string | null;
   url: string;
   textSource: string | null;
-  dissentAt: number | null;
+  dissents: Array<{ ord: number; charStart: number; charEnd: number; heading: string | null }>;
   images: DecisionImageInfo[];
   firstSeenAt: string;
   lastChangedAt: string;
@@ -200,7 +207,10 @@ export async function getDecision(db: Queryable, source: MirrorSource, id: strin
   const { rows } = await db.query<Record<string, unknown>>(
     `SELECT d.source, d.source_id, d.case_number, d.case_numbers, d.court, d.decision_type, d.decided_on::text AS decided_on,
             d.published_on::text AS published_on, d.ecli, d.legal_sentence, d.url, d.first_seen_at, d.last_changed_at, d.gone_at,
-            t.body, t.text_source, t.dissent_at,
+            t.body, t.text_source,
+            coalesce((SELECT json_agg(json_build_object('ord', x.ord, 'charStart', x.char_start, 'charEnd', x.char_end,
+                                                        'heading', x.heading) ORDER BY x.ord)
+                      FROM mirror.decision_dissent x WHERE x.decision_id = d.id), '[]'::json) AS dissents,
             coalesce((SELECT json_agg(json_build_object('ord', i.ord, 'charAt', i.char_at, 'mime', i.mime, 'width', i.width,
                                                         'height', i.height, 'bytes', length(i.bytes)) ORDER BY i.ord)
                       FROM mirror.decision_image i WHERE i.decision_id = d.id), '[]'::json) AS images
@@ -224,7 +234,7 @@ export async function getDecision(db: Queryable, source: MirrorSource, id: strin
     legalSentence: (r.legal_sentence as string | null) ?? null,
     url: String(r.url),
     textSource: (r.text_source as string | null) ?? null,
-    dissentAt: r.dissent_at === null || r.dissent_at === undefined ? null : Number(r.dissent_at),
+    dissents: (typeof r.dissents === "string" ? JSON.parse(r.dissents) : r.dissents) as DecisionView["dissents"],
     images: (typeof r.images === "string" ? JSON.parse(r.images) : r.images) as DecisionImageInfo[],
     firstSeenAt: iso(r.first_seen_at)!,
     lastChangedAt: iso(r.last_changed_at)!,

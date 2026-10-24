@@ -17,6 +17,8 @@ export interface SourceStatus {
   shortText: number;
   withLegalSentence: number;
   withDissent: number;
+  /** All odlišná stanoviska (a decision can carry several). */
+  dissents: number;
   images: number;
   /** decision_type → count; "?" = unknown. */
   types: Record<string, number>;
@@ -42,8 +44,10 @@ export async function mirrorStatus(db: Queryable): Promise<{ sources: SourceStat
        (SELECT count(*) FROM mirror.decision d JOIN mirror.decision_text t ON t.decision_id = d.id
          WHERE d.source = s.source AND t.char_count < $1) AS short_text,
        (SELECT count(*) FROM mirror.decision d WHERE d.source = s.source AND d.legal_sentence IS NOT NULL) AS with_legal_sentence,
-       (SELECT count(*) FROM mirror.decision d JOIN mirror.decision_text t ON t.decision_id = d.id
-         WHERE d.source = s.source AND t.dissent_at IS NOT NULL) AS with_dissent,
+       (SELECT count(DISTINCT x.decision_id) FROM mirror.decision d JOIN mirror.decision_dissent x ON x.decision_id = d.id
+         WHERE d.source = s.source) AS with_dissent,
+       (SELECT count(*) FROM mirror.decision d JOIN mirror.decision_dissent x ON x.decision_id = d.id
+         WHERE d.source = s.source) AS dissents,
        (SELECT count(*) FROM mirror.decision d JOIN mirror.decision_image i ON i.decision_id = d.id
          WHERE d.source = s.source) AS images,
        (SELECT coalesce(jsonb_object_agg(t, n), '{}'::jsonb) FROM (
@@ -71,6 +75,7 @@ export async function mirrorStatus(db: Queryable): Promise<{ sources: SourceStat
       shortText: Number(r.short_text),
       withLegalSentence: Number(r.with_legal_sentence),
       withDissent: Number(r.with_dissent),
+      dissents: Number(r.dissents),
       images: Number(r.images),
       types: Object.fromEntries(Object.entries((r.types as Record<string, unknown>) ?? {}).map(([k, v]) => [k, Number(v)])),
       chunks: Number(r.chunks),
@@ -94,7 +99,7 @@ export async function mirrorStatus(db: Queryable): Promise<{ sources: SourceStat
 
 /** Plain-text table for the CLI. */
 export function formatStatus(status: { sources: SourceStatus[]; databaseBytes: number }): string {
-  const head = ["zdroj", "rozhodnutí", "s textem", "bez textu", "krátké", "práv. věta", "disent", "obrázky", "chunky", "fronta", "nejnovější"];
+  const head = ["zdroj", "rozhodnutí", "s textem", "bez textu", "krátké", "práv. věta", "s disentem", "disentů", "obrázky", "chunky", "fronta", "nejnovější"];
   const lines = status.sources.map((s) => [
     s.source,
     s.decisions,
@@ -103,6 +108,7 @@ export function formatStatus(status: { sources: SourceStatus[]; databaseBytes: n
     s.shortText,
     s.withLegalSentence,
     s.withDissent,
+    s.dissents,
     s.images,
     s.chunks,
     s.queued,

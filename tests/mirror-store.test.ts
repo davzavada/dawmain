@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Db } from "@/src/mirror/db/client";
 import { dequeue, enqueue, finishRun, idsWithText, saveDecision, startRun } from "@/src/mirror/db/store";
 import { mirrorStatus } from "@/src/mirror/status";
+import { reindexSource } from "@/src/mirror/reindex";
 import type { DecisionRecord } from "@/src/mirror/types";
 
 /** The crawler's writes against the real schema (PGlite). */
@@ -63,7 +64,7 @@ function record(overrides: Partial<DecisionRecord> = {}): DecisionRecord {
 
 async function row(sourceId = "1-1169-26_1") {
   const { rows } = await pg.query<Record<string, unknown>>(
-    `SELECT d.*, t.char_count, t.text_source, t.dissent_at, (SELECT count(*) FROM mirror.decision_chunk c WHERE c.decision_id = d.id) AS chunks
+    `SELECT d.*, t.char_count, t.text_source, (SELECT min(x.char_start) FROM mirror.decision_dissent x WHERE x.decision_id = d.id) AS dissent_at, (SELECT count(*) FROM mirror.decision_chunk c WHERE c.decision_id = d.id) AS chunks
      FROM mirror.decision d LEFT JOIN mirror.decision_text t ON t.decision_id = d.id WHERE d.source = 'us' AND d.source_id = $1`,
     [sourceId],
   );
@@ -139,6 +140,27 @@ describe("type, dissent and pictures", () => {
   });
 });
 
+describe("reindex", () => {
+  it("rebuilds chunks and every dissent from the stored text and pictures, without the source", async () => {
+    const text = "Nález. ".repeat(100) + "\nV Brně\n\n1. S T A N O V I S K O\nsoudce X\n" + "Důvody. ".repeat(80) + "\n\nOdlišné stanovisko soudce Y\n\nNesouhlasím.";
+    const rule = { charAt: text.indexOf("\n\n1. S"), mime: "image/png" as const, width: 609, height: 1, bytes: Uint8Array.from([0x89, 0x50]) };
+    await saveDecision(db, record({ sourceId: "Pl-36-93", decisionType: "nalez", text: { body: text, source: "us:gettext-hidden" }, images: [rule] }));
+    const id = (await pg.query<{ id: number }>("SELECT id FROM mirror.decision WHERE source_id = 'Pl-36-93'")).rows[0].id;
+    const dissents = async () =>
+      (await pg.query<{ heading: string }>("SELECT heading FROM mirror.decision_dissent WHERE decision_id = $1 ORDER BY ord", [id])).rows.map((r) => r.heading);
+    expect(await dissents()).toEqual(["1. S T A N O V I S K O", "Odlišné stanovisko soudce Y"]);
+
+    await pg.query("DELETE FROM mirror.decision_chunk WHERE decision_id = $1", [id]);
+    await pg.query("DELETE FROM mirror.decision_dissent WHERE decision_id = $1", [id]);
+    const counts = { fetched: 0, changed: 0, failed: 0 };
+    await reindexSource({ db, log: () => undefined }, "us", counts);
+    expect(counts.failed).toBe(0);
+    expect(counts.fetched).toBe(Number((await pg.query<{ n: number }>("SELECT count(*)::int AS n FROM mirror.decision_text")).rows[0].n));
+    expect(await dissents()).toEqual(["1. S T A N O V I S K O", "Odlišné stanovisko soudce Y"]);
+    expect((await pg.query("SELECT 1 FROM mirror.decision_chunk WHERE decision_id = $1", [id])).rows.length).toBeGreaterThan(0);
+  });
+});
+
 describe("fetch_queue and runs", () => {
   it("backs off on repeated failures and clears on success", async () => {
     await enqueue(db, "us", "3-9-26_1", "decision", "HTTP 500");
@@ -158,8 +180,8 @@ describe("fetch_queue and runs", () => {
     await finishRun(db, id, { fetched: 3, changed: 2, failed: 1 }, null);
     const status = await mirrorStatus(db);
     const us = status.sources.find((s) => s.source === "us")!;
-    expect(us).toMatchObject({ decisions: 3, withText: 2, withoutText: 1, shortText: 1, withLegalSentence: 1, withDissent: 1, images: 0, queued: 1 });
-    expect(us.types).toEqual({ usneseni: 2, nalez: 1 });
+    expect(us).toMatchObject({ decisions: 4, withText: 3, withoutText: 1, shortText: 1, withLegalSentence: 1, withDissent: 2, dissents: 3, images: 1, queued: 1 });
+    expect(us.types).toEqual({ usneseni: 2, nalez: 2 });
     expect(us.lastRun).toMatchObject({ mode: "backfill", fetched: 3, changed: 2, failed: 1, error: null });
     expect(status.sources.find((s) => s.source === "ns")).toMatchObject({ decisions: 0, lastRun: null });
   });

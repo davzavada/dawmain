@@ -69,6 +69,7 @@ describe("mirror schema", () => {
       "decision_chunk_ns",
       "decision_chunk_nss",
       "decision_chunk_us",
+      "decision_dissent",
       "decision_image",
       "decision_text",
       "fetch_queue",

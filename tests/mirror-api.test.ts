@@ -22,6 +22,7 @@ let pg: PGlite;
 let app: Hono;
 
 const png = Uint8Array.from(Buffer.from("89504e470d0a1a0a0000000d49484452", "hex"));
+const photo = Uint8Array.from(Buffer.from("ffd8ffe000104a46", "hex"));
 
 function record(o: Partial<DecisionRecord>): DecisionRecord {
   return {
@@ -76,7 +77,10 @@ beforeAll(async () => {
       ecli: "ECLI:CZ:US:2025:4.US.296.24.1",
       legalSentence: "Promlčení <b>nelze</b> přehlédnout.",
       text: { body: nalezBody, source: "us:gettext-hidden" },
-      images: [{ charAt: nalezBody.indexOf("\n\nOdlišné"), mime: "image/png", width: 609, height: 1, bytes: png }],
+      images: [
+        { charAt: nalezBody.indexOf("\n\nOdlišné"), mime: "image/png", width: 609, height: 1, bytes: png },
+        { charAt: nalezBody.indexOf("\nV Brně"), mime: "image/jpeg", width: 200, height: 100, bytes: photo },
+      ],
     }),
   );
   await saveDecision(
@@ -147,7 +151,7 @@ describe("GET /v1/search", () => {
 
   it("says when the excerpt lies in a dissent", async () => {
     const body = await (await get("/v1/search?q=" + encodeURIComponent("nesouhlasím s většinou"))).json();
-    expect(body.hits[0]).toMatchObject({ id: "4-296-24_1", inDissent: true });
+    expect(body.hits[0]).toMatchObject({ id: "4-296-24_1", inDissent: true, dissent: 0 });
   });
 
   it("rejects bad parameters", async () => {
@@ -164,28 +168,36 @@ describe("GET /v1/decisions", () => {
     expect(body).toMatchObject({
       id: "4-296-24_1",
       form: "nalez",
-      dissentAt: nalezBody.indexOf("Odlišné stanovisko"),
-      images: [{ ord: 0, mime: "image/png", width: 609, height: 1, bytes: png.length }],
+      dissents: [{ ord: 0, charStart: nalezBody.indexOf("Odlišné stanovisko"), charEnd: nalezBody.length, heading: "Odlišné stanovisko" }],
+      images: [
+        { ord: 0, mime: "image/png", width: 609, height: 1, bytes: png.length },
+        { ord: 1, mime: "image/jpeg", width: 200, height: 100, bytes: photo.length },
+      ],
     });
     expect(body.text).toMatchObject({ page: 1, total_pages: 1, total_chars: nalezBody.length });
     expect(body.text.text).toBe(nalezBody);
   });
 
-  it("renders the whole decision as HTML: picture inline, rule before the dissent, text escaped", async () => {
+  it("renders the whole decision as HTML: NALUS's separator as the one rule before the dissent, text escaped", async () => {
     const res = await get("/v1/decisions/us/4-296-24_1?format=html");
     expect(res.headers.get("content-type")).toMatch(/text\/html/);
     const html = await res.text();
-    expect(html).toContain(`src="data:image/png;base64,${Buffer.from(png).toString("base64")}"`);
-    expect(html.indexOf("<img")).toBeLessThan(html.indexOf('<hr class="dissent">'));
+    expect(html.match(/<hr class="dissent">/g)).toHaveLength(1);
     expect(html.indexOf('<hr class="dissent">')).toBeLessThan(html.indexOf("Odlišné stanovisko"));
     expect(html).toContain("Promlčení &lt;b&gt;nelze&lt;/b&gt;");
+  });
+
+  it("draws a real picture inline", async () => {
+    const html = await (await get("/v1/decisions/us/4-296-24_1?format=html")).text();
+    expect(html).toContain(`src="data:image/jpeg;base64,${Buffer.from(photo).toString("base64")}"`);
+    expect(html.indexOf("<img")).toBeLessThan(html.indexOf('<hr class="dissent">'));
   });
 
   it("serves a picture's bytes", async () => {
     const res = await get("/v1/decisions/us/4-296-24_1/images/0");
     expect(res.headers.get("content-type")).toBe("image/png");
     expect(Buffer.from(await res.arrayBuffer()).equals(Buffer.from(png))).toBe(true);
-    expect((await get("/v1/decisions/us/4-296-24_1/images/1")).status).toBe(404);
+    expect((await get("/v1/decisions/us/4-296-24_1/images/2")).status).toBe(404);
   });
 
   it("404 for an unknown decision, 400 for an unknown source", async () => {
@@ -201,7 +213,8 @@ describe("GET /v1/status", () => {
       decisions: 2,
       withText: 2,
       withDissent: 1,
-      images: 1,
+      dissents: 1,
+      images: 2,
       types: { nalez: 1, usneseni: 1 },
     });
   });

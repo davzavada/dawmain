@@ -96,34 +96,49 @@ export function isSeparatorRule(img: { width: number | null; height: number | nu
   return img.width !== null && img.height !== null && img.width >= 300 && img.height <= 3;
 }
 
+/** Starts closer than this are one dissent (a rule, then its heading a line below). */
+const SAME_DISSENT_CHARS = 300;
+
+export interface DissentSpan {
+  start: number;
+  end: number;
+  /** Its first line ("Odlišné stanovisko soudce Jiřího Muchy"), null when empty. */
+  heading: string | null;
+}
+
 /**
- * Offset of the first odlišné stanovisko, the earlier of:
- * - the start of a line that IS its heading — "Odlišné stanovisko",
- *   "Odlišné stanovisko Daniely Zemanové", letter-spaced "O d l i š n é
- *   s t a n o v i s k o" — not a sentence that mentions one ("Uplatňuji
- *   tímto odlišné stanovisko …", "v disentu k nálezu");
- * - the text after a separator rule (isSeparatorRule) among `images`: NALUS
- *   puts one before each dissent, also before headings without the word
- *   "odlišné" (Pl. ÚS 36/93: "1. S T A N O V I S K O").
- * null when there is none. Pure.
+ * Every odlišné stanovisko of a decision, in order. A dissent starts at
+ * - a line that IS its heading — "Odlišné stanovisko", "Odlišné stanovisko
+ *   Daniely Zemanové", numbered "2. Odlišné stanovisko", letter-spaced
+ *   "O d l i š n é  s t a n o v i s k o" — not a sentence that mentions one
+ *   ("Uplatňuji tímto odlišné stanovisko …", "v disentu k nálezu");
+ * - or the text after a separator rule (isSeparatorRule) among `images`:
+ *   NALUS draws one before each dissent, also before headings without the
+ *   word "odlišné" (Pl. ÚS 36/93: "1. S T A N O V I S K O").
+ * A rule and the heading just below it are one dissent. Each runs to the
+ * next one or to the end of the text. Pure.
  */
-export function findDissentStart(body: string, images: Array<{ charAt: number; width: number | null; height: number | null }> = []): number | null {
-  let heading: number | null = null;
+export function findDissents(body: string, images: Array<{ charAt: number; width: number | null; height: number | null }> = []): DissentSpan[] {
+  const starts: number[] = [];
   for (const m of body.matchAll(/^[^\n]*$/gm)) {
     const line = m[0].trim();
     if (!line || line.length > MAX_DISSENT_HEADING) continue;
-    if (/^(?:\d{1,2}\.)?odlišn[éáý]stanovisk/i.test(line.replace(/\s+/g, ""))) {
-      heading = m.index + m[0].indexOf(line[0]);
-      break;
-    }
+    if (/^(?:\d{1,2}\.)?odlišn[éáý]stanovisk/i.test(line.replace(/\s+/g, ""))) starts.push(m.index + m[0].indexOf(line[0]));
   }
-  const rules = images.filter(isSeparatorRule).map((img) => {
+  for (const img of images) {
+    if (!isSeparatorRule(img)) continue;
     let at = Math.min(img.charAt, body.length);
     while (at < body.length && /\s/.test(body[at])) at++;
-    return at;
-  });
-  const candidates = [...(heading === null ? [] : [heading]), ...rules.filter((at) => at < body.length)];
-  return candidates.length ? Math.min(...candidates) : null;
+    if (at < body.length) starts.push(at);
+  }
+  starts.sort((a, b) => a - b);
+  const merged: number[] = [];
+  for (const at of starts) if (merged.length === 0 || at - merged[merged.length - 1] >= SAME_DISSENT_CHARS) merged.push(at);
+  return merged.map((start, i) => ({
+    start,
+    end: merged[i + 1] ?? body.length,
+    heading: body.slice(start, body.indexOf("\n", start) === -1 ? undefined : body.indexOf("\n", start)).trim() || null,
+  }));
 }
 
 /** Chunks of a record with text; [] when it has none. Pure. */

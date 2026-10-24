@@ -1,10 +1,12 @@
+import { isSeparatorRule } from "../index";
 import type { FullDecision } from "./queries";
 
 /**
  * The whole decision as one HTML page: metadata, právní věta, the text with
  * its pictures at their places (inlined as data: URIs — the page then needs
- * no further authenticated requests) and a rule before the first odlišné
- * stanovisko. No formatting beyond paragraphs: the mirror stores none.
+ * no further authenticated requests) and a rule before every odlišné
+ * stanovisko — NALUS's own separator picture (609×1) is drawn as that rule.
+ * No formatting beyond paragraphs: the mirror stores none.
  * Metafile pictures (WMF/EMF) browsers cannot show are named, not drawn.
  * Pure — unit-tested.
  */
@@ -31,6 +33,7 @@ function paragraphs(text: string): string {
 }
 
 function image(img: RenderImage): string {
+  if (isSeparatorRule(img)) return '<hr class="dissent">';
   if (img.mime !== "image/png" && img.mime !== "image/jpeg") {
     return `<p class="img-missing">[obrázek ${img.ord + 1}: ${escape(img.mime)} – prohlížeč ho neumí zobrazit]</p>`;
   }
@@ -40,10 +43,13 @@ function image(img: RenderImage): string {
 
 export function renderDecisionHtml(d: FullDecision, images: RenderImage[]): string {
   const body = d.body ?? "";
-  // Cut points: every picture, and the dissent's start.
+  // Cut points: every picture, and the start of every dissent (NALUS draws a
+  // rule there itself: then the picture is the rule, no second one).
   const marks = [
     ...images.map((img) => ({ at: Math.min(img.char_at, body.length), html: image(img) })),
-    ...(d.dissentAt !== null ? [{ at: d.dissentAt, html: '<hr class="dissent">' }] : []),
+    ...d.dissents
+      .filter((x) => !images.some((img) => isSeparatorRule(img) && x.charStart - Math.min(img.char_at, body.length) <= 4 && x.charStart >= img.char_at))
+      .map((x) => ({ at: x.charStart, html: '<hr class="dissent">' })),
   ].sort((a, b) => a.at - b.at);
   let html = "";
   let from = 0;

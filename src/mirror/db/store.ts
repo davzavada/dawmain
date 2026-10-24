@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { deriveChunks, findDissentStart } from "../index";
+import { deriveChunks, findDissents } from "../index";
 import type { DecisionImage, DecisionRecord, MirrorSource } from "../types";
 import type { Db, Queryable } from "./client";
 
@@ -81,29 +81,43 @@ export async function saveDecision(db: Db, record: DecisionRecord, options: { re
     const newerParser = rows[0].prev_parser !== null && rows[0].prev_parser < record.parserVersion;
     if (record.text && (textChanged || newerParser || options.reindex)) {
       await tx.query(
-        `INSERT INTO mirror.decision_text (decision_id, body, char_count, text_source, dissent_at) VALUES ($1, $2, $3, $4, $5)
+        `INSERT INTO mirror.decision_text (decision_id, body, char_count, text_source) VALUES ($1, $2, $3, $4)
          ON CONFLICT (decision_id) DO UPDATE SET body = EXCLUDED.body, char_count = EXCLUDED.char_count,
-           text_source = EXCLUDED.text_source, dissent_at = EXCLUDED.dissent_at`,
-        [id, record.text.body, record.text.body.length, record.text.source, await dissentStart(tx, record, id)],
+           text_source = EXCLUDED.text_source`,
+        [id, record.text.body, record.text.body.length, record.text.source],
       );
       await writeChunks(tx, record, id);
       if (record.images) await writeImages(tx, record.images, id);
+      await writeDissents(tx, record, id);
     }
     return { id, inserted, textChanged };
   });
 }
 
-/** dissent_at from the text and the pictures: the record's, or (a reindex without them) the stored ones. */
-async function dissentStart(tx: Queryable, record: DecisionRecord, id: number): Promise<number | null> {
-  let images = record.images;
+/**
+ * Replace the dissents of decision `id`, found in the text and the pictures:
+ * the record's, or (a reindex reads no pictures) the stored ones.
+ */
+export async function writeDissents(tx: Queryable, record: DecisionRecord, id: number): Promise<number> {
+  let images: Array<{ charAt: number; width: number | null; height: number | null }> | undefined = record.images;
   if (!images) {
     const { rows } = await tx.query<{ char_at: number; width: number | null; height: number | null }>(
       "SELECT char_at, width, height FROM mirror.decision_image WHERE decision_id = $1",
       [id],
     );
-    images = rows.map((r) => ({ charAt: r.char_at, width: r.width, height: r.height, mime: "image/png", bytes: new Uint8Array() }));
+    images = rows.map((r) => ({ charAt: r.char_at, width: r.width, height: r.height }));
   }
-  return findDissentStart(record.text!.body, images);
+  const dissents = record.text ? findDissents(record.text.body, images) : [];
+  await tx.query("DELETE FROM mirror.decision_dissent WHERE decision_id = $1", [id]);
+  if (dissents.length) {
+    await tx.query(
+      `INSERT INTO mirror.decision_dissent (decision_id, ord, char_start, char_end, heading)
+       SELECT $1, x.ord, x.char_start, x.char_end, x.heading
+       FROM jsonb_to_recordset($2::jsonb) AS x(ord int, char_start int, char_end int, heading text)`,
+      [id, JSON.stringify(dissents.map((d, ord) => ({ ord, char_start: d.start, char_end: d.end, heading: d.heading })))],
+    );
+  }
+  return dissents.length;
 }
 
 /** Replace the pictures of decision `id`. */

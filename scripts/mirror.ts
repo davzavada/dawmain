@@ -5,12 +5,12 @@
  *   npx tsx scripts/mirror.ts migrate [--dry-run]   apply src/mirror/db/migrations as mirror_owner
  *   npx tsx scripts/mirror.ts backfill --source us [--limit N] [--quarters 2004Q2,2024Q2]
  *                                                   without --quarters: from the cursor to today
+ *   npx tsx scripts/mirror.ts reindex --source us   rebuild chunks and dissents from the stored text (no network)
  *   npx tsx scripts/mirror.ts status                per-source counts, last run, queue
  *   npx tsx scripts/mirror.ts api                   HTTP API on MIRROR_API_HOST:MIRROR_API_PORT
  *                                                   (default 127.0.0.1:8080), token MIRROR_API_TOKEN
  *
- * Planned (later steps of the plan): sync, reindex; backfill of ns, nss,
- * justice.
+ * Planned (later steps of the plan): sync; backfill of ns, nss, justice.
  *
  * Connection strings come from the environment or /etc/mirror/env
  * (MIRROR_ENV_FILE overrides the path).
@@ -20,8 +20,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { migrate } from "./db-migrate.mjs";
-import { closeMirrorPools, loadMirrorEnv, mirrorPool, mirrorUrl, poolDb } from "../src/mirror/db/client";
-import { finishRun, startRun, updateRun, type RunCounts } from "../src/mirror/db/store";
+import { closeMirrorPools, loadMirrorEnv, mirrorPool, mirrorUrl, poolDb, type Db } from "../src/mirror/db/client";
+import { finishRun, startRun, updateRun, type RunCounts, type RunMode } from "../src/mirror/db/store";
+import { reindexSource } from "../src/mirror/reindex";
+import { MIRROR_SOURCES, type MirrorSource } from "../src/mirror/types";
 import { backfillUs, newUsPacer } from "../src/mirror/crawl/us";
 import { SourceStopped } from "../src/mirror/http";
 import { formatStatus, mirrorStatus } from "../src/mirror/status";
@@ -46,7 +48,6 @@ const EXIT_SOURCE_STOPPED = 3;
 
 const PLANNED: Record<string, string> = {
   sync: "krok 6",
-  reindex: "krok 7",
 };
 
 function option(args: string[], name: string): string | undefined {
@@ -79,12 +80,45 @@ async function runBackfill(args: string[]): Promise<number> {
   if (limit !== undefined && !(Number.isInteger(limit) && limit > 0)) throw new Error("--limit must be a positive integer");
   const quarters = option(args, "--quarters")?.split(",").map((q) => q.trim());
 
+  return runTracked("us", "backfill", async (ctx, counts) => {
+    const rps = Number(process.env.MIRROR_US_RPS ?? "1");
+    const concurrency = Number(process.env.MIRROR_US_CONCURRENCY ?? "1");
+    if (!(Number.isInteger(concurrency) && concurrency >= 1 && concurrency <= 8)) throw new Error("MIRROR_US_CONCURRENCY must be 1–8");
+    ctx.log(`us: tempo ${rps} req/s, souběžně ${concurrency}`);
+    await backfillUs({ ...ctx, pacer: newUsPacer(rps) }, { limit, quarters, concurrency }, counts);
+  });
+}
+
+async function runReindex(args: string[]): Promise<number> {
+  const source = option(args, "--source");
+  if (!source || !(MIRROR_SOURCES as readonly string[]).includes(source)) {
+    console.error("mirror reindex: --source us | ns | nss | justice");
+    return 2;
+  }
+  return runTracked(source as MirrorSource, "reindex", (ctx, counts) => reindexSource(ctx, source as MirrorSource, counts));
+}
+
+/**
+ * One run with its sync_run row: counts written every 50 decisions, the
+ * end (or why it ended) recorded. SIGTERM / SIGINT (systemctl stop) asks the
+ * work to stop after the decision in hand; the row then says "zastaveno".
+ */
+async function runTracked(
+  source: MirrorSource,
+  mode: RunMode,
+  work: (ctx: { db: Db; log: (line: string) => void; progress: (c: RunCounts) => Promise<void>; shouldStop: () => boolean }, counts: RunCounts) => Promise<void>,
+): Promise<number> {
   const db = poolDb(mirrorPool("writer"));
   const counts: RunCounts = { fetched: 0, changed: 0, failed: 0 };
-  const runId = await startRun(db, "us", "backfill");
+  const runId = await startRun(db, source, mode);
   const log = (line: string) => console.log(`${new Date().toISOString().slice(11, 19)} ${line}`);
-  let error: string | null = null;
-  let stopped = false;
+  let stopRequested: string | null = null;
+  for (const signal of ["SIGTERM", "SIGINT"] as const) {
+    process.once(signal, () => {
+      stopRequested = signal;
+      log(`${source}: ${signal} — dokončuji rozpracovaná rozhodnutí a končím`);
+    });
+  }
   let reported = 0;
   const progress = async (c: RunCounts) => {
     const done = c.fetched + c.failed;
@@ -92,21 +126,21 @@ async function runBackfill(args: string[]): Promise<number> {
     reported = done;
     await updateRun(db, runId, c);
   };
+  let error: string | null = null;
+  let stopped = false;
   try {
-    const rps = Number(process.env.MIRROR_US_RPS ?? "1");
-    const concurrency = Number(process.env.MIRROR_US_CONCURRENCY ?? "1");
-    if (!(Number.isInteger(concurrency) && concurrency >= 1 && concurrency <= 8)) throw new Error("MIRROR_US_CONCURRENCY must be 1–8");
-    log(`us: tempo ${rps} req/s, souběžně ${concurrency}`);
-    await backfillUs({ db, pacer: newUsPacer(rps), log, progress }, { limit, quarters, concurrency }, counts);
+    await work({ db, log, progress, shouldStop: () => stopRequested !== null }, counts);
+    if (stopRequested) error = `zastaveno (${stopRequested})`;
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
     stopped = e instanceof SourceStopped;
-    log(e instanceof SourceStopped ? `us: ZASTAVENO — ${error}` : `us: běh selhal — ${error}`);
+    log(e instanceof SourceStopped ? `${source}: ZASTAVENO — ${error}` : `${source}: běh selhal — ${error}`);
   } finally {
     await finishRun(db, runId, counts, error);
   }
-  log(`us: hotovo — staženo ${counts.fetched}, nových/změněných ${counts.changed}, chyb ${counts.failed}`);
-  return stopped ? EXIT_SOURCE_STOPPED : error ? 1 : 0;
+  log(`${source}: ${mode} konec — zpracováno ${counts.fetched}, nových/změněných ${counts.changed}, chyb ${counts.failed}`);
+  if (stopped) return EXIT_SOURCE_STOPPED;
+  return error && !stopRequested ? 1 : 0;
 }
 
 async function runStatus(): Promise<void> {
@@ -140,6 +174,7 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
     if (command === "backfill") return await runBackfill(args);
+    if (command === "reindex") return await runReindex(args);
     if (command === "status") {
       await runStatus();
       return 0;
@@ -151,7 +186,7 @@ async function main(argv: string[]): Promise<number> {
     console.error(`mirror ${command}: zatím neimplementováno (${PLANNED[command]} plánu)`);
     return 2;
   }
-  console.error("usage: mirror migrate [--dry-run] | backfill --source us [--limit N] [--quarters …] | status | api");
+  console.error("usage: mirror migrate [--dry-run] | backfill --source us [--limit N] [--quarters …] | reindex --source … | status | api");
   return 2;
 }
 

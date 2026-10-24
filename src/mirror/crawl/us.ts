@@ -35,6 +35,8 @@ export interface CrawlContext {
   log: (line: string) => void;
   /** Called after every stored or failed decision (the CLI writes counts every 50). */
   progress?: (counts: RunCounts) => Promise<void>;
+  /** True once a stop was asked for (SIGTERM): workers finish the decision in hand and return. */
+  shouldStop?: () => boolean;
 }
 
 /** Requests per second across all workers (MIRROR_US_RPS; v1-plan default 1, set 4 on 24. 10.). */
@@ -160,7 +162,7 @@ async function fetchAndStore(ctx: CrawlContext, hits: UsHit[], counts: RunCounts
   let next = 0;
   let stopped: SourceStopped | null = null;
   const worker = async () => {
-    while (stopped === null && next < todo.length) {
+    while (stopped === null && next < todo.length && !ctx.shouldStop?.()) {
       const hit = todo[next++];
       try {
         const record = await fetchUsDecision(ctx, hit);
@@ -215,13 +217,15 @@ export async function backfillUs(ctx: CrawlContext, options: UsBackfillOptions, 
   const perQuarter = options.limit ? Math.ceil(options.limit / quarters.length) : undefined;
   let left = options.limit ?? Infinity;
   for (const q of quarters) {
-    if (left <= 0) break;
+    if (left <= 0 || ctx.shouldStop?.()) break;
     const { from, to } = quarterRange(q);
     const all = await discoverUs(ctx, from, to);
     const take = perQuarter ? spread(all, Math.min(perQuarter, left)) : all;
     ctx.log(`us: ${q}: ${all.length} rozhodnutí, stahuji ${take.length}`);
     await fetchAndStore(ctx, take, counts, options.concurrency ?? 1);
     left -= take.length;
+    // A stopped quarter is not done: the next run lists it again and skips what is stored.
+    if (ctx.shouldStop?.()) break;
     if (!pilot && !options.limit) await writeCursor(ctx.db, "us", { next: nextQuarter(q) });
   }
 }

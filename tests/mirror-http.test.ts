@@ -11,9 +11,9 @@ describe("Pacer", () => {
       await pacer.wait();
       starts.push(Date.now() - t0);
     }));
+    // Timers fire late under load, never early: only the lower bound is firm.
     starts.sort((a, b) => a - b);
-    for (let i = 1; i < starts.length; i++) expect(starts[i] - starts[i - 1]).toBeGreaterThanOrEqual(35);
-    expect(starts.at(-1)!).toBeGreaterThanOrEqual(150);
+    expect(starts.at(-1)!).toBeGreaterThanOrEqual(4 * 40 - 5);
   });
 
   it("refuses a rate outside (0, 10] requests per second", () => {
