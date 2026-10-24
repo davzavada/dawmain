@@ -91,21 +91,39 @@ export function chunkText(text: string): TextSpan[] {
 /** A heading line is short: "Odlišné stanovisko soudce JUDr. Jana Musila k nálezu …". */
 const MAX_DISSENT_HEADING = 160;
 
+/** A separator rule as NALUS draws one before every odlišné stanovisko: 609×1 px. */
+export function isSeparatorRule(img: { width: number | null; height: number | null }): boolean {
+  return img.width !== null && img.height !== null && img.width >= 300 && img.height <= 3;
+}
+
 /**
- * Offset of the first odlišné stanovisko: the start of a line that IS its
- * heading — "Odlišné stanovisko", "Odlišné stanovisko Daniely Zemanové",
- * letter-spaced "O d l i š n é  s t a n o v i s k o" — not a sentence that
- * mentions one ("Uplatňuji tímto odlišné stanovisko …", "v disentu k nálezu").
+ * Offset of the first odlišné stanovisko, the earlier of:
+ * - the start of a line that IS its heading — "Odlišné stanovisko",
+ *   "Odlišné stanovisko Daniely Zemanové", letter-spaced "O d l i š n é
+ *   s t a n o v i s k o" — not a sentence that mentions one ("Uplatňuji
+ *   tímto odlišné stanovisko …", "v disentu k nálezu");
+ * - the text after a separator rule (isSeparatorRule) among `images`: NALUS
+ *   puts one before each dissent, also before headings without the word
+ *   "odlišné" (Pl. ÚS 36/93: "1. S T A N O V I S K O").
  * null when there is none. Pure.
  */
-export function findDissentStart(body: string): number | null {
-  const lines = body.matchAll(/^[^\n]*$/gm);
-  for (const m of lines) {
+export function findDissentStart(body: string, images: Array<{ charAt: number; width: number | null; height: number | null }> = []): number | null {
+  let heading: number | null = null;
+  for (const m of body.matchAll(/^[^\n]*$/gm)) {
     const line = m[0].trim();
     if (!line || line.length > MAX_DISSENT_HEADING) continue;
-    if (/^odlišn[éáý]stanovisk/i.test(line.replace(/\s+/g, ""))) return m.index + m[0].indexOf(line[0]);
+    if (/^(?:\d{1,2}\.)?odlišn[éáý]stanovisk/i.test(line.replace(/\s+/g, ""))) {
+      heading = m.index + m[0].indexOf(line[0]);
+      break;
+    }
   }
-  return null;
+  const rules = images.filter(isSeparatorRule).map((img) => {
+    let at = Math.min(img.charAt, body.length);
+    while (at < body.length && /\s/.test(body[at])) at++;
+    return at;
+  });
+  const candidates = [...(heading === null ? [] : [heading]), ...rules.filter((at) => at < body.length)];
+  return candidates.length ? Math.min(...candidates) : null;
 }
 
 /** Chunks of a record with text; [] when it has none. Pure. */

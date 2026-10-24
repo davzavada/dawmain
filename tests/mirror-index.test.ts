@@ -70,6 +70,16 @@ describe("findDissentStart", () => {
     expect(findDissentStart(spaced)).toBe(spaced.indexOf("O d l"));
   });
 
+  it("takes the text after a separator rule, also when the heading lacks 'odlišné' (Pl. ÚS 36/93)", () => {
+    const body = "V Brně dne 17. května 1994\n\n1. S T A N O V I S K O\nsoudce X\n\n2. Odlišné stanovisko\nsoudce Y";
+    const rule = { charAt: body.indexOf("\n\n1. S"), width: 609, height: 1 };
+    // Without the rule only the numbered "2. Odlišné stanovisko" heading is found.
+    expect(findDissentStart(body)).toBe(body.indexOf("2. Odlišné"));
+    expect(findDissentStart(body, [rule])).toBe(body.indexOf("1. S T A N"));
+    // A picture that is not a thin rule says nothing.
+    expect(findDissentStart(body, [{ ...rule, height: 200 }])).toBe(body.indexOf("2. Odlišné"));
+  });
+
   it("ignores sentences that only mention one", () => {
     expect(findDissentStart("1. Uplatňuji tímto odlišné stanovisko proti výroku.\nJak jsem popsal v disentu k nálezu.")).toBeNull();
     expect(findDissentStart("přičemž odlišnost ručení od zástavního práva")).toBeNull();

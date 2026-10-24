@@ -84,13 +84,26 @@ export async function saveDecision(db: Db, record: DecisionRecord, options: { re
         `INSERT INTO mirror.decision_text (decision_id, body, char_count, text_source, dissent_at) VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (decision_id) DO UPDATE SET body = EXCLUDED.body, char_count = EXCLUDED.char_count,
            text_source = EXCLUDED.text_source, dissent_at = EXCLUDED.dissent_at`,
-        [id, record.text.body, record.text.body.length, record.text.source, findDissentStart(record.text.body)],
+        [id, record.text.body, record.text.body.length, record.text.source, await dissentStart(tx, record, id)],
       );
       await writeChunks(tx, record, id);
       if (record.images) await writeImages(tx, record.images, id);
     }
     return { id, inserted, textChanged };
   });
+}
+
+/** dissent_at from the text and the pictures: the record's, or (a reindex without them) the stored ones. */
+async function dissentStart(tx: Queryable, record: DecisionRecord, id: number): Promise<number | null> {
+  let images = record.images;
+  if (!images) {
+    const { rows } = await tx.query<{ char_at: number; width: number | null; height: number | null }>(
+      "SELECT char_at, width, height FROM mirror.decision_image WHERE decision_id = $1",
+      [id],
+    );
+    images = rows.map((r) => ({ charAt: r.char_at, width: r.width, height: r.height, mime: "image/png", bytes: new Uint8Array() }));
+  }
+  return findDissentStart(record.text!.body, images);
 }
 
 /** Replace the pictures of decision `id`. */
