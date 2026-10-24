@@ -59,11 +59,19 @@ export async function fetchAndStore<T>(ctx: CrawlContext, job: FetchJob<T>, coun
       const item = todo[next++];
       const id = job.id(item);
       try {
-        const saved = await saveDecision(ctx.db, await job.fetch(item));
+        const record = await job.fetch(item);
+        const saved = await saveDecision(ctx.db, record);
         failedInRow = 0;
         counts.fetched++;
         if (saved.inserted || saved.textChanged) counts.changed++;
-        await dequeue(ctx.db, job.source, id);
+        if (record.text) {
+          await dequeue(ctx.db, job.source, id);
+        } else {
+          // The source gave the record but no text: stored, not done (v1-plan) — retried later.
+          counts.failed++;
+          ctx.log(`${job.source}: ${id}: zdroj nevrátil text rozhodnutí`);
+          await enqueue(ctx.db, job.source, id, "text", "zdroj nevrátil text rozhodnutí");
+        }
       } catch (error) {
         if (error instanceof SourceStopped) {
           stopped = error;

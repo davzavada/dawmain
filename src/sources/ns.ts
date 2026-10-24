@@ -508,8 +508,10 @@ export function parseNsDecision(html: string, unid: string): NsDecision {
   // A leading note survives the opening cut when the decision opens another
   // way — "Předseda senátu Nejvyššího soudu rozhodl …" (live 3 Tdo 1140/2023,
   // 5 To 35/2016: WebSearch then carried 61 words WebPrint has not). It is
-  // one paragraph ending with the source ("… dostupné na www.nsoud.cz.").
-  const note = /^\s*Citace rozhodnutí Nejvyššího soudu by měla obsahovat[^\n]*?(?:nsoud\.cz\.?)[^\n]*\n/u.exec(text);
+  // one paragraph ending with the source ("… dostupné na www.nsoud.cz."). A
+  // page that carries nothing else (live 29 Cdo 4492/2010: no body on either
+  // rendition) is left with no text at all, not with the note.
+  const note = /^\s*Citace rozhodnutí Nejvyššího soudu by měla obsahovat[^\n]*?(?:nsoud\.cz\.?)[^\n]*(?:\n|$)/u.exec(text);
   if (note) text = text.slice(note[0].length);
   text = text.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
 
