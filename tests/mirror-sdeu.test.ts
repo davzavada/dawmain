@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseSdeuYear, sdeuYearQuery } from "@/src/mirror/crawl/sdeu";
-import { celexCaseNumber, mapSdeu, sdeuCaseNumbers, sdeuCourt, sdeuType } from "@/src/mirror/map/sdeu";
+import { celexCaseNumber, mapSdeu, NO_CZECH_FULL_TEXT, sdeuCaseNumbers, sdeuCourt, sdeuCzechKind, sdeuType } from "@/src/mirror/map/sdeu";
 
 const year2019 = JSON.parse(readFileSync(path.join(__dirname, "fixtures", "mirror", "sdeu-sparql-2019.json"), "utf8"));
 
@@ -29,7 +29,7 @@ describe("SDEU enumeration (Cellar SPARQL, live 2019 rows)", () => {
 describe("mapSdeu", () => {
   it("maps a judgment with its Czech text", () => {
     const item = parseSdeuYear(year2019).find((i) => i.celex === "62019CJ0311")!;
-    const record = mapSdeu(item, "Rozsudek Soudního dvora (čtvrtého senátu) ze dne 3. prosince 2020 …");
+    const record = mapSdeu(item, "ROZSUDEK SOUDNÍHO DVORA (čtvrtého senátu) 3. prosince 2020 … Z těchto důvodů Soudní dvůr (čtvrtý senát) rozhodl takto: …");
     expect(record).toMatchObject({
       source: "sdeu",
       sourceId: "62019CJ0311",
@@ -49,8 +49,26 @@ describe("mapSdeu", () => {
 
   it("marks an Advocate General's opinion and every joined case", () => {
     const item = parseSdeuYear(year2019).find((i) => i.celex === "62019CC0084")!;
-    const record = mapSdeu(item, "Stanovisko generálního advokáta …");
+    const record = mapSdeu(item, "STANOVISKO GENERÁLNÍHO ADVOKÁTA MACIEJE SZPUNARA přednesené dne 2. dubna 2020 …");
     expect(record).toMatchObject({ decisionType: "stanovisko", sourceFlags: ["CELEX:CC", "GA"], caseNumbers: ["C-84/19", "C-222/19", "C-252/19"] });
+  });
+
+  it("keeps a Czech summary but marks it: the full text is in another language", () => {
+    const item = parseSdeuYear(year2019).find((i) => i.celex === "62019CO0853")!;
+    const summary = "Usnesení Soudního dvora (desátého senátu) ze dne 2. července 2020 – IM v. Sting Reality\n(Věc C-853/19)\nPředmět … Rozhodnutí …";
+    const record = mapSdeu(item, summary);
+    expect(record.text?.source).toBe("sdeu:cellar-ces-souhrn");
+    expect(record.sourceFlags).toEqual(["CELEX:CO", NO_CZECH_FULL_TEXT]);
+    expect(record.textAbsent).toBeUndefined();
+  });
+
+  it("tells a Czech summary from the full text (live pilot texts)", () => {
+    expect(sdeuCzechKind("ROZSUDEK SOUDU (druhého senátu) 9. listopadu 2004 … Úplný text ve francouzském jazyce … Předmět: … Rozhodnutí: Žaloba se zamítá.")).toBe("summary");
+    expect(sdeuCzechKind("Rozsudek Soudního dvora (sedmého senátu) ze dne 11. ledna 2007 – Komise v. Řecko (Věc C‑269/05) … Předmět … 2) Řecké republice se ukládá náhrada nákladů řízení.")).toBe("summary");
+    expect(sdeuCzechKind("… 45 Z těchto důvodů Soudní dvůr (pátý senát) rozhodl takto: …")).toBe("full");
+    expect(sdeuCzechKind("… Z\u00a0těchto důvodů Soudní dvůr (druhý senát) usnesl takto:")).toBe("full");
+    expect(sdeuCzechKind("STANOVISKO GENERÁLNÍ ADVOKÁTKY JULIANE KOKOTT přednesené dne …")).toBe("full");
+    expect(sdeuCzechKind("NÁZOR GENERÁLNÍ ADVOKÁTKY ELEANOR SHARPSTON přednesený …")).toBe("full");
   });
 
   it("stores a document without a Czech version as such, not as a failure", () => {

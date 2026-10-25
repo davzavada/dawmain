@@ -8,7 +8,26 @@ import type { DecisionRecord, DecisionType } from "../types";
  * Pure — unit-tested.
  */
 
-export const SDEU_PARSER_VERSION = 1;
+/** 2: a Czech summary is told from the full text (sdeuCzechKind) and marked. */
+export const SDEU_PARSER_VERSION = 2;
+
+/** source_flags of a document whose Czech text is only a summary: the full text is in another language (Cellar). */
+export const NO_CZECH_FULL_TEXT = "BEZ_CS_PLNEHO_ZNENI";
+
+/**
+ * Full text or only the Czech summary? A decision not published in the
+ * Reports exists in full only in the language of the case and in French;
+ * in Czech Cellar holds a notice — heading, "Předmět", "Rozhodnutí"/výrok,
+ * headnotes, "Úplný text ve francouzském jazyce" (pilot 25. 10.: T-285/02,
+ * F-65/05, C-269/05, C-352/10). Every full judgment or order ends with
+ * "Z těchto důvodů … rozhodl/usnesl takto", every opinion opens
+ * "STANOVISKO / NÁZOR GENERÁLNÍHO ADVOKÁTA"; a summary has neither. Pure.
+ */
+export function sdeuCzechKind(text: string): "full" | "summary" {
+  if (/z\s+těchto\s+důvodů/i.test(text)) return "full";
+  if (/(stanovisko|názor)\s+generální(ho)?\s+advokát/i.test(text)) return "full";
+  return "summary";
+}
 
 /** Case-law CELEX of a document itself (no _SUM/_INF companions): 62019CJ0311, 62019CO0853(01). */
 export const SDEU_CELEX_RE = /^6(\d{4})(CJ|CC|CO|CS|CV|CP|CD|CX|CT|TJ|TO|TC|TT|FJ|FO|FT)(\d{4})(\(\d{2}\))?$/;
@@ -61,7 +80,9 @@ export function sdeuCaseNumbers(item: Pick<SdeuListItem, "celex" | "caseCs">): s
 const iso = (v: string | undefined): string | null => (v && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : null);
 
 export function mapSdeu(item: SdeuListItem, textCs: string | null): DecisionRecord {
-  const { type, flags } = sdeuType(item.celex);
+  const { type, flags: kindFlags } = sdeuType(item.celex);
+  const summary = textCs !== null && sdeuCzechKind(textCs) === "summary";
+  const flags = summary ? [...kindFlags, NO_CZECH_FULL_TEXT] : kindFlags;
   const caseNumbers = sdeuCaseNumbers(item);
   return {
     source: "sdeu",
@@ -77,7 +98,8 @@ export function mapSdeu(item: SdeuListItem, textCs: string | null): DecisionReco
     ecli: item.ecli?.trim() || null,
     publishedOn: iso(item.published),
     parserVersion: SDEU_PARSER_VERSION,
-    text: textCs ? { body: textCs, source: "sdeu:cellar-ces" } : null,
+    // A Czech summary is kept (searchable in Czech) but says what it is: the source and the flag.
+    text: textCs ? { body: textCs, source: summary ? "sdeu:cellar-ces-souhrn" : "sdeu:cellar-ces" } : null,
     ...(textCs ? {} : { textAbsent: "česká verze v Cellaru neexistuje" }),
     images: [],
   };
