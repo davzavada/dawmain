@@ -23,7 +23,9 @@
 >    `MIRROR_US_RPS`, `MIRROR_US_CONCURRENCY`, `MIRROR_NS_…` v `/etc/mirror/env`;
 >    NS po kalibraci 300 rozhodnutí bez jediné 5xx. Po hodině bez 429/403
 >    ÚS a NS na 6 req/s, 6 souběžně. NSS na 4 req/s vrátil po ~50 min
->    HTTP 403 (blokace na ~13 min) → NSS běží na 2 req/s, 2 souběžně.)
+>    HTTP 403 (blokace na ~13 min) → NSS na 2 req/s; po dalším 403 (po ~2 h)
+>    25. 10. rozhodnuto: NSS 1 req/s, 1 souběžně, a po 403 sám pokračuje za
+>    60 min, nejvýš 3× za 24 h — `deploy/mirror/mirror-backfill@nss.service.d`.)
 > 6. Kde plán nesedí na realitu (jiná verze balíčku, endpoint nefunguje),
 >    řekni to a navrhni úpravu, nehádej.
 
