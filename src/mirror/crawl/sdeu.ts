@@ -1,6 +1,6 @@
 import { htmlToText } from "@/src/sources/shared/html";
 import { readCursor, writeCursor, type RunCounts } from "../db/store";
-import { pacedFetch } from "../http";
+import { SourceStopped, pacedFetch } from "../http";
 import { SDEU_CELEX_RE, SDEU_PARSER_VERSION, mapSdeu, type SdeuListItem } from "../map/sdeu";
 import type { DecisionRecord } from "../types";
 import { fetchAndStore, spread, type CrawlContext } from "./workers";
@@ -63,14 +63,30 @@ export function parseSdeuYear(json: unknown): SdeuListItem[] {
   return [...byCelex.values()].sort((a, b) => a.celex.localeCompare(b.celex));
 }
 
+/** Attempts per SPARQL page; Cellar's endpoint answers 502 now and then (pilot 25. 10.). */
+const SPARQL_ATTEMPTS = 3;
+const SPARQL_RETRY_MS = 30_000;
+
+async function sparqlPage(ctx: CrawlContext, year: number, offset: number): Promise<unknown[]> {
+  const url = `${SPARQL}?query=${encodeURIComponent(sdeuYearQuery(year, offset))}`;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const response = await pacedFetch(LABEL, ctx.pacer, url, { headers: { accept: "application/sparql-results+json" }, timeoutMs: 120_000 });
+      if (!response.ok) throw new Error(`Cellar SPARQL answered HTTP ${response.status} for year ${year}`);
+      return ((await response.json()) as { results?: { bindings?: unknown[] } }).results?.bindings ?? [];
+    } catch (error) {
+      if (error instanceof SourceStopped || attempt >= SPARQL_ATTEMPTS) throw error;
+      ctx.log(`sdeu: ${year}: výčet selhal (${error instanceof Error ? error.message : String(error)}), znovu za ${SPARQL_RETRY_MS / 1000} s`);
+      await (ctx.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms))))(SPARQL_RETRY_MS);
+    }
+  }
+}
+
 /** A year's rows page by page (SPARQL_PAGE), grouped once all are in. */
 export async function listSdeuYear(ctx: CrawlContext, year: number): Promise<SdeuListItem[]> {
   const rows: unknown[] = [];
   for (let offset = 0; ; offset += SPARQL_PAGE) {
-    const url = `${SPARQL}?query=${encodeURIComponent(sdeuYearQuery(year, offset))}`;
-    const response = await pacedFetch(LABEL, ctx.pacer, url, { headers: { accept: "application/sparql-results+json" }, timeoutMs: 120_000 });
-    if (!response.ok) throw new Error(`Cellar SPARQL answered HTTP ${response.status} for year ${year}`);
-    const page = ((await response.json()) as { results?: { bindings?: unknown[] } }).results?.bindings ?? [];
+    const page = await sparqlPage(ctx, year, offset);
     rows.push(...page);
     if (page.length < SPARQL_PAGE) break;
   }
