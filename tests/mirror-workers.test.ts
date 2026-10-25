@@ -85,6 +85,17 @@ describe("fetchAndStore", () => {
     expect(q.rows).toEqual([{ kind: "text" }]);
   });
 
+  it("does not queue a record whose text the source does not have (SDEU without Czech)", async () => {
+    const counts = { fetched: 0, changed: 0, failed: 0 };
+    await fetchAndStore(
+      ctx([]),
+      { source: "ns", parserVersion: 1, items: ["A1"], id: (x) => x, fetch: async (x) => ({ ...record(x), text: null, textAbsent: "česká verze neexistuje" }), concurrency: 1 },
+      counts,
+    );
+    expect(counts).toMatchObject({ fetched: 1, failed: 0 });
+    expect((await pg.query("SELECT 1 FROM mirror.fetch_queue WHERE source_id = 'A1'")).rows).toHaveLength(0);
+  });
+
   it("skips what is stored, and a 429/403 stops every worker", async () => {
     const counts = { fetched: 0, changed: 0, failed: 0 };
     const fetched: string[] = [];

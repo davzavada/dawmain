@@ -59,7 +59,7 @@ export async function mirrorStatus(db: Queryable): Promise<{ sources: SourceStat
        (SELECT row_to_json(r) FROM (
           SELECT mode, started_at, finished_at, fetched, changed, failed, error FROM mirror.sync_run
           WHERE source = s.source ORDER BY started_at DESC LIMIT 1) r) AS last_run
-     FROM unnest(ARRAY['us','ns','nss','justice']) AS s(source)`,
+     FROM unnest(ARRAY['us','ns','nss','justice','sdeu']) AS s(source)`,
     [SHORT_TEXT_CHARS],
   );
   const size = await db.query<{ bytes: string }>("SELECT pg_database_size(current_database())::text AS bytes");

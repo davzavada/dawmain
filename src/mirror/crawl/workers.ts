@@ -64,7 +64,7 @@ export async function fetchAndStore<T>(ctx: CrawlContext, job: FetchJob<T>, coun
         failedInRow = 0;
         counts.fetched++;
         if (saved.inserted || saved.textChanged) counts.changed++;
-        if (record.text) {
+        if (record.text || record.textAbsent) {
           await dequeue(ctx.db, job.source, id);
         } else {
           // The source gave the record but no text: stored, not done (v1-plan) — retried later.

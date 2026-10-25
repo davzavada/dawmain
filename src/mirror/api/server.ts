@@ -60,7 +60,7 @@ export function createMirrorApi(options: { db: Queryable; token: string }): Hono
 
   app.get("/v1/search", async (c) => {
     const q = c.req.query();
-    if (q.source && !isMirrorSource(q.source)) throw new BadRequest("source must be us, ns, nss or justice");
+    if (q.source && !isMirrorSource(q.source)) throw new BadRequest("source must be us, ns, nss, justice or sdeu");
     if (q.type && !TYPES.has(q.type as DecisionType)) throw new BadRequest("type must be rozsudek, usneseni, nalez, stanovisko or jine");
     const limit = q.limit ? Number(q.limit) : undefined;
     if (limit !== undefined && !(Number.isInteger(limit) && limit >= 1 && limit <= MAX_LIMIT)) {
@@ -83,7 +83,7 @@ export function createMirrorApi(options: { db: Queryable; token: string }): Hono
 
   app.get("/v1/decisions/:source/:id", async (c) => {
     const { source, id } = c.req.param();
-    if (!isMirrorSource(source)) throw new BadRequest("source must be us, ns, nss or justice");
+    if (!isMirrorSource(source)) throw new BadRequest("source must be us, ns, nss, justice or sdeu");
     const decision = await getDecision(db, source, id);
     if (!decision) return c.json({ error: "not found" }, 404);
     if (c.req.query("format") === "html") {
