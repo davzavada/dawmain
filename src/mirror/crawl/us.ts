@@ -110,19 +110,35 @@ async function searchRange(ctx: CrawlContext, from: string, to: string): Promise
   return { hits, total };
 }
 
-/** Every row decided from..to; splits the range while rows and total disagree. */
+/**
+ * Every row decided from..to. Splits the range in half — down to single
+ * days — while rows and total disagree, and also when its search fails: a
+ * quarter's search timed out ten times in a row on the night of 25. 10.
+ * (2019Q2) and took the whole run down with it. Only a single day that
+ * fails is an error; a 429/403 (SourceStopped) is never split.
+ */
 export async function discoverUs(ctx: CrawlContext, from: string, to: string): Promise<UsHit[]> {
-  const { hits, total } = await searchRange(ctx, from, to);
-  const unique = [...new Map(hits.map((h) => [h.sz, h])).values()];
-  if (unique.length === total) return unique;
   const days = daysBetween(from, to);
+  const halves = async () => {
+    const mid = addDays(from, Math.floor(days / 2));
+    return [...(await discoverUs(ctx, from, mid)), ...(await discoverUs(ctx, addDays(mid, 1), to))];
+  };
+  let found: { hits: UsHit[]; total: number };
+  try {
+    found = await searchRange(ctx, from, to);
+  } catch (error) {
+    if (error instanceof SourceStopped || days < 1) throw error;
+    ctx.log(`us: ${from}..${to}: hledání selhalo (${error instanceof Error ? error.message : String(error)}), dělím interval`);
+    return halves();
+  }
+  const unique = [...new Map(found.hits.map((h) => [h.sz, h])).values()];
+  if (unique.length === found.total) return unique;
   if (days < 1) {
-    ctx.log(`us: ${from}: ${unique.length} řádků z ${total} (nejde dál dělit)`);
+    ctx.log(`us: ${from}: ${unique.length} řádků z ${found.total} (nejde dál dělit)`);
     return unique;
   }
-  ctx.log(`us: ${from}..${to}: ${unique.length} řádků z ${total}, dělím interval`);
-  const mid = addDays(from, Math.floor(days / 2));
-  return [...(await discoverUs(ctx, from, mid)), ...(await discoverUs(ctx, addDays(mid, 1), to))];
+  ctx.log(`us: ${from}..${to}: ${unique.length} řádků z ${found.total}, dělím interval`);
+  return halves();
 }
 
 // ---------- fetch ----------
