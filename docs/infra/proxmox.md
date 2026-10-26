@@ -89,3 +89,14 @@ Návrat: `pct rollback 101 pre-<migrace>` (zahodí vše zapsané po snapshotu).
   `Authorization: Bearer …`.
 - Kontrola: `cloudflared tunnel --config /etc/cloudflared/config.yml ingress validate`,
   `journalctl -u cloudflared`.
+
+## Denní sync (krok 6)
+
+- `mirror-sync.timer` → `mirror-sync.service` každou noc ve 03:30 (čas
+  kontejneru Europe/Prague), zmeškaný běh dožene po startu.
+- Pro každý zdroj nejdřív splatné řádky `fetch_queue` (běh `retry`), pak
+  vše, co zdroj zveřejnil za posledních 7 dní (justice 14) — staženo znovu,
+  takže se projeví i opravy u zdroje (běh `sync`). Každý běh je řádek
+  `sync_run`; `mirror status` ukazuje poslední.
+- NSS se synchronizuje až po doběhnutí backfillu (sdílí s ním limit NSS).
+- Ručně: `npx tsx scripts/mirror.ts sync [--source us] [--days 7] [--no-retry]`.
