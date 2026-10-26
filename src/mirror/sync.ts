@@ -150,6 +150,10 @@ async function stored(ctx: CrawlContext, source: MirrorSource, ids: string[]): P
 
 /** Retry the due fetch_queue rows of `source`; returns how many were due. */
 export async function retrySource(ctx: CrawlContext, source: MirrorSource, concurrency: number, counts: RunCounts): Promise<number> {
+  if (source === "nss" && !(await nssBackfillDone(ctx))) {
+    ctx.log("nss: opakování fronty přeskočeno — backfill ještě běží (sdílí s ním limit NSS)");
+    return 0;
+  }
   const ids = await dueIds(ctx, source);
   if (ids.length === 0) return 0;
   const rows = await stored(ctx, source, ids);
