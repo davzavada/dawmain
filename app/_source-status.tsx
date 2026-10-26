@@ -135,17 +135,41 @@ function host(href: string): string {
   return new URL(href).host;
 }
 
+/**
+ * Groups the server answers from Dawmain's own, regularly updated copy instead
+ * of querying the court's database live. Drawn in a blue frame with a tag and a
+ * note; the live groups get a grey frame. Until the internal database is in
+ * place this is only the look — the tools still query live.
+ */
+const INTERNAL_GROUPS: ReadonlySet<string> = new Set(["Judikatura"]);
+
 export function SourceList() {
   const answers = useStatuses();
   const rows = DATABASES.map((db) => toRow(db, answers[db.canaryId]));
   return DATABASE_GROUPS.map((group) => {
     const items = rows.filter((row) => row.group === group);
+    const internal = INTERNAL_GROUPS.has(group);
     return (
-      <div key={group} className="source-group">
+      <div key={group} className="source-group source-frame" data-origin={internal ? "internal" : "live"}>
         <div className="source-group-head">
           <span className="source-group-name">{group}</span>
           <span className="source-group-count">{items.length}</span>
+          {internal ? (
+            <span
+              className="source-origin"
+              title="Rozhodnutí se hledají ve vlastní databázi Dawmainu, ne živě v databázi soudu."
+            >
+              <Icon name="database" size={13} />
+              Interní databáze
+            </span>
+          ) : null}
         </div>
+        {internal ? (
+          <p className="source-origin-note">
+            Rozhodnutí hledá Dawmain ve vlastní, pravidelně aktualizované kopii. Odkaz vždy vede na
+            originál u soudu.
+          </p>
+        ) : null}
         <ul>
           {items.map((row) => {
             const look = LOOK[row.id] ?? { icon: "list", color: "var(--soft)" };

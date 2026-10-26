@@ -10,8 +10,8 @@ import { useZoteroStatus } from "./zotero-status";
 
 /**
  * The "Vlastní zdroje" group at the top of the home page's source list
- * (wireframe 01, 02): two rows — Zotero (only where the deployment can
- * connect it) and Vlastní soubory. Visitors see both greyed out with a
+ * (wireframe 01, 02): two rows — Vlastní soubory and Zotero (only where
+ * the deployment can connect it). Visitors see both greyed out with a
  * lock and a click signs them in (01); signed in, Zotero shows the
  * connected account and Vlastní soubory the documents and pages, with
  * "Spravovat" opening the modal (02). The rows read the shared summary
@@ -41,12 +41,12 @@ export function OwnSourcesGroup({ zotero }: { zotero: boolean }) {
     return (
       <>
         <Group signedIn={false} className="zd-hint-out">
-          {zotero ? <ZoteroRow signedIn={false} /> : null}
           <FilesInvite auth={auth} />
+          {zotero ? <ZoteroRow signedIn={false} /> : null}
         </Group>
         <Group signedIn className="zd-hint-in">
-          {zotero ? <ZoteroRowView desc={LOADING} /> : null}
           <HintedFilesRow />
+          {zotero ? <ZoteroRowView desc={LOADING} /> : null}
         </Group>
       </>
     );
@@ -54,8 +54,8 @@ export function OwnSourcesGroup({ zotero }: { zotero: boolean }) {
   const signedIn = auth === "signed_in";
   return (
     <Group signedIn={signedIn}>
-      {zotero ? <ZoteroRow signedIn={signedIn} /> : null}
       {signedIn ? <FilesRow auth={auth} summary={summary} /> : <FilesInvite auth={auth} />}
+      {zotero ? <ZoteroRow signedIn={signedIn} /> : null}
     </Group>
   );
 }
@@ -84,7 +84,7 @@ function FilesInvite({ auth }: { auth: string }) {
         <button type="button" className="source-title zd-row-button" onClick={requestSignIn} disabled={auth !== "signed_out"}>
           Vlastní soubory
         </button>
-        <span className="source-desc">Nahrané knihy, články, komentáře a vzory, ve kterých asistent hledá vedle oficiálních databází. V režimu Pro.</span>
+        <span className="source-desc">Nahrajte vlastní soubory – asistent v nich bude hledat vedle oficiálních databází. V režimu Pro.</span>
       </div>
     </li>
   );

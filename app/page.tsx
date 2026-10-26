@@ -29,9 +29,11 @@ export default function Home() {
           zásadě zdarma. Proto jsem vytvořil nekomerční alternativu. Budu rád, když ji vyzkoušíte :)
         </p>
         <p className="lead">
-          V oficiálních databázích server hledá živě – funguje jako nachytřený Google a nic si z
-          nich nekopíruje. Kdo má režim Pro, může připojit svou knihovnu Zotero a nahrát vlastní
-          soubory.
+          Štvalo mě, že soudní databáze často padají nebo jsou nedostupné. Judikaturu proto server
+          hledá ve vlastní, pravidelně aktualizované databázi, takže funguje, i když web soudu
+          zrovna nejede. Předpisy a literaturu hledá živě přímo v oficiálních zdrojích – jako
+          nachytřený Google, nic si z nich nekopíruje. Kdo má režim Pro, může připojit svou knihovnu
+          Zotero a nahrát vlastní soubory.
         </p>
         <a href={OWL_URL} className="project-card">
           <img src="/owl.svg" alt="" width={36} height={36} />

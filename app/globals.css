@@ -549,6 +549,61 @@ main > footer a {
   background: var(--down-bg);
   color: var(--rose);
 }
+/* Official databases in a frame: blue for those answered from Dawmain's own
+   copy (Interní databáze), grey for those queried live. */
+.source-frame {
+  padding: 14px 16px 2px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--well);
+}
+.source-frame[data-origin="internal"] {
+  border-color: var(--internal-line);
+  background: var(--internal-bg);
+}
+.source-frame[data-origin="internal"] .source-group-head {
+  border-bottom-color: var(--internal-hairline);
+}
+.source-frame .source:last-child {
+  border-bottom: 0;
+}
+.source-origin {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 8px 1px 6px;
+  border-radius: 6px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  white-space: nowrap;
+}
+.source-origin-note {
+  margin: 10px 0 2px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+:root {
+  --internal-line: rgb(37 99 235 / 0.28);
+  --internal-hairline: rgb(37 99 235 / 0.18);
+  --internal-bg: rgb(37 99 235 / 0.035);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --internal-line: rgb(96 165 250 / 0.35);
+    --internal-hairline: rgb(96 165 250 / 0.2);
+    --internal-bg: rgb(96 165 250 / 0.06);
+  }
+}
+@media (max-width: 640px) {
+  .source-frame {
+    padding: 12px 12px 2px;
+  }
+}
 .source-group.locked .source-group-name,
 .source-group.locked .source-title {
   color: var(--faint);
