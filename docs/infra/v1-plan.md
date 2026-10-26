@@ -25,7 +25,8 @@
 >    ÚS a NS na 6 req/s, 6 souběžně. NSS na 4 req/s vrátil po ~50 min
 >    HTTP 403 (blokace na ~13 min) → NSS na 2 req/s; po dalším 403 (po ~2 h)
 >    25. 10. rozhodnuto: NSS 1 req/s, 1 souběžně, a po 403 sám pokračuje za
->    60 min, nejvýš 3× za 24 h — `deploy/mirror/mirror-backfill@nss.service.d`. justice.cz 4 req/s,
+>    60 min, nejvýš 3× za 24 h; 26. 10. limit obnovení zrušen (403 přichází
+>    po 1–2,5 h i na 1 req/s) — `deploy/mirror/mirror-backfill@nss.service.d`. justice.cz 4 req/s,
 >    po hodině bez chyb 6 req/s.)
 > 6. Kde plán nesedí na realitu (jiná verze balíčku, endpoint nefunguje),
 >    řekni to a navrhni úpravu, nehádej.
