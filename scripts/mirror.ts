@@ -158,6 +158,18 @@ async function runReindex(args: string[]): Promise<number> {
  * end (or why it ended) recorded. SIGTERM / SIGINT (systemctl stop) asks the
  * work to stop after the decision in hand; the row then says "zastaveno".
  */
+/**
+ * Set once SIGTERM / SIGINT (systemctl stop) arrives — one listener for the
+ * process, however many runs (a sync runs ten) it holds.
+ */
+let stopSignal: string | null = null;
+for (const signal of ["SIGTERM", "SIGINT"] as const) {
+  process.once(signal, () => {
+    stopSignal = signal;
+    console.log(`${new Date().toISOString().slice(11, 19)} ${signal} — dokončuji rozpracovaná rozhodnutí a končím`);
+  });
+}
+
 async function runTracked(
   source: MirrorSource,
   mode: RunMode,
@@ -167,13 +179,8 @@ async function runTracked(
   const counts: RunCounts = { fetched: 0, changed: 0, failed: 0 };
   const runId = await startRun(db, source, mode);
   const log = (line: string) => console.log(`${new Date().toISOString().slice(11, 19)} ${line}`);
-  let stopRequested: string | null = null;
-  for (const signal of ["SIGTERM", "SIGINT"] as const) {
-    process.once(signal, () => {
-      stopRequested = signal;
-      log(`${source}: ${signal} — dokončuji rozpracovaná rozhodnutí a končím`);
-    });
-  }
+  const stopRequested = () => stopSignal;
+  if (stopSignal) log(`${source}: přeskočeno — ${stopSignal}`);
   let reported = 0;
   const progress = async (c: RunCounts) => {
     const done = c.fetched + c.failed;
@@ -184,8 +191,8 @@ async function runTracked(
   let error: string | null = null;
   let stopped = false;
   try {
-    await work({ db, log, progress, shouldStop: () => stopRequested !== null }, counts);
-    if (stopRequested) error = `zastaveno (${stopRequested})`;
+    if (!stopRequested()) await work({ db, log, progress, shouldStop: () => stopRequested() !== null }, counts);
+    if (stopRequested()) error = `zastaveno (${stopRequested()})`;
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
     stopped = e instanceof SourceStopped;
@@ -195,7 +202,7 @@ async function runTracked(
   }
   log(`${source}: ${mode} konec — zpracováno ${counts.fetched}, nových/změněných ${counts.changed}, chyb ${counts.failed}`);
   if (stopped) return EXIT_SOURCE_STOPPED;
-  return error && !stopRequested ? 1 : 0;
+  return error && !stopRequested() ? 1 : 0;
 }
 
 async function runStatus(): Promise<void> {

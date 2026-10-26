@@ -145,6 +145,17 @@ describe("type, dissent and pictures", () => {
   });
 });
 
+describe("NUL characters", () => {
+  it("drops U+0000 from the text and the fields instead of failing the insert", async () => {
+    await saveDecision(db, record({ sourceId: "NUL-1", caseNumbers: ["I. ÚS 1/26\u0000"], text: { body: "Text\u0000 s nulou.", source: "us:gettext-hidden" } }));
+    const r = await row("NUL-1");
+    expect(r.case_numbers).toEqual(["I. ÚS 1/26"]);
+    const t = await pg.query<{ body: string }>("SELECT t.body FROM mirror.decision_text t JOIN mirror.decision d ON d.id = t.decision_id WHERE d.source_id = 'NUL-1'");
+    expect(t.rows[0].body).toBe("Text s nulou.");
+    await pg.query("DELETE FROM mirror.decision WHERE source_id = 'NUL-1'");
+  });
+});
+
 describe("image blobs", () => {
   it("stores the same picture once, however many decisions carry it", async () => {
     const emblem = Uint8Array.from(Buffer.from("47494638396169007700", "hex"));

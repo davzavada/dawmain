@@ -70,7 +70,7 @@ export async function fetchAndStore<T>(ctx: CrawlContext, job: FetchJob<T>, coun
           await dequeue(ctx.db, job.source, id);
         } else {
           // The source gave the record but no text: stored, not done (v1-plan) — retried later.
-          counts.failed++;
+          // Not a failure of the run: the source has nothing (yet); the queue backs off.
           ctx.log(`${job.source}: ${id}: zdroj nevrátil text rozhodnutí`);
           await enqueue(ctx.db, job.source, id, "text", "zdroj nevrátil text rozhodnutí");
         }

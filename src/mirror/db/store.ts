@@ -27,7 +27,26 @@ export interface SaveResult {
  * the pictures are rewritten when the text changed or a newer parser read
  * it — or always with `reindex`; pictures only when the record carries them.
  */
-export async function saveDecision(db: Db, record: DecisionRecord, options: { reindex?: boolean } = {}): Promise<SaveResult> {
+/**
+ * Postgres text cannot hold U+0000, and a source occasionally sends one
+ * (justice.cz finaldoc, 26. 10.: "invalid byte sequence for encoding UTF8:
+ * 0x00" kept 24 decisions in the queue). Dropped from every string.
+ */
+function withoutNul(record: DecisionRecord): DecisionRecord {
+  const clean = (s: string | null) => (s === null ? null : s.replace(/\u0000/g, ""));
+  return {
+    ...record,
+    court: clean(record.court),
+    caseNumber: clean(record.caseNumber),
+    caseNumbers: record.caseNumbers.map((c) => c.replace(/\u0000/g, "")),
+    legalSentence: clean(record.legalSentence),
+    ecli: clean(record.ecli),
+    text: record.text ? { ...record.text, body: record.text.body.replace(/\u0000/g, "") } : null,
+  };
+}
+
+export async function saveDecision(db: Db, input: DecisionRecord, options: { reindex?: boolean } = {}): Promise<SaveResult> {
+  const record = withoutNul(input);
   const sha = record.text ? textSha256(record.text.body) : null;
   return db.transaction(async (tx) => {
     const { rows } = await tx.query<{ id: string | number; prev_sha: string | null; prev_parser: number | null; inserted: boolean }>(

@@ -80,7 +80,7 @@ describe("fetchAndStore", () => {
       { source: "ns", parserVersion: 1, items: ["T1"], id: (x) => x, fetch: async (x) => ({ ...record(x), text: null }), concurrency: 1 },
       counts,
     );
-    expect(counts).toMatchObject({ fetched: 1, failed: 1 });
+    expect(counts).toMatchObject({ fetched: 1, failed: 0 }); // the source has no text: queued, not a failure
     const q = await pg.query<{ kind: string }>("SELECT kind FROM mirror.fetch_queue WHERE source_id = 'T1'");
     expect(q.rows).toEqual([{ kind: "text" }]);
   });
