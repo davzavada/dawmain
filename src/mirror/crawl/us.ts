@@ -72,7 +72,10 @@ function daysBetween(from: string, to: string): number {
 // ---------- discover ----------
 
 /** All rows of one search (decision date from..to), page by page in one session. */
-async function searchRange(ctx: CrawlContext, from: string, to: string): Promise<{ hits: UsHit[]; total: number }> {
+/** Which date a search range filters: the decision's (backfill) or its publication (daily sync). */
+export type DateField = "decided" | "published";
+
+async function searchRange(ctx: CrawlContext, from: string, to: string, by: DateField = "decided"): Promise<{ hits: UsHit[]; total: number }> {
   const session = new CookieSession();
   const formResponse = await pacedFetch(LABEL, ctx.pacer, `${BASE}/Search.aspx`);
   session.absorb(formResponse);
@@ -81,7 +84,7 @@ async function searchRange(ctx: CrawlContext, from: string, to: string): Promise
   const post = await pacedFetch(LABEL, ctx.pacer, `${BASE}/Search.aspx`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded", cookie: session.header(), referer: `${BASE}/Search.aspx` },
-    body: buildNalusForm(state, { dateFrom: from, dateTo: to }, PAGE_SIZE).toString(),
+    body: buildNalusForm(state, by === "published" ? { publishedFrom: from, publishedTo: to } : { dateFrom: from, dateTo: to }, PAGE_SIZE).toString(),
     redirect: "manual",
   });
   session.absorb(post);
@@ -117,15 +120,15 @@ async function searchRange(ctx: CrawlContext, from: string, to: string): Promise
  * (2019Q2) and took the whole run down with it. Only a single day that
  * fails is an error; a 429/403 (SourceStopped) is never split.
  */
-export async function discoverUs(ctx: CrawlContext, from: string, to: string): Promise<UsHit[]> {
+export async function discoverUs(ctx: CrawlContext, from: string, to: string, by: DateField = "decided"): Promise<UsHit[]> {
   const days = daysBetween(from, to);
   const halves = async () => {
     const mid = addDays(from, Math.floor(days / 2));
-    return [...(await discoverUs(ctx, from, mid)), ...(await discoverUs(ctx, addDays(mid, 1), to))];
+    return [...(await discoverUs(ctx, from, mid, by)), ...(await discoverUs(ctx, addDays(mid, 1), to, by))];
   };
   let found: { hits: UsHit[]; total: number };
   try {
-    found = await searchRange(ctx, from, to);
+    found = await searchRange(ctx, from, to, by);
   } catch (error) {
     if (error instanceof SourceStopped || days < 1) throw error;
     ctx.log(`us: ${from}..${to}: hledání selhalo (${error instanceof Error ? error.message : String(error)}), dělím interval`);

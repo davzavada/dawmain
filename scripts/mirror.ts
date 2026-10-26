@@ -8,11 +8,11 @@
  *                       [--years 2019 (sdeu)]
  *                                                   without --quarters: from the cursor to today
  *   npx tsx scripts/mirror.ts reindex --source us   rebuild chunks and dissents from the stored text (no network)
+ *   npx tsx scripts/mirror.ts sync [--source us] [--days 7] [--no-retry]
+ *                                                   fetch_queue retry + the last days' publications
  *   npx tsx scripts/mirror.ts status                per-source counts, last run, queue
  *   npx tsx scripts/mirror.ts api                   HTTP API on MIRROR_API_HOST:MIRROR_API_PORT
  *                                                   (default 127.0.0.1:8080), token MIRROR_API_TOKEN
- *
- * Planned (later steps of the plan): sync.
  *
  * Connection strings come from the environment or /etc/mirror/env
  * (MIRROR_ENV_FILE overrides the path).
@@ -25,6 +25,7 @@ import { migrate } from "./db-migrate.mjs";
 import { closeMirrorPools, loadMirrorEnv, mirrorPool, mirrorUrl, poolDb, type Db } from "../src/mirror/db/client";
 import { finishRun, startRun, updateRun, type RunCounts, type RunMode } from "../src/mirror/db/store";
 import { reindexSource } from "../src/mirror/reindex";
+import { retrySource, syncSource } from "../src/mirror/sync";
 import { MIRROR_SOURCES, type MirrorSource } from "../src/mirror/types";
 import { backfillUs, newUsPacer } from "../src/mirror/crawl/us";
 import { backfillNs } from "../src/mirror/crawl/ns";
@@ -52,10 +53,6 @@ const MIRROR_MIGRATIONS_DIR = path.join(
  * a human looks first (v1-plan, pravidlo 5).
  */
 const EXIT_SOURCE_STOPPED = 3;
-
-const PLANNED: Record<string, string> = {
-  sync: "krok 6",
-};
 
 function option(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
@@ -115,6 +112,36 @@ async function runBackfill(args: string[]): Promise<number> {
     else if (source === "justice") await backfillJustice({ ...ctx, pacer: newPacer(rps) }, { limit, days, concurrency }, counts);
     else await backfillSdeu({ ...ctx, pacer: newPacer(rps) }, { limit, years, concurrency }, counts);
   });
+}
+
+/**
+ * Daily sync: for every source (or --source), first the due fetch_queue rows
+ * (a "retry" run), then the last days' publications (a "sync" run). Each is
+ * its own sync_run row; one source failing or stopped does not hold the
+ * others back. Exit status: the worst of the runs (3 = a source stopped).
+ */
+async function runSync(args: string[]): Promise<number> {
+  const only = option(args, "--source");
+  if (only && !(MIRROR_SOURCES as readonly string[]).includes(only)) throw new Error(`unknown source ${only}`);
+  const daysArg = option(args, "--days");
+  const days = daysArg ? Number(daysArg) : undefined;
+  if (days !== undefined && !(Number.isInteger(days) && days >= 1 && days <= 60)) throw new Error("--days must be 1–60");
+  const sources = (only ? [only] : MIRROR_SOURCES) as MirrorSource[];
+  let worst = 0;
+  for (const source of sources) {
+    for (const mode of ["retry", "sync"] as const) {
+      if (mode === "retry" && args.includes("--no-retry")) continue;
+      const code = await runTracked(source, mode, async (ctx, counts) => {
+        const { rps, concurrency } = rate(source, ctx.log);
+        const crawl = { ...ctx, pacer: newPacer(rps) };
+        if (mode === "retry") await retrySource(crawl, source, concurrency, counts);
+        else await syncSource(crawl, source, { days, concurrency }, counts);
+      });
+      worst = Math.max(worst, code);
+      if (code === EXIT_SOURCE_STOPPED) break; // the source refused us: no sync after a stopped retry
+    }
+  }
+  return worst;
 }
 
 async function runReindex(args: string[]): Promise<number> {
@@ -203,6 +230,7 @@ async function main(argv: string[]): Promise<number> {
     }
     if (command === "backfill") return await runBackfill(args);
     if (command === "reindex") return await runReindex(args);
+    if (command === "sync") return await runSync(args);
     if (command === "status") {
       await runStatus();
       return 0;
@@ -210,11 +238,7 @@ async function main(argv: string[]): Promise<number> {
   } finally {
     await closeMirrorPools();
   }
-  if (command && command in PLANNED) {
-    console.error(`mirror ${command}: zatím neimplementováno (${PLANNED[command]} plánu)`);
-    return 2;
-  }
-  console.error("usage: mirror migrate [--dry-run] | backfill --source us|ns|nss|justice|sdeu [--limit N] [--quarters …|--months …|--days …|--years …] | reindex --source … | status | api");
+  console.error("usage: mirror migrate [--dry-run] | backfill --source us|ns|nss|justice|sdeu [--limit N] [--quarters …|--months …|--days …|--years …] | reindex --source … | sync [--source …] [--days N] | status | api");
   return 2;
 }
 

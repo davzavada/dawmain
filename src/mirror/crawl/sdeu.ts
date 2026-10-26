@@ -28,10 +28,32 @@ export const SDEU_FIRST_YEAR = 1954;
  * grouped in parseSdeuYear instead.
  */
 export function sdeuYearQuery(year: number, offset = 0): string {
+  return sdeuQuery(`FILTER(STRSTARTS(STR(?celex), "6${year}"))`, offset);
+}
+
+/** Case law received by the Publications Office on `sinceIso` (YYYY-MM-DD) or later — the daily sync. */
+export function sdeuRecentQuery(sinceIso: string, offset = 0): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(sinceIso)) throw new Error(`not a date: ${sinceIso}`);
+  return sdeuQuery(
+    `FILTER(STRSTARTS(STR(?celex), "6"))
+  ?w cdm:work_datetime_transmission ?since .
+  FILTER(?since >= "${sinceIso}T00:00:00"^^<http://www.w3.org/2001/XMLSchema#dateTime>)`,
+    offset,
+  );
+}
+
+/** These CELEX numbers only (a retry of documents never stored). */
+export function sdeuCelexQuery(celexes: string[], offset = 0): string {
+  const safe = celexes.filter((c) => SDEU_CELEX_RE.test(c));
+  if (safe.length === 0) throw new Error("no valid CELEX");
+  return sdeuQuery(`VALUES ?celex { ${safe.map((c) => `"${c}"^^<http://www.w3.org/2001/XMLSchema#string>`).join(" ")} }`, offset);
+}
+
+function sdeuQuery(filter: string, offset: number): string {
   return `PREFIX cdm: <http://publications.europa.eu/ontology/cdm#>
 SELECT ?celex ?ecli ?date ?published ?caseCs ?partiesCs WHERE {
   ?w cdm:resource_legal_id_celex ?celex .
-  FILTER(STRSTARTS(STR(?celex), "6${year}"))
+  ${filter}
   OPTIONAL { ?w cdm:case-law_ecli ?ecli }
   OPTIONAL { ?w cdm:work_date_document ?date }
   OPTIONAL { ?w cdm:work_datetime_transmission ?published }
@@ -68,16 +90,16 @@ export function parseSdeuYear(json: unknown): SdeuListItem[] {
 const SPARQL_ATTEMPTS = 3;
 const SPARQL_RETRY_MS = 30_000;
 
-async function sparqlPage(ctx: CrawlContext, year: number, offset: number): Promise<unknown[]> {
-  const url = `${SPARQL}?query=${encodeURIComponent(sdeuYearQuery(year, offset))}`;
+async function sparqlPage(ctx: CrawlContext, query: (offset: number) => string, what: string, offset: number): Promise<unknown[]> {
+  const url = `${SPARQL}?query=${encodeURIComponent(query(offset))}`;
   for (let attempt = 1; ; attempt++) {
     try {
       const response = await pacedFetch(LABEL, ctx.pacer, url, { headers: { accept: "application/sparql-results+json" }, timeoutMs: 120_000 });
-      if (!response.ok) throw new Error(`Cellar SPARQL answered HTTP ${response.status} for year ${year}`);
+      if (!response.ok) throw new Error(`Cellar SPARQL answered HTTP ${response.status} for ${what}`);
       return ((await response.json()) as { results?: { bindings?: unknown[] } }).results?.bindings ?? [];
     } catch (error) {
       if (error instanceof SourceStopped || attempt >= SPARQL_ATTEMPTS) throw error;
-      ctx.log(`sdeu: ${year}: výčet selhal (${error instanceof Error ? error.message : String(error)}), znovu za ${SPARQL_RETRY_MS / 1000} s`);
+      ctx.log(`sdeu: ${what}: výčet selhal (${error instanceof Error ? error.message : String(error)}), znovu za ${SPARQL_RETRY_MS / 1000} s`);
       await (ctx.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms))))(SPARQL_RETRY_MS);
     }
   }
@@ -85,9 +107,13 @@ async function sparqlPage(ctx: CrawlContext, year: number, offset: number): Prom
 
 /** A year's rows page by page (SPARQL_PAGE), grouped once all are in. */
 export async function listSdeuYear(ctx: CrawlContext, year: number): Promise<SdeuListItem[]> {
+  return listSdeu(ctx, (offset) => sdeuYearQuery(year, offset), `year ${year}`);
+}
+
+export async function listSdeu(ctx: CrawlContext, query: (offset: number) => string, what: string): Promise<SdeuListItem[]> {
   const rows: unknown[] = [];
   for (let offset = 0; ; offset += SPARQL_PAGE) {
-    const page = await sparqlPage(ctx, year, offset);
+    const page = await sparqlPage(ctx, query, what, offset);
     rows.push(...page);
     if (page.length < SPARQL_PAGE) break;
   }

@@ -85,16 +85,19 @@ export function usTextExtras(getTextHtml: string): UsTextExtras {
 }
 
 export function mapUs(hit: UsHit, decision: NalusDecision, abstract: NalusAbstract | null, extras: UsTextExtras): DecisionRecord {
-  const caseNumber = usCaseNumber(hit.caseNumber);
+  // Without a results row (a retry from fetch_queue of a decision never
+  // stored), the page's own registry sign gives both: "I.ÚS 3338/23 ze dne 28. 3. 2024".
+  const sign = decision.registrySign ? /^(.+?)\s+ze dne\s+(.+)$/.exec(decision.registrySign) : null;
+  const caseNumber = usCaseNumber(hit.caseNumber || sign?.[1] || "");
   return {
     source: "us",
     sourceId: hit.sz,
     url: decision.url,
     court: usCourt(hit.sz),
-    caseNumber,
-    caseNumbers: [caseNumber],
+    caseNumber: caseNumber || null,
+    caseNumbers: caseNumber ? [caseNumber] : [],
     decisionType: decisionType(hit.form ?? decision.form),
-    decidedOn: hit.date ?? null,
+    decidedOn: hit.date ?? (sign ? czechToIso(sign[2]) : null),
     legalSentence: abstract?.legalSentence ?? null,
     ecli: hit.ecli ?? nalusEcli(hit.sz, decision.registrySign) ?? null,
     publishedOn: hit.publishedOn ?? null,

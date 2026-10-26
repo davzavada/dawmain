@@ -65,10 +65,13 @@ function addDays(iso: string, days: number): string {
 // ---------- discover ----------
 
 /** searchNss behind the pacer; a 429/403 becomes SourceStopped. */
-async function pacedSearch(ctx: CrawlContext, from: string, to: string, page: number) {
+/** Which date a search range filters: the decision's (backfill) or its publication, "aktualizovano" (daily sync). */
+export type NssDateField = "decided" | "published";
+
+async function pacedSearch(ctx: CrawlContext, from: string, to: string, page: number, by: NssDateField = "decided") {
   await ctx.pacer.wait();
   try {
-    return await searchNss({ dateFrom: from, dateTo: to }, page);
+    return await searchNss(by === "published" ? { publishedFrom: from, publishedTo: to } : { dateFrom: from, dateTo: to }, page);
   } catch (error) {
     if (error instanceof SourceError && /HTTP (429|403)\b/.test(error.message)) {
       throw new SourceStopped(Number(/HTTP (\d{3})/.exec(error.message)![1]), `${BASE}/Home/Index`);
@@ -77,12 +80,12 @@ async function pacedSearch(ctx: CrawlContext, from: string, to: string, page: nu
   }
 }
 
-async function searchRange(ctx: CrawlContext, from: string, to: string): Promise<{ hits: NssHit[]; total: number }> {
-  const first = await pacedSearch(ctx, from, to, 1);
+async function searchRange(ctx: CrawlContext, from: string, to: string, by: NssDateField): Promise<{ hits: NssHit[]; total: number }> {
+  const first = await pacedSearch(ctx, from, to, 1, by);
   const total = first.total ?? first.hits.length;
   const hits = [...first.hits];
   for (let page = 2; hits.length < total; page++) {
-    const next = await pacedSearch(ctx, from, to, page);
+    const next = await pacedSearch(ctx, from, to, page, by);
     if (next.hits.length === 0) break;
     hits.push(...next.hits);
   }
@@ -96,15 +99,15 @@ async function searchRange(ctx: CrawlContext, from: string, to: string): Promise
  * searchNss's timeout), a week or a day is not. Only a single day that
  * fails is an error; a 429/403 (SourceStopped) is never split.
  */
-export async function discoverNss(ctx: CrawlContext, from: string, to: string): Promise<NssHit[]> {
+export async function discoverNss(ctx: CrawlContext, from: string, to: string, by: NssDateField = "decided"): Promise<NssHit[]> {
   const days = Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
   const halves = async () => {
     const mid = addDays(from, Math.floor(days / 2));
-    return [...(await discoverNss(ctx, from, mid)), ...(await discoverNss(ctx, addDays(mid, 1), to))];
+    return [...(await discoverNss(ctx, from, mid, by)), ...(await discoverNss(ctx, addDays(mid, 1), to, by))];
   };
   let found: { hits: NssHit[]; total: number };
   try {
-    found = await searchRange(ctx, from, to);
+    found = await searchRange(ctx, from, to, by);
   } catch (error) {
     if (error instanceof SourceStopped || days < 1) throw error;
     ctx.log(`nss: ${from}..${to}: hledání selhalo (${error instanceof Error ? error.message : String(error)}), dělím interval`);

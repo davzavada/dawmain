@@ -38,10 +38,12 @@ export interface FetchJob<T> {
   id: (item: T) => string;
   fetch: (item: T) => Promise<DecisionRecord>;
   concurrency: number;
+  /** Fetch every item, also those already done (daily sync: changes at the source). */
+  refresh?: boolean;
 }
 
 export async function fetchAndStore<T>(ctx: CrawlContext, job: FetchJob<T>, counts: RunCounts): Promise<void> {
-  const done = await idsWithText(ctx.db, job.source, job.items.map(job.id), job.parserVersion);
+  const done = job.refresh ? new Set<string>() : await idsWithText(ctx.db, job.source, job.items.map(job.id), job.parserVersion);
   const todo = job.items.filter((item) => !done.has(job.id(item)));
   const sleep = ctx.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   let next = 0;
