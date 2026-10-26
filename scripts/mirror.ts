@@ -120,13 +120,19 @@ async function runBackfill(args: string[]): Promise<number> {
  * its own sync_run row; one source failing or stopped does not hold the
  * others back. Exit status: the worst of the runs (3 = a source stopped).
  */
+/**
+ * What the nightly sync keeps current. SDEU is not mirrored any more (removed
+ * 26. 10.: its case law is read live through Cellar); `--source sdeu` still works.
+ */
+const SYNCED_SOURCES: readonly MirrorSource[] = ["us", "ns", "nss", "justice"];
+
 async function runSync(args: string[]): Promise<number> {
   const only = option(args, "--source");
   if (only && !(MIRROR_SOURCES as readonly string[]).includes(only)) throw new Error(`unknown source ${only}`);
   const daysArg = option(args, "--days");
   const days = daysArg ? Number(daysArg) : undefined;
   if (days !== undefined && !(Number.isInteger(days) && days >= 1 && days <= 60)) throw new Error("--days must be 1–60");
-  const sources = (only ? [only] : MIRROR_SOURCES) as MirrorSource[];
+  const sources = (only ? [only] : SYNCED_SOURCES) as MirrorSource[];
   let worst = 0;
   for (const source of sources) {
     for (const mode of ["retry", "sync"] as const) {
