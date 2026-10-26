@@ -161,14 +161,19 @@ export async function writeChunks(tx: Queryable, record: DecisionRecord, id: num
 }
 
 /**
- * Source ids (of `ids`) already stored WITH text by parser `parserVersion`
- * or newer — a resumed backfill skips them, an older parser's rows it fetches again.
+ * Source ids (of `ids`) that are done: stored by parser `parserVersion` or
+ * newer and not waiting in fetch_queue — with text, or without it when that
+ * is the source's state (textAbsent: SDEU without a Czech version is never
+ * queued). A resumed backfill skips them; an older parser's rows and queued
+ * ones (failed, or no text yet) it fetches again.
  */
 export async function idsWithText(db: Queryable, source: MirrorSource, ids: string[], parserVersion: number): Promise<Set<string>> {
   if (ids.length === 0) return new Set();
   const { rows } = await db.query<{ source_id: string }>(
-    `SELECT source_id FROM mirror.decision
-     WHERE source = $1 AND source_id = ANY($2::text[]) AND text_sha256 IS NOT NULL AND parser_version >= $3`,
+    `SELECT d.source_id FROM mirror.decision d
+     WHERE d.source = $1 AND d.source_id = ANY($2::text[]) AND d.parser_version >= $3
+       AND (d.text_sha256 IS NOT NULL
+            OR NOT EXISTS (SELECT 1 FROM mirror.fetch_queue q WHERE q.source = d.source AND q.source_id = d.source_id))`,
     [source, ids, parserVersion],
   );
   return new Set(rows.map((r) => r.source_id));

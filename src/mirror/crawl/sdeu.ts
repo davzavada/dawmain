@@ -1,3 +1,4 @@
+import { cellarChoiceParts } from "@/src/sources/cellar";
 import { htmlToText } from "@/src/sources/shared/html";
 import { readCursor, writeCursor, type RunCounts } from "../db/store";
 import { SourceStopped, pacedFetch } from "../http";
@@ -102,15 +103,8 @@ async function czechText(ctx: CrawlContext, celex: string): Promise<string | nul
     return null;
   }
   if (response.status === 300) {
-    // Multi-part document: every part, in order, all or nothing (as fetchCellarDocument).
-    const origin = new URL(CELLAR).origin;
-    const parts = [...(await response.text()).matchAll(/href="(http[^"]+)"/g)].map((m) => m[1]).filter((href) => {
-      try {
-        return new URL(href).origin === origin;
-      } catch {
-        return false;
-      }
-    });
+    // One manifestation's parts, in order, all or nothing (cellarChoiceParts, as fetchCellarDocument).
+    const parts = cellarChoiceParts(await response.text());
     if (parts.length === 0) throw new Error(`Cellar listed no parts for ${celex}`);
     const texts: string[] = [];
     for (const part of parts) {

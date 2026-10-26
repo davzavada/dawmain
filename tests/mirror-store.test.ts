@@ -107,10 +107,15 @@ describe("saveDecision", () => {
     expect(kept.legal_sentence).toBe("Právní věta.");
   });
 
-  it("lists ids stored with text", async () => {
+  it("lists done ids: with text, or without it and not queued; a queued one is fetched again", async () => {
     await saveDecision(db, record({ sourceId: "2-1-26_1", text: null }));
-    expect([...(await idsWithText(db, "us", ["1-1169-26_1", "2-1-26_1", "3-9-26_1"], 1))]).toEqual(["1-1169-26_1"]);
+    await saveDecision(db, record({ sourceId: "2-2-26_1", text: null }));
+    await enqueue(db, "us", "2-2-26_1", "text", "no text yet");
+    const done = await idsWithText(db, "us", ["1-1169-26_1", "2-1-26_1", "2-2-26_1", "3-9-26_1"], 1);
+    expect([...done].sort()).toEqual(["1-1169-26_1", "2-1-26_1"]);
     expect((await idsWithText(db, "us", ["1-1169-26_1"], 2)).size).toBe(0); // a newer parser fetches it again
+    await dequeue(db, "us", "2-2-26_1");
+    await pg.query("DELETE FROM mirror.decision WHERE source_id = '2-2-26_1'");
   });
 });
 
