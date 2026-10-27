@@ -73,7 +73,7 @@ export interface ActLookup {
 }
 
 /** Bump when the rules change: `mirror provisions` then redoes every decision. */
-export const EXTRACTOR_VERSION = 3;
+export const EXTRACTOR_VERSION = 4;
 
 const ODD_SPACES = /[     ]/g;
 const B = "(?<![\\p{L}\\p{N}])";
@@ -413,7 +413,7 @@ interface Ref {
 
 // A § letter sticks to its number ("§ 243c"): "§ 2910 a 2913" is two paragraphs, not "2910a".
 // OCR reads 1 as "l" ("§ l42 odst. l"): a leading l before digits is a 1.
-const NUM = /(l?\d{1,4})(?:([a-z])|\s([a-z])(?=\s+odst))?(?![\p{L}\p{N}])|([IVXLC]{1,6})(?![\p{L}\p{N}])\.?/uy;
+const NUM = /(l?\d{1,4})(?:([a-z]{1,2})|\s([a-z])(?=\s+odst))?(?![\p{L}\p{N}])|([IVXLC]{1,6})(?![\p{L}\p{N}])\.?/uy;
 const roman = (s: string) => s.toLowerCase();
 
 function lettersBetween(a: string, b: string): string[] {
@@ -558,15 +558,28 @@ function parseGroup(t: string, pos: number): { paths: string[][]; end: number } 
 const HEAD_RE = /(§§?|(?<![\p{L}])(?:čl\.|[čČ]lán(?:ek|ku|kem|ky|ků|cích)))(?:\s*[.-](?=\d))?\s*(?=l?[\dIVXLC])/gu;
 
 /** Every § / článek reference with its sub-levels and its span. Pure. */
-function parseRefs(t: string): Array<{ refs: Ref[]; start: number; end: number }> {
-  const out: Array<{ refs: Ref[]; start: number; end: number }> = [];
+/**
+ * The "§" the stored text lost (review of decisions without references, 27. 10.): NS "dovolací řízení podle
+ * 243b odst. 5 věty druhé o. s. ř." (some 3,500 NS decisions), old NALUS texts with "š 43 odst. 1" or
+ * "ustanovení 5 72 odst. 2" for "§". Only where nothing else can be meant: after "podle / dle / ustanovení /
+ * ust." and before "odst. N" — or after "š", which is no Czech word.
+ */
+const LOST_PAR_RE =
+  /(?<!§\s?)(?:(?<=(?:ustanovení|ust\.|podle|dle)\s+)(?:5\s+)?(?=\d{1,4}[a-z]{0,2}\s+odst\.\s*\d)|(?<![\p{L}\p{N}])š\s+(?=\d{1,4}[a-z]{0,2}(?![\p{L}\p{N}])))/gu;
+
+function parseRefs(t: string): Array<{ refs: Ref[]; start: number; end: number; lost?: true }> {
+  const out: Array<{ refs: Ref[]; start: number; end: number; lost?: true }> = [];
   let lastEnd = 0;
-  for (const m of t.matchAll(HEAD_RE)) {
+  const heads = [
+    ...[...t.matchAll(HEAD_RE)].map((m) => ({ index: m.index, end: m.index + m[0].length, par: m[1].startsWith("§") })),
+    ...[...t.matchAll(LOST_PAR_RE)].map((m) => ({ index: m.index, end: m.index + m[0].length, par: true, lost: true as const })),
+  ].sort((a, b) => a.index - b.index);
+  for (const m of heads) {
     // A head inside the previous span ("čl. 7, čl. 10 a čl. 13") is already read.
     if (m.index < lastEnd) continue;
-    let head = m[1].startsWith("§") ? "par" : "cl";
+    let head = m.par ? "par" : "cl";
     const refs: Ref[] = [];
-    let pos = m.index + m[0].length;
+    let pos = m.end;
     let prev: Ref | null = null;
     let range = false; // the separator before this number was "až" / a dash
     for (;;) {
@@ -594,7 +607,7 @@ function parseRefs(t: string): Array<{ refs: Ref[]; start: number; end: number }
       pos = sep.lastIndex;
     }
     if (refs.length) {
-      out.push({ refs, start: m.index, end: pos });
+      out.push({ refs, start: m.index, end: pos, ...("lost" in m ? { lost: true as const } : {}) });
       lastEnd = pos;
     }
   }
@@ -781,6 +794,8 @@ export function extractProvisions(text: string, lookup: ActLookup | null = null,
   }
   const out: ProvisionMention[] = [];
   for (const [i, span] of spans.entries()) {
+    // A "§" the text lost counts only with its act: "podle 2 odst. 1 smlouvy" is a contract's clause.
+    if (span.lost && !acts[i]) continue;
     // "§ 2664 o. z. věty prvé": the sentence written after the act belongs to the (last) reference.
     if (via[i] === "after") {
       const v = TRAILING_SENTENCE.exec(t.slice(namedUntil[i], namedUntil[i] + 40));

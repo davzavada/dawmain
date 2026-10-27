@@ -231,6 +231,14 @@ describe("provision references in decision texts", () => {
     expect(keys("komentář k § 216 bod 6.")).toEqual([]);
   });
 
+  it("reads a § the stored text lost, and only with its act (review of decisions without references)", () => {
+    expect(keys("dovolací řízení podle 243b odst. 5 věty druhé občanského soudního řádu zastavil", 2009)).toEqual(["zak:99/1963 par:243b/o5/v2"]);
+    expect(keys("jeho návrh podle š 43 odst. 1 písm. a) zákona č. 182/1993 Sb. odmítl", 1997)).toEqual(["zak:182/1993 par:43/o1/pa"]);
+    expect(keys("uvedená v ustanovení 5 72 odst. 2 zákona č. 182/1993 Sb.", 1997)).toEqual(["zak:182/1993 par:72/o2"]);
+    expect(keys("§ 35ba odst. 1 písm. a) zákona č. 586/1992 Sb.")).toEqual(["zak:586/1992 par:35ba/o1/pa"]);
+    expect(keys("platba podle 2 odst. 1 smlouvy; lhůta podle 5 dnů")).toEqual([]);
+  });
+
   it("aggregates mentions per provision with every level of the key", () => {
     const rows = aggregateProvisions(extractProvisions("§ 2913 odst. 1 zákona č. 89/2012 Sb. a znovu § 2913 odst. 1 zákona č. 89/2012 Sb.", LOOKUP, 2020));
     const row = rows.find((r) => r.provision === "par:2913/o1");
