@@ -151,7 +151,10 @@ NS ReadViewEntries a NSS id-walk nejsou v kódu ověřené, první krok u nich j
 - `GET /v1/search?q=&source=&court=&from=&to=&case=&limit=` — fulltext
   (`buildTsQuery`) + identifikátory (`queryIdentKeys`), řazení `ts_rank_cd`,
   odpověď ve tvaru blízkém `AggregatedHit` (`src/mcp/tools/cz-caselaw.ts`)
-  + úryvek se zvýrazněním.
+  + úryvek se zvýrazněním. `source` může být víc soudů (`ns,nss`). S RUM
+  indexem na chunkách (migrace 0012, balík `postgresql-17-rum`) se řadí jen
+  5 000 chunků, které index seřadí první (pilot NS: top 20 shodné z 18–20,
+  častá fráze 0,1–0,8 s místo desítek sekund); text se čte až pro vrácené hity.
 - `GET /v1/decisions/:source/:id` — metadata, text (stránky po 45k jako
   `pageOrExcerpt`), odkaz na oficiální zdroj.
 - `GET /v1/provisions?cite=§ 2913 odst. 1 zákona č. 89/2012 Sb.` (nebo
@@ -160,7 +163,11 @@ NS ReadViewEntries a NSS id-walk nejsou v kódu ověřené, první krok u nich j
   bod/věta), s úryvkem u první citace. `GET /v1/decisions/:source/:id/provisions`
   — co rozhodnutí cituje. Vrstva `decision_provision` (migrace 0008, 0009),
   počítá ji `mirror provisions` a po každém syncu i sync.
-- `GET /v1/status` — per zdroj počty, poslední `sync_run`, fronta chyb.
+- `GET /v1/acts?q=&group=cz|eu|intl&limit=` — našeptávač předpisů z registru
+  (číslo, CELEX, zkratka z tabulky `src/files/index/acts.ts`, slova názvu);
+  řadí podle počtu citujících rozhodnutí (počítá se na pozadí jednou denně).
+- `GET /v1/status` — per zdroj počty, poslední `sync_run`, fronta chyb; z
+  mezipaměti (`asOf`), přepočet na pozadí po 5 min.
 
 Hono + `@hono/node-server`, role `mirror_reader`, timeout dotazu 5 s.
 

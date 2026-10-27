@@ -12,7 +12,8 @@ import type { DecisionType, MirrorSource } from "../types";
 export interface ProvisionQuery {
   act: string;
   provision: string;
-  source?: MirrorSource;
+  /** Any of these courts; none = all. */
+  sources?: MirrorSource[];
   categories?: string[];
   from?: string;
   to?: string;
@@ -63,7 +64,7 @@ export function parseCitation(cite: string, lookup: ActLookup | null): { act: st
 export async function decisionsByProvision(db: Queryable, q: ProvisionQuery): Promise<{ total: number; hits: ProvisionHit[] }> {
   const where = ["p.act_id = $1", "p.provision = $2"];
   const params: unknown[] = [q.act, q.provision];
-  if (q.source) where.push(`d.source = $${params.push(q.source)}`);
+  if (q.sources?.length) where.push(`d.source = ANY($${params.push(q.sources)}::text[])`);
   if (q.categories?.length) where.push(`d.category = ANY($${params.push(q.categories)}::text[])`);
   if (q.from) where.push(`d.decided_on >= $${params.push(q.from)}`);
   if (q.to) where.push(`d.decided_on <= $${params.push(q.to)}`);

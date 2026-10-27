@@ -2,9 +2,10 @@ import { timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import type { Queryable } from "../db/client";
 import { mirrorStatus } from "../status";
-import type { DecisionType } from "../types";
+import { MIRROR_SOURCES, type DecisionType, type MirrorSource } from "../types";
 import { decisionPage, getDecision, getImage, getImages, isMirrorSource, searchDecisions, MAX_LIMIT } from "./queries";
 import { renderDecisionHtml } from "./render";
+import { ACT_GROUPS, ACTS_MAX_LIMIT, actCitations, suggestActs, type ActGroup } from "./acts";
 import { loadActLookup } from "../legal/lookup";
 import type { ActLookup } from "../legal/provisions";
 import { decisionsByProvision, normalizeAct, normalizeProvision, parseCitation, provisionsOfDecision } from "./provisions";
@@ -13,12 +14,13 @@ import { decisionsByProvision, normalizeAct, normalizeProvision, parseCitation, 
  * API v1 of the mirror (v1-plan: jen LAN, bearer token), run as
  * mirror-api.service on LXC `app`, listening on its LAN address only:
  *
- *   GET /v1/search?q=&source=&court=&type=&category=&from=&to=&case=&limit=   (category: NS A–E, "A,B")
+ *   GET /v1/search?q=&source=&court=&type=&category=&from=&to=&case=&limit=   (category: NS A–E, "A,B"; source: "ns,nss")
  *   GET /v1/decisions/:source/:id[?page=N | ?format=html]
  *   GET /v1/decisions/:source/:id/images/:ord
  *   GET /v1/decisions/:source/:id/provisions        the § / články it cites
  *   GET /v1/provisions?cite= | act=&provision= [&source=&category=&from=&to=&limit=&offset=]
  *                                                   decisions citing a provision
+ *   GET /v1/acts?q=&group=cz|eu|intl&limit=          the act registry, for a picker
  *   GET /v1/status                                  cached: answers with the last count (asOf), recounts after 5 min
  *
  * Every route needs `Authorization: Bearer <MIRROR_API_TOKEN>`. Queries run
@@ -45,31 +47,67 @@ function categories(value: string | undefined): string[] | undefined {
   return list;
 }
 
+/** One court or several ("ns,nss", or source repeated); none = all. */
+function sources(values: string[] | undefined): MirrorSource[] | undefined {
+  const list = (values ?? []).flatMap((v) => v.split(",")).map((v) => v.trim()).filter(Boolean);
+  if (!list.every(isMirrorSource)) throw new BadRequest("source must be us, ns, nss, justice or sdeu, several as ns,nss");
+  return list.length ? [...new Set(list)] : undefined;
+}
+
+/** The courts whose chunks carry the RUM index (built per partition: decision_chunk_<source>_tsv_rum). */
+async function rumSources(db: Queryable): Promise<Set<string>> {
+  const { rows } = await db.query<{ source: string }>(
+    `SELECT substr(t.relname, length('decision_chunk_') + 1) AS source
+     FROM pg_index i JOIN pg_class x ON x.oid = i.indexrelid JOIN pg_am am ON am.oid = x.relam JOIN pg_class t ON t.oid = i.indrelid
+     JOIN pg_namespace n ON n.oid = t.relnamespace
+     WHERE am.amname = 'rum' AND n.nspname = 'mirror' AND t.relname LIKE 'decision\\_chunk\\_%'`,
+  );
+  return new Set(rows.map((r) => r.source));
+}
+
 function date(value: string | undefined, name: string): string | undefined {
   if (value === undefined || value === "") return undefined;
   if (!ISO_DATE.test(value) || Number.isNaN(Date.parse(value))) throw new BadRequest(`${name} must be YYYY-MM-DD`);
   return value;
 }
 
-/** How long a status count is served before a request starts a recount; the recount may take 60 s, not the API's 5. */
+/** Status counts are served for 5 min, act citation counts for a day; either may take minutes to recount, not the API's 5 s. */
 const STATUS_TTL_MS = 5 * 60_000;
-const STATUS_TIMEOUT_MS = 60_000;
+const CITATIONS_TTL_MS = 24 * 3_600_000;
+const SLOW_TIMEOUT_MS = 5 * 60_000;
 
-type Status = Awaited<ReturnType<typeof mirrorStatus>> & { asOf: string };
-
-/** Count on one pooled connection with a longer statement timeout (pg's Pool); anything else counts as is. */
-async function countStatus(db: Queryable): Promise<Status> {
+/** Run `fn` on one pooled connection with SLOW_TIMEOUT_MS (pg's Pool); anything else runs it as is. */
+async function slow<T>(db: Queryable, fn: (db: Queryable) => Promise<T>): Promise<T> {
   const pool = db as Queryable & { connect?: () => Promise<Queryable & { release(): void }> };
-  const asOf = new Date().toISOString();
-  if (typeof pool.connect !== "function") return { ...(await mirrorStatus(db)), asOf };
+  if (typeof pool.connect !== "function") return fn(db);
   const client = await pool.connect();
   try {
-    await client.query(`SET statement_timeout = ${STATUS_TIMEOUT_MS}`);
-    return { ...(await mirrorStatus(client)), asOf };
+    await client.query(`SET statement_timeout = ${SLOW_TIMEOUT_MS}`);
+    return await fn(client);
   } finally {
     await client.query("RESET statement_timeout").catch(() => undefined);
     client.release();
   }
+}
+
+/** The last value of `load`, recomputed in the background once older than `ttl`; `get` waits only for the very first. */
+function stale<T>(load: () => Promise<T>, ttl: number, name: string) {
+  let value: { at: number; data: T } | null = null;
+  let loading: Promise<T> | null = null;
+  const refresh = () =>
+    (loading ??= load()
+      .then((data) => {
+        value = { at: Date.now(), data };
+        return data;
+      })
+      .finally(() => {
+        loading = null;
+      }));
+  const peek = (): { at: number; data: T } | null => {
+    if (!value || Date.now() - value.at > ttl) refresh().catch((error) => console.error(`mirror-api: ${name}: ${error}`));
+    return value;
+  };
+  return { peek, get: async () => peek() ?? { at: Date.now(), data: await refresh() } };
 }
 
 export function createMirrorApi(options: { db: Queryable; token: string }): Hono {
@@ -92,9 +130,12 @@ export function createMirrorApi(options: { db: Queryable; token: string }): Hono
     return c.json({ error: "internal error" }, 500);
   });
 
+  // Which courts the search may cut to the RUM index's first candidates (rechecked hourly: indexes are built by hand).
+  const rum = stale(() => rumSources(db), 3_600_000, "rum indexes");
+  rum.peek();
   app.get("/v1/search", async (c) => {
     const q = c.req.query();
-    if (q.source && !isMirrorSource(q.source)) throw new BadRequest("source must be us, ns, nss, justice or sdeu");
+    const courts = sources(c.req.queries("source"));
     if (q.type && !TYPES.has(q.type as DecisionType)) throw new BadRequest("type must be rozsudek, usneseni, nalez, stanovisko or jine");
     const limit = q.limit ? Number(q.limit) : undefined;
     if (limit !== undefined && !(Number.isInteger(limit) && limit >= 1 && limit <= MAX_LIMIT)) {
@@ -104,7 +145,7 @@ export function createMirrorApi(options: { db: Queryable; token: string }): Hono
     const started = performance.now();
     const result = await searchDecisions(db, {
       q: q.q?.slice(0, 1000),
-      source: q.source as never,
+      sources: courts,
       court: q.court || undefined,
       type: (q.type || undefined) as DecisionType | undefined,
       from: date(q.from, "from"),
@@ -112,6 +153,7 @@ export function createMirrorApi(options: { db: Queryable; token: string }): Hono
       caseNumber: q.case || undefined,
       categories: categories(q.category),
       limit,
+      rum: (courts ?? MIRROR_SOURCES).every((s) => rum.peek()?.data.has(s)),
     });
     return c.json({ ...result, tookMs: Math.round(performance.now() - started) });
   });
@@ -174,7 +216,7 @@ export function createMirrorApi(options: { db: Queryable; token: string }): Hono
       if (!provision) throw new BadRequest("provision must be like par:2913/o1 or § 2913 odst. 1");
     }
     if (!act || !provision) throw new BadRequest("cite, or act and provision, are required");
-    if (q.source && !isMirrorSource(q.source)) throw new BadRequest("source must be us, ns, nss, justice or sdeu");
+    const courts = sources(c.req.queries("source"));
     const limit = q.limit ? Number(q.limit) : 20;
     if (!(Number.isInteger(limit) && limit >= 1 && limit <= MAX_LIMIT)) throw new BadRequest(`limit must be 1–${MAX_LIMIT}`);
     const offset = q.offset ? Number(q.offset) : 0;
@@ -183,7 +225,7 @@ export function createMirrorApi(options: { db: Queryable; token: string }): Hono
     const result = await decisionsByProvision(db, {
       act,
       provision,
-      source: (q.source || undefined) as never,
+      sources: courts,
       categories: categories(q.category),
       from: date(q.from, "from"),
       to: date(q.to, "to"),
@@ -193,20 +235,25 @@ export function createMirrorApi(options: { db: Queryable; token: string }): Hono
     return c.json({ act, provision, ...result, tookMs: Math.round(performance.now() - started) });
   });
 
-  // The counts scan every decision (seconds on the full mirror): served from the last count, recounted
-  // in the background once stale; only the very first request waits.
-  let status: Status | null = null;
-  let counting: Promise<Status> | null = null;
-  const recount = () =>
-    (counting ??= countStatus(db)
-      .then((fresh) => (status = fresh))
-      .finally(() => {
-        counting = null;
-      }));
+  // How many decisions cite each act (a minute over the whole mirror): the picker's order once known.
+  const citations = stale(() => slow(db, actCitations), CITATIONS_TTL_MS, "act citations");
+  app.get("/v1/acts", async (c) => {
+    const q = c.req.query();
+    if (!q.q?.trim()) throw new BadRequest("q is required");
+    if (q.group && !ACT_GROUPS.includes(q.group as ActGroup)) throw new BadRequest("group must be cz, eu or intl");
+    const limit = q.limit ? Number(q.limit) : undefined;
+    if (limit !== undefined && !(Number.isInteger(limit) && limit >= 1 && limit <= ACTS_MAX_LIMIT)) {
+      throw new BadRequest(`limit must be 1–${ACTS_MAX_LIMIT}`);
+    }
+    const cited = citations.peek()?.data;
+    return c.json({ acts: await suggestActs(db, { q: q.q, group: (q.group || undefined) as ActGroup | undefined, limit, cited }) });
+  });
+
+  // The counts scan every decision (seconds on the full mirror): served from the last count.
+  const status = stale(() => slow(db, mirrorStatus), STATUS_TTL_MS, "status");
   app.get("/v1/status", async (c) => {
-    if (!status) return c.json(await recount());
-    if (Date.now() - Date.parse(status.asOf) > STATUS_TTL_MS) recount().catch((error) => console.error(`mirror-api: status: ${error}`));
-    return c.json(status);
+    const { at, data } = await status.get();
+    return c.json({ ...data, asOf: new Date(at).toISOString() });
   });
 
   app.notFound((c) => c.json({ error: "not found" }, 404));

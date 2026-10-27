@@ -12,6 +12,13 @@ import { MIRROR_SOURCES, type DecisionType, type MirrorSource } from "../types";
  * finds nothing) and the identifier one (ident_keys && the query's sp. zn. /
  * § / ECLI keys). Each decision ranks by its best chunk; the hit carries
  * that chunk's excerpt with the matches marked.
+ *
+ * With a RUM index on the courts' chunks (`rum`), the lexical channel ranks
+ * only the RUM_CANDIDATES chunks the index orders first (its own ts_rank
+ * distance) instead of every matching chunk: a common phrase ("bezdůvodné
+ * obohacení") matches hundreds of thousands of chunks, ranked in a minute.
+ * The pilot on NS kept 18–20 of the top 20 decisions at 5,000 candidates.
+ * Filters (court, date, category) apply after that cut.
  */
 
 export const MAX_LIMIT = 50;
@@ -19,10 +26,12 @@ export const EXCERPT_CHARS = 400;
 const RANK_WEIGHTS = "{0.05,0.12,0.2,1.0}";
 /** One identifier match counts like a strong lexical match. */
 const IDENT_SCORE = 0.5;
+export const RUM_CANDIDATES = 5000;
 
 export interface SearchInput {
   q?: string;
-  source?: MirrorSource;
+  /** Any of these courts; none = all. */
+  sources?: MirrorSource[];
   court?: string;
   type?: DecisionType;
   from?: string;
@@ -32,6 +41,8 @@ export interface SearchInput {
   /** NS categories, any of them (["A", "B"]). */
   categories?: string[];
   limit?: number;
+  /** Every searched court's chunks have the RUM index (decision_chunk_<source>_tsv_rum). */
+  rum?: boolean;
 }
 
 /** The shape of caselaw_search's AggregatedHit, plus the local fields. */
@@ -94,35 +105,56 @@ async function runChannel(db: Queryable, input: SearchInput, tsquery: string | n
   const limit = Math.min(Math.max(1, Math.floor(input.limit ?? 20)), MAX_LIMIT);
   const { rows } = await db.query<ChunkRow & Record<string, unknown>>(
     `WITH q AS (SELECT CASE WHEN $1::text IS NULL THEN NULL ELSE to_tsquery('simple', $1::text) END AS tsq),
+     candidates AS (${
+       input.rum
+         ? // The tsquery spelled out, not from q: the index orders by a constant, not by a joined value.
+           `(SELECT c.source, c.decision_id, c.char_start, c.char_end, c.tsv, c.ident_keys
+             FROM mirror.decision_chunk c
+             WHERE ($3::text[] IS NULL OR c.source = ANY($3)) AND $1::text IS NOT NULL AND c.tsv @@ to_tsquery('simple', $1::text)
+             ORDER BY c.tsv <=> to_tsquery('simple', $1::text) LIMIT ${RUM_CANDIDATES})
+            UNION ALL
+            SELECT c.source, c.decision_id, c.char_start, c.char_end, c.tsv, c.ident_keys
+            FROM mirror.decision_chunk c
+            WHERE ($3::text[] IS NULL OR c.source = ANY($3)) AND cardinality($2::text[]) > 0 AND c.ident_keys && $2::text[]`
+         : `SELECT c.source, c.decision_id, c.char_start, c.char_end, c.tsv, c.ident_keys
+            FROM mirror.decision_chunk c, q
+            WHERE ($3::text[] IS NULL OR c.source = ANY($3))  -- prunes to the courts' partitions
+              AND ((q.tsq IS NOT NULL AND c.tsv @@ q.tsq) OR (cardinality($2::text[]) > 0 AND c.ident_keys && $2::text[]))`
+     }),
      matched AS (
        SELECT c.source, c.decision_id, c.char_start, c.char_end,
               coalesce(ts_rank_cd('${RANK_WEIGHTS}'::float4[], c.tsv, q.tsq), 0)
                 + ${IDENT_SCORE} * cardinality(ARRAY(SELECT unnest(c.ident_keys) INTERSECT SELECT unnest($2::text[]))) AS score
-       FROM mirror.decision_chunk c, q
-       WHERE ($3::text IS NULL OR c.source = $3)  -- prunes to one partition
-         AND ((q.tsq IS NOT NULL AND c.tsv @@ q.tsq) OR (cardinality($2::text[]) > 0 AND c.ident_keys && $2::text[]))
+       FROM candidates c, q
      ),
      best AS (
        SELECT DISTINCT ON (m.decision_id) m.* FROM matched m ORDER BY m.decision_id, m.score DESC, m.char_start
+     ),
+     top AS (
+       SELECT d.id, d.source, d.source_id, d.case_number, d.court, d.decision_type, d.category, d.decided_on, d.published_on, d.ecli, d.url,
+              b.score, b.char_start, b.char_end
+       FROM best b
+       JOIN mirror.decision d ON d.id = b.decision_id
+       WHERE ($3::text[] IS NULL OR d.source = ANY($3))
+         AND ($4::text IS NULL OR d.court ILIKE '%' || $4 || '%')
+         AND ($5::text IS NULL OR d.decision_type = $5)
+         AND ($6::date IS NULL OR d.decided_on >= $6)
+         AND ($7::date IS NULL OR d.decided_on <= $7)
+         AND (cardinality($8::text[]) = 0 OR EXISTS (
+               SELECT 1 FROM mirror.decision_chunk c2 WHERE c2.decision_id = d.id AND c2.ident_keys && $8::text[]))
+         AND (cardinality($10::text[]) = 0 OR d.category = ANY($10::text[]))
+       ORDER BY b.score DESC, d.decided_on DESC NULLS LAST
+       LIMIT $9
      )
-     SELECT d.source, d.source_id, d.case_number, d.court, d.decision_type, d.category, d.decided_on::text, d.published_on::text, d.ecli, d.url,
-            b.score::float8 AS score, b.char_start,
-            (SELECT array_agg(x.char_start ORDER BY x.ord) FROM mirror.decision_dissent x WHERE x.decision_id = d.id) AS dissent_starts,
-            substr(t.body, b.char_start + 1, b.char_end - b.char_start) AS chunk
-     FROM best b
-     JOIN mirror.decision d ON d.id = b.decision_id
-     JOIN mirror.decision_text t ON t.decision_id = d.id
-     WHERE ($3::text IS NULL OR d.source = $3)
-       AND ($4::text IS NULL OR d.court ILIKE '%' || $4 || '%')
-       AND ($5::text IS NULL OR d.decision_type = $5)
-       AND ($6::date IS NULL OR d.decided_on >= $6)
-       AND ($7::date IS NULL OR d.decided_on <= $7)
-       AND (cardinality($8::text[]) = 0 OR EXISTS (
-             SELECT 1 FROM mirror.decision_chunk c2 WHERE c2.decision_id = d.id AND c2.ident_keys && $8::text[]))
-       AND (cardinality($10::text[]) = 0 OR d.category = ANY($10::text[]))
-     ORDER BY b.score DESC, d.decided_on DESC NULLS LAST
-     LIMIT $9`,
-    [tsquery, keys, input.source ?? null, input.court ?? null, input.type ?? null, input.from ?? null, input.to ?? null, caseKeys, limit, input.categories ?? []],
+     -- The text only for the hits kept, not for every candidate.
+     SELECT r.source, r.source_id, r.case_number, r.court, r.decision_type, r.category, r.decided_on::text, r.published_on::text, r.ecli, r.url,
+            r.score::float8 AS score, r.char_start,
+            (SELECT array_agg(x.char_start ORDER BY x.ord) FROM mirror.decision_dissent x WHERE x.decision_id = r.id) AS dissent_starts,
+            substr(t.body, r.char_start + 1, r.char_end - r.char_start) AS chunk
+     FROM top r
+     JOIN mirror.decision_text t ON t.decision_id = r.id
+     ORDER BY r.score DESC, r.decided_on DESC NULLS LAST`,
+    [tsquery, keys, input.sources?.length ? input.sources : null, input.court ?? null, input.type ?? null, input.from ?? null, input.to ?? null, caseKeys, limit, input.categories ?? []],
   );
   return rows;
 }
