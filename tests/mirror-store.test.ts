@@ -2,7 +2,8 @@ import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Db } from "@/src/mirror/db/client";
-import { dequeue, enqueue, finishRun, idsWithText, saveDecision, startRun } from "@/src/mirror/db/store";
+import { gunzipSync } from "node:zlib";
+import { dequeue, enqueue, finishRun, idsWithText, saveDecision, startRun, writeRaw } from "@/src/mirror/db/store";
 import { mirrorStatus } from "@/src/mirror/status";
 import { reindexSource } from "@/src/mirror/reindex";
 import type { DecisionRecord } from "@/src/mirror/types";
@@ -144,6 +145,24 @@ describe("search fields on the text", () => {
     await saveDecision(db, record({ ...own, text: { body: "Nový text pro hledání.", source: "us:gettext-hidden" } }));
     expect(await meta()).toMatchObject({ decided_on: "2024-05-06", decision_type: "nalez" });
     await pg.query(`DELETE FROM mirror.decision WHERE source_id = 'BM25-1'`);
+  });
+});
+
+describe("the source's own document", () => {
+  it("keeps it gzipped with its hash, replaces it on the next fetch, and records a 404 without content", async () => {
+    const html = new TextEncoder().encode("<html><b>Rozsudek</b> <div align=center>jménem republiky</div></html>");
+    const saved = await saveDecision(db, record({ sourceId: "RAW-1", raw: { url: "https://x/1", status: 200, contentType: "text/html; charset=utf-8", bytes: html } }));
+    const row = async () =>
+      (await pg.query<{ status: number; bytes: number; sha256: string | null; gz: Uint8Array; content_type: string }>(
+        `SELECT status, bytes, sha256, gz, content_type FROM mirror.decision_raw WHERE decision_id = $1`, [saved.id],
+      )).rows[0];
+    const first = await row();
+    expect(first).toMatchObject({ status: 200, bytes: html.length, content_type: "text/html; charset=utf-8" });
+    expect(first.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(new TextDecoder().decode(gunzipSync(first.gz))).toContain("<b>Rozsudek</b>");
+    await writeRaw(db, saved.id, { url: "https://x/1", status: 404, contentType: null, bytes: new Uint8Array() });
+    expect(await row()).toMatchObject({ status: 404, bytes: 0, sha256: null });
+    await pg.query(`DELETE FROM mirror.decision WHERE source_id = 'RAW-1'`);
   });
 });
 

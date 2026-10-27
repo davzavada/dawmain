@@ -1,4 +1,5 @@
 import { fetchUpstream, type UpstreamOptions } from "@/src/sources/shared/http";
+import type { RawDocument } from "./types";
 
 /**
  * Upstream access of the crawler: fetchUpstream (timeout, UA, one retry on
@@ -40,4 +41,13 @@ export async function pacedFetch(label: string, pacer: Pacer, url: string, optio
     throw new SourceStopped(response.status, url);
   }
   return response;
+}
+
+/** Read a response once: its bytes kept as the source's document, and a fresh Response to decode as before. */
+export async function keepRaw(response: Response, url: string): Promise<{ raw: RawDocument; response: Response }> {
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  return {
+    raw: { url, status: response.status, contentType: response.headers.get("content-type"), bytes },
+    response: new Response(bytes, { status: response.status, headers: response.headers }),
+  };
 }

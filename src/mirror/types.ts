@@ -61,4 +61,14 @@ export interface DecisionRecord {
   textAbsent?: string;
   /** Pictures of the decision; undefined = not read (a reindex from stored text leaves stored ones alone). */
   images?: DecisionImage[];
+  /** The source's own document as it came (migration 0014); undefined = not kept by this fetch. */
+  raw?: RawDocument;
+}
+
+/** One response of the source, verbatim: NS / ÚS / NSS HTML, the justice finaldoc JSON. */
+export interface RawDocument {
+  url: string;
+  status: number;
+  contentType: string | null;
+  bytes: Uint8Array;
 }

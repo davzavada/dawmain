@@ -43,6 +43,8 @@ export interface SearchInput {
   limit?: number;
   /** Every searched court's chunks have the RUM index (decision_chunk_<source>_tsv_rum). */
   rum?: boolean;
+  /** The BM25 index over decision_text is built (decision_text_bm25, pg_search). */
+  bm25?: boolean;
 }
 
 /** The shape of caselaw_search's AggregatedHit, plus the local fields. */
@@ -188,10 +190,65 @@ function toHit(row: ChunkRow, terms: string[], identKeys: string[]): MirrorHit {
   };
 }
 
+/**
+ * Words only, through BM25 (pg_search): the index ranks whole decisions and returns the top ones with
+ * the court / type / date / category filters applied inside it — milliseconds where ranking chunks took
+ * seconds on common phrases. Czech stems, diacritics folded. The excerpt is the decision's best chunk
+ * for the same words (ts_rank_cd), looked up for the hits kept only. `all`: every word (&&&), else any (|||).
+ */
+async function runBm25(db: Queryable, input: SearchInput, text: string, all: boolean, tsquery: string | null): Promise<ChunkRow[]> {
+  const limit = Math.min(Math.max(1, Math.floor(input.limit ?? 20)), MAX_LIMIT);
+  const params: unknown[] = [text, tsquery, limit];
+  // Filters spelled out only when given: the index takes them in, an "$n IS NULL OR …" it would not.
+  const where = [`t.body ${all ? "&&&" : "|||"} $1::text`];
+  if (input.sources?.length) where.push(`t.source = ANY($${params.push(input.sources)}::text[])`);
+  if (input.type) where.push(`t.decision_type = $${params.push(input.type)}`);
+  if (input.from) where.push(`t.decided_on >= $${params.push(input.from)}::date`);
+  if (input.to) where.push(`t.decided_on <= $${params.push(input.to)}::date`);
+  if (input.categories?.length) where.push(`t.category = ANY($${params.push(input.categories)}::text[])`);
+  const { rows } = await db.query<ChunkRow & Record<string, unknown>>(
+    `WITH top AS (
+       SELECT t.decision_id, pdb.score(t.decision_id) AS score
+       FROM mirror.decision_text t
+       WHERE ${where.join(" AND ")}
+       ORDER BY pdb.score(t.decision_id) DESC
+       LIMIT $3
+     ),
+     best AS (
+       SELECT DISTINCT ON (c.decision_id) c.decision_id, c.char_start, c.char_end
+       FROM top JOIN mirror.decision_chunk c ON c.decision_id = top.decision_id
+       ORDER BY c.decision_id,
+                coalesce(ts_rank_cd('${RANK_WEIGHTS}'::float4[], c.tsv, to_tsquery('simple', $2::text)), 0) DESC, c.char_start
+     )
+     SELECT d.source, d.source_id, d.case_number, d.court, d.decision_type, d.category, d.decided_on::text, d.published_on::text, d.ecli, d.url,
+            top.score::float8 AS score, coalesce(b.char_start, 0) AS char_start,
+            (SELECT array_agg(x.char_start ORDER BY x.ord) FROM mirror.decision_dissent x WHERE x.decision_id = d.id) AS dissent_starts,
+            substr(t.body, coalesce(b.char_start, 0) + 1, coalesce(b.char_end - b.char_start, ${EXCERPT_CHARS * 4})) AS chunk
+     FROM top
+     JOIN mirror.decision d ON d.id = top.decision_id
+     JOIN mirror.decision_text t ON t.decision_id = top.decision_id
+     LEFT JOIN best b ON b.decision_id = top.decision_id
+     ORDER BY top.score DESC, d.decided_on DESC NULLS LAST`,
+    params,
+  );
+  return rows;
+}
+
 export async function searchDecisions(db: Queryable, input: SearchInput): Promise<SearchResult> {
   const p = plan(input);
   const keys = [...new Set([...p.keys, ...p.caseKeys])];
   if (!p.tsAnd && keys.length === 0) return { hits: [], channel: null, terms: [], identKeys: [] };
+  // BM25 for words alone; identifiers (sp. zn., §, the case filter) and the court-name filter keep the chunk channels.
+  const words = input.q ? stripIdentifiers(input.q).trim() : "";
+  if (input.bm25 && p.tsAnd && words && keys.length === 0 && !input.court) {
+    let rows = await runBm25(db, input, words, true, p.tsAnd);
+    let channel: SearchResult["channel"] = "and";
+    if (rows.length === 0) {
+      channel = "or";
+      rows = await runBm25(db, input, words, false, p.tsOr ?? p.tsAnd);
+    }
+    return { hits: rows.map((r) => toHit(r, p.terms, [])), channel, terms: p.terms, identKeys: [] };
+  }
   // The case filter alone is not a search query; with nothing else, it lists that case's decisions.
   const rankKeys = p.tsAnd || p.keys.length ? p.keys : p.caseKeys;
   let channel: SearchResult["channel"] = p.tsAnd ? "and" : "ident";

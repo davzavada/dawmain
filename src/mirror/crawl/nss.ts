@@ -2,9 +2,9 @@ import { SourceError } from "@/src/sources/shared/errors";
 import { decodeBody, htmlToText, looksLikeHtml } from "@/src/sources/shared/html";
 import { decodeRendition, isNssMissingBody, parseNssDetail, searchNss, type NssHit } from "@/src/sources/nss";
 import { readCursor, writeCursor, type RunCounts } from "../db/store";
-import { SourceStopped, pacedFetch } from "../http";
+import { SourceStopped, keepRaw, pacedFetch } from "../http";
 import { NSS_PARSER_VERSION, mapNss } from "../map/nss";
-import type { DecisionRecord } from "../types";
+import type { DecisionRecord, RawDocument } from "../types";
 import { fetchAndStore, spread, type CrawlContext } from "./workers";
 
 /**
@@ -125,7 +125,15 @@ export async function discoverNss(ctx: CrawlContext, from: string, to: string, b
 
 // ---------- fetch ----------
 
-async function nssText(ctx: CrawlContext, id: string): Promise<{ body: string; source: string } | null> {
+/** The document kept for every decision: the HTML rendition (Text is plain, without formatting). */
+export const nssRawUrl = (id: string) => `${BASE}/DokumentOriginal/Html/${id}`;
+
+async function nssHtml(ctx: CrawlContext, id: string): Promise<{ raw: RawDocument; response: Response }> {
+  const url = nssRawUrl(id);
+  return keepRaw(await pacedFetch(LABEL, ctx.pacer, url), url);
+}
+
+async function nssText(ctx: CrawlContext, id: string): Promise<{ text: { body: string; source: string } | null; raw: RawDocument }> {
   const textResponse = await pacedFetch(LABEL, ctx.pacer, `${BASE}/DokumentOriginal/Text/${id}`);
   if (textResponse.ok) {
     // UTF-16; Aspose leaves control characters where dashes belong (\u001e in case numbers).
@@ -133,20 +141,23 @@ async function nssText(ctx: CrawlContext, id: string): Promise<{ body: string; s
       .replace(/\u001e/g, "-")
       .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, " ")
       .trim();
-    if (text && !isNssMissingBody(text)) return { body: looksLikeHtml(text) ? htmlToText(text) : text, source: "nss:text" };
+    if (text && !isNssMissingBody(text)) {
+      // The body stays the Text rendition's; the HTML is fetched for its formatting only.
+      const { raw } = await nssHtml(ctx, id);
+      return { text: { body: looksLikeHtml(text) ? htmlToText(text) : text, source: "nss:text" }, raw };
+    }
   } else {
     await textResponse.body?.cancel().catch(() => undefined);
   }
-  const htmlResponse = await pacedFetch(LABEL, ctx.pacer, `${BASE}/DokumentOriginal/Html/${id}`);
+  const { raw, response: htmlResponse } = await nssHtml(ctx, id);
   if (!htmlResponse.ok) {
-    await htmlResponse.body?.cancel().catch(() => undefined);
-    if (htmlResponse.status === 404 || htmlResponse.status === 410) return null;
+    if (htmlResponse.status === 404 || htmlResponse.status === 410) return { text: null, raw };
     throw new Error(`NSS answered HTTP ${htmlResponse.status} for the text of ${id}`);
   }
   const html = await decodeRendition(htmlResponse);
   const converted = isNssMissingBody(html) ? "" : htmlToText(html);
-  if (!converted || /^\s*(?:N\/A(?:\s*-\s*text)?\s*)+$/i.test(converted)) return null;
-  return { body: converted, source: "nss:html" };
+  if (!converted || /^\s*(?:N\/A(?:\s*-\s*text)?\s*)+$/i.test(converted)) return { text: null, raw };
+  return { text: { body: converted, source: "nss:html" }, raw };
 }
 
 export async function fetchNssDecision(ctx: CrawlContext, hit: NssHit): Promise<DecisionRecord> {
@@ -154,7 +165,8 @@ export async function fetchNssDecision(ctx: CrawlContext, hit: NssHit): Promise<
   if (!detail.ok) throw new Error(`NSS detail answered HTTP ${detail.status} for ${hit.id}`);
   const metadata = parseNssDetail(await detail.text());
   if (!metadata["Spisová značka"] && !metadata["ECLI"]) throw new Error(`NSS detail of ${hit.id} carries no case number nor ECLI`);
-  return mapNss(hit.id, metadata, await nssText(ctx, hit.id));
+  const { text, raw } = await nssText(ctx, hit.id);
+  return { ...mapNss(hit.id, metadata, text), raw };
 }
 
 // ---------- backfill ----------

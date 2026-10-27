@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
+import { gzipSync } from "node:zlib";
 import { deriveChunks, findDissents } from "../index";
-import type { DecisionImage, DecisionRecord, MirrorSource } from "../types";
+import type { DecisionImage, DecisionRecord, MirrorSource, RawDocument } from "../types";
 import type { Db, Queryable } from "./client";
 
 /**
@@ -117,8 +118,29 @@ export async function saveDecision(db: Db, input: DecisionRecord, options: { rei
       if (record.images) await writeImages(tx, record.images, id);
       await writeDissents(tx, record, id);
     }
+    if (record.raw) await writeRaw(tx, id, record.raw);
     return { id, inserted, textChanged };
   });
+}
+
+/** Keep the source's document of decision `id` (gzip), replacing an older one. */
+export async function writeRaw(db: Queryable, id: number, raw: RawDocument): Promise<void> {
+  const ok = raw.status >= 200 && raw.status < 300;
+  await db.query(
+    `INSERT INTO mirror.decision_raw (decision_id, url, status, content_type, fetched_at, bytes, sha256, gz)
+     VALUES ($1, $2, $3, $4, now(), $5, $6, $7)
+     ON CONFLICT (decision_id) DO UPDATE SET url = EXCLUDED.url, status = EXCLUDED.status, content_type = EXCLUDED.content_type,
+       fetched_at = EXCLUDED.fetched_at, bytes = EXCLUDED.bytes, sha256 = EXCLUDED.sha256, gz = EXCLUDED.gz`,
+    [
+      id,
+      raw.url,
+      raw.status,
+      raw.contentType,
+      raw.bytes.length,
+      ok ? createHash("sha256").update(raw.bytes).digest("hex") : null,
+      ok ? gzipSync(raw.bytes, { level: 9 }) : new Uint8Array(),
+    ],
+  );
 }
 
 /**
@@ -246,7 +268,7 @@ export interface RunCounts {
   failed: number;
 }
 
-export type RunMode = "backfill" | "sync" | "reindex" | "retry";
+export type RunMode = "backfill" | "sync" | "reindex" | "retry" | "raw";
 
 export async function startRun(db: Queryable, source: MirrorSource, mode: RunMode): Promise<number> {
   const { rows } = await db.query<{ id: string | number }>(

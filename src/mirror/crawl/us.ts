@@ -9,7 +9,7 @@ import {
   type NalusAbstract,
 } from "@/src/sources/nalus";
 import { readCursor, writeCursor, type RunCounts } from "../db/store";
-import { SourceStopped, pacedFetch, type Pacer } from "../http";
+import { SourceStopped, keepRaw, pacedFetch, type Pacer } from "../http";
 import { fetchAndStore, newPacer, spread, type CrawlContext } from "./workers";
 import { mapUs, parseUsPublishedDates, US_PARSER_VERSION, usTextExtras, type UsHit } from "../map/us";
 
@@ -146,8 +146,12 @@ export async function discoverUs(ctx: CrawlContext, from: string, to: string, by
 
 // ---------- fetch ----------
 
+/** The document `mirror raw` keeps for a decision stored before. */
+export const usRawUrl = (sz: string) => `${BASE}/GetText.aspx?sz=${sz}`;
+
 export async function fetchUsDecision(ctx: CrawlContext, hit: UsHit) {
-  const textResponse = await pacedFetch(LABEL, ctx.pacer, `${BASE}/GetText.aspx?sz=${hit.sz}`);
+  const url = usRawUrl(hit.sz);
+  const { raw, response: textResponse } = await keepRaw(await pacedFetch(LABEL, ctx.pacer, url), url);
   const html = await textResponse.text();
   const decision = parseNalusDecision(html, hit.sz);
   let abstract: NalusAbstract | null = null;
@@ -158,7 +162,7 @@ export async function fetchUsDecision(ctx: CrawlContext, hit: UsHit) {
     if (error instanceof SourceStopped) throw error;
     ctx.log(`us: ${hit.sz}: GetAbstract selhal (${error instanceof Error ? error.message : String(error)}), ukládám bez právní věty`);
   }
-  return mapUs(hit, decision, abstract, usTextExtras(html));
+  return { ...mapUs(hit, decision, abstract, usTextExtras(html)), raw };
 }
 
 // ---------- backfill ----------

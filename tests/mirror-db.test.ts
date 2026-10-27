@@ -75,6 +75,7 @@ describe("mirror schema", () => {
       "decision_dissent",
       "decision_image",
       "decision_provision",
+      "decision_raw",
       "decision_text",
       "fetch_queue",
       "image_blob",

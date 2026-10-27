@@ -1,7 +1,7 @@
 import { SourceError } from "@/src/sources/shared/errors";
 import { parseJusticeDecision } from "@/src/sources/justice";
 import { readCursor, writeCursor, type RunCounts } from "../db/store";
-import { pacedFetch } from "../http";
+import { keepRaw, pacedFetch } from "../http";
 import { JUSTICE_PARSER_VERSION, justiceUuid, mapJustice, type JusticeListItem } from "../map/justice";
 import type { DecisionRecord } from "../types";
 import { fetchAndStore, spread, type CrawlContext } from "./workers";
@@ -57,18 +57,23 @@ export async function discoverJusticeDay(ctx: CrawlContext, date: string, count:
   return unique;
 }
 
+/** The document `mirror raw` keeps for a decision stored before (the whole finaldoc JSON). */
+export const justiceRawUrl = (uuid: string) => `${API}/finaldoc/${uuid}`;
+
 export async function fetchJusticeDecision(ctx: CrawlContext, entry: JusticeEntry): Promise<DecisionRecord> {
-  const response = await pacedFetch(LABEL, ctx.pacer, `${API}/finaldoc/${entry.uuid}`, { headers: { accept: "application/json" } });
-  if (response.status === 404) throw new Error(`justice.cz has no finaldoc ${entry.uuid} (404)`);
-  if (!response.ok) throw new Error(`justice.cz answered HTTP ${response.status} for finaldoc ${entry.uuid}`);
+  const url = justiceRawUrl(entry.uuid);
+  const fetched = await pacedFetch(LABEL, ctx.pacer, url, { headers: { accept: "application/json" } });
+  if (fetched.status === 404) throw new Error(`justice.cz has no finaldoc ${entry.uuid} (404)`);
+  if (!fetched.ok) throw new Error(`justice.cz answered HTTP ${fetched.status} for finaldoc ${entry.uuid}`);
+  const { raw, response } = await keepRaw(fetched, url);
   const json = await response.json();
   try {
-    return mapJustice(entry.uuid, entry.item, parseJusticeDecision(json, entry.uuid));
+    return { ...mapJustice(entry.uuid, entry.item, parseJusticeDecision(json, entry.uuid)), raw };
   } catch (error) {
     // A finaldoc without any text: the record without it, queued (workers) — not a crash.
     if (error instanceof SourceError && error.kind === "PARSE_DRIFT") {
       const metadata = ((json as { metadata?: Record<string, unknown> | null })?.metadata ?? {}) as Record<string, unknown>;
-      return mapJustice(entry.uuid, entry.item, { text: "", metadata });
+      return { ...mapJustice(entry.uuid, entry.item, { text: "", metadata }), raw };
     }
     throw error;
   }

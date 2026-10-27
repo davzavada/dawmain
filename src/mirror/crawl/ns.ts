@@ -1,7 +1,7 @@
 import { decodeBody } from "@/src/sources/shared/html";
 import { buildNsQuery, nsBodyMissing, nsSearchUrl, parseNsSearch } from "@/src/sources/ns";
 import { readCursor, writeCursor, type RunCounts } from "../db/store";
-import { SourceStopped, pacedFetch } from "../http";
+import { SourceStopped, keepRaw, pacedFetch } from "../http";
 import { NS_PARSER_VERSION, mapNs, markNsPictures, parseNsMarked } from "../map/ns";
 import type { DecisionImage, DecisionRecord } from "../types";
 import { fetchAndStore, spread, type CrawlContext } from "./workers";
@@ -73,12 +73,17 @@ export function sniffImage(bytes: Uint8Array): "image/gif" | "image/png" | "imag
   return null;
 }
 
+/** The document `mirror raw` keeps for a decision stored before (the rendition every fetch tries first). */
+export const nsRawUrl = (unid: string) => `${DB}/WebSearch/${unid}?openDocument`;
+
 async function fetchRendition(ctx: CrawlContext, unid: string, rendition: "WebPrint" | "WebSearch") {
-  const response = await pacedFetch(LABEL, ctx.pacer, `${DB}/${rendition}/${unid}?openDocument`);
-  if (response.status === 404) throw new Error(`NS has no document ${unid} (404)`);
-  if (!response.ok) throw new Error(`NS answered HTTP ${response.status} for ${rendition}/${unid}`);
+  const url = `${DB}/${rendition}/${unid}?openDocument`;
+  const fetched = await pacedFetch(LABEL, ctx.pacer, url);
+  if (fetched.status === 404) throw new Error(`NS has no document ${unid} (404)`);
+  if (!fetched.ok) throw new Error(`NS answered HTTP ${fetched.status} for ${rendition}/${unid}`);
+  const { raw, response } = await keepRaw(fetched, url);
   const { html, pictures } = markNsPictures(await decodeBody(response));
-  return { ...parseNsMarked(html, unid, pictures.length), pictures };
+  return { ...parseNsMarked(html, unid, pictures.length), pictures, raw };
 }
 
 /**
@@ -116,7 +121,7 @@ export async function fetchNsDecision(ctx: CrawlContext, entry: NsEntry): Promis
       ctx.log(`ns: ${entry.unid}: obrázek ${i} nedostupný (${error instanceof Error ? error.message : String(error)}), ukládám bez něj`);
     }
   }
-  return mapNs(entry.unid, page.decision, textSource, images);
+  return { ...mapNs(entry.unid, page.decision, textSource, images), raw: page.raw };
 }
 
 export interface NsBackfillOptions {

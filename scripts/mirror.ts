@@ -3,6 +3,7 @@
  * CLI of the case-law mirror (docs/infra/v1-plan.md), run on LXC `app`:
  *
  *   npx tsx scripts/mirror.ts migrate [--dry-run]   apply src/mirror/db/migrations as mirror_owner
+ *   npx tsx scripts/mirror.ts raw --source us|ns|nss|justice [--limit N]   the source's own document for decisions stored without it
  *   npx tsx scripts/mirror.ts backfill --source us|ns|nss|justice|sdeu [--limit N]
  *                       [--quarters 2004Q2 (us)] [--months 2024-03 (nss)] [--days 2025-03-12 (justice)]
  *                       [--years 2019 (sdeu)]
@@ -36,6 +37,7 @@ import type { ActLookup } from "../src/mirror/legal/provisions";
 import { retrySource, syncSource } from "../src/mirror/sync";
 import { MIRROR_SOURCES, type MirrorSource } from "../src/mirror/types";
 import { backfillUs, newUsPacer } from "../src/mirror/crawl/us";
+import { fetchRawMissing } from "../src/mirror/raw";
 import { backfillNs, fillNsCategories } from "../src/mirror/crawl/ns";
 import { backfillNss } from "../src/mirror/crawl/nss";
 import { backfillJustice } from "../src/mirror/crawl/justice";
@@ -123,6 +125,22 @@ async function runBackfill(args: string[]): Promise<number> {
     else if (source === "nss") await backfillNss({ ...ctx, pacer: newPacer(rps) }, { limit, months, concurrency }, counts);
     else if (source === "justice") await backfillJustice({ ...ctx, pacer: newPacer(rps) }, { limit, days, concurrency }, counts);
     else await backfillSdeu({ ...ctx, pacer: newPacer(rps) }, { limit, years, concurrency }, counts);
+  });
+}
+
+/** `raw --source us|ns|nss|justice [--limit N]`: the source's own document for decisions stored without it. */
+async function runRaw(args: string[]): Promise<number> {
+  const source = option(args, "--source");
+  if (source !== "us" && source !== "ns" && source !== "nss" && source !== "justice") {
+    console.error(`mirror raw: neznámý zdroj ${source ?? "(chybí --source)"} (us, ns, nss, justice)`);
+    return 2;
+  }
+  const limitArg = option(args, "--limit");
+  const limit = limitArg ? Number(limitArg) : undefined;
+  if (limit !== undefined && !(Number.isInteger(limit) && limit > 0)) throw new Error("--limit must be a positive integer");
+  return runTracked(source, "raw", async (ctx, counts) => {
+    const { rps, concurrency } = rate(source, ctx.log);
+    await fetchRawMissing({ ...ctx, pacer: source === "us" ? newUsPacer(rps) : newPacer(rps) }, source, { limit, concurrency }, counts);
   });
 }
 
@@ -321,6 +339,7 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
     if (command === "backfill") return await runBackfill(args);
+    if (command === "raw") return await runRaw(args);
     if (command === "reindex") return await runReindex(args);
     if (command === "ns-categories") {
       const from = option(args, "--from") ?? "1990-01-01";
@@ -352,7 +371,7 @@ async function main(argv: string[]): Promise<number> {
   } finally {
     await closeMirrorPools();
   }
-  console.error("usage: mirror migrate [--dry-run] | backfill --source us|ns|nss|justice|sdeu [--limit N] [--quarters …|--months …|--days …|--years …] | reindex --source … | sync [--source …] [--days N] | acts import | status | api");
+  console.error("usage: mirror migrate [--dry-run] | backfill --source us|ns|nss|justice|sdeu [--limit N] [--quarters …|--months …|--days …|--years …] | reindex --source … | raw --source us|ns|nss|justice [--limit N] | sync [--source …] [--days N] | acts import | status | api");
   return 2;
 }
 

@@ -91,6 +91,15 @@ function sources(values: string[] | undefined): MirrorSource[] | undefined {
   return list.length ? [...new Set(list)] : undefined;
 }
 
+/** The BM25 index over decision_text is built and valid (CREATE INDEX CONCURRENTLY leaves it invalid until done). */
+async function bm25Ready(db: Queryable): Promise<boolean> {
+  const { rows } = await db.query<{ ok: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM pg_index i JOIN pg_class x ON x.oid = i.indexrelid JOIN pg_namespace n ON n.oid = x.relnamespace
+                    WHERE n.nspname = 'mirror' AND x.relname = 'decision_text_bm25' AND i.indisvalid) AS ok`,
+  );
+  return Boolean(rows[0]?.ok);
+}
+
 /** The courts whose chunks carry the RUM index (built per partition: decision_chunk_<source>_tsv_rum). */
 async function rumSources(db: Queryable): Promise<Set<string>> {
   const { rows } = await db.query<{ source: string }>(
@@ -201,7 +210,9 @@ export function createMirrorApi(options: {
 
   // Which courts the search may cut to the RUM index's first candidates (rechecked hourly: indexes are built by hand).
   const rum = stale(() => rumSources(db), 3_600_000, "rum indexes");
+  const bm25 = stale(() => bm25Ready(db), 3_600_000, "bm25 index");
   rum.peek();
+  bm25.peek();
   app.get("/v1/search", async (c) => {
     const q = c.req.query();
     const courts = sources(c.req.queries("source"));
@@ -233,6 +244,7 @@ export function createMirrorApi(options: {
           categories: categories(q.category),
           limit,
           rum: (courts ?? MIRROR_SOURCES).every((s) => rum.peek()?.data.has(s)),
+      bm25: bm25.peek()?.data === true,
         }),
       SEARCH_TIMEOUT_MS,
       SEARCH_WORK_MEM,
