@@ -108,19 +108,28 @@ describe("provision references in decision texts", () => {
     expect(keys("čl. 7 odst. 1, čl. 10 odst. 1 a čl. 13 Listiny")).toEqual(["zak:2/1993 cl:7/o1", "zak:2/1993 cl:10/o1", "zak:2/1993 cl:13"]);
   });
 
-  it("gives a reference inside the paraphrase of a provision that provision's act", () => {
+  it("never guesses the act of a reference from the one before it (no paraphrase, decided 27. 10.)", () => {
     const text = "Podle § 1824 o. z. sjednává-li se smlouva prostřednictvím prostředku komunikace na dálku, sdělí podnikatel spotřebiteli údaje uvedené v § 1811 odst. 2 a § 1820 odst. 1.";
-    expect(keys(text)).toEqual(["zak:89/2012 par:1824", "zak:89/2012 par:1811/o2", "zak:89/2012 par:1820/o1"]);
-    // not when the reference names its own (unknown) act, nor across a judgment
-    expect(keys("Podle § 1824 o. z. platí, že dle § 4 zákona se postupuje …").at(-1)).toBe("? par:4");
-    expect(keys("§ 6 o. s. ř.; rozsudek ESLP ve věci Lüdi, § 51").at(-1)).toBe("? par:51");
+    expect(keys(text)).toEqual(["zak:89/2012 par:1824", "? par:1811/o2", "? par:1820/o1"]);
+  });
+
+  it("reads every combination of levels, the EU pododstavec too", () => {
+    const k = (text: string) => extractProvisions(`${text} zákona č. 1/2000 Sb.`)[0].keys.at(-1);
+    expect(k("§ 5 písm. a)")).toBe("par:5/pa");
+    expect(k("§ 5 bod 3")).toBe("par:5/b3");
+    expect(k("§ 5 věta první")).toBe("par:5/v1");
+    expect(k("§ 5 písm. a) bod 1")).toBe("par:5/pa/b1");
+    expect(k("§ 5 odst. 2 písm. a) bod 1 věta první")).toBe("par:5/o2/pa/b1/v1");
+    expect(extractProvisions("čl. 17 odst. 3 pododst. 2 nařízení (EU) 2016/679")[0].keys.at(-1)).toBe("cl:17/o3/s2");
   });
 
   it("fixes what the precision review of round 1 found", () => {
     // a decision's own definition of a name holds; "daňový řád" before 2011 is 337/1992
     expect(keys("§ 55b zákona č. 337/1992 Sb., o správě daní a poplatků (dále jen „daňový řád“). Podle § 4 daňového řádu …", 2010).at(-1)).toBe("zak:337/1992 par:4");
     expect(keys("§ 50 odst. 3 daňového řádu", 2009)).toEqual(["zak:337/1992 par:50/o3"]);
-    expect(keys("§ 50 odst. 3 daňového řádu", 2015)).toEqual(["zak:280/2009 par:50/o3"]);
+    // without a number in the decision, a name of two acts in force at once gets none (decided 27. 10.)
+    expect(keys("§ 50 odst. 3 daňového řádu", 2015)).toEqual(["? par:50/o3"]);
+    expect(keys("§ 50 odst. 3 daňového řádu zákona č. 280/2009 Sb.", 2015)[0]).toBe("zak:280/2009 par:50/o3");
     // "trestního zákona" in 2003 is the old code
     expect(keys("§ 248 odst. 1 trestního zákona", 2003)).toEqual(["zak:140/1961 par:248/o1"]);
     // a back reference skips the amendment
@@ -156,7 +165,8 @@ describe("provision references in decision texts", () => {
     expect(keys("§ 46 zákona č. 71/1967 Sb., o správním řízení (správní řád). … § 46 správního řádu", 2006).at(-1)).toBe("zak:71/1967 par:46");
     expect(keys("§ 60 odst. 1 zákona č. 65/1965 Sb., zákoníku práce. … § 249 zák. práce", 2007).at(-1)).toBe("zak:65/1965 par:249");
     expect(keys("§ 5 odst. 2 rozpočtových pravidel republiky", 2006)).toEqual(["zak:576/1990 par:5/o2"]);
-    expect(keys("§ 187 odst. 1 tr. zák.", 2010)).toEqual(["zak:140/1961 par:187/o1"]);
+    expect(keys("§ 187 odst. 1 tr. zák.", 2009)).toEqual(["zak:140/1961 par:187/o1"]);
+    expect(keys("§ 187 odst. 1 tr. zák.", 2015)).toEqual(["? par:187/o1"]);
     // back references: the kind of act, with its issuer between; a nález is no zákon; the bare kind word
     expect(keys("dle vyhlášky Ministerstva spravedlnosti č. 254/2015 Sb., podle § 151 odst. 3 o. s. ř. a dle § 2 odst. 1 uvedené vyhlášky").at(-1)).toBe("zak:254/2015 par:2/o1");
     expect(keys("zákon č. 428/2012 Sb. upravuje …, nálezem Ústavního soudu vyhlášeným pod č. 177/2013 Sb.; podle § 15 tohoto zákona").at(-1)).toBe("zak:428/2012 par:15");
@@ -182,7 +192,8 @@ describe("provision references in decision texts", () => {
     expect(keys("§ 132a zák. práce; … § 132a zák. č. 65/1965 Sb. (zákoník práce)", 2010)[0]).toBe("zak:65/1965 par:132a");
     expect(keys("§ 132 – 132a zák. práce dříve platného", 2010)[0]).toBe("zak:65/1965 par:132");
     expect(keys("§ 119 a § 120 odst. 1 o. z.", 2005)).toEqual(["zak:40/1964 par:119", "zak:40/1964 par:120/o1"]);
-    expect(keys("§ 1188 občanského zákona", 2025)).toEqual(["zak:89/2012 par:1188"]);
+    expect(keys("§ 1188 občanského zákona", 2025)).toEqual(["? par:1188"]);
+    expect(keys("§ 1188 občanského zákona; zákon č. 89/2012 Sb.", 2025)[0]).toBe("zak:89/2012 par:1188");
     expect(keys("§ 9 odst. 4 starého zákona o pozemkových úpravách", 2010)).toEqual(["zak:284/1991 par:9/o4"]);
     // a defined name declines; an EU decision's three-part number
     expect(keys("§ 16 odst. 7 zák. č. 588/1992 Sb., o dani z přidané hodnoty (dále jen „zákon o DPH“). § 16 odst. 7 zákona o DPH", 2005).at(-1)).toBe("zak:588/1992 par:16/o7");

@@ -39,6 +39,8 @@ export interface ActMention {
   act: string;
   /** A name several acts share ("zákon o obcích"): all of them — an earlier numbered mention of one decides. */
   alts?: string[];
+  /** A title shared with older acts (registry): with nothing else to go by, the year's pick stands. */
+  byYear?: true;
   /** Named by its number ("zákona č. 40/1964 Sb."), not by a name. */
   numbered?: true;
   /** By the decision's own "(dále jen „…“)": that binding stands. */
@@ -53,8 +55,8 @@ export interface ProvisionMention {
   keys: string[];
   start: number;
   end: number;
-  /** How the act was found: named right after, from the next reference of a chain, a back reference, a paraphrase; "" none. */
-  via: "after" | "chain" | "back" | "paraphrase" | "";
+  /** How the act was found: named right after, from the next reference of a chain, a back reference; "" none. */
+  via: "after" | "chain" | "back" | "";
 }
 
 /** What the registry adds: names ("zákon o …" subjects) and global aliases, both resolved with the decision's year. */
@@ -173,10 +175,14 @@ const NAMED_SOURCES: Array<{ pattern: RegExp; act: string; before?: Array<[numbe
  * 26. 10.: 169 definitions of it for 40/1964, 22 for 89/2012), "tr. zák."
  * the 1961 one. The decision's year decides; without one, the table's act stays.
  */
-const RECODIFIED: Array<{ text: RegExp; act: string; until: number; old: string }> = [
+/**
+ * `settled`: the name is the new act's own and not ambiguous after `until` ("o. z." is the 2012 code's abbreviation;
+ * the 1964 one was "obč. zák.") — only the year applies, never "no act".
+ */
+const RECODIFIED: Array<{ text: RegExp; act: string; until: number; old: string; settled?: true }> = [
   { text: /^(?:obč\.\s?zák|ObčZ|občansk\p{L}+\s+zákon)/iu, act: "zak:89/2012", until: 2014, old: "zak:40/1964" },
   // "o. z." / "OZ" before 2014 is mostly the new code already published; before 2012 it can only be the old one.
-  { text: /^(?:o\.\s?z|OZ)/u, act: "zak:89/2012", until: 2012, old: "zak:40/1964" },
+  { text: /^(?:o\.\s?z|OZ)/u, act: "zak:89/2012", until: 2012, old: "zak:40/1964", settled: true },
   // "tr. zák." and "trestní zákon" are the old code's names; "tr. zákoník" never is. Decided in 2010, a case was mostly older.
   { text: /^(?:tr\.\s?zák(?!oník)|TrZ|trestní\p{L}*\s+zákon(?!ík))/iu, act: "zak:40/2009", until: 2011, old: "zak:140/1961" },
   { text: /^(?:zákoník\p{L}*\s+práce|zák\.\s?pr(?:áce|\.)|ZPr?(?!\p{L}))/iu, act: "zak:262/2006", until: 2007, old: "zak:65/1965" },
@@ -194,6 +200,20 @@ const OLD_AFTER = /^[\s,]*(?:dříve\s+platn\p{L}*|tehdy\s+(?:platn|účinn)\p{L
 /** Implementing decrees that tell which of two successor acts a name means. */
 const PAIR_HINTS: Record<string, string> = { "zak:205/1999": "zak:168/1999", "zak:69/2024": "zak:30/2024" };
 const actYear = (act: string) => Number(/\/(\d{4})/.exec(act)?.[1] ?? 0);
+
+/** The acts a recodified name may mean ("obč. zák.": 89/2012 and 40/1964), or null. */
+function pairOf(act: string, matched: string): string[] | null {
+  // Only a name of the new act is ambiguous ("rozpočtová pravidla republiky" names the old one alone).
+  const r = RECODIFIED.find((x) => x.act === act && x.text.test(matched));
+  return r && r.act !== r.old && !r.settled ? [r.act, r.old] : null;
+}
+
+/** The year an act took effect, where it matters for telling successors apart; else its year. */
+const IN_FORCE: Record<string, number> = {
+  "zak:89/2012": 2014, "zak:40/2009": 2010, "zak:500/2004": 2006, "zak:262/2006": 2007, "zak:280/2009": 2011,
+  "zak:218/2000": 2001, "zak:183/2006": 2007, "zak:242/2016": 2017, "zak:143/2001": 2001, "zak:139/2002": 2002, "zak:30/2024": 2024,
+};
+const inForce = (act: string) => IN_FORCE[act] ?? actYear(act);
 
 function recodified(act: string, matched: string, year: number | null): string {
   if (year === null) return act;
@@ -261,14 +281,17 @@ export function findActMentions(t: string, lookup: ActLookup | null, year: numbe
   }
   for (const entry of ACT_ABBREVIATIONS) {
     const re = new RegExp(entry.pattern.source, entry.pattern.flags.includes("g") ? entry.pattern.flags : `${entry.pattern.flags}g`);
-    for (const m of t.matchAll(re)) out.push({ start: m.index, end: m.index + m[0].length, act: recodified(entry.act, m[0], year) });
+    for (const m of t.matchAll(re)) {
+      const alts = pairOf(entry.act, m[0]);
+      out.push({ start: m.index, end: m.index + m[0].length, act: recodified(entry.act, m[0], year), ...(alts ? { alts } : {}) });
+    }
   }
   for (const { pattern, act, before } of NAMED_SOURCES) {
     const then = (year !== null && before?.find(([until]) => year < until)?.[1]) || act;
     for (const m of t.matchAll(pattern)) {
-      const old = before?.length && OLD_HINT.test(t.slice(Math.max(0, m.index - 15), m.index)) ? before[0][1] : null;
-      const id = then.endsWith("-p") ? `${then}${m[1]}` : (old ?? recodified(then, m[0], year));
-      out.push({ start: m.index, end: m.index + m[0].length, act: id });
+      const id = then.endsWith("-p") ? `${then}${m[1]}` : recodified(then, m[0], year);
+      const alts = before?.length ? [act, ...before.map(([, old]) => old)] : pairOf(act, m[0]);
+      out.push({ start: m.index, end: m.index + m[0].length, act: id, ...(alts ? { alts } : {}) });
     }
   }
   if (lookup) {
@@ -277,7 +300,7 @@ export function findActMentions(t: string, lookup: ActLookup | null, year: numbe
       const kind = head.startsWith("ústavní") ? "ústavní zákon" : head.startsWith("zák") ? "zákon" : head.startsWith("vyhláš") ? "vyhláška" : "nařízení vlády";
       const wordsStart = m.index + m[0].length;
       const hit = lookup.byName(kind, t.slice(wordsStart, wordsStart + 160), year);
-      if (hit) out.push({ start: m.index, end: wordsStart + hit.length, act: hit.act, ...(hit.alts ? { alts: hit.alts } : {}) });
+      if (hit) out.push({ start: m.index, end: wordsStart + hit.length, act: hit.act, ...(hit.alts ? { alts: hit.alts, byYear: true as const } : {}) });
     }
     for (const [alias, act] of lookup.aliases(year)) {
       for (const m of t.matchAll(new RegExp(`${B}${escapeAlias(alias)}${E}`, "gu"))) out.push({ start: m.index, end: m.index + m[0].length, act });
@@ -461,6 +484,9 @@ function parseGroup(t: string, pos: number): { paths: string[][]; end: number } 
       break;
     }
   }
+  // "čl. 17 odst. 3 pododst. 2" (EU acts): the pododstavec is a level of its own.
+  const sub = take(/\s*,?\s*(?:pododst\.|pododstav\p{L}*)\s*(\d{1,2})/uy, end);
+  if (sub) end = sub.end;
   const p =
     take(/\s*,?\s*(?:písm(?:eno|ena|ene|en)?\.?|lit\.)\s*([a-z]{1,2})(?:[)/]|(?![\p{L}\p{N}]))/uy, end) ??
     // "odst. 1 a), d) AT": the letter alone, but only with its bracket, after an odstavec.
@@ -524,7 +550,8 @@ function parseGroup(t: string, pos: number): { paths: string[][]; end: number } 
   // "odst. 1, 2 písm. h)": what follows a list of odstavce belongs to the last of them.
   const os = odst.map((x) => `o${x}`);
   for (const a of os.slice(0, -1)) levels.push([a]);
-  for (const c of ps) for (const d of bs) levels.push([os.at(-1) ?? null, c, d, ...vs].filter((x): x is string => x !== null));
+  const ss = sub ? `s${sub.m[1]}` : null;
+  for (const c of ps) for (const d of bs) levels.push([os.at(-1) ?? null, ss, c, d, ...vs].filter((x): x is string => x !== null));
   return { paths: levels.filter((l) => l.length > 0), end };
 }
 
@@ -644,15 +671,6 @@ function articleBased(act: string): boolean {
 }
 /** "čl. 23 spisu" (a page of the court file), "§ 1 až 654. Komentář" (a book title): not citations. */
 const NOT_A_CITATION = /^[\s.,)\/–-]*(?:(?:soudního\s+|trestního\s+|správního\s+|tr\.\s*)?spisu|spis(?![\p{L}])|civilní\s+věci|čj\.|č\.\s*j\.|[Kk]omentář|\[?Systém\s+ASPI)/u;
-/** A sentence ends between: ". Podle", "). 12. Soud". */
-const SENTENCE_END = /[.!?][")“”]?\s+(?:\d{1,3}\.\s+)?[\p{Lu}„"]/u;
-
-/** How far behind a resolved reference an unresolved one still reads as part of its paraphrase. */
-const PARAPHRASE_REACH = 400;
-/** Between the two: words that name another act, or a judgment (whose paragraphs are not §§ of an act). */
-const OTHER_ACT_BETWEEN = /zákon|zák\.|vyhlášk|vyhl\.|nařízen|předpis|úmluv|směrnic|protokol|rozsud|ve\s+věci|tarif/iu;
-/** Right after the reference: a word naming what it belongs to — "§ 5 zákona", "čl. 8 podmínek", "§ 12 rozsudku". */
-const OTHER_ACT_AFTER = /^[\s,]*(?:zákon|zák\.|vyhl|nařízen|předpis|smlouv|podmín|ujednání|rozsud|úmluv|protokol|řádu|tarif|stanov|statut)/iu;
 
 /**
  * What joins references that share the act named after the last of them:
@@ -689,43 +707,45 @@ export function extractProvisions(text: string, lookup: ActLookup | null = null,
     ...base.filter((x) => x.numbered || !definedSpans.some(([s, e]) => x.start < e && s < x.end)),
   ]);
 
-  // "zákona č. 367/1990 Sb., o obcích … § 45 zákona o obcích": a shared name means the act the decision named.
-  for (const m of mentions) {
-    if (!m.alts) continue;
-    const named = mentions.find((x) => x.end <= m.start && !x.alts && m.alts!.includes(x.act));
-    if (named) m.act = named.act;
-  }
   // "zákoníku práce č. 65/1965 Sb.": a name right before its number is that number.
   for (const [k, m] of mentions.entries()) {
     const next = mentions[k + 1];
-    if (!m.numbered && next?.numbered && /^\s*,?\s*(?:č\.|číslo)?\s*$/u.test(t.slice(m.end, next.start))) m.act = next.act;
-  }
-  // "§ 449 odst. 3 zákona č. 40/1964 Sb., občanského zákoníku, ve znění účinném do 31. 12. 2013 … § 449a obč. zák."
-  // (decided 2016): a name of a recodified act follows the one of the pair the decision named by number —
-  // the last one before, else the first one after; "starého", "dříve platného" next to it mean the old one;
-  // and never an act younger than the decision.
-  for (const m of mentions) {
-    if (m.numbered || m.defined) continue;
-    const text = t.slice(m.start, m.end);
-    for (const r of RECODIFIED) {
-      if ((m.act !== r.act && m.act !== r.old) || !r.text.test(text)) continue;
-      const pair = (x: ActMention) => x.numbered && (x.act === r.act || x.act === r.old);
-      const named = [...mentions].reverse().find((x) => pair(x) && x.start < m.start) ?? mentions.find((x) => pair(x) && x.start > m.end);
-      if (named) m.act = named.act;
-      if (OLD_HINT.test(t.slice(Math.max(0, m.start - 15), m.start)) || OLD_AFTER.test(t.slice(m.end, m.end + 40))) m.act = r.old;
-      // "obč. zák." beside "o. z." in one decision: the two codes, "obč. zák." the old one.
-      if (/^obč\.\s?zák/u.test(text) && mentions.some((x) => x.act === r.act && /^o\.\s?z/u.test(t.slice(x.start, x.end)))) m.act = r.old;
-      if (year !== null && actYear(r.act) > year) m.act = r.old;
+    if (!m.numbered && next?.numbered && /^\s*,?\s*(?:č\.|číslo)?\s*$/u.test(t.slice(m.end, next.start))) {
+      m.act = next.act;
+      m.alts = undefined;
     }
   }
-  // Successors sharing a name ("zákon o pojištění odpovědnosti z provozu vozidla", 168/1999 and 30/2024):
-  // the implementing decree the decision cites tells which.
+  // A name several acts may bear — old and new code ("obč. zák."), predecessors ("stavební zákon"), a shared title
+  // ("zákon o obcích") — means what the decision itself says (decided 27. 10.): the act of them it names by number
+  // (the last before, else the first after); else the implementing decree it cites with it; "starého", "dříve
+  // platného", "účinném do" the oldest. Without any of that the year decides only when one of them alone was in
+  // force by then — otherwise the reference stays without an act.
   for (const m of mentions) {
-    if (!m.alts) continue;
-    const hint = mentions.find((x) => x.numbered && PAIR_HINTS[x.act] && m.alts!.includes(PAIR_HINTS[x.act]));
-    if (hint && !mentions.some((x) => x.numbered && x.end <= m.start && m.alts!.includes(x.act))) m.act = PAIR_HINTS[hint.act];
+    if (!m.alts || m.numbered || m.defined) continue;
+    const cand = m.alts;
+    const isCand = (x: ActMention) => Boolean(x.numbered) && cand.includes(x.act);
+    const named = [...mentions].reverse().find((x) => isCand(x) && x.start < m.start) ?? mentions.find((x) => isCand(x) && x.start > m.end);
+    if (named) {
+      m.act = named.act;
+      continue;
+    }
+    const decree = mentions.find((x) => x.numbered && PAIR_HINTS[x.act] && cand.includes(PAIR_HINTS[x.act]));
+    if (decree) {
+      m.act = PAIR_HINTS[decree.act];
+      continue;
+    }
+    const oldest = [...cand].sort((a, b) => inForce(a) - inForce(b))[0];
+    const text = t.slice(m.start, m.end);
+    // "obč. zák." beside "o. z." in one decision: the two codes, "obč. zák." the old one.
+    const twoCodes = /^obč\.\s?zák/u.test(text) && mentions.some((x) => x.act === "zak:89/2012" && /^o\.\s?z/u.test(t.slice(x.start, x.end)));
+    if (twoCodes || OLD_HINT.test(t.slice(Math.max(0, m.start - 15), m.start)) || OLD_AFTER.test(t.slice(m.end, m.end + 40))) {
+      m.act = oldest;
+      continue;
+    }
+    if (m.byYear) continue;
+    const then = year === null ? cand : cand.filter((a) => inForce(a) <= year);
+    m.act = then.length === 1 ? then[0] : "";
   }
-
   const spans = parseRefs(t).filter(
     (span) => !NOT_A_CITATION.test(t.slice(span.end, span.end + 30)) && !/komentář\p{L}*\s+k\s*$/iu.test(t.slice(Math.max(0, span.start - 20), span.start)),
   );
@@ -753,29 +773,11 @@ export function extractProvisions(text: string, lookup: ActLookup | null = null,
   });
   // Back to front: an unresolved reference joined to the next one takes its act.
   for (let i = spans.length - 2; i >= 0; i--) {
-    if (!acts[i] && acts[i + 1] && fits(i, i + 1, acts[i + 1]) && CHAIN.test(t.slice(spans[i].end, spans[i + 1].start))) {
+    // A reference whose own act name was left open (several acts, no number) stays open.
+    if (!acts[i] && via[i] !== "after" && acts[i + 1] && fits(i, i + 1, acts[i + 1]) && CHAIN.test(t.slice(spans[i].end, spans[i + 1].start))) {
       acts[i] = acts[i + 1];
       via[i] = "chain";
     }
-  }
-  // A reference inside the paraphrase of a provision belongs to its act: "Podle § 1824 o. z. … sdělí
-  // podnikatel údaje uvedené v § 1811 odst. 2" — close behind, no other act named or hinted at between.
-  for (let i = 1; i < spans.length; i++) {
-    if (acts[i] || via[i] === "back" || !acts[i - 1] || !fits(i, i - 1, acts[i - 1])) continue;
-    const from = namedUntil[i - 1];
-    const to = spans[i].start;
-    if (to - from > PARAPHRASE_REACH) continue;
-    // Within the sentence, and no act named in between or shortly after ("čl. 13 části B šesté směrnice").
-    if (SENTENCE_END.test(t.slice(from, to))) continue;
-    const namedSoonAfter = (x: ActMention) => {
-      const gap = t.slice(spans[i].end, x.start);
-      return x.start >= spans[i].end && gap.length <= 60 && !SENTENCE_END.test(gap) && !/§|čl\./u.test(gap);
-    };
-    if (mentions.some((x) => (x.start >= from && x.end <= to) || namedSoonAfter(x))) continue;
-    if (headOf(i) === "cl" && /smlouv|spis/iu.test(t.slice(Math.max(from, to - 80), to))) continue;
-    if (OTHER_ACT_BETWEEN.test(t.slice(from, to)) || OTHER_ACT_AFTER.test(t.slice(spans[i].end, spans[i].end + 40))) continue;
-    acts[i] = acts[i - 1];
-    via[i] = "paraphrase";
   }
   const out: ProvisionMention[] = [];
   for (const [i, span] of spans.entries()) {
