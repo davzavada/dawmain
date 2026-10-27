@@ -5,6 +5,8 @@ import type { Hono } from "hono";
 import type { Db } from "@/src/mirror/db/client";
 import { saveDecision } from "@/src/mirror/db/store";
 import { createMirrorApi } from "@/src/mirror/api/server";
+import { buildActLookup } from "@/src/mirror/legal/lookup";
+import { provisionsSource } from "@/src/mirror/provisions";
 import type { DecisionRecord } from "@/src/mirror/types";
 
 /** The HTTP API (Hono, app.request) over the real schema in PGlite. */
@@ -90,9 +92,16 @@ beforeAll(async () => {
       caseNumber: "I. ÚS 10/25",
       caseNumbers: ["I. ÚS 10/25"],
       decidedOn: "2025-03-01",
-      text: { body: "Ústavní stížnost se odmítá. Stěžovatel odkazuje na nález sp. zn. IV. ÚS 296/24 o promlčení.", source: "us:gettext-hidden" },
+      text: { body: "Ústavní stížnost se odmítá. Stěžovatel odkazuje na nález sp. zn. IV. ÚS 296/24 o promlčení. Namítá porušení § 2913 odst. 1 písm. b) zákona č. 89/2012 Sb. a čl. 36 odst. 1 Listiny.", source: "us:gettext-hidden" },
     }),
   );
+  await pg.query(`INSERT INTO mirror.act (id, collection, kind, number, year, title, origin) VALUES ('zak:89/2012', 'sb', 'zákon', '89', 2012, 'Zákon občanský zákoník', 'esbirka')`);
+  const counts = { fetched: 0, changed: 0, failed: 0 };
+  await provisionsSource({ db, log: () => undefined }, "us", buildActLookup([]), counts);
+  expect(counts).toEqual({ fetched: 2, changed: 2, failed: 0 });
+  // A second run finds nothing to do: provision_state holds text and version.
+  await provisionsSource({ db, log: () => undefined }, "us", buildActLookup([]), counts);
+  expect(counts.fetched).toBe(2);
   app = createMirrorApi({ db, token: TOKEN });
 });
 afterAll(async () => {
@@ -203,6 +212,37 @@ describe("GET /v1/decisions", () => {
   it("404 for an unknown decision, 400 for an unknown source", async () => {
     expect((await get("/v1/decisions/us/9-9-99")).status).toBe(404);
     expect((await get("/v1/decisions/eu/x")).status).toBe(400);
+  });
+});
+
+describe("search by cited provision", () => {
+  it("finds a decision by any level of the provision, from a key or a citation", async () => {
+    for (const url of [
+      "/v1/provisions?act=89/2012&provision=par:2913",
+      "/v1/provisions?act=zak:89/2012&provision=§ 2913 odst. 1 písm. b)",
+      `/v1/provisions?cite=${encodeURIComponent("§ 2913 odst. 1 zákona č. 89/2012 Sb.")}`,
+    ]) {
+      const body = await (await get(url)).json();
+      expect(body.total, url).toBe(1);
+      expect(body.hits[0]).toMatchObject({ id: "1-10-25_1", caseNumber: "I. ÚS 10/25", mentions: 1 });
+      expect(body.hits[0].excerpt).toContain("§ 2913 odst. 1 písm. b)");
+    }
+    expect((await (await get("/v1/provisions?act=zak:2/1993&provision=cl:36/o1")).json()).total).toBe(1);
+    expect((await (await get("/v1/provisions?act=89/2012&provision=par:2914")).json()).total).toBe(0);
+  });
+
+  it("lists what a decision cites, deepest keys with the act's title", async () => {
+    const body = await (await get("/v1/decisions/us/1-10-25_1/provisions")).json();
+    expect(body.provisions).toEqual([
+      expect.objectContaining({ act: "zak:89/2012", actTitle: "Zákon občanský zákoník", provision: "par:2913/o1/pb" }),
+      expect.objectContaining({ act: "zak:2/1993", provision: "cl:36/o1" }),
+    ]);
+  });
+
+  it("explains a bad request", async () => {
+    expect((await get("/v1/provisions?act=89/2012")).status).toBe(400);
+    expect((await get("/v1/provisions?act=nonsense&provision=par:1")).status).toBe(400);
+    expect((await get(`/v1/provisions?cite=${encodeURIComponent("§ 5 něčeho")}`)).status).toBe(400);
   });
 });
 

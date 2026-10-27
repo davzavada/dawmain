@@ -154,6 +154,12 @@ NS ReadViewEntries a NSS id-walk nejsou v kódu ověřené, první krok u nich j
   + úryvek se zvýrazněním.
 - `GET /v1/decisions/:source/:id` — metadata, text (stránky po 45k jako
   `pageOrExcerpt`), odkaz na oficiální zdroj.
+- `GET /v1/provisions?cite=§ 2913 odst. 1 zákona č. 89/2012 Sb.` (nebo
+  `act=89/2012&provision=par:2913/o1`) `&source=&from=&to=&limit=&offset=` —
+  rozhodnutí citující ustanovení (klíč na každé úrovni: § → odst. → písm. →
+  bod/věta), s úryvkem u první citace. `GET /v1/decisions/:source/:id/provisions`
+  — co rozhodnutí cituje. Vrstva `decision_provision` (migrace 0008, 0009),
+  počítá ji `mirror provisions` a po každém syncu i sync.
 - `GET /v1/status` — per zdroj počty, poslední `sync_run`, fronta chyb.
 
 Hono + `@hono/node-server`, role `mirror_reader`, timeout dotazu 5 s.
@@ -167,7 +173,8 @@ src/mirror/crawl/{us,ns,nss,justice}.ts     discover (výčet id) + fetch, reži
 src/mirror/map/{us,ns,nss,justice}.ts       výstup parse*() → řádek decision (5 polí + technická)
 src/mirror/index.ts                         text → chunky + tsv + ident_keys
 src/mirror/api/server.ts                    Hono API
-scripts/mirror.ts                           CLI: migrate | backfill --source | sync | reindex | status | api
+src/mirror/legal/*.ts                       registr předpisů (e-Sbírka, Cellar) a extrakce citovaných ustanovení
+scripts/mirror.ts                           CLI: migrate | backfill --source | sync | reindex | acts import | provisions | status | api
 deploy/mirror/*.service, *.timer            systemd jednotky
 docs/infra/README.md, proxmox.md            runbook a vysvětlení vrstev
 ```

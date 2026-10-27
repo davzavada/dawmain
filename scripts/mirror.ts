@@ -11,6 +11,8 @@
  *   npx tsx scripts/mirror.ts sync [--source us] [--days 7] [--no-retry]
  *                                                   fetch_queue retry + the last days' publications
  *   npx tsx scripts/mirror.ts acts import [--skip-eu]  act registry from e-Sbírka and Cellar
+ *   npx tsx scripts/mirror.ts provisions [--source us]  cited § / články of new, changed or stale decisions
+ *                                                   (no network; sync runs it after each source)
  *   npx tsx scripts/mirror.ts status                per-source counts, last run, queue
  *   npx tsx scripts/mirror.ts api                   HTTP API on MIRROR_API_HOST:MIRROR_API_PORT
  *                                                   (default 127.0.0.1:8080), token MIRROR_API_TOKEN
@@ -26,6 +28,9 @@ import { migrate } from "./db-migrate.mjs";
 import { closeMirrorPools, loadMirrorEnv, mirrorPool, mirrorUrl, poolDb, type Db } from "../src/mirror/db/client";
 import { finishRun, startRun, updateRun, type RunCounts, type RunMode } from "../src/mirror/db/store";
 import { reindexSource } from "../src/mirror/reindex";
+import { provisionsSource } from "../src/mirror/provisions";
+import { loadActLookup } from "../src/mirror/legal/lookup";
+import type { ActLookup } from "../src/mirror/legal/provisions";
 import { retrySource, syncSource } from "../src/mirror/sync";
 import { MIRROR_SOURCES, type MirrorSource } from "../src/mirror/types";
 import { backfillUs, newUsPacer } from "../src/mirror/crawl/us";
@@ -151,8 +156,19 @@ async function runSync(args: string[]): Promise<number> {
       worst = Math.max(worst, code);
       if (code === EXIT_SOURCE_STOPPED) break; // the source refused us: no sync after a stopped retry
     }
+    // What the sync brought, read for cited provisions (no network).
+    worst = Math.max(worst, await runProvisions(source));
   }
   return worst;
+}
+
+let actLookup: Promise<ActLookup> | null = null;
+
+/** `mirror provisions`: decision_provision of new, changed or stale decisions of one source. */
+async function runProvisions(source: MirrorSource): Promise<number> {
+  actLookup ??= loadActLookup(mirrorPool("reader"));
+  const lookup = await actLookup;
+  return runTracked(source, "reindex", (ctx, counts) => provisionsSource(ctx, source, lookup, counts));
 }
 
 /**
@@ -298,6 +314,13 @@ async function main(argv: string[]): Promise<number> {
     }
     if (command === "backfill") return await runBackfill(args);
     if (command === "reindex") return await runReindex(args);
+    if (command === "provisions") {
+      const only = option(args, "--source");
+      if (only && !(MIRROR_SOURCES as readonly string[]).includes(only)) throw new Error(`unknown source ${only}`);
+      let worst = 0;
+      for (const source of (only ? [only] : SYNCED_SOURCES) as MirrorSource[]) worst = Math.max(worst, await runProvisions(source));
+      return worst;
+    }
     if (command === "sync") return await runSync(args);
     if (command === "acts" && args[0] === "import") return await runActsImport(args.slice(1));
     if (command === "status") {

@@ -57,6 +57,9 @@ export interface ActLookup {
   aliases(year: number | null): Array<[string, string]>;
 }
 
+/** Bump when the rules change: `mirror provisions` then redoes every decision. */
+export const EXTRACTOR_VERSION = 1;
+
 const ODD_SPACES = /[     ]/g;
 const B = "(?<![\\p{L}\\p{N}])";
 const E = "(?![\\p{L}\\p{N}])";
