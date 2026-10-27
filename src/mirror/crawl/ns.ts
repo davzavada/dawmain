@@ -176,13 +176,24 @@ export async function fillNsCategories(
   counts: RunCounts,
 ): Promise<{ unknown: number }> {
   const DAY = 86_400_000;
+  // A dropped connection ("terminated", 27. 10.) is retried; a refusal (SourceStopped) is not.
+  const searchWithRetry = async (url: string) => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return parseNsSearch(await decodeBody(await pacedFetch(LABEL, ctx.pacer, url, { timeoutMs: 120_000 })));
+      } catch (error) {
+        if (error instanceof SourceStopped || attempt >= 3) throw error;
+        ctx.log(`ns: kategorie — ${error instanceof Error ? error.message : String(error)}, znovu za ${30 * attempt} s`);
+        await new Promise((r) => setTimeout(r, 30_000 * attempt));
+      }
+    }
+  };
   const iso = (t: number) => new Date(t).toISOString().slice(0, 10);
   let unknown = 0;
   const window = async (from: number, to: number): Promise<void> => {
     if (ctx.shouldStop?.()) return;
     const query = buildNsQuery({ dateFrom: iso(from), dateTo: iso(to) });
-    const response = await pacedFetch(LABEL, ctx.pacer, nsSearchUrl(query, false, 1, 1000), { timeoutMs: 120_000 });
-    const page = parseNsSearch(await decodeBody(response));
+    const page = await searchWithRetry(nsSearchUrl(query, false, 1, 1000));
     const listed = page.matched ?? page.total ?? page.hits.length;
     if ((listed >= NS_SEARCH_WHOLE || page.hits.length < listed) && to > from) {
       const mid = from + Math.floor((to - from) / DAY / 2) * DAY;
