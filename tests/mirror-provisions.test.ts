@@ -200,6 +200,24 @@ describe("provision references in decision texts", () => {
     expect(keys("§ 1970 z.č. 89/2012, Sb.")).toEqual(["zak:89/2012 par:1970"]);
   });
 
+  it("fixes what rounds 4 and 5 found", () => {
+    // the number overlapping a name decides; a definition prefers the act named by number
+    expect(keys("§ 221 odst. 1 trestního zákona č. 140/1961 Sb.", 2013)).toEqual(["zak:140/1961 par:221/o1"]);
+    expect(keys("§ 179 zákona č. 140/1961 Sb., trestního zákona (dále jen „tr. zák.“). § 250 odst. 3 tr. zák.", 2014).at(-1)).toBe("zak:140/1961 par:250/o3");
+    // "dříve" marks what follows it
+    expect(keys("§ 2279 odst. 2 o. z. (dříve § 706 odst. 2 obč. zák.)", 2026)).toEqual(["zak:89/2012 par:2279/o2", "zak:40/1964 par:706/o2"]);
+    // "této smlouvy" is no act; "této směrnice" only a directive; "směrnice 2008/48" without "/ES"
+    expect(keys("§ 2 zákona č. 172/1991 Sb. … v čl. IV této smlouvy").at(-1)).toBe("? cl:iv");
+    expect(keys("směrnice 2008/48 … v článku 8 této směrnice")).toEqual(["eu:32008L0048 cl:8"]);
+    // definitions: unquoted names; a bare "zákon" never takes a numbered act
+    expect(keys("§ 19 zákona č. 588/1992 Sb., o dani z přidané hodnoty (dále jen zákon o DPH). § 5 zákona o DPH", 2006).at(-1)).toBe("zak:588/1992 par:5");
+    expect(keys("§ 39 zákona č. 155/1995 Sb. (dále jen zákon). § 88 zákona č. 582/1991 Sb.", 2010).at(-1)).toBe("zak:582/1991 par:88");
+    // chains and gaps
+    expect(keys("§ 8 odst. 2 ve spojení s ustanovením § 1 odst. 1 písm. b) zákona o půdě")[0]).toBe("zak:229/1991 par:8/o2");
+    expect(keys("§ 4 odst. 5 zákona a vyhlášky č. 205/1999 Sb.")[0]).toBe("? par:4/o5");
+    expect(keys("komentář k § 216 bod 6.")).toEqual([]);
+  });
+
   it("aggregates mentions per provision with every level of the key", () => {
     const rows = aggregateProvisions(extractProvisions("§ 2913 odst. 1 zákona č. 89/2012 Sb. a znovu § 2913 odst. 1 zákona č. 89/2012 Sb.", LOOKUP, 2020));
     const row = rows.find((r) => r.provision === "par:2913/o1");
