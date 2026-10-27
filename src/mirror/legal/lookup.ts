@@ -7,7 +7,8 @@ import type { ActLookup } from "./provisions";
  * and the global aliases mined from the case law. A name shortened in the
  * text ("zákona o mezinárodní justiční spolupráci" for "… ve věcech
  * trestních") counts when its first three words or more say which act it
- * is. Built once per run from
+ * is. Names of a republished full text (úplné znění) are left out: they mean
+ * the act itself. Built once per run from
  * mirror.act_alias; buildActLookup is pure — unit-tested.
  */
 
@@ -15,6 +16,15 @@ export interface NameRow {
   alias: string; // "zákon o obchodních korporacích"
   act_id: string;
   year: number | null;
+  /** The act's title — for leaving out full texts (úplné znění). */
+  title?: string;
+}
+
+/** "Zákon, kterým se mění zákon č. 185/2001 Sb., …" → zak:185/2001 — only when it amends that one act. */
+export function amendedBy(title: string): string | null {
+  const m = /^Zákon,?\s+kterým\s+se\s+mění\s+zákon\s+č\.\s*(\d{1,4})\/(\d{4})/u.exec(title);
+  if (!m || (title.match(/zákon\p{L}*\s+č\./gu) ?? []).length !== 1) return null;
+  return `zak:${Number(m[1])}/${m[2]}`;
 }
 
 export interface AliasEntry {
@@ -40,10 +50,16 @@ function pick(cands: Candidate[], year: number | null): Candidate {
   return (year !== null ? sorted.find((c) => (c.year ?? 0) <= year) : undefined) ?? sorted[0];
 }
 
-export function buildActLookup(names: NameRow[], aliases: AliasEntry[] = []): ActLookup {
+export function buildActLookup(names: NameRow[], aliases: AliasEntry[] = [], amending: Array<{ id: string; title: string }> = []): ActLookup {
+  const amends = new Map<string, string>();
+  for (const a of amending) {
+    const target = amendedBy(a.title);
+    if (target) amends.set(a.id, target);
+  }
   // kind → "first second" words of the subject → candidates
   const index = new Map<string, Map<string, Candidate[]>>();
   for (const row of names) {
+    if (row.title && /úplné\s+znění/iu.test(row.title)) continue;
     const kind = KINDS.find((k) => row.alias.toLowerCase().startsWith(`${k} o `));
     if (!kind) continue;
     const subject = words(row.alias.slice(kind.length + 3));
@@ -80,8 +96,10 @@ export function buildActLookup(names: NameRow[], aliases: AliasEntry[] = []): Ac
         [bestLen, best] = [len, partial];
       }
       const last = tokens[bestLen - 1];
-      return { act: pick(best, year).act, length: last.index! + last[0].length };
+      const alts = [...new Set(best.map((c) => c.act))];
+      return { act: pick(best, year).act, length: last.index! + last[0].length, ...(alts.length > 1 ? { alts } : {}) };
     },
+    amended: (act) => amends.get(act) ?? null,
     aliases(year) {
       const byAlias = new Map<string, Candidate[]>();
       for (const a of aliases) byAlias.set(a.alias, [...(byAlias.get(a.alias) ?? []), { subject: [], act: a.act_id, year: a.year }]);
@@ -93,12 +111,15 @@ export function buildActLookup(names: NameRow[], aliases: AliasEntry[] = []): Ac
 /** The lookup from the registry: title names, and the case-law aliases that are not generic words. */
 export async function loadActLookup(db: Queryable): Promise<ActLookup> {
   const { rows: names } = await db.query<NameRow & Record<string, unknown>>(
-    `SELECT al.alias, al.act_id, a.year FROM mirror.act_alias al JOIN mirror.act a ON a.id = al.act_id
+    `SELECT al.alias, al.act_id, a.year, a.title FROM mirror.act_alias al JOIN mirror.act a ON a.id = al.act_id
      WHERE al.kind = 'name' AND al.origin IN ('title', 'manual', 'table')`,
+  );
+  const { rows: amending } = await db.query<{ id: string; title: string } & Record<string, unknown>>(
+    `SELECT id, title FROM mirror.act WHERE collection = 'sb' AND title ~ '^Zákon,?\s+kterým\s+se\s+mění\s+zákon\s+č\.'`,
   );
   const { rows: aliases } = await db.query<AliasEntry & Record<string, unknown>>(
     `SELECT al.alias, al.act_id, a.year FROM mirror.act_alias al JOIN mirror.act a ON a.id = al.act_id
      WHERE al.origin = 'caselaw'`,
   );
-  return buildActLookup(names, aliases);
+  return buildActLookup(names, aliases, amending);
 }

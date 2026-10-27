@@ -76,6 +76,8 @@ const ISSUER =
 export function titleNames(title: string): string[] {
   const t = clean(title);
   const names = new Set<string>();
+  // A republished full text ("… (úplné znění, jak vyplývá z pozdějších změn)") is not cited by its own number.
+  if (/úplné\s+znění/iu.test(t)) return [];
   const kind = actKind(t);
   if (kind === "zákon" || kind === "vyhláška" || kind === "nařízení vlády" || kind === "ústavní zákon") {
     const body = t
