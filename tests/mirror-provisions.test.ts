@@ -174,6 +174,32 @@ describe("provision references in decision texts", () => {
     expect(keys("§ 2521-3081). [Systém ASPI]")).toEqual([]);
   });
 
+  it("fixes what rounds 3 and 4 found", () => {
+    // old and new codes: a number after the name, a number later in the decision, "dříve platného", never younger than the decision
+    expect(keys("§ 73 odst. 1 písm. c) zákoníku práce č. 65/1965 Sb.", 2008)).toEqual(["zak:65/1965 par:73/o1/pc"]);
+    expect(keys("§ 132a zák. práce; … § 132a zák. č. 65/1965 Sb. (zákoník práce)", 2010)[0]).toBe("zak:65/1965 par:132a");
+    expect(keys("§ 132 – 132a zák. práce dříve platného", 2010)[0]).toBe("zak:65/1965 par:132");
+    expect(keys("§ 119 a § 120 odst. 1 o. z.", 2005)).toEqual(["zak:40/1964 par:119", "zak:40/1964 par:120/o1"]);
+    expect(keys("§ 1188 občanského zákona", 2025)).toEqual(["zak:89/2012 par:1188"]);
+    expect(keys("§ 9 odst. 4 starého zákona o pozemkových úpravách", 2010)).toEqual(["zak:284/1991 par:9/o4"]);
+    // a defined name declines; an EU decision's three-part number
+    expect(keys("§ 16 odst. 7 zák. č. 588/1992 Sb., o dani z přidané hodnoty (dále jen „zákon o DPH“). § 16 odst. 7 zákona o DPH", 2005).at(-1)).toBe("zak:588/1992 par:16/o7");
+    expect(keys("čl. 3 písm. c) rozhodnutí Komise 2002/190/ES")).toEqual(["eu:32002D0190 cl:3/pc"]);
+    // the decree co-cited tells which successor act a shared name means
+    const vehicles = buildActLookup([
+      { alias: "zákon o pojištění odpovědnosti z provozu vozidla", act_id: "zak:168/1999", year: 1999 },
+      { alias: "zákon o pojištění odpovědnosti z provozu vozidla", act_id: "zak:30/2024", year: 2024 },
+    ]);
+    expect(keys("§ 24c odst. 1 zákona o pojištění odpovědnosti z provozu vozidla a § 2a vyhlášky č. 205/1999 Sb.", 2025, vehicles)[0]).toBe("zak:168/1999 par:24c/o1");
+    // a § never goes back to the Listina; the Protocols are acts of their own
+    expect(keys("čl. 36 Listiny … § 12 odst. 2 citovaného zákona")[1]).toBe("? par:12/o2");
+    expect(keys("čl. 1 Dodatkového protokolu k Úmluvě a čl. 2 Protokolu č. 7 k Úmluvě")).toEqual(["zak:209/1992-p1 cl:1", "zak:209/1992-p7 cl:2"]);
+    expect(keys("čl. 6 odst. 1 Evropské úmluvy o ochraně lidských práv")).toEqual(["zak:209/1992 cl:6/o1"]);
+    // numbers written otherwise
+    expect(keys("§ 18a odst. 2 zákona číslo 111/1994 Sb.")).toEqual(["zak:111/1994 par:18a/o2"]);
+    expect(keys("§ 1970 z.č. 89/2012, Sb.")).toEqual(["zak:89/2012 par:1970"]);
+  });
+
   it("aggregates mentions per provision with every level of the key", () => {
     const rows = aggregateProvisions(extractProvisions("§ 2913 odst. 1 zákona č. 89/2012 Sb. a znovu § 2913 odst. 1 zákona č. 89/2012 Sb.", LOOKUP, 2020));
     const row = rows.find((r) => r.provision === "par:2913/o1");

@@ -6,7 +6,7 @@ import type { ActLookup } from "./provisions";
  * titles ("zákon o obchodních korporacích") found by the words after "o",
  * and the global aliases mined from the case law. A name shortened in the
  * text ("zákona o mezinárodní justiční spolupráci" for "… ve věcech
- * trestních") counts when its first three words or more say which act it
+ * trestních") counts when its first two words or more say which act it
  * is. Names of a republished full text (úplné znění) are left out: they mean
  * the act itself. Built once per run from
  * mirror.act_alias; buildActLookup is pure — unit-tested.
@@ -92,7 +92,7 @@ export function buildActLookup(names: NameRow[], aliases: AliasEntry[] = [], ame
         };
         const len = Math.max(0, ...cands.map(shared));
         const partial = cands.filter((c) => shared(c) === len);
-        if (len < 3 || new Set(partial.map((c) => c.act)).size !== 1) return null;
+        if (len < 2 || new Set(partial.map((c) => c.act)).size !== 1) return null;
         [bestLen, best] = [len, partial];
       }
       const last = tokens[bestLen - 1];
