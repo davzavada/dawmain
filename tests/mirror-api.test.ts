@@ -264,5 +264,6 @@ describe("GET /v1/status", () => {
       images: 2,
       types: { nalez: 1, usneseni: 1 },
     });
+    expect(Date.parse(body.asOf)).not.toBeNaN();
   });
 });

@@ -19,7 +19,7 @@ import { decisionsByProvision, normalizeAct, normalizeProvision, parseCitation, 
  *   GET /v1/decisions/:source/:id/provisions        the § / články it cites
  *   GET /v1/provisions?cite= | act=&provision= [&source=&category=&from=&to=&limit=&offset=]
  *                                                   decisions citing a provision
- *   GET /v1/status
+ *   GET /v1/status                                  cached: answers with the last count (asOf), recounts after 5 min
  *
  * Every route needs `Authorization: Bearer <MIRROR_API_TOKEN>`. Queries run
  * as mirror_reader with a 5 s statement timeout (the pool's).
@@ -49,6 +49,27 @@ function date(value: string | undefined, name: string): string | undefined {
   if (value === undefined || value === "") return undefined;
   if (!ISO_DATE.test(value) || Number.isNaN(Date.parse(value))) throw new BadRequest(`${name} must be YYYY-MM-DD`);
   return value;
+}
+
+/** How long a status count is served before a request starts a recount; the recount may take 60 s, not the API's 5. */
+const STATUS_TTL_MS = 5 * 60_000;
+const STATUS_TIMEOUT_MS = 60_000;
+
+type Status = Awaited<ReturnType<typeof mirrorStatus>> & { asOf: string };
+
+/** Count on one pooled connection with a longer statement timeout (pg's Pool); anything else counts as is. */
+async function countStatus(db: Queryable): Promise<Status> {
+  const pool = db as Queryable & { connect?: () => Promise<Queryable & { release(): void }> };
+  const asOf = new Date().toISOString();
+  if (typeof pool.connect !== "function") return { ...(await mirrorStatus(db)), asOf };
+  const client = await pool.connect();
+  try {
+    await client.query(`SET statement_timeout = ${STATUS_TIMEOUT_MS}`);
+    return { ...(await mirrorStatus(client)), asOf };
+  } finally {
+    await client.query("RESET statement_timeout").catch(() => undefined);
+    client.release();
+  }
 }
 
 export function createMirrorApi(options: { db: Queryable; token: string }): Hono {
@@ -172,7 +193,21 @@ export function createMirrorApi(options: { db: Queryable; token: string }): Hono
     return c.json({ act, provision, ...result, tookMs: Math.round(performance.now() - started) });
   });
 
-  app.get("/v1/status", async (c) => c.json(await mirrorStatus(db)));
+  // The counts scan every decision (seconds on the full mirror): served from the last count, recounted
+  // in the background once stale; only the very first request waits.
+  let status: Status | null = null;
+  let counting: Promise<Status> | null = null;
+  const recount = () =>
+    (counting ??= countStatus(db)
+      .then((fresh) => (status = fresh))
+      .finally(() => {
+        counting = null;
+      }));
+  app.get("/v1/status", async (c) => {
+    if (!status) return c.json(await recount());
+    if (Date.now() - Date.parse(status.asOf) > STATUS_TTL_MS) recount().catch((error) => console.error(`mirror-api: status: ${error}`));
+    return c.json(status);
+  });
 
   app.notFound((c) => c.json({ error: "not found" }, 404));
   return app;
