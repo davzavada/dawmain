@@ -169,7 +169,7 @@ NS ReadViewEntries a NSS id-walk nejsou v kódu ověřené, první krok u nich j
 - `GET /v1/status` — per zdroj počty, poslední `sync_run`, fronta chyb; z
   mezipaměti (`asOf`), přepočet na pozadí po 5 min.
 
-Hono + `@hono/node-server`, role `mirror_reader`, timeout dotazu 5 s.
+Hono + `@hono/node-server`, role `mirror_reader`, timeout dotazu 5 s (hledání 12 s a work_mem 64 MB: RUM řadí všechny shody prefixového dotazu, nejčastější fráze přes všechny soudy 3–4 s).
 
 ## Kód v repu `dawmain` (větev `claude/kind-cray-w0w1iz`)
 
