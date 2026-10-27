@@ -25,8 +25,10 @@ export const EXCERPT_CHARS = 400;
 const RANK_WEIGHTS = "{0.05,0.12,0.2,1.0}";
 /** One identifier match counts like a strong lexical match. */
 const IDENT_SCORE = 0.5;
-/** Words with an identifier, or the court-name filter: searched within this many BM25-first decisions. */
+/** The court-name filter: applied to this many BM25-first decisions. */
 export const BM25_CANDIDATES = 5000;
+/** Words with an identifier: the words' chunks are read for this many BM25-first decisions (~20 chunks each). */
+const WITHIN_CANDIDATES = 1000;
 
 export interface SearchInput {
   q?: string;
@@ -112,21 +114,20 @@ async function runChannel(
   const limit = Math.min(Math.max(1, Math.floor(input.limit ?? 20)), MAX_LIMIT);
   const { rows } = await db.query<ChunkRow & Record<string, unknown>>(
     `WITH q AS (SELECT CASE WHEN $1::text IS NULL THEN NULL ELSE to_tsquery('simple', $1::text) END AS tsq),
-     candidates AS (${
-       within
-         ? // The words only in the decisions BM25 found (decision_id index), the identifiers anywhere (ident_keys index).
-           `SELECT c.source, c.decision_id, c.char_start, c.char_end, c.tsv, c.ident_keys
-            FROM mirror.decision_chunk c, q
-            WHERE ($3::text[] IS NULL OR c.source = ANY($3)) AND c.decision_id = ANY($11::bigint[]) AND q.tsq IS NOT NULL AND c.tsv @@ q.tsq
-            UNION ALL
-            SELECT c.source, c.decision_id, c.char_start, c.char_end, c.tsv, c.ident_keys
-            FROM mirror.decision_chunk c
-            WHERE ($3::text[] IS NULL OR c.source = ANY($3)) AND cardinality($2::text[]) > 0 AND c.ident_keys && $2::text[]`
-         : `SELECT c.source, c.decision_id, c.char_start, c.char_end, c.tsv, c.ident_keys
-            FROM mirror.decision_chunk c, q
-            WHERE ($3::text[] IS NULL OR c.source = ANY($3))  -- prunes to the courts' partitions
-              AND ((q.tsq IS NOT NULL AND c.tsv @@ q.tsq) OR (cardinality($2::text[]) > 0 AND c.ident_keys && $2::text[]))`
-     }),
+     -- Two channels as UNION ALL, each on its own index: an OR of the two makes the planner read every chunk.
+     -- $1 IS NOT NULL / cardinality($2) > 0 are one-time filters: a channel without input is not scanned.
+     candidates AS (
+       SELECT c.source, c.decision_id, c.char_start, c.char_end, c.tsv, c.ident_keys
+       FROM mirror.decision_chunk c, q
+       WHERE $1::text IS NOT NULL AND ($3::text[] IS NULL OR c.source = ANY($3)) AND c.tsv @@ q.tsq${
+         // The words only in the decisions BM25 found (decision_id index); without BM25 every chunk is read.
+         within ? " AND c.decision_id = ANY($11::bigint[])" : ""
+       }
+       UNION ALL
+       SELECT c.source, c.decision_id, c.char_start, c.char_end, c.tsv, c.ident_keys
+       FROM mirror.decision_chunk c
+       WHERE cardinality($2::text[]) > 0 AND ($3::text[] IS NULL OR c.source = ANY($3)) AND c.ident_keys && $2::text[]
+     ),
      matched AS (
        SELECT c.source, c.decision_id, c.char_start, c.char_end,
               coalesce(ts_rank_cd('${RANK_WEIGHTS}'::float4[], c.tsv, q.tsq), 0)
@@ -224,12 +225,12 @@ function bm25Where(input: SearchInput, all: boolean, params: unknown[]): string 
 }
 
 /** The BM25-first decisions for the words (every word, else any), the chunk channels' `within`. */
-async function bm25Candidates(db: Queryable, input: SearchInput, text: string): Promise<number[]> {
+async function bm25Candidates(db: Queryable, input: SearchInput, text: string, limit: number): Promise<number[]> {
   for (const all of [true, false]) {
     const params: unknown[] = [text];
     const { rows } = await db.query<{ id: string }>(
       `SELECT t.decision_id::text AS id FROM mirror.decision_text t WHERE ${bm25Where(input, all, params)}
-       ORDER BY pdb.score(t.decision_id) DESC LIMIT ${BM25_CANDIDATES}`,
+       ORDER BY pdb.score(t.decision_id) DESC LIMIT ${limit}`,
       params,
     );
     if (rows.length) return rows.map((r) => Number(r.id));
@@ -291,7 +292,7 @@ export async function searchDecisions(db: Queryable, input: SearchInput): Promis
     return { hits: rows.map((r) => toHit(r, p.terms, [])), channel, terms: p.terms, identKeys: [] };
   }
   // Words with an identifier: the words' chunks only within BM25's first decisions.
-  const within = input.bm25 && p.tsAnd && words ? await bm25Candidates(db, input, words) : undefined;
+  const within = input.bm25 && p.tsAnd && words ? await bm25Candidates(db, input, words, WITHIN_CANDIDATES) : undefined;
   // The case filter alone is not a search query; with nothing else, it lists that case's decisions.
   const rankKeys = p.tsAnd || p.keys.length ? p.keys : p.caseKeys;
   let channel: SearchResult["channel"] = p.tsAnd ? "and" : "ident";
