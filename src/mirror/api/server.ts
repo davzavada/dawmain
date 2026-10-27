@@ -5,6 +5,7 @@ import { mirrorStatus } from "../status";
 import type { DecisionType } from "../types";
 import { decisionPage, getDecision, getImage, getImages, isMirrorSource, searchDecisions, MAX_LIMIT } from "./queries";
 import { renderDecisionHtml } from "./render";
+import { ACT_GROUPS, ACTS_MAX_LIMIT, suggestActs, type ActGroup } from "./acts";
 import { loadActLookup } from "../legal/lookup";
 import type { ActLookup } from "../legal/provisions";
 import { decisionsByProvision, normalizeAct, normalizeProvision, parseCitation, provisionsOfDecision } from "./provisions";
@@ -19,6 +20,7 @@ import { decisionsByProvision, normalizeAct, normalizeProvision, parseCitation, 
  *   GET /v1/decisions/:source/:id/provisions        the § / články it cites
  *   GET /v1/provisions?cite= | act=&provision= [&source=&category=&from=&to=&limit=&offset=]
  *                                                   decisions citing a provision
+ *   GET /v1/acts?q=&group=cz|eu|intl&limit=          the act registry, for a picker
  *   GET /v1/status
  *
  * Every route needs `Authorization: Bearer <MIRROR_API_TOKEN>`. Queries run
@@ -170,6 +172,17 @@ export function createMirrorApi(options: { db: Queryable; token: string }): Hono
       offset,
     });
     return c.json({ act, provision, ...result, tookMs: Math.round(performance.now() - started) });
+  });
+
+  app.get("/v1/acts", async (c) => {
+    const q = c.req.query();
+    if (!q.q?.trim()) throw new BadRequest("q is required");
+    if (q.group && !ACT_GROUPS.includes(q.group as ActGroup)) throw new BadRequest("group must be cz, eu or intl");
+    const limit = q.limit ? Number(q.limit) : undefined;
+    if (limit !== undefined && !(Number.isInteger(limit) && limit >= 1 && limit <= ACTS_MAX_LIMIT)) {
+      throw new BadRequest(`limit must be 1–${ACTS_MAX_LIMIT}`);
+    }
+    return c.json({ acts: await suggestActs(db, { q: q.q, group: (q.group || undefined) as ActGroup | undefined, limit }) });
   });
 
   app.get("/v1/status", async (c) => c.json(await mirrorStatus(db)));

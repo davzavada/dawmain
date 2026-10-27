@@ -253,6 +253,49 @@ describe("search by cited provision", () => {
   });
 });
 
+describe("GET /v1/acts", () => {
+  beforeAll(async () => {
+    await pg.query(
+      `INSERT INTO mirror.act (id, collection, kind, number, year, title, short_title, origin) VALUES
+         ('zak:99/1963', 'sb', 'zákon', '99', 1963, 'Zákon občanský soudní řád', null, 'esbirka'),
+         ('zak:40/1964', 'sb', 'zákon', '40', 1964, 'Zákon občanský zákoník', null, 'esbirka'),
+         ('zak:209/1992', 'sb', 'sdělení', '209', 1992, 'Sdělení federálního ministerstva zahraničních věcí o sjednání Úmluvy o ochraně lidských práv a základních svobod', null, 'esbirka'),
+         ('sm:12/2005', 'sm', 'sdělení', '12', 2005, 'Sdělení Ministerstva zahraničních věcí o sjednání Smlouvy o přistoupení', null, 'esbirka'),
+         ('eu:32016R0679', 'eu', 'nařízení', '679', 2016, 'Nařízení Evropského parlamentu a Rady (EU) 2016/679 o ochraně fyzických osob v souvislosti se zpracováním osobních údajů', null, 'cellar')`,
+    );
+    await pg.query(
+      `INSERT INTO mirror.act_alias (alias, act_id, kind, origin) VALUES
+         ('OSŘ', 'zak:99/1963', 'abbreviation', 'table'), ('o. s. ř.', 'zak:99/1963', 'abbreviation', 'table'),
+         ('GDPR', 'eu:32016R0679', 'abbreviation', 'table'), ('EÚLP', 'zak:209/1992', 'abbreviation', 'table')`,
+    );
+  });
+  const ids = async (url: string) => ((await (await get(url)).json()).acts as Array<{ id: string }>).map((a) => a.id);
+
+  it("finds by words, newest first, and by number", async () => {
+    expect(await ids("/v1/acts?q=ob%C4%8Dansk%C3%BD%20z%C3%A1kon%C3%ADk")).toEqual(["zak:89/2012", "zak:40/1964"]);
+    expect(await ids("/v1/acts?q=40/1964")).toEqual(["zak:40/1964"]);
+    expect(await ids("/v1/acts?q=32016R0679")).toEqual(["eu:32016R0679"]);
+  });
+
+  it("puts an exact abbreviation first and returns it", async () => {
+    const body = await (await get("/v1/acts?q=OS%C5%98")).json();
+    expect(body.acts[0]).toMatchObject({ id: "zak:99/1963", abbreviation: expect.any(String) });
+    expect(await ids("/v1/acts?q=gdpr")).toEqual(["eu:32016R0679"]);
+  });
+
+  it("keeps to a group: treaties include the old sdělení of the Sbírka zákonů", async () => {
+    expect(await ids("/v1/acts?q=%C3%BAmluv&group=intl")).toEqual(["zak:209/1992"]);
+    expect(await ids("/v1/acts?q=sd%C4%9Blen%C3%AD&group=intl")).toEqual(["sm:12/2005", "zak:209/1992"]);
+    expect(await ids("/v1/acts?q=ob%C4%8Dansk%C3%BD&group=eu")).toEqual([]);
+  });
+
+  it("explains a bad request", async () => {
+    expect((await get("/v1/acts")).status).toBe(400);
+    expect((await get("/v1/acts?q=x&group=us")).status).toBe(400);
+    expect((await get("/v1/acts?q=x&limit=99")).status).toBe(400);
+  });
+});
+
 describe("GET /v1/status", () => {
   it("returns the per-source state", async () => {
     const body = await (await get("/v1/status")).json();
