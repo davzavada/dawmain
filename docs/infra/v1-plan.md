@@ -151,7 +151,13 @@ NS ReadViewEntries a NSS id-walk nejsou v kódu ověřené, první krok u nich j
 - `GET /v1/search?q=&source=&court=&from=&to=&case=&limit=` — fulltext
   (`buildTsQuery`) + identifikátory (`queryIdentKeys`), řazení `ts_rank_cd`,
   odpověď ve tvaru blízkém `AggregatedHit` (`src/mcp/tools/cz-caselaw.ts`)
-  + úryvek se zvýrazněním. `source` může být víc soudů (`ns,nss`). S RUM
+  + úryvek se zvýrazněním. Slova bez identifikátorů jdou přes BM25 (pg_search
+  0.26, index `decision_text_bm25` nad celým textem, český stemmer bez
+  diakritiky, filtry soud/datum/druh/kategorie v indexu; migrace 0013, 0015):
+  7–35 ms v API. Index musí mít `mutable_segment_rows = 0` — buffer nových
+  řádků se jinak při každém dotazu indexuje znovu (454 řádků = 600 ms).
+  `source` může být víc soudů (`ns,nss`). Sp. zn. / § a filtr soudu jdou
+  dál přes chunky; s RUM
   indexem na chunkách (migrace 0012, balík `postgresql-17-rum`) se řadí jen
   5 000 chunků, které index seřadí první (pilot NS: top 20 shodné z 18–20,
   častá fráze 0,1–0,8 s místo desítek sekund); text se čte až pro vrácené hity.
@@ -168,6 +174,10 @@ NS ReadViewEntries a NSS id-walk nejsou v kódu ověřené, první krok u nich j
   řadí podle počtu citujících rozhodnutí (počítá se na pozadí jednou denně).
 - `GET /v1/status` — per zdroj počty, poslední `sync_run`, fronta chyb; z
   mezipaměti (`asOf`), přepočet na pozadí po 5 min.
+
+Originály dokumentů zdroje (NS/ÚS/NSS HTML, justice JSON) v `decision_raw`
+(migrace 0014, gzip): ukládá je každé stažení, starší doplní `mirror raw
+--source …` (jeden požadavek na rozhodnutí). Z nich se počítá formátování.
 
 Hono + `@hono/node-server`, role `mirror_reader`, timeout dotazu 5 s (hledání 12 s a work_mem 64 MB: RUM řadí všechny shody prefixového dotazu, nejčastější fráze přes všechny soudy 3–4 s).
 
