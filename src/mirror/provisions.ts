@@ -30,8 +30,10 @@ export async function writeProvisions(tx: Queryable, decisionId: number, textSha
   );
 }
 
-export async function provisionsSource(ctx: ReindexContext, source: MirrorSource, lookup: ActLookup, counts: RunCounts): Promise<void> {
+/** `limit`: at most this many decisions (a pilot). */
+export async function provisionsSource(ctx: ReindexContext, source: MirrorSource, lookup: ActLookup, counts: RunCounts, limit = Infinity): Promise<void> {
   let lastId = 0;
+  const start = counts.fetched + counts.failed;
   for (;;) {
     if (ctx.shouldStop?.()) return;
     const { rows } = await ctx.db.query<{ id: string; text_sha256: string | null; year: number | null; body: string }>(
@@ -45,7 +47,7 @@ export async function provisionsSource(ctx: ReindexContext, source: MirrorSource
     );
     if (rows.length === 0) return;
     for (const r of rows) {
-      if (ctx.shouldStop?.()) return;
+      if (ctx.shouldStop?.() || counts.fetched + counts.failed - start >= limit) return;
       const id = Number(r.id);
       lastId = id;
       try {

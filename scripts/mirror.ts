@@ -11,7 +11,7 @@
  *   npx tsx scripts/mirror.ts sync [--source us] [--days 7] [--no-retry]
  *                                                   fetch_queue retry + the last days' publications
  *   npx tsx scripts/mirror.ts acts import [--skip-eu]  act registry from e-Sbírka and Cellar
- *   npx tsx scripts/mirror.ts provisions [--source us]  cited § / články of new, changed or stale decisions
+ *   npx tsx scripts/mirror.ts provisions [--source us] [--limit N]  cited § / články of new, changed or stale decisions
  *                                                   (no network; sync runs it after each source)
  *   npx tsx scripts/mirror.ts status                per-source counts, last run, queue
  *   npx tsx scripts/mirror.ts api                   HTTP API on MIRROR_API_HOST:MIRROR_API_PORT
@@ -165,10 +165,10 @@ async function runSync(args: string[]): Promise<number> {
 let actLookup: Promise<ActLookup> | null = null;
 
 /** `mirror provisions`: decision_provision of new, changed or stale decisions of one source. */
-async function runProvisions(source: MirrorSource): Promise<number> {
+async function runProvisions(source: MirrorSource, limit?: number): Promise<number> {
   actLookup ??= loadActLookup(mirrorPool("reader"));
   const lookup = await actLookup;
-  return runTracked(source, "reindex", (ctx, counts) => provisionsSource(ctx, source, lookup, counts));
+  return runTracked(source, "reindex", (ctx, counts) => provisionsSource(ctx, source, lookup, counts, limit));
 }
 
 /**
@@ -192,7 +192,13 @@ async function runActsImport(args: string[]): Promise<number> {
   }
   const items = JSON.parse(gunzipSync(readFileSync(file)).toString("utf8"))["položky"];
   const cz = parseEsbirkaActs(items);
-  log(`e-Sbírka: ${await upsertActs(db, cz.acts)} předpisů, ${await upsertAliases(db, cz.aliases)} jmen`);
+  const actCount = await upsertActs(db, cz.acts);
+  // Title names are derived from the titles alone: replaced whole, so a name the rules no longer give goes.
+  const nameCount = await db.transaction(async (tx) => {
+    await tx.query("DELETE FROM mirror.act_alias WHERE origin = 'title'");
+    return upsertAliases(tx, cz.aliases);
+  });
+  log(`e-Sbírka: ${actCount} předpisů, ${nameCount} jmen`);
 
   if (!args.includes("--skip-eu")) {
     const pacer = newPacer(2);
@@ -317,8 +323,11 @@ async function main(argv: string[]): Promise<number> {
     if (command === "provisions") {
       const only = option(args, "--source");
       if (only && !(MIRROR_SOURCES as readonly string[]).includes(only)) throw new Error(`unknown source ${only}`);
+      const limitArg = option(args, "--limit");
+      const limit = limitArg ? Number(limitArg) : undefined;
+      if (limit !== undefined && !(Number.isInteger(limit) && limit >= 1)) throw new Error("--limit must be a positive integer");
       let worst = 0;
-      for (const source of (only ? [only] : SYNCED_SOURCES) as MirrorSource[]) worst = Math.max(worst, await runProvisions(source));
+      for (const source of (only ? [only] : SYNCED_SOURCES) as MirrorSource[]) worst = Math.max(worst, await runProvisions(source, limit));
       return worst;
     }
     if (command === "sync") return await runSync(args);
