@@ -63,6 +63,8 @@ describe("mirror schema", () => {
       "SELECT tablename AS name FROM pg_tables WHERE schemaname = 'mirror' ORDER BY 1",
     );
     expect(rows.map((r) => r.name)).toEqual([
+      "act",
+      "act_alias",
       "decision",
       "decision_chunk",
       "decision_chunk_justice",
@@ -72,6 +74,7 @@ describe("mirror schema", () => {
       "decision_chunk_us",
       "decision_dissent",
       "decision_image",
+      "decision_provision",
       "decision_text",
       "fetch_queue",
       "image_blob",

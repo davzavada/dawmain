@@ -10,6 +10,7 @@
  *   npx tsx scripts/mirror.ts reindex --source us   rebuild chunks and dissents from the stored text (no network)
  *   npx tsx scripts/mirror.ts sync [--source us] [--days 7] [--no-retry]
  *                                                   fetch_queue retry + the last days' publications
+ *   npx tsx scripts/mirror.ts acts import [--skip-eu]  act registry from e-Sbírka and Cellar
  *   npx tsx scripts/mirror.ts status                per-source counts, last run, queue
  *   npx tsx scripts/mirror.ts api                   HTTP API on MIRROR_API_HOST:MIRROR_API_PORT
  *                                                   (default 127.0.0.1:8080), token MIRROR_API_TOKEN
@@ -33,10 +34,14 @@ import { backfillNss } from "../src/mirror/crawl/nss";
 import { backfillJustice } from "../src/mirror/crawl/justice";
 import { backfillSdeu } from "../src/mirror/crawl/sdeu";
 import { newPacer } from "../src/mirror/crawl/workers";
-import { SourceStopped } from "../src/mirror/http";
+import { SourceStopped, pacedFetch } from "../src/mirror/http";
 import { formatStatus, mirrorStatus } from "../src/mirror/status";
 import { serve } from "@hono/node-server";
 import { createMirrorApi } from "../src/mirror/api/server";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { gunzipSync } from "node:zlib";
+import { euActsYearQuery, parseCellarActs, parseEsbirkaActs } from "../src/mirror/legal/registry";
+import { manualRegistry, upsertActs, upsertAliases } from "../src/mirror/legal/store";
 
 const MIRROR_MIGRATIONS_DIR = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -150,6 +155,56 @@ async function runSync(args: string[]): Promise<number> {
   return worst;
 }
 
+/**
+ * `mirror acts import`: the act registry — e-Sbírka's act list (downloaded
+ * to MIRROR_DATA_DIR, default /srv/mirror-data, when missing or older than a
+ * week), Cellar's EU acts year by year (--skip-eu leaves them), and the
+ * hand-kept part. Idempotent.
+ */
+async function runActsImport(args: string[]): Promise<number> {
+  const log = (line: string) => console.log(`${new Date().toISOString().slice(11, 19)} ${line}`);
+  const db = poolDb(mirrorPool("writer"));
+  const dir = path.join(process.env.MIRROR_DATA_DIR ?? "/srv/mirror-data", "esbirka");
+  const file = path.join(dir, "002PravniAkt.json.gz");
+  const stale = !existsSync(file) || Date.now() - statSync(file).mtimeMs > 7 * 86_400_000;
+  if (stale) {
+    mkdirSync(dir, { recursive: true });
+    const response = await fetch("https://opendata.eselpoint.gov.cz/datove-sady-esbirka/002PravniAkt.json.gz");
+    if (!response.ok) throw new Error(`e-Sbírka answered HTTP ${response.status}`);
+    writeFileSync(file, Buffer.from(await response.arrayBuffer()));
+    log(`e-Sbírka: staženo ${file}`);
+  }
+  const items = JSON.parse(gunzipSync(readFileSync(file)).toString("utf8"))["položky"];
+  const cz = parseEsbirkaActs(items);
+  log(`e-Sbírka: ${await upsertActs(db, cz.acts)} předpisů, ${await upsertAliases(db, cz.aliases)} jmen`);
+
+  if (!args.includes("--skip-eu")) {
+    const pacer = newPacer(2);
+    let total = 0;
+    for (let year = 1952; year <= new Date().getUTCFullYear(); year++) {
+      for (let attempt = 1; ; attempt++) {
+        try {
+          const url = `https://publications.europa.eu/webapi/rdf/sparql?query=${encodeURIComponent(euActsYearQuery(year))}`;
+          const response = await pacedFetch("Cellar – registr", pacer, url, { headers: { accept: "application/sparql-results+json" }, timeoutMs: 180_000 });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          total += await upsertActs(db, parseCellarActs(await response.json()));
+          break;
+        } catch (error) {
+          if (attempt >= 3) throw error;
+          log(`EU ${year}: ${error instanceof Error ? error.message : String(error)}, znovu za 30 s`);
+          await new Promise((r) => setTimeout(r, 30_000));
+        }
+      }
+    }
+    log(`CELLAR: ${total} unijních aktů`);
+  }
+
+  const manual = manualRegistry();
+  await upsertActs(db, manual.acts);
+  log(`ručně: ${manual.acts.length} předpisů, ${await upsertAliases(db, manual.aliases)} jmen a zkratek`);
+  return 0;
+}
+
 async function runReindex(args: string[]): Promise<number> {
   const source = option(args, "--source");
   if (!source || !(MIRROR_SOURCES as readonly string[]).includes(source)) {
@@ -244,6 +299,7 @@ async function main(argv: string[]): Promise<number> {
     if (command === "backfill") return await runBackfill(args);
     if (command === "reindex") return await runReindex(args);
     if (command === "sync") return await runSync(args);
+    if (command === "acts" && args[0] === "import") return await runActsImport(args.slice(1));
     if (command === "status") {
       await runStatus();
       return 0;
@@ -251,7 +307,7 @@ async function main(argv: string[]): Promise<number> {
   } finally {
     await closeMirrorPools();
   }
-  console.error("usage: mirror migrate [--dry-run] | backfill --source us|ns|nss|justice|sdeu [--limit N] [--quarters …|--months …|--days …|--years …] | reindex --source … | sync [--source …] [--days N] | status | api");
+  console.error("usage: mirror migrate [--dry-run] | backfill --source us|ns|nss|justice|sdeu [--limit N] [--quarters …|--months …|--days …|--years …] | reindex --source … | sync [--source …] [--days N] | acts import | status | api");
   return 2;
 }
 
