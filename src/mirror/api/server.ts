@@ -2,7 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import type { Queryable } from "../db/client";
 import { mirrorStatus } from "../status";
-import { MIRROR_SOURCES, type DecisionType, type MirrorSource } from "../types";
+import type { DecisionType, MirrorSource } from "../types";
 import {
   decisionPage,
   getDecision,
@@ -100,17 +100,6 @@ async function bm25Ready(db: Queryable): Promise<boolean> {
   return Boolean(rows[0]?.ok);
 }
 
-/** The courts whose chunks carry the RUM index (built per partition: decision_chunk_<source>_tsv_rum). */
-async function rumSources(db: Queryable): Promise<Set<string>> {
-  const { rows } = await db.query<{ source: string }>(
-    `SELECT substr(t.relname, length('decision_chunk_') + 1) AS source
-     FROM pg_index i JOIN pg_class x ON x.oid = i.indexrelid JOIN pg_am am ON am.oid = x.relam JOIN pg_class t ON t.oid = i.indrelid
-     JOIN pg_namespace n ON n.oid = t.relnamespace
-     WHERE am.amname = 'rum' AND n.nspname = 'mirror' AND t.relname LIKE 'decision\\_chunk\\_%'`,
-  );
-  return new Set(rows.map((r) => r.source));
-}
-
 function date(value: string | undefined, name: string): string | undefined {
   if (value === undefined || value === "") return undefined;
   if (!ISO_DATE.test(value) || Number.isNaN(Date.parse(value)))
@@ -122,10 +111,7 @@ function date(value: string | undefined, name: string): string | undefined {
 const STATUS_TTL_MS = 5 * 60_000;
 const CITATIONS_TTL_MS = 24 * 3_600_000;
 const SLOW_TIMEOUT_MS = 5 * 60_000;
-/**
- * The search alone gets 12 s (Glass waits 15) and 64 MB to sort in: RUM sorts every chunk a prefix
- * query matches, and the commonest phrases over all courts ("náhrada škody") take 3–4 s warm.
- */
+/** The search alone gets 12 s (Glass waits 15) and 64 MB to sort in: without BM25 (index missing) it ranks chunks. */
 const SEARCH_TIMEOUT_MS = 12_000;
 const SEARCH_WORK_MEM = "64MB";
 
@@ -208,10 +194,8 @@ export function createMirrorApi(options: {
     return c.json({ error: "internal error" }, 500);
   });
 
-  // Which courts the search may cut to the RUM index's first candidates (rechecked hourly: indexes are built by hand).
-  const rum = stale(() => rumSources(db), 3_600_000, "rum indexes");
+  // Whether the BM25 index is there and valid (rechecked hourly: it is built by hand, CONCURRENTLY).
   const bm25 = stale(() => bm25Ready(db), 3_600_000, "bm25 index");
-  rum.peek();
   bm25.peek();
   app.get("/v1/search", async (c) => {
     const q = c.req.query();
@@ -243,7 +227,6 @@ export function createMirrorApi(options: {
           caseNumber: q.case || undefined,
           categories: categories(q.category),
           limit,
-          rum: (courts ?? MIRROR_SOURCES).every((s) => rum.peek()?.data.has(s)),
       bm25: bm25.peek()?.data === true,
         }),
       SEARCH_TIMEOUT_MS,

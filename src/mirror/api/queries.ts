@@ -13,12 +13,11 @@ import { MIRROR_SOURCES, type DecisionType, type MirrorSource } from "../types";
  * § / ECLI keys). Each decision ranks by its best chunk; the hit carries
  * that chunk's excerpt with the matches marked.
  *
- * With a RUM index on the courts' chunks (`rum`), the lexical channel ranks
- * only the RUM_CANDIDATES chunks the index orders first (its own ts_rank
- * distance) instead of every matching chunk: a common phrase ("bezdůvodné
- * obohacení") matches hundreds of thousands of chunks, ranked in a minute.
- * The pilot on NS kept 18–20 of the top 20 decisions at 5,000 candidates.
- * Filters (court, date, category) apply after that cut.
+ * Words alone go to BM25 over whole decisions (runBm25). Words with an
+ * identifier keep the chunk channels, the lexical
+ * one within the BM25_CANDIDATES decisions BM25 ranks first (`within`):
+ * there is no tsvector index on the chunks — a common phrase matches
+ * hundreds of thousands of them.
  */
 
 export const MAX_LIMIT = 50;
@@ -26,7 +25,8 @@ export const EXCERPT_CHARS = 400;
 const RANK_WEIGHTS = "{0.05,0.12,0.2,1.0}";
 /** One identifier match counts like a strong lexical match. */
 const IDENT_SCORE = 0.5;
-export const RUM_CANDIDATES = 5000;
+/** Words with an identifier, or the court-name filter: searched within this many BM25-first decisions. */
+export const BM25_CANDIDATES = 5000;
 
 export interface SearchInput {
   q?: string;
@@ -41,8 +41,6 @@ export interface SearchInput {
   /** NS categories, any of them (["A", "B"]). */
   categories?: string[];
   limit?: number;
-  /** Every searched court's chunks have the RUM index (decision_chunk_<source>_tsv_rum). */
-  rum?: boolean;
   /** The BM25 index over decision_text is built (decision_text_bm25, pg_search). */
   bm25?: boolean;
 }
@@ -103,17 +101,23 @@ function plan(input: SearchInput): { tsAnd: string | null; tsOr: string | null; 
   return { tsAnd: ts.and, tsOr: ts.or, terms: ts.terms, keys: ids.keys, caseKeys };
 }
 
-async function runChannel(db: Queryable, input: SearchInput, tsquery: string | null, keys: string[], caseKeys: string[]): Promise<ChunkRow[]> {
+async function runChannel(
+  db: Queryable,
+  input: SearchInput,
+  tsquery: string | null,
+  keys: string[],
+  caseKeys: string[],
+  within?: number[],
+): Promise<ChunkRow[]> {
   const limit = Math.min(Math.max(1, Math.floor(input.limit ?? 20)), MAX_LIMIT);
   const { rows } = await db.query<ChunkRow & Record<string, unknown>>(
     `WITH q AS (SELECT CASE WHEN $1::text IS NULL THEN NULL ELSE to_tsquery('simple', $1::text) END AS tsq),
      candidates AS (${
-       input.rum
-         ? // The tsquery spelled out, not from q: the index orders by a constant, not by a joined value.
-           `(SELECT c.source, c.decision_id, c.char_start, c.char_end, c.tsv, c.ident_keys
-             FROM mirror.decision_chunk c
-             WHERE ($3::text[] IS NULL OR c.source = ANY($3)) AND $1::text IS NOT NULL AND c.tsv @@ to_tsquery('simple', $1::text)
-             ORDER BY c.tsv <=> to_tsquery('simple', $1::text) LIMIT ${RUM_CANDIDATES})
+       within
+         ? // The words only in the decisions BM25 found (decision_id index), the identifiers anywhere (ident_keys index).
+           `SELECT c.source, c.decision_id, c.char_start, c.char_end, c.tsv, c.ident_keys
+            FROM mirror.decision_chunk c, q
+            WHERE ($3::text[] IS NULL OR c.source = ANY($3)) AND c.decision_id = ANY($11::bigint[]) AND q.tsq IS NOT NULL AND c.tsv @@ q.tsq
             UNION ALL
             SELECT c.source, c.decision_id, c.char_start, c.char_end, c.tsv, c.ident_keys
             FROM mirror.decision_chunk c
@@ -156,7 +160,19 @@ async function runChannel(db: Queryable, input: SearchInput, tsquery: string | n
      FROM top r
      JOIN mirror.decision_text t ON t.decision_id = r.id
      ORDER BY r.score DESC, r.decided_on DESC NULLS LAST`,
-    [tsquery, keys, input.sources?.length ? input.sources : null, input.court ?? null, input.type ?? null, input.from ?? null, input.to ?? null, caseKeys, limit, input.categories ?? []],
+    [
+      tsquery,
+      keys,
+      input.sources?.length ? input.sources : null,
+      input.court ?? null,
+      input.type ?? null,
+      input.from ?? null,
+      input.to ?? null,
+      caseKeys,
+      limit,
+      input.categories ?? [],
+      ...(within ? [within] : []),
+    ],
   );
   return rows;
 }
@@ -196,9 +212,7 @@ function toHit(row: ChunkRow, terms: string[], identKeys: string[]): MirrorHit {
  * seconds on common phrases. Czech stems, diacritics folded. The excerpt is the decision's best chunk
  * for the same words (ts_rank_cd), looked up for the hits kept only. `all`: every word (&&&), else any (|||).
  */
-async function runBm25(db: Queryable, input: SearchInput, text: string, all: boolean, tsquery: string | null): Promise<ChunkRow[]> {
-  const limit = Math.min(Math.max(1, Math.floor(input.limit ?? 20)), MAX_LIMIT);
-  const params: unknown[] = [text, tsquery, limit];
+function bm25Where(input: SearchInput, all: boolean, params: unknown[]): string {
   // Filters spelled out only when given: the index takes them in, an "$n IS NULL OR …" it would not.
   const where = [`t.body ${all ? "&&&" : "|||"} $1::text`];
   if (input.sources?.length) where.push(`t.source = ANY($${params.push(input.sources)}::text[])`);
@@ -206,17 +220,44 @@ async function runBm25(db: Queryable, input: SearchInput, text: string, all: boo
   if (input.from) where.push(`t.decided_on >= $${params.push(input.from)}::date`);
   if (input.to) where.push(`t.decided_on <= $${params.push(input.to)}::date`);
   if (input.categories?.length) where.push(`t.category = ANY($${params.push(input.categories)}::text[])`);
+  return where.join(" AND ");
+}
+
+/** The BM25-first decisions for the words (every word, else any), the chunk channels' `within`. */
+async function bm25Candidates(db: Queryable, input: SearchInput, text: string): Promise<number[]> {
+  for (const all of [true, false]) {
+    const params: unknown[] = [text];
+    const { rows } = await db.query<{ id: string }>(
+      `SELECT t.decision_id::text AS id FROM mirror.decision_text t WHERE ${bm25Where(input, all, params)}
+       ORDER BY pdb.score(t.decision_id) DESC LIMIT ${BM25_CANDIDATES}`,
+      params,
+    );
+    if (rows.length) return rows.map((r) => Number(r.id));
+  }
+  return [];
+}
+
+async function runBm25(db: Queryable, input: SearchInput, text: string, all: boolean, tsquery: string | null): Promise<ChunkRow[]> {
+  const limit = Math.min(Math.max(1, Math.floor(input.limit ?? 20)), MAX_LIMIT);
+  const params: unknown[] = [text, tsquery, limit];
+  const where = bm25Where(input, all, params);
+  // The court name is not in the index: the BM25-first candidates, then the court, then the limit.
+  const court = input.court ? `AND d.court ILIKE '%' || $${params.push(input.court)} || '%'` : "";
   const { rows } = await db.query<ChunkRow & Record<string, unknown>>(
     `WITH top AS (
        SELECT t.decision_id, pdb.score(t.decision_id) AS score
        FROM mirror.decision_text t
-       WHERE ${where.join(" AND ")}
+       WHERE ${where}
        ORDER BY pdb.score(t.decision_id) DESC
-       LIMIT $3
+       LIMIT ${court ? BM25_CANDIDATES : "$3"}
+     ),
+     kept AS (
+       SELECT top.* FROM top JOIN mirror.decision d ON d.id = top.decision_id WHERE true ${court}
+       ORDER BY top.score DESC LIMIT $3
      ),
      best AS (
        SELECT DISTINCT ON (c.decision_id) c.decision_id, c.char_start, c.char_end
-       FROM top JOIN mirror.decision_chunk c ON c.decision_id = top.decision_id
+       FROM kept top JOIN mirror.decision_chunk c ON c.decision_id = top.decision_id
        ORDER BY c.decision_id,
                 coalesce(ts_rank_cd('${RANK_WEIGHTS}'::float4[], c.tsv, to_tsquery('simple', $2::text)), 0) DESC, c.char_start
      )
@@ -224,7 +265,7 @@ async function runBm25(db: Queryable, input: SearchInput, text: string, all: boo
             top.score::float8 AS score, coalesce(b.char_start, 0) AS char_start,
             (SELECT array_agg(x.char_start ORDER BY x.ord) FROM mirror.decision_dissent x WHERE x.decision_id = d.id) AS dissent_starts,
             substr(t.body, coalesce(b.char_start, 0) + 1, coalesce(b.char_end - b.char_start, ${EXCERPT_CHARS * 4})) AS chunk
-     FROM top
+     FROM kept top
      JOIN mirror.decision d ON d.id = top.decision_id
      JOIN mirror.decision_text t ON t.decision_id = top.decision_id
      LEFT JOIN best b ON b.decision_id = top.decision_id
@@ -238,9 +279,9 @@ export async function searchDecisions(db: Queryable, input: SearchInput): Promis
   const p = plan(input);
   const keys = [...new Set([...p.keys, ...p.caseKeys])];
   if (!p.tsAnd && keys.length === 0) return { hits: [], channel: null, terms: [], identKeys: [] };
-  // BM25 for words alone; identifiers (sp. zn., §, the case filter) and the court-name filter keep the chunk channels.
+  // BM25 for words alone (the court-name filter on its first candidates); identifiers (sp. zn., §, the case filter) keep the chunk channels.
   const words = input.q ? stripIdentifiers(input.q).trim() : "";
-  if (input.bm25 && p.tsAnd && words && keys.length === 0 && !input.court) {
+  if (input.bm25 && p.tsAnd && words && keys.length === 0) {
     let rows = await runBm25(db, input, words, true, p.tsAnd);
     let channel: SearchResult["channel"] = "and";
     if (rows.length === 0) {
@@ -249,13 +290,15 @@ export async function searchDecisions(db: Queryable, input: SearchInput): Promis
     }
     return { hits: rows.map((r) => toHit(r, p.terms, [])), channel, terms: p.terms, identKeys: [] };
   }
+  // Words with an identifier: the words' chunks only within BM25's first decisions.
+  const within = input.bm25 && p.tsAnd && words ? await bm25Candidates(db, input, words) : undefined;
   // The case filter alone is not a search query; with nothing else, it lists that case's decisions.
   const rankKeys = p.tsAnd || p.keys.length ? p.keys : p.caseKeys;
   let channel: SearchResult["channel"] = p.tsAnd ? "and" : "ident";
-  let rows = await runChannel(db, input, p.tsAnd, rankKeys, p.caseKeys);
+  let rows = await runChannel(db, input, p.tsAnd, rankKeys, p.caseKeys, within);
   if (rows.length === 0 && p.tsOr) {
     channel = "or";
-    rows = await runChannel(db, input, p.tsOr, rankKeys, p.caseKeys);
+    rows = await runChannel(db, input, p.tsOr, rankKeys, p.caseKeys, within);
   }
   return { hits: rows.map((r) => toHit(r, p.terms, keys)), channel, terms: p.terms, identKeys: keys };
 }
