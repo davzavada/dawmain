@@ -763,6 +763,15 @@ async function fetchNsResults(url: string, deadlineAt: number): Promise<NsSearch
   return parseNsSearch(await response.text());
 }
 
+/** A SearchView URL: `first` 1-based, relevance order for full text, the view order otherwise. */
+export function nsSearchUrl(query: string, relevance: boolean, first: number, rows: number): string {
+  return (
+    `${BASE}/$$WebSearch1?SearchView&Query=${encodeURIComponent(query)}` +
+    // SearchMax must stay large: SearchMax=1 provokes HTTP 500 upstream.
+    `&SearchMax=${NS_SEARCH_MAX}&SearchOrder=${relevance ? 1 : 4}&Start=${first}&Count=${rows}&pohled=1`
+  );
+}
+
 async function runNsSearch(
   input: NsSearchInput,
   start: number,
@@ -776,10 +785,7 @@ async function runNsSearch(
   // A field-only listing has no ranking to offer, so it keeps the view order,
   // which pages with Start and reports the true count.
   const relevance = Boolean(input.query);
-  const urlFor = (first: number, rows: number) =>
-    `${BASE}/$$WebSearch1?SearchView&Query=${encodeURIComponent(query)}` +
-    // SearchMax must stay large: SearchMax=1 provokes HTTP 500 upstream.
-    `&SearchMax=${NS_SEARCH_MAX}&SearchOrder=${relevance ? 1 : 4}&Start=${first}&Count=${rows}&pohled=1`;
+  const urlFor = (first: number, rows: number) => nsSearchUrl(query, relevance, first, rows);
   const fetchPage = (url: string) => upstreamCache.through(url, () => fetchNsResults(url, deadlineAt));
 
   if (!relevance) {

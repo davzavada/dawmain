@@ -239,6 +239,13 @@ describe("search by cited provision", () => {
     ]);
   });
 
+  it("filters by NS category", async () => {
+    // The ÚS decisions have none: any category filter leaves them out.
+    expect((await (await get("/v1/provisions?act=89/2012&provision=par:2913&category=A,B")).json()).total).toBe(0);
+    expect((await get("/v1/provisions?act=89/2012&provision=par:2913&category=Z")).status).toBe(400);
+    expect((await (await get("/v1/search?q=promlčení&category=A")).json()).hits).toEqual([]);
+  });
+
   it("explains a bad request", async () => {
     expect((await get("/v1/provisions?act=89/2012")).status).toBe(400);
     expect((await get("/v1/provisions?act=nonsense&provision=par:1")).status).toBe(400);

@@ -1,5 +1,5 @@
 import { decodeBody } from "@/src/sources/shared/html";
-import { nsBodyMissing } from "@/src/sources/ns";
+import { buildNsQuery, nsBodyMissing, nsSearchUrl, parseNsSearch } from "@/src/sources/ns";
 import { readCursor, writeCursor, type RunCounts } from "../db/store";
 import { SourceStopped, pacedFetch } from "../http";
 import { NS_PARSER_VERSION, mapNs, markNsPictures, parseNsMarked } from "../map/ns";
@@ -158,4 +158,58 @@ export async function backfillNs(ctx: CrawlContext, options: NsBackfillOptions, 
     await writeCursor(ctx.db, "ns", { start });
     if (page.entries.length < NS_VIEW_PAGE) return;
   }
+}
+
+/** Fewer hits than this in a window: the search listed it whole (it addresses 900 at most). */
+const NS_SEARCH_WHOLE = 900;
+
+/**
+ * `mirror ns-categories`: "Kategorie rozhodnutí" of stored NS decisions from
+ * the search result rows, which carry it — the view used to discover them
+ * does not. Date windows of `days` (by datum_rozhodnuti), halved while the
+ * search might not list one whole. Writes only where the category differs;
+ * counts hits that are not stored (a completeness signal).
+ */
+export async function fillNsCategories(
+  ctx: CrawlContext,
+  options: { from: string; to: string; days?: number },
+  counts: RunCounts,
+): Promise<{ unknown: number }> {
+  const DAY = 86_400_000;
+  const iso = (t: number) => new Date(t).toISOString().slice(0, 10);
+  let unknown = 0;
+  const window = async (from: number, to: number): Promise<void> => {
+    if (ctx.shouldStop?.()) return;
+    const query = buildNsQuery({ dateFrom: iso(from), dateTo: iso(to) });
+    const response = await pacedFetch(LABEL, ctx.pacer, nsSearchUrl(query, false, 1, 1000), { timeoutMs: 120_000 });
+    const page = parseNsSearch(await decodeBody(response));
+    const listed = page.matched ?? page.total ?? page.hits.length;
+    if ((listed >= NS_SEARCH_WHOLE || page.hits.length < listed) && to > from) {
+      const mid = from + Math.floor((to - from) / DAY / 2) * DAY;
+      await window(from, mid);
+      await window(mid + DAY, to);
+      return;
+    }
+    if (page.hits.length < listed) ctx.log(`ns: ${iso(from)}: vyhledávání vypsalo ${page.hits.length} z ${listed}`);
+    const rows = page.hits.filter((h) => h.category);
+    const { rows: res } = await ctx.db.query<{ updated: number; known: number }>(
+      `WITH x AS (SELECT * FROM unnest($1::text[], $2::text[]) AS x(unid, category)),
+            upd AS (UPDATE mirror.decision d SET category = x.category FROM x
+                    WHERE d.source = 'ns' AND d.source_id = x.unid AND d.category IS DISTINCT FROM x.category RETURNING 1)
+       SELECT (SELECT count(*) FROM upd)::int AS updated,
+              (SELECT count(*) FROM mirror.decision d WHERE d.source = 'ns' AND d.source_id = ANY($3::text[]))::int AS known`,
+      [rows.map((h) => h.unid.toUpperCase()), rows.map((h) => h.category!), page.hits.map((h) => h.unid.toUpperCase())],
+    );
+    counts.fetched += page.hits.length;
+    counts.changed += res[0].updated;
+    unknown += page.hits.length - res[0].known;
+    await ctx.progress?.(counts);
+  };
+  const days = options.days ?? 30;
+  const end = Date.parse(options.to);
+  for (let t = Date.parse(options.from); t <= end; t += days * DAY) {
+    await window(t, Math.min(end, t + (days - 1) * DAY));
+    ctx.log(`ns: kategorie do ${iso(Math.min(end, t + (days - 1) * DAY))} — ${counts.fetched} v hledání, ${counts.changed} doplněno, ${unknown} neuložených`);
+  }
+  return { unknown };
 }

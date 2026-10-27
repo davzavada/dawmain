@@ -52,8 +52,8 @@ export async function saveDecision(db: Db, input: DecisionRecord, options: { rei
     const { rows } = await tx.query<{ id: string | number; prev_sha: string | null; prev_parser: number | null; inserted: boolean }>(
       `WITH prev AS (SELECT text_sha256, parser_version FROM mirror.decision WHERE source = $1 AND source_id = $2)
        INSERT INTO mirror.decision AS d
-         (source, source_id, url, court, case_number, case_numbers, decided_on, legal_sentence, ecli, published_on, text_sha256, parser_version, decision_type, source_flags)
-       VALUES ($1, $2, $3, $4, $5, $6::text[], $7::date, $8, $9, $10::date, $11, $12, $13, $14::text[])
+         (source, source_id, url, court, case_number, case_numbers, decided_on, legal_sentence, ecli, published_on, text_sha256, parser_version, decision_type, source_flags, category)
+       VALUES ($1, $2, $3, $4, $5, $6::text[], $7::date, $8, $9, $10::date, $11, $12, $13, $14::text[], $15)
        ON CONFLICT (source, source_id) DO UPDATE SET
          url = EXCLUDED.url,
          court = EXCLUDED.court,
@@ -61,6 +61,7 @@ export async function saveDecision(db: Db, input: DecisionRecord, options: { rei
          case_numbers = EXCLUDED.case_numbers,
          decision_type = EXCLUDED.decision_type,
          source_flags = EXCLUDED.source_flags,
+         category = COALESCE(EXCLUDED.category, d.category),
          decided_on = EXCLUDED.decided_on,
          legal_sentence = EXCLUDED.legal_sentence,
          ecli = EXCLUDED.ecli,
@@ -94,6 +95,7 @@ export async function saveDecision(db: Db, input: DecisionRecord, options: { rei
         record.parserVersion,
         record.decisionType,
         record.sourceFlags ?? [],
+        record.category ?? null,
       ],
     );
     const id = Number(rows[0].id);

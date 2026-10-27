@@ -13,11 +13,11 @@ import { decisionsByProvision, normalizeAct, normalizeProvision, parseCitation, 
  * API v1 of the mirror (v1-plan: jen LAN, bearer token), run as
  * mirror-api.service on LXC `app`, listening on its LAN address only:
  *
- *   GET /v1/search?q=&source=&court=&type=&from=&to=&case=&limit=
+ *   GET /v1/search?q=&source=&court=&type=&category=&from=&to=&case=&limit=   (category: NS A–E, "A,B")
  *   GET /v1/decisions/:source/:id[?page=N | ?format=html]
  *   GET /v1/decisions/:source/:id/images/:ord
  *   GET /v1/decisions/:source/:id/provisions        the § / články it cites
- *   GET /v1/provisions?cite= | act=&provision= [&source=&from=&to=&limit=&offset=]
+ *   GET /v1/provisions?cite= | act=&provision= [&source=&category=&from=&to=&limit=&offset=]
  *                                                   decisions citing a provision
  *   GET /v1/status
  *
@@ -37,6 +37,13 @@ function tokenMatches(header: string | undefined, token: string): boolean {
 }
 
 class BadRequest extends Error {}
+
+function categories(value: string | undefined): string[] | undefined {
+  if (!value) return undefined;
+  const list = value.toUpperCase().split(",").map((c) => c.trim()).filter(Boolean);
+  if (!list.every((c) => /^[A-E]$/.test(c))) throw new BadRequest("category must be A–E, several as A,B");
+  return list;
+}
 
 function date(value: string | undefined, name: string): string | undefined {
   if (value === undefined || value === "") return undefined;
@@ -82,6 +89,7 @@ export function createMirrorApi(options: { db: Queryable; token: string }): Hono
       from: date(q.from, "from"),
       to: date(q.to, "to"),
       caseNumber: q.case || undefined,
+      categories: categories(q.category),
       limit,
     });
     return c.json({ ...result, tookMs: Math.round(performance.now() - started) });
@@ -155,6 +163,7 @@ export function createMirrorApi(options: { db: Queryable; token: string }): Hono
       act,
       provision,
       source: (q.source || undefined) as never,
+      categories: categories(q.category),
       from: date(q.from, "from"),
       to: date(q.to, "to"),
       limit,

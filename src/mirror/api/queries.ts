@@ -29,6 +29,8 @@ export interface SearchInput {
   to?: string;
   /** A case number the decision must carry or cite ("I. ÚS 1169/26"). */
   caseNumber?: string;
+  /** NS categories, any of them (["A", "B"]). */
+  categories?: string[];
   limit?: number;
 }
 
@@ -39,6 +41,8 @@ export interface MirrorHit {
   caseNumber: string | null;
   court: string | null;
   form: DecisionType | null;
+  /** NS "Kategorie rozhodnutí" A–E; null elsewhere. */
+  category: string | null;
   date: string | null;
   published: string | null;
   ecli: string | null;
@@ -67,6 +71,7 @@ interface ChunkRow {
   case_number: string | null;
   court: string | null;
   decision_type: DecisionType | null;
+  category: string | null;
   decided_on: string | null;
   published_on: string | null;
   ecli: string | null;
@@ -100,7 +105,7 @@ async function runChannel(db: Queryable, input: SearchInput, tsquery: string | n
      best AS (
        SELECT DISTINCT ON (m.decision_id) m.* FROM matched m ORDER BY m.decision_id, m.score DESC, m.char_start
      )
-     SELECT d.source, d.source_id, d.case_number, d.court, d.decision_type, d.decided_on::text, d.published_on::text, d.ecli, d.url,
+     SELECT d.source, d.source_id, d.case_number, d.court, d.decision_type, d.category, d.decided_on::text, d.published_on::text, d.ecli, d.url,
             b.score::float8 AS score, b.char_start,
             (SELECT array_agg(x.char_start ORDER BY x.ord) FROM mirror.decision_dissent x WHERE x.decision_id = d.id) AS dissent_starts,
             substr(t.body, b.char_start + 1, b.char_end - b.char_start) AS chunk
@@ -114,9 +119,10 @@ async function runChannel(db: Queryable, input: SearchInput, tsquery: string | n
        AND ($7::date IS NULL OR d.decided_on <= $7)
        AND (cardinality($8::text[]) = 0 OR EXISTS (
              SELECT 1 FROM mirror.decision_chunk c2 WHERE c2.decision_id = d.id AND c2.ident_keys && $8::text[]))
+       AND (cardinality($10::text[]) = 0 OR d.category = ANY($10::text[]))
      ORDER BY b.score DESC, d.decided_on DESC NULLS LAST
      LIMIT $9`,
-    [tsquery, keys, input.source ?? null, input.court ?? null, input.type ?? null, input.from ?? null, input.to ?? null, caseKeys, limit],
+    [tsquery, keys, input.source ?? null, input.court ?? null, input.type ?? null, input.from ?? null, input.to ?? null, caseKeys, limit, input.categories ?? []],
   );
   return rows;
 }
@@ -137,6 +143,7 @@ function toHit(row: ChunkRow, terms: string[], identKeys: string[]): MirrorHit {
     caseNumber: row.case_number,
     court: row.court,
     form: row.decision_type,
+    category: row.category ?? null,
     date: row.decided_on,
     published: row.published_on,
     ecli: row.ecli,
@@ -182,6 +189,7 @@ export interface DecisionView {
   caseNumbers: string[];
   court: string | null;
   form: DecisionType | null;
+  category: string | null;
   date: string | null;
   published: string | null;
   ecli: string | null;
@@ -205,7 +213,7 @@ export function isMirrorSource(value: string): value is MirrorSource {
 
 export async function getDecision(db: Queryable, source: MirrorSource, id: string): Promise<FullDecision | null> {
   const { rows } = await db.query<Record<string, unknown>>(
-    `SELECT d.source, d.source_id, d.case_number, d.case_numbers, d.court, d.decision_type, d.decided_on::text AS decided_on,
+    `SELECT d.source, d.source_id, d.case_number, d.case_numbers, d.court, d.decision_type, d.category, d.decided_on::text AS decided_on,
             d.published_on::text AS published_on, d.ecli, d.legal_sentence, d.url, d.first_seen_at, d.last_changed_at, d.gone_at,
             t.body, t.text_source,
             coalesce((SELECT json_agg(json_build_object('ord', x.ord, 'charStart', x.char_start, 'charEnd', x.char_end,
@@ -228,6 +236,7 @@ export async function getDecision(db: Queryable, source: MirrorSource, id: strin
     caseNumbers: (r.case_numbers as string[]) ?? [],
     court: (r.court as string | null) ?? null,
     form: (r.decision_type as DecisionType | null) ?? null,
+    category: (r.category as string | null) ?? null,
     date: (r.decided_on as string | null) ?? null,
     published: (r.published_on as string | null) ?? null,
     ecli: (r.ecli as string | null) ?? null,

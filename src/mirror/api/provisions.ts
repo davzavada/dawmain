@@ -13,6 +13,7 @@ export interface ProvisionQuery {
   act: string;
   provision: string;
   source?: MirrorSource;
+  categories?: string[];
   from?: string;
   to?: string;
   limit: number;
@@ -25,6 +26,7 @@ export interface ProvisionHit {
   caseNumber: string | null;
   court: string | null;
   form: DecisionType | null;
+  category: string | null;
   date: string | null;
   url: string;
   mentions: number;
@@ -62,6 +64,7 @@ export async function decisionsByProvision(db: Queryable, q: ProvisionQuery): Pr
   const where = ["p.act_id = $1", "p.provision = $2"];
   const params: unknown[] = [q.act, q.provision];
   if (q.source) where.push(`d.source = $${params.push(q.source)}`);
+  if (q.categories?.length) where.push(`d.category = ANY($${params.push(q.categories)}::text[])`);
   if (q.from) where.push(`d.decided_on >= $${params.push(q.from)}`);
   if (q.to) where.push(`d.decided_on <= $${params.push(q.to)}`);
   const filter = where.join(" AND ");
@@ -70,7 +73,7 @@ export async function decisionsByProvision(db: Queryable, q: ProvisionQuery): Pr
     params,
   );
   const { rows } = await db.query<Record<string, unknown>>(
-    `SELECT d.source, d.source_id, d.case_number, d.court, d.decision_type, d.decided_on::text AS decided_on, d.url, p.mentions,
+    `SELECT d.source, d.source_id, d.case_number, d.court, d.decision_type, d.category, d.decided_on::text AS decided_on, d.url, p.mentions,
             substr(t.body, greatest(1, p.first_at + 1 - ${EXCERPT_BEFORE}), ${EXCERPT_CHARS}) AS excerpt
      FROM mirror.decision_provision p JOIN mirror.decision d ON d.id = p.decision_id
      LEFT JOIN mirror.decision_text t ON t.decision_id = d.id
@@ -87,6 +90,7 @@ export async function decisionsByProvision(db: Queryable, q: ProvisionQuery): Pr
       caseNumber: (r.case_number as string | null) ?? null,
       court: (r.court as string | null) ?? null,
       form: (r.decision_type as DecisionType | null) ?? null,
+      category: (r.category as string | null) ?? null,
       date: (r.decided_on as string | null) ?? null,
       url: String(r.url),
       mentions: Number(r.mentions),

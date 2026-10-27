@@ -11,6 +11,8 @@
  *   npx tsx scripts/mirror.ts sync [--source us] [--days 7] [--no-retry]
  *                                                   fetch_queue retry + the last days' publications
  *   npx tsx scripts/mirror.ts acts import [--skip-eu]  act registry from e-Sbírka and Cellar
+ *   npx tsx scripts/mirror.ts ns-categories [--from 1990-01-01] [--to YYYY-MM-DD] [--days 30]
+ *                                                   NS "Kategorie rozhodnutí" of stored decisions from search rows
  *   npx tsx scripts/mirror.ts provisions [--source us] [--limit N]  cited § / články of new, changed or stale decisions
  *                                                   (no network; sync runs it after each source)
  *   npx tsx scripts/mirror.ts status                per-source counts, last run, queue
@@ -34,7 +36,7 @@ import type { ActLookup } from "../src/mirror/legal/provisions";
 import { retrySource, syncSource } from "../src/mirror/sync";
 import { MIRROR_SOURCES, type MirrorSource } from "../src/mirror/types";
 import { backfillUs, newUsPacer } from "../src/mirror/crawl/us";
-import { backfillNs } from "../src/mirror/crawl/ns";
+import { backfillNs, fillNsCategories } from "../src/mirror/crawl/ns";
 import { backfillNss } from "../src/mirror/crawl/nss";
 import { backfillJustice } from "../src/mirror/crawl/justice";
 import { backfillSdeu } from "../src/mirror/crawl/sdeu";
@@ -320,6 +322,17 @@ async function main(argv: string[]): Promise<number> {
     }
     if (command === "backfill") return await runBackfill(args);
     if (command === "reindex") return await runReindex(args);
+    if (command === "ns-categories") {
+      const from = option(args, "--from") ?? "1990-01-01";
+      const to = option(args, "--to") ?? new Date().toISOString().slice(0, 10);
+      const days = Number(option(args, "--days") ?? "30");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) throw new Error("--from/--to must be YYYY-MM-DD");
+      if (!(Number.isInteger(days) && days >= 1 && days <= 366)) throw new Error("--days must be 1–366");
+      return await runTracked("ns", "backfill", async (ctx, counts) => {
+        const result = await fillNsCategories({ ...ctx, pacer: newPacer(rate("ns", ctx.log).rps) }, { from, to, days }, counts);
+        ctx.log(`ns: kategorie hotovo — ${result.unknown} rozhodnutí z hledání v zrcadle chybí`);
+      });
+    }
     if (command === "provisions") {
       const only = option(args, "--source");
       if (only && !(MIRROR_SOURCES as readonly string[]).includes(only)) throw new Error(`unknown source ${only}`);

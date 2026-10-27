@@ -58,6 +58,7 @@ describe("mapNs", () => {
       caseNumber: "4 Tdo 466/2026",
       caseNumbers: ["4 Tdo 466/2026"],
       decisionType: "usneseni",
+      category: "D",
       decidedOn: "2026-06-17",
       ecli: "ECLI:CZ:NS:2026:4.TDO.466.2026.1",
       parserVersion: 3,
