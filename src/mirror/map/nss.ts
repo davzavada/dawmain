@@ -52,6 +52,7 @@ export function mapNss(id: string, metadata: Record<string, string>, text: { bod
     caseNumber: caseNumbers[0] ?? null,
     caseNumbers,
     decisionType: decisionType(metadata["Druh dokumentu"]),
+    sourceMeta: metadata,
     decidedOn: isoDate(metadata["Datum vydání rozhodnutí"]),
     legalSentence: null,
     ecli: metadata["ECLI"]?.trim() || null,

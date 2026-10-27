@@ -41,6 +41,8 @@ export interface DecisionRecord {
   caseNumber: string | null;
   caseNumbers: string[];
   decisionType: DecisionType | null;
+  /** The source's own metadata, verbatim (migration 0011); absent = not read. */
+  sourceMeta?: Record<string, unknown> | null;
   /** NS "Kategorie rozhodnutí" A–E; absent = none (or another source). */
   category?: string | null;
   /** Flags the source sets itself, verbatim (justice: specialType); absent = none. */

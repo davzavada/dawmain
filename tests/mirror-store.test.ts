@@ -107,6 +107,16 @@ describe("saveDecision", () => {
     expect(kept.legal_sentence).toBe("Právní věta.");
   });
 
+  it("stores the source's metadata verbatim, without NUL, and keeps it when a record comes without", async () => {
+    const own = { sourceId: "meta-1", caseNumber: "I. ÚS 9/99", caseNumbers: ["I. ÚS 9/99"] };
+    await saveDecision(db, record({ ...own, sourceMeta: { Heslo: "Náhrada\u0000 škody", "Ústavní stížnost": "IV. ÚS 1/24 | vyhověno" } }));
+    const meta = async () => (await db.query<{ m: unknown }>("SELECT source_meta AS m FROM mirror.decision WHERE source_id = 'meta-1'")).rows[0].m;
+    expect(await meta()).toEqual({ Heslo: "Náhrada škody", "Ústavní stížnost": "IV. ÚS 1/24 | vyhověno" });
+    await saveDecision(db, record({ ...own, sourceMeta: null }));
+    expect(await meta()).toEqual({ Heslo: "Náhrada škody", "Ústavní stížnost": "IV. ÚS 1/24 | vyhověno" });
+    await db.query("DELETE FROM mirror.decision WHERE source_id = 'meta-1'");
+  });
+
   it("lists done ids: with text, or without it and not queued; a queued one is fetched again", async () => {
     await saveDecision(db, record({ sourceId: "2-1-26_1", text: null }));
     await saveDecision(db, record({ sourceId: "2-2-26_1", text: null }));

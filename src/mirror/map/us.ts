@@ -97,6 +97,8 @@ export function mapUs(hit: UsHit, decision: NalusDecision, abstract: NalusAbstra
     caseNumber: caseNumber || null,
     caseNumbers: caseNumber ? [caseNumber] : [],
     decisionType: decisionType(hit.form ?? decision.form),
+    // The results row (soudce zpravodaj, form, SbNU citation); a retry has none and keeps what is stored.
+    sourceMeta: hit.caseNumber ? { ...hit, registrySign: decision.registrySign ?? null } : null,
     decidedOn: hit.date ?? (sign ? czechToIso(sign[2]) : null),
     legalSentence: abstract?.legalSentence ?? null,
     ecli: hit.ecli ?? nalusEcli(hit.sz, decision.registrySign) ?? null,

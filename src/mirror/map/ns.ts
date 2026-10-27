@@ -105,6 +105,7 @@ export function mapNs(
     caseNumber: caseNumbers[0] ?? null,
     caseNumbers,
     decisionType: decisionType(m["Typ rozhodnutí"]),
+    sourceMeta: m,
     category: /^[A-E]$/.test(m["Kategorie rozhodnutí"]?.trim().toUpperCase() ?? "") ? m["Kategorie rozhodnutí"]!.trim().toUpperCase() : null,
     decidedOn: isoDate(m["Datum rozhodnutí"]),
     legalSentence: m["Právní věta"]?.trim() || null,

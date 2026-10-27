@@ -61,6 +61,7 @@ export function mapJustice(
     caseNumber: caseNumbers[0] ?? null,
     caseNumbers,
     decisionType: justiceType(m.type),
+    sourceMeta: { item, document: m },
     sourceFlags: Array.isArray(m.specialType) ? m.specialType.filter((f): f is string => typeof f === "string" && f.length > 0) : [],
     decidedOn: iso(item.datumVydani) ?? iso(m.decisionAt),
     legalSentence: null,

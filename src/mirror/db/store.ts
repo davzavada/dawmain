@@ -42,6 +42,8 @@ function withoutNul(record: DecisionRecord): DecisionRecord {
     legalSentence: clean(record.legalSentence),
     ecli: clean(record.ecli),
     text: record.text ? { ...record.text, body: record.text.body.replace(/\u0000/g, "") } : null,
+    // jsonb refuses \u0000 too.
+    sourceMeta: record.sourceMeta ? (JSON.parse(JSON.stringify(record.sourceMeta).replace(/\\u0000/g, "")) as Record<string, unknown>) : record.sourceMeta,
   };
 }
 
@@ -52,8 +54,8 @@ export async function saveDecision(db: Db, input: DecisionRecord, options: { rei
     const { rows } = await tx.query<{ id: string | number; prev_sha: string | null; prev_parser: number | null; inserted: boolean }>(
       `WITH prev AS (SELECT text_sha256, parser_version FROM mirror.decision WHERE source = $1 AND source_id = $2)
        INSERT INTO mirror.decision AS d
-         (source, source_id, url, court, case_number, case_numbers, decided_on, legal_sentence, ecli, published_on, text_sha256, parser_version, decision_type, source_flags, category)
-       VALUES ($1, $2, $3, $4, $5, $6::text[], $7::date, $8, $9, $10::date, $11, $12, $13, $14::text[], $15)
+         (source, source_id, url, court, case_number, case_numbers, decided_on, legal_sentence, ecli, published_on, text_sha256, parser_version, decision_type, source_flags, category, source_meta)
+       VALUES ($1, $2, $3, $4, $5, $6::text[], $7::date, $8, $9, $10::date, $11, $12, $13, $14::text[], $15, $16::jsonb)
        ON CONFLICT (source, source_id) DO UPDATE SET
          url = EXCLUDED.url,
          court = EXCLUDED.court,
@@ -62,6 +64,7 @@ export async function saveDecision(db: Db, input: DecisionRecord, options: { rei
          decision_type = EXCLUDED.decision_type,
          source_flags = EXCLUDED.source_flags,
          category = COALESCE(EXCLUDED.category, d.category),
+         source_meta = COALESCE(EXCLUDED.source_meta, d.source_meta),
          decided_on = EXCLUDED.decided_on,
          legal_sentence = EXCLUDED.legal_sentence,
          ecli = EXCLUDED.ecli,
@@ -96,6 +99,7 @@ export async function saveDecision(db: Db, input: DecisionRecord, options: { rei
         record.decisionType,
         record.sourceFlags ?? [],
         record.category ?? null,
+        record.sourceMeta ? JSON.stringify(record.sourceMeta) : null,
       ],
     );
     const id = Number(rows[0].id);
