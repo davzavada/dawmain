@@ -148,6 +148,32 @@ describe("provision references in decision texts", () => {
     expect(keys("§ 31a odst. 3 písm. e) OdpŠk")).toEqual(["zak:82/1998 par:31a/o3/pe"]);
   });
 
+  it("fixes what rounds 2 and 3 found", () => {
+    // a name of a recodified act follows the act of the pair the decision named by number, not the year
+    expect(keys("§ 630 občanského zákoníku č. 40/1964 Sb. … podle § 630 občanského zákoníku", 2017).at(-1)).toBe("zak:40/1964 par:630");
+    expect(keys("§ 46 zákona č. 71/1967 Sb., o správním řízení (správní řád). … § 46 správního řádu", 2006).at(-1)).toBe("zak:71/1967 par:46");
+    expect(keys("§ 60 odst. 1 zákona č. 65/1965 Sb., zákoníku práce. … § 249 zák. práce", 2007).at(-1)).toBe("zak:65/1965 par:249");
+    expect(keys("§ 5 odst. 2 rozpočtových pravidel republiky", 2006)).toEqual(["zak:576/1990 par:5/o2"]);
+    expect(keys("§ 187 odst. 1 tr. zák.", 2010)).toEqual(["zak:140/1961 par:187/o1"]);
+    // back references: the kind of act, with its issuer between; a nález is no zákon; the bare kind word
+    expect(keys("dle vyhlášky Ministerstva spravedlnosti č. 254/2015 Sb., podle § 151 odst. 3 o. s. ř. a dle § 2 odst. 1 uvedené vyhlášky").at(-1)).toBe("zak:254/2015 par:2/o1");
+    expect(keys("zákon č. 428/2012 Sb. upravuje …, nálezem Ústavního soudu vyhlášeným pod č. 177/2013 Sb.; podle § 15 tohoto zákona").at(-1)).toBe("zak:428/2012 par:15");
+    expect(keys("§ 7 vyhlášky č. 177/1996 Sb. … a § 13 odst. 3 vyhlášky v částce 300 Kč").at(-1)).toBe("zak:177/1996 par:13/o3");
+    // an acronym defined after another act keeps its own
+    expect(keys("§ 1 notářského řádu (dále jen „OdpŠk“). § 31a OdpŠk").at(-1)).toBe("zak:82/1998 par:31a");
+    // levels
+    expect(extractProvisions("§ 119 odst. 1 písm. b) bodu 1 a 6 zákona č. 326/1999 Sb.")[0].keys).toContain("par:119/o1/pb/b6");
+    expect(keys("§ 119 odst. 1 písm. b) bodu 1 a 6 zákona č. 326/1999 Sb.")).toHaveLength(1);
+    expect(keys("čl. II bodů 1 a 7 zákona č. 404/2012 Sb.")).toEqual(["zak:404/2012 cl:ii/b1"]);
+    expect(keys("§ 243g odst. 1 části první věty za středníkem o. s. ř.")).toEqual(["zak:99/1963 par:243g/o1/v1/vza"]);
+    expect(keys("§ 2664 o. z. věty prvé")).toEqual(["zak:89/2012 par:2664/v1"]);
+    expect(keys("§ 80 odst. (1) zák. č. 6/2002 Sb.")).toEqual(["zak:6/2002 par:80/o1"]);
+    expect(keys("§ 2079 a následujících zákona č. 89/2012 Sb.")).toEqual(["zak:89/2012 par:2079"]);
+    expect(keys("§ 39 obč. zákoníku. Zvolený", 2010)).toEqual(["zak:40/1964 par:39"]);
+    expect(keys("§ 15 odst. 1 zákona 92/91 Sb.")).toEqual(["zak:92/1991 par:15/o1"]);
+    expect(keys("§ 2521-3081). [Systém ASPI]")).toEqual([]);
+  });
+
   it("aggregates mentions per provision with every level of the key", () => {
     const rows = aggregateProvisions(extractProvisions("§ 2913 odst. 1 zákona č. 89/2012 Sb. a znovu § 2913 odst. 1 zákona č. 89/2012 Sb.", LOOKUP, 2020));
     const row = rows.find((r) => r.provision === "par:2913/o1");

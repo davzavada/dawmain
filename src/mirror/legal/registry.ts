@@ -163,6 +163,11 @@ export function parseCellarActs(json: unknown): ActRow[] {
 /** Primary EU law and other acts courts cite by name only: id, title, names. */
 export const MANUAL_ACTS: Array<{ act: ActRow; names: string[]; abbreviations: string[] }> = [
   {
+    act: { id: "eu:11957E/TXT", collection: "eu", kind: "smlouva", number: null, year: 1957, title: "Smlouva o založení Evropského (hospodářského) společenství", shortTitle: null },
+    names: ["smlouva o založení evropského společenství"],
+    abbreviations: ["SES", "SEHS"],
+  },
+  {
     act: { id: "eu:12016E/TXT", collection: "eu", kind: "smlouva", number: null, year: 2016, title: "Smlouva o fungování Evropské unie (konsolidované znění)", shortTitle: null },
     names: ["smlouva o fungování evropské unie"],
     abbreviations: ["SFEU", "TFEU", "Smlouvy o fungování EU"],

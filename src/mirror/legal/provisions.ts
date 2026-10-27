@@ -39,6 +39,8 @@ export interface ActMention {
   act: string;
   /** A name several acts share ("zákon o obcích"): all of them — an earlier numbered mention of one decides. */
   alts?: string[];
+  /** Named by its number ("zákona č. 40/1964 Sb."), not by a name. */
+  numbered?: true;
 }
 
 export interface ProvisionMention {
@@ -102,18 +104,32 @@ const NAMED_SOURCES: Array<{ pattern: RegExp; act: string; before?: Array<[numbe
   { pattern: new RegExp(`${B}ex\\.\\s?ř\\p{L}*\\.?`, "gu"), act: "zak:120/2001" },
   { pattern: new RegExp(`${B}(?:AT|a\\.\\s?t\\.)(?![\\p{L}])`, "gu"), act: "zak:177/1996" },
   { pattern: new RegExp(`${B}o\\.\\s?z(?![\\p{L}.])`, "gu"), act: "zak:89/2012" },
-  { pattern: new RegExp(`${B}obč\\.\\s?zák(?:oník\\p{L}*)?(?![\\p{L}.])`, "gu"), act: "zak:89/2012" },
+  { pattern: new RegExp(`${B}obč\\.\\s?(?:zákoník\\p{L}*|zák(?![\\p{L}.]))`, "gu"), act: "zak:89/2012" },
   { pattern: new RegExp(`${B}tr\\.\\s?zákon(?:a|u|em|e)?(?![\\p{L}])`, "gu"), act: "zak:40/2009" },
   // Abbreviations of the case law (review round 2).
   { pattern: new RegExp(`${B}OdpŠk${E}`, "gu"), act: "zak:82/1998" },
   { pattern: new RegExp(`${B}ZKV${E}`, "gu"), act: "zak:328/1991" },
   { pattern: new RegExp(`${B}(?:ZSŠ|zákon\\p{L}*\\s+směnečn\\p{L}*\\s+a\\s+šekov\\p{L}*)${E}`, "gu"), act: "zak:191/1950" },
   { pattern: new RegExp(`${B}ZDP${E}`, "gu"), act: "zak:586/1992" },
-  { pattern: new RegExp(`${B}rozpočtov\\p{L}*\\s+pravid\\p{L}*(?:\\s+republiky)?${E}`, "giu"), act: "zak:218/2000" },
+  { pattern: new RegExp(`${B}rozpočtov\\p{L}*\\s+pravid\\p{L}*\\s+republiky${E}`, "giu"), act: "zak:576/1990" },
+  { pattern: new RegExp(`${B}rozpočtov\\p{L}*\\s+pravid\\p{L}*${E}`, "giu"), act: "zak:218/2000" },
   { pattern: new RegExp(`${B}energetick\\p{L}*\\s+${ZAKON}`, "giu"), act: "zak:458/2000" },
   { pattern: new RegExp(`${B}zákon\\p{L}*\\s+o\\s+velké\\s+privatizaci${E}`, "giu"), act: "zak:92/1991" },
   { pattern: new RegExp(`${B}(?:zákon\\p{L}*|zák\\.)\\s+o\\s+pobytu\\s+cizinců${E}`, "giu"), act: "zak:326/1999" },
-  { pattern: new RegExp(`${B}Dodatkov\\p{L}*\\s+protokol\\p{L}*${E}`, "gu"), act: "zak:209/1992" },
+  { pattern: new RegExp(`${B}[Dd]odatkov\\p{L}*\\s+protokol\\p{L}*${E}`, "gu"), act: "zak:209/1992" },
+  { pattern: new RegExp(`${B}tr\\.\\s?zák(?![\\p{L}.])`, "gu"), act: "zak:40/2009" },
+  { pattern: new RegExp(`${B}tr\\.\\s?ř(?![\\p{L}.])`, "gu"), act: "zak:141/1961" },
+  { pattern: new RegExp(`${B}obch\\.\\s?z\\.(?!\\s?\\p{L}\\.)`, "gu"), act: "zak:513/1991" },
+  { pattern: new RegExp(`${B}s\\.\\s?ř\\.(?!\\s?s)`, "gu"), act: "zak:500/2004" },
+  { pattern: new RegExp(`${B}transformační\\p{L}*\\s+${ZAKON}`, "giu"), act: "zak:42/1992" },
+  { pattern: new RegExp(`${B}školsk\\p{L}+\\s+${ZAKON}`, "giu"), act: "zak:561/2004" },
+  { pattern: new RegExp(`${B}zákon\\p{L}*\\s+o\\s+(?:ochraně\\s+)?hospodářské\\s+soutěž\\p{L}*${E}`, "giu"), act: "zak:143/2001", before: [[2001, "zak:63/1991"]] },
+  { pattern: new RegExp(`${B}zákon\\p{L}*\\s+o\\s+dani\\s+z\\s+příjmů${E}`, "giu"), act: "zak:586/1992" },
+  { pattern: new RegExp(`${B}ZDSP${E}`, "gu"), act: "zak:337/1992" },
+  { pattern: new RegExp(`${B}zákon\\p{L}*\\s+o\\s+Ústavním\\p{L}*\\s+soudu${E}`, "giu"), act: "zak:182/1993" },
+  { pattern: new RegExp(`${B}zákon\\p{L}*\\s+o\\s+pozemkových\\s+úpravách${E}`, "giu"), act: "zak:139/2002", before: [[2002, "zak:284/1991"]] },
+  { pattern: new RegExp(`${B}Pakt(?:u|em)?${E}`, "gu"), act: "zak:120/1976" },
+  { pattern: new RegExp(`${B}(?:SES|Smlouv\\p{L}*\\s+o\\s+(?:založení\\s+)?(?:Evropského\\s+společenství|ES|EHS))${E}`, "gu"), act: "eu:11957E/TXT" },
   // Names courts use for acts whose titles say otherwise.
   { pattern: new RegExp(`${B}zákon\\p{L}*\\s+o\\s+půdě${E}`, "giu"), act: "zak:229/1991" },
   { pattern: new RegExp(`${B}zákon\\p{L}*\\s+o\\s+(?:rozhlasovém\\s+a\\s+televizním\\s+)?vysílání${E}`, "giu"), act: "zak:231/2001" },
@@ -142,11 +158,13 @@ const NAMED_SOURCES: Array<{ pattern: RegExp; act: string; before?: Array<[numbe
  */
 const RECODIFIED: Array<{ text: RegExp; act: string; until: number; old: string }> = [
   { text: /^(?:obč\.\s?zák|ObčZ|občansk\p{L}+\s+zákoník)/iu, act: "zak:89/2012", until: 2014, old: "zak:40/1964" },
-  { text: /^(?:tr\.\s?zák(?!oník)|TrZ|trestní\p{L}*\s+zákon(?!ík))/iu, act: "zak:40/2009", until: 2010, old: "zak:140/1961" },
+  // "tr. zák." and "trestní zákon" are the old code's names; "tr. zákoník" never is. Decided in 2010, a case was mostly older.
+  { text: /^(?:tr\.\s?zák(?!oník)|TrZ|trestní\p{L}*\s+zákon(?!ík))/iu, act: "zak:40/2009", until: 2011, old: "zak:140/1961" },
+  { text: /^(?:zákoník\p{L}*\s+práce|zák\.\s?pr(?:áce|\.)|ZPr?(?!\p{L}))/iu, act: "zak:262/2006", until: 2007, old: "zak:65/1965" },
   // Before 2011 "daňový řád" was the zákon o správě daní a poplatků (review round 1: 60 references in three NSS decisions).
   { text: /^(?:daň\.\s?ř|d\.\s?ř|daňov\p{L}*\s+řád|DŘ|DaŘ)/iu, act: "zak:280/2009", until: 2011, old: "zak:337/1992" },
   { text: /^rozpočtov\p{L}*\s+pravid/iu, act: "zak:218/2000", until: 2001, old: "zak:576/1990" },
-  { text: /^(?:spr\.\s?ř|správní\p{L}*\s+řád)/iu, act: "zak:500/2004", until: 2006, old: "zak:71/1967" },
+  { text: /^(?:spr\.\s?ř|s\.\s?ř\.|správní\p{L}*\s+řád)/iu, act: "zak:500/2004", until: 2006, old: "zak:71/1967" },
   { text: /^(?:obch\.\s?zák|ObchZ)/iu, act: "zak:513/1991", until: 9999, old: "zak:513/1991" },
 ];
 
@@ -178,11 +196,11 @@ export function findActMentions(t: string, lookup: ActLookup | null, year: numbe
   const out: ActMention[] = [];
   for (const m of t.matchAll(ACT_NUMBER_RE)) {
     const [n, y] = m[1] ? [m[1], m[2]] : [m[3], m[4]];
-    out.push({ start: m.index, end: m.index + m[0].length, act: zakId(n, y) });
+    out.push({ start: m.index, end: m.index + m[0].length, act: zakId(n, y), numbered: true });
   }
   for (const m of t.matchAll(SHORT_YEAR_RE)) {
     const yy = Number(m[2]);
-    out.push({ start: m.index, end: m.index + m[0].length, act: zakId(m[1], String(yy >= 45 ? 1900 + yy : 2000 + yy)) });
+    out.push({ start: m.index, end: m.index + m[0].length, act: zakId(m[1], String(yy >= 45 ? 1900 + yy : 2000 + yy)), numbered: true });
   }
   for (const m of t.matchAll(SMS_RE)) out.push({ start: m.index, end: m.index + m[0].length, act: `sm:${Number(m[1])}/${m[2]}` });
   for (const m of t.matchAll(EU_ACT_RE)) {
@@ -243,7 +261,11 @@ function isAmendment(t: string, x: ActMention): boolean {
 
 /** Acts an alias already means globally ("o. s. ř.", "obč. zák." — with the act it replaced). */
 const KNOWN = new Map<string, Set<string>>();
-const ABBREVIATION_RES = ACT_ABBREVIATIONS.map((entry) => ({ entry, re: new RegExp(entry.pattern.source, entry.pattern.flags.replace("g", "")) }));
+// The act table's names and abbreviations, and this module's own (NAMED_SOURCES).
+const ABBREVIATION_RES = [
+  ...ACT_ABBREVIATIONS.map((entry) => ({ entry: { act: entry.act }, re: new RegExp(entry.pattern.source, entry.pattern.flags.replace("g", "")) })),
+  ...NAMED_SOURCES.map(({ pattern, act }) => ({ entry: { act }, re: new RegExp(pattern.source, pattern.flags.replace("g", "")) })),
+];
 
 function knownActs(alias: string): Set<string> {
   const cached = KNOWN.get(alias);
@@ -284,8 +306,8 @@ export function findDefinitions(t: string, mentions: ActMention[]): Definition[]
       const last = [...inReach].reverse();
       const own = last.find((x) => !amendment(x)) ?? last[0];
       // A dotted abbreviation ("o. s. ř.") defined for another act is a slip; a name ("daňový řád" for 337/1992 in 2009) is not.
-      const dotted = /^(?:\p{L}{1,5}\.\s?){2,}\p{L}{0,5}\.?$/u.test(a);
-      const main = known.size ? (last.find((x) => known.has(x.act)) ?? (dotted ? undefined : own)) : own;
+      const strict = /^(?:\p{L}{1,5}\.\s?){2,}\p{L}{0,5}\.?$/u.test(a) || !/\s/u.test(a);
+      const main = known.size ? (last.find((x) => known.has(x.act)) ?? (strict ? undefined : own)) : own;
       if (main) defs.push({ alias: a, act: main.act, at: m.index + m[0].length });
     }
   }
@@ -324,7 +346,7 @@ function numbersBetween(a: number, b: number, cap = 30): string[] {
  */
 function parseSubLevels(t: string, pos: number): { paths: string[][]; end: number } {
   // Groups in a row, each from its odstavec: "odst. 1 písm. e), odst. 2".
-  const NEXT_GROUP = /\s*,?\s*(?:a|i|nebo|či|resp\.|respektive)?\s*(?=odst\.\s*(?:\d|[lI](?![\p{L}\p{N}])))/uy;
+  const NEXT_GROUP = /\s*(?:in\s+fine\s*)?,?\s*(?:a|i|až|nebo|či|resp\.|respektive)?\s*(?=odst\.\s*(?:\d|[lI](?![\p{L}\p{N}])))/uy;
   let { paths, end } = parseGroup(t, pos);
   for (;;) {
     NEXT_GROUP.lastIndex = end;
@@ -350,7 +372,7 @@ function parseGroup(t: string, pos: number): { paths: string[][]; end: number } 
   let pism: string[] = [];
   let bod: string[] = [];
   const o =
-    take(/\s*,?\s*(?:odst\.|odstav\p{L}*)\s*(\d{1,3}|[lI](?![\p{L}\p{N}]))/uy, end) ??
+    take(/\s*,?\s*(?:odst\.|odstav\p{L}*)\s*\(?(\d{1,3}|[lI](?![\p{L}\p{N}]))\)?/uy, end) ??
     // "§ 1811/2 a 1820/1": the odstavec after a slash (one or two digits — never a year).
     take(/\/(\d{1,2})(?![\p{N}\/])/uy, end);
   if (o) {
@@ -404,6 +426,13 @@ function parseGroup(t: string, pos: number): { paths: string[][]; end: number } 
   if (b) {
     bod = [b.m[1]];
     end = b.end;
+    // "bodu 1 a 6", "bodů 1, 2 a 3": a list of body, not of paragraphs.
+    for (;;) {
+      const sb = take(/\s*(?:,|a|nebo)\s*(\d{1,3})(?![\p{N}]|\s*[§/])\.?(?!\s*(?:odst|písm))/uy, end);
+      if (!sb) break;
+      bod.push(sb.m[1]);
+      end = sb.end;
+    }
   }
   // "věty první", "věta druhá", "poslední věta", "věty za středníkem", "věta první před středníkem":
   // the sentence is a level, the part of it around the semicolon one more.
@@ -411,15 +440,16 @@ function parseGroup(t: string, pos: number): { paths: string[][]; end: number } 
   const ORD = String.raw`prv\p{L}*|druh\p{L}*|třetí|čtvrt\p{L}*|pát\p{L}*|posledn\p{L}*`;
   const v = take(
     new RegExp(
-      String.raw`\s*,?\s*(?:část\p{L}*\s+(?:první\s+)?)?(?:vět(?:a|y|ou|u|ě)\s+(${ORD})|(${ORD})\s+vět\p{L}*)?(?:\s*,?\s*(?:část\p{L}*\s+)?(?:vět\p{L}*\s+)?(před|za)\s+středníkem)?,?`,
+      // "části první věty za středníkem" = of the first sentence, the part after the semicolon
+      String.raw`\s*,?\s*(?:část\p{L}*\s+(?:(první)\s+(?=vět))?)?(?:vět(?:a|y|ou|u|ě)\s+(${ORD})|(${ORD})\s+vět\p{L}*)?(?:\s*,?\s*(?:část\p{L}*\s+)?(?:vět\p{L}*\s+)?(před|za)\s+středníkem)?,?`,
       "uy",
     ),
     end,
   );
-  if (v && (v.m[1] || v.m[2] || v.m[3])) {
-    const w = (v.m[1] ?? v.m[2] ?? "").toLowerCase();
+  if (v && (v.m[1] || v.m[2] || v.m[3] || v.m[4])) {
+    const w = (v.m[2] ?? v.m[3] ?? v.m[1] ?? "").toLowerCase();
     if (w) veta.push(w.startsWith("prv") ? "1" : w.startsWith("dru") ? "2" : w.startsWith("tř") ? "3" : w.startsWith("čtv") ? "4" : w.startsWith("pát") ? "5" : "posl");
-    if (v.m[3]) veta.push(v.m[3] === "před" ? "pred" : "za");
+    if (v.m[4]) veta.push(v.m[4] === "před" ? "pred" : "za");
     end = v.end;
   }
   const levels: string[][] = [];
@@ -481,6 +511,9 @@ function parseRefs(t: string): Array<{ refs: Ref[]; start: number; end: number }
 
 const BACK_REF =
   /^\s*,?\s*(?:téhož|téže|tého\p{L}*|stejn\p{L}*|citovan\p{L}*|cit\.|uveden\p{L}*|výše\s+uveden\p{L}*|shora\s+uveden\p{L}*|tohoto|této|daného|předmětn\p{L}*|posledně\s+citovan\p{L}*)\s+(zák\.|vyhl\.|zákon\p{L}*|předpis\p{L}*|řád\p{L}*|nařízení|směrnic\p{L}*|vyhlášk\p{L}*|tarif\p{L}*|úmluv\p{L}*|smlouv\p{L}*|listin\p{L}*|zákoník\p{L}*)/iu;
+/** "§ 13 odst. 3 vyhlášky v částce", "článku 2 bodu 10 nařízení,": the kind word alone, with no number of its own, points back. */
+const BARE_KIND = /^\s*,?\s*(vyhlášk\p{L}*|vyhl\.|nařízení)(?!\s+(?:\p{L}+\s+){0,6}?č\.|\s*\()(?![\p{L}])/iu;
+
 /** The kind a back reference names: "téhož zákona" a zákon, "uvedené vyhlášky" a vyhláška; others any. */
 function kindOf(noun: string): string | null {
   const n = noun.toLowerCase();
@@ -491,9 +524,11 @@ const VYHLASKY = new Set(["zak:177/1996", "zak:196/2001", "zak:330/2001"]);
 
 /** The kind of act a mention is, from its words and those just before it ("vyhlášky č. 177/1996 Sb."). */
 function mentionKind(t: string, x: ActMention): string {
-  const around = t.slice(Math.max(0, x.start - 25), x.end);
-  if (VYHLASKY.has(x.act) || /vyhl(?:\.|ášk\p{L}*)\s*(?:č\.\s*)?\S*$/iu.test(around)) return "vyhláška";
-  if (/nařízení\p{L}*[^§]*$/iu.test(around)) return "nařízení";
+  const before = t.slice(Math.max(0, x.start - 70), x.start);
+  const own = t.slice(x.start, x.end);
+  if (VYHLASKY.has(x.act) || /vyhl/iu.test(own) || /vyhl(?:\.|ášk\p{L}*)(?:\s+[\p{L},]+){0,6}?\s*(?:č\.\s*)?$/iu.test(before)) return "vyhláška";
+  if (/nařízení/iu.test(own) || /nařízení\p{L}*(?:\s+[\p{L},()]+){0,6}?\s*(?:č\.\s*)?$/iu.test(before)) return "nařízení";
+  if (/(?:nález\p{L}*|sdělení)(?:\s+[\p{L},.\d]+){0,10}?\s*(?:pod\s+)?(?:č\.\s*)?$/iu.test(before)) return "jiné";
   return "zákon";
 }
 
@@ -509,15 +544,23 @@ const GAP = new RegExp(
     // "věty první a druhé, o. s. ř.", "§ 237 odst. 3 in fine o. s. ř."
     String.raw`(?:(?:,|a)?\s*(?:(?:věty?\s+)?(?:druh|třet|posledn)\p{L}*|(?:prv|druh|třet|posledn)\p{L}*\s+vět\p{L}*)\s*,?\s*)?` +
     String.raw`(?:(?:in\s+fine|a\s+contrario|a\s+contr\.)\s*,?\s*)?` +
-    String.raw`(?:a\s+násl(?:ed)?\.\s*,?\s*)?` +
+    String.raw`["“”]?\s*(?:\([^()]{0,40}\)\s*)?` +
+    String.raw`(?:a\s+(?:násl(?:ed)?\.|následující\p{L}*)\s*,?\s*)?` +
+    String.raw`(?:(?:tehdy|v\s+té\s+době)\s+)?(?:platn\p{L}*|účinn\p{L}*)?\s*` +
     // "článku II, části první, přechodných ustanovení zákona č. 404/2012 Sb."
     String.raw`(?:část\p{L}*\s+\p{L}+\s*,?\s*)?(?:přechodn\p{L}*\s+ustanovení\s+)?` +
     // The kind word before a bare number, with the issuer between: "vyhlášky Ministerstva financí České republiky č.",
     // "zákona ČNR č." — never across an amendment ("zákona, který byl změněn zákonem č.").
-    String.raw`(?:(?:${KIND_BEFORE_NUMBER}|zákon\p{L}*|zák\.)(?:\s+(?!ve\s|znění|změn|novel|kter|jímž|jenž)[\p{L},]+){0,6}?\s*č\.\s*|${KIND_BEFORE_NUMBER}\s+|č\.\s*)?` +
+    String.raw`(?:(?:${KIND_BEFORE_NUMBER}|zákon\p{L}*|zák\.)(?:\s+(?!ve\s|znění|změn|novel|kter|jímž|jenž)[\p{L},]+){0,6}?\s*č\.\s*|${KIND_BEFORE_NUMBER}\s+|(?:zákon\p{L}*|zák\.)\s+|č\.\s*)?` +
     String.raw`[\s,]{0,3}$`,
-  "u",
+  "iu",
 );
+const TRAILING_SENTENCE = /^\s*,?\s*vět(?:a|y|ou|ě)\s+(prv\p{L}*|druh\p{L}*|třetí|čtvrt\p{L}*|pát\p{L}*|posledn\p{L}*)/iu;
+function sentenceNumber(word: string): string {
+  const w = word.toLowerCase();
+  return w.startsWith("prv") ? "1" : w.startsWith("dru") ? "2" : w.startsWith("tř") ? "3" : w.startsWith("čtv") ? "4" : w.startsWith("pát") ? "5" : "posl";
+}
+
 /** Acts with články only: a "§" of theirs is a slip for "čl.". */
 const ARTICLE_ONLY = new Set(["zak:1/1993", "zak:2/1993", "zak:209/1992", "zak:104/1991", "zak:120/1976", "zak:208/1993"]);
 /** Acts whose units are články: EU acts, treaties, the constitutional acts. */
@@ -525,7 +568,7 @@ function articleBased(act: string): boolean {
   return act.startsWith("eu:") || act.startsWith("sm:") || ARTICLE_ONLY.has(act);
 }
 /** "čl. 23 spisu" (a page of the court file), "§ 1 až 654. Komentář" (a book title): not citations. */
-const NOT_A_CITATION = /^[\s.,)\/–-]*(?:(?:soudního\s+|trestního\s+|správního\s+)?spisu|spis(?![\p{L}])|civilní\s+věci|čj\.|č\.\s*j\.|Komentář)/u;
+const NOT_A_CITATION = /^[\s.,)\/–-]*(?:(?:soudního\s+|trestního\s+|správního\s+|tr\.\s*)?spisu|spis(?![\p{L}])|civilní\s+věci|čj\.|č\.\s*j\.|[Kk]omentář|\[?Systém\s+ASPI)/u;
 /** A sentence ends between: ". Podle", "). 12. Soud". */
 const SENTENCE_END = /[.!?][")“”]?\s+(?:\d{1,3}\.\s+)?[\p{Lu}„"]/u;
 
@@ -541,7 +584,7 @@ const OTHER_ACT_AFTER = /^[\s,]*(?:zákon|zák\.|vyhl|nařízen|předpis|smlouv|
  * "§ 107 a § 361 tr. zák.", "§ 8 odst. 1 ve spojení s § 7 vyhlášky …".
  */
 const CHAIN =
-  /^(?:\s*(?:,|;|a|i|až|nebo|či|resp\.|respektive|popř\.|případně|též|také|ve\s+spojení\s+s|ve\s+spoj\.\s+s|v\s+návaznosti\s+na|a\s+násl(?:ed)?\.|násl\.|a\s+contrario|a\s+contr\.|za\s+použití|ani|ustanovení|ust\.|čl\.|článk\p{L}*|článek|dále|na|v|ve))*\s*$/u;
+  /^(?:\s*(?:,|;|a|i|až|nebo|či|resp\.|respektive|popř\.|případně|též|také|ve\s+spojení\s+s|ve\s+spoj\.\s+s|v\s+návaznosti\s+na|a\s+násl(?:ed)?\.|násl\.|a\s+contrario|a\s+contr\.|za\s+použití|za\s+užití|v\s+souladu\s+s|spojení|s|se|k|dle|podle|[-–]|\([^()]{0,40}\)|(?:druh|třet|čtvrt|posledn)\p{L}*|ani|ustanovení|ust\.|čl\.|článk\p{L}*|článek|dále|na|v|ve))*\s*$/u;
 
 /**
  * The provisions `text` cites, with acts resolved (see the header).
@@ -571,6 +614,17 @@ export function extractProvisions(text: string, lookup: ActLookup | null = null,
     const named = mentions.find((x) => x.end <= m.start && !x.alts && m.alts!.includes(x.act));
     if (named) m.act = named.act;
   }
+  // "§ 449 odst. 3 zákona č. 40/1964 Sb., občanského zákoníku, ve znění účinném do 31. 12. 2013 … § 449a obč. zák."
+  // (decided 2016): a name of a recodified act follows the one of the pair the decision last named by number.
+  for (const m of mentions) {
+    if (m.numbered) continue;
+    const text = t.slice(m.start, m.end);
+    for (const r of RECODIFIED) {
+      if ((m.act !== r.act && m.act !== r.old) || !r.text.test(text)) continue;
+      const named = [...mentions].reverse().find((x) => x.numbered && x.start < m.start && (x.act === r.act || x.act === r.old));
+      if (named) m.act = named.act;
+    }
+  }
 
   const spans = parseRefs(t).filter((span) => !NOT_A_CITATION.test(t.slice(span.end, span.end + 30)));
   const headOf = (i: number) => spans[i].refs[0].head;
@@ -586,7 +640,7 @@ export function extractProvisions(text: string, lookup: ActLookup | null = null,
       via[i] = "after";
       return after.act;
     }
-    const back = BACK_REF.exec(t.slice(span.end, span.end + 60));
+    const back = BACK_REF.exec(t.slice(span.end, span.end + 60)) ?? BARE_KIND.exec(t.slice(span.end, span.end + 40));
     if (back) {
       const want = kindOf(back[1]);
       via[i] = "back";
@@ -604,7 +658,7 @@ export function extractProvisions(text: string, lookup: ActLookup | null = null,
   // A reference inside the paraphrase of a provision belongs to its act: "Podle § 1824 o. z. … sdělí
   // podnikatel údaje uvedené v § 1811 odst. 2" — close behind, no other act named or hinted at between.
   for (let i = 1; i < spans.length; i++) {
-    if (acts[i] || !acts[i - 1] || !fits(i, i - 1, acts[i - 1])) continue;
+    if (acts[i] || via[i] === "back" || !acts[i - 1] || !fits(i, i - 1, acts[i - 1])) continue;
     const from = namedUntil[i - 1];
     const to = spans[i].start;
     if (to - from > PARAPHRASE_REACH) continue;
@@ -622,6 +676,15 @@ export function extractProvisions(text: string, lookup: ActLookup | null = null,
   }
   const out: ProvisionMention[] = [];
   for (const [i, span] of spans.entries()) {
+    // "§ 2664 o. z. věty prvé": the sentence written after the act belongs to the (last) reference.
+    if (via[i] === "after") {
+      const v = TRAILING_SENTENCE.exec(t.slice(namedUntil[i], namedUntil[i] + 40));
+      const last = span.refs.at(-1)!;
+      if (v) {
+        const level = `v${sentenceNumber(v[1])}`;
+        last.sub = last.sub.length ? last.sub.map((path) => [...path, level]) : [[level]];
+      }
+    }
     for (const ref of span.refs) {
       let act = acts[i];
       // "§ 37e zák. č. 297/2009 Sb.": a § of an act that only amends another is a § of that other one.
