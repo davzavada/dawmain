@@ -129,6 +129,24 @@ describe("saveDecision", () => {
   });
 });
 
+describe("search fields on the text", () => {
+  it("copies court, date, type and category onto the text, and follows the decision's changes", async () => {
+    const own = { sourceId: "BM25-1", decidedOn: "2024-05-06", decisionType: "nalez" as const, text: { body: "Text pro hledání.", source: "us:gettext-hidden" } };
+    await saveDecision(db, record(own));
+    const meta = async () =>
+      (await pg.query<Record<string, unknown>>(
+        `SELECT t.source, t.decided_on::text AS decided_on, t.decision_type, t.category FROM mirror.decision_text t
+         JOIN mirror.decision d ON d.id = t.decision_id WHERE d.source_id = 'BM25-1'`,
+      )).rows[0];
+    expect(await meta()).toEqual({ source: "us", decided_on: "2024-05-06", decision_type: "nalez", category: null });
+    await pg.query(`UPDATE mirror.decision SET category = 'B', decided_on = '2024-05-07' WHERE source_id = 'BM25-1'`);
+    expect(await meta()).toMatchObject({ decided_on: "2024-05-07", category: "B" });
+    await saveDecision(db, record({ ...own, text: { body: "Nový text pro hledání.", source: "us:gettext-hidden" } }));
+    expect(await meta()).toMatchObject({ decided_on: "2024-05-06", decision_type: "nalez" });
+    await pg.query(`DELETE FROM mirror.decision WHERE source_id = 'BM25-1'`);
+  });
+});
+
 describe("type, dissent and pictures", () => {
   const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   const dissentBody = "Ústavní soud rozhodl takto. ".repeat(30) + "\npředseda senátu\n\nOdlišné stanovisko\n\nNesouhlasím.";
