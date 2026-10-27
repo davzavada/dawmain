@@ -136,13 +136,15 @@ describe("provision references in decision texts", () => {
     // a paraphrase stays in its sentence and never gives a § act to a článek of a contract
     expect(keys("Podle § 86 odst. 1 o. s. ř. je smlouva neplatná. Žalobkyni bylo podle § 1879 prokázáno postoupení.").at(-1)).toBe("? par:1879");
     expect(keys("podle § 536 obch. zák. ve smlouvě v jejím článku IX").at(-1)).toBe("? cl:ix");
-    // the same name means the act the decision named; a § of an amending act is a § of the act it amends
+    // the same name means the act the decision named
     expect(keys("§ 36a zákona č. 367/1990 Sb., o obcích. … § 45 zákona o obcích", 2005, buildActLookup([
       { alias: "zákon o obcích", act_id: "zak:128/2000", year: 2000 },
       { alias: "zákon o obcích", act_id: "zak:367/1990", year: 1990 },
     ])).at(-1)).toBe("zak:367/1990 par:45");
     const amending = buildActLookup([], [], [{ id: "zak:297/2009", title: "Zákon, kterým se mění zákon č. 185/2001 Sb., o odpadech" }]);
-    expect(keys("§ 37e zák. č. 297/2009 Sb.", 2015, amending)).toEqual(["zak:185/2001 par:37e"]);
+    // the number the decision writes stays — the registry only checks it
+    expect(keys("§ 37e zák. č. 297/2009 Sb.", 2015, amending)).toEqual(["zak:297/2009 par:37e"]);
+    expect(keys("§ 163 zákona č. 99/1964 Sb., občanský soudní řád")).toEqual(["zak:99/1964 par:163"]);
     // round 2: two-digit years, case-law abbreviations
     expect(keys("§ 4 zákona č. 168/99 Sb.")).toEqual(["zak:168/1999 par:4"]);
     expect(keys("§ 31a odst. 3 písm. e) OdpŠk")).toEqual(["zak:82/1998 par:31a/o3/pe"]);

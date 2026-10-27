@@ -63,12 +63,15 @@ export interface ActLookup {
   byName(kind: string, words: string, year: number | null): { act: string; length: number; alts?: string[] } | null;
   /** Global aliases (mined abbreviations) as [alias, act] — never generic words. */
   aliases(year: number | null): Array<[string, string]>;
-  /** The act an amending act amends, when it amends one only ("Zákon, kterým se mění zákon č. 185/2001 Sb."). */
+  /**
+   * The act an amending act amends, when it amends one only ("Zákon, kterým se mění zákon č. 185/2001 Sb.").
+   * For checking only: the number the decision writes is never replaced.
+   */
   amended?(act: string): string | null;
 }
 
 /** Bump when the rules change: `mirror provisions` then redoes every decision. */
-export const EXTRACTOR_VERSION = 2;
+export const EXTRACTOR_VERSION = 3;
 
 const ODD_SPACES = /[     ]/g;
 const B = "(?<![\\p{L}\\p{N}])";
@@ -677,10 +680,13 @@ export function extractProvisions(text: string, lookup: ActLookup | null = null,
       defined.push({ start: d.at + m.index, end: d.at + m.index + m[0].length, act: d.act, defined: true });
     }
   }
-  const definedSpans = defined.map((x) => [x.start, x.end] as const);
+  // A defined alias beats any global meaning of the same words — but never an act number the decision writes.
+  const numbers = base.filter((x) => x.numbered);
+  const kept = defined.filter((d) => !numbers.some((x) => d.start < x.end && x.start < d.end));
+  const definedSpans = kept.map((x) => [x.start, x.end] as const);
   const mentions = dedupeMentions([
-    ...defined,
-    ...base.filter((x) => !definedSpans.some(([s, e]) => x.start < e && s < x.end)),
+    ...kept,
+    ...base.filter((x) => x.numbered || !definedSpans.some(([s, e]) => x.start < e && s < x.end)),
   ]);
 
   // "zákona č. 367/1990 Sb., o obcích … § 45 zákona o obcích": a shared name means the act the decision named.
@@ -783,9 +789,9 @@ export function extractProvisions(text: string, lookup: ActLookup | null = null,
       }
     }
     for (const ref of span.refs) {
-      let act = acts[i];
-      // "§ 37e zák. č. 297/2009 Sb.": a § of an act that only amends another is a § of that other one.
-      if (act && ref.head === "par") act = lookup?.amended?.(act) ?? act;
+      // The act number the decision writes is the basis and stays, even "§ 37e zák. č. 297/2009 Sb." (an amending act):
+      // the registry only checks it (decided 27. 10.).
+      const act = acts[i];
       // "§ 89 odst. 2 Ústavy": these acts have články only.
       const head = ref.head === "par" && act && via[i] === "after" && ARTICLE_ONLY.has(act) ? "cl" : ref.head;
       const top = `${head}:${ref.n}`;
