@@ -61,8 +61,15 @@ const ODD_SPACES = /[     ]/g;
 const B = "(?<![\\p{L}\\p{N}])";
 const E = "(?![\\p{L}\\p{N}])";
 
-/** Acts cited by name only — the act table (acts.ts) has Ústava; these it lacks. Longest match wins. */
-const NAMED_SOURCES: Array<{ pattern: RegExp; act: string }> = [
+/** "zákon" in any case but "zákoník". */
+const ZAKON = "zákon(?:a|u|em|e|ě)?(?![\\p{L}\\p{N}])";
+
+/**
+ * Acts cited by name only — the act table (acts.ts) has Ústava; these it
+ * lacks. Longest match wins. `before`: [year, act] — in a decision from
+ * before that year the name meant the older act.
+ */
+const NAMED_SOURCES: Array<{ pattern: RegExp; act: string; before?: Array<[number, string]> }> = [
   { pattern: new RegExp(`${B}Listin\\p{L}*\\s+základních\\s+práv\\s+Evropské\\s+unie${E}`, "gu"), act: "eu:12016P/TXT" },
   { pattern: new RegExp(`${B}Listin\\p{L}*\\s+EU${E}`, "gu"), act: "eu:12016P/TXT" },
   { pattern: new RegExp(`${B}Listin\\p{L}*(?:\\s+základních\\s+práv\\s+a\\s+svobod)?${E}`, "gu"), act: "zak:2/1993" },
@@ -70,6 +77,27 @@ const NAMED_SOURCES: Array<{ pattern: RegExp; act: string }> = [
   { pattern: new RegExp(`${B}Úmluv\\p{L}*${E}(?!\\s+(?:o|OSN|č\\.)\\s)`, "gu"), act: "zak:209/1992" },
   { pattern: new RegExp(`${B}(?:SFEU|Smlouv\\p{L}*\\s+o\\s+fungování\\s+(?:Evropské\\s+unie|EU))${E}`, "gu"), act: "eu:12016E/TXT" },
   { pattern: new RegExp(`${B}(?:SEU|Smlouv\\p{L}*\\s+o\\s+Evropské\\s+unii)${E}`, "gu"), act: "eu:12016M/TXT" },
+  { pattern: new RegExp(`${B}Dodatkov\\p{L}*\\s+protokol\\p{L}*\\s+(?:č\\.\\s*\\d+\\s+)?k\\s+Úmluvě${E}`, "gu"), act: "zak:209/1992" },
+  { pattern: new RegExp(`${B}Úmluv\\p{L}*\\s+o\\s+právech\\s+dítěte${E}`, "gu"), act: "zak:104/1991" },
+  { pattern: new RegExp(`${B}Úmluv\\p{L}*\\s+o\\s+právním\\s+postavení\\s+uprchlíků${E}`, "gu"), act: "zak:208/1993" },
+  { pattern: new RegExp(`${B}Mezinárodní\\p{L}*\\s+pakt\\p{L}*\\s+o\\s+(?:občanských\\s+a\\s+politických|hospodářských,\\s+sociálních\\s+a\\s+kulturních)\\s+právech${E}`, "giu"), act: "zak:120/1976" },
+  // The tariffs: courts cite them by their short titles, declined.
+  { pattern: new RegExp(`${B}advokátní\\p{L}*\\s+tarif\\p{L}*${E}`, "giu"), act: "zak:177/1996" },
+  { pattern: new RegExp(`${B}notářsk\\p{L}*\\s+tarif\\p{L}*${E}`, "giu"), act: "zak:196/2001" },
+  { pattern: new RegExp(`${B}exekuční\\p{L}*\\s+tarif\\p{L}*${E}`, "giu"), act: "zak:330/2001" },
+  { pattern: new RegExp(`${B}tr\\.\\s?řád\\p{L}*${E}`, "gu"), act: "zak:141/1961" },
+  { pattern: new RegExp(`${B}d\\.\\s?ř\\.(?!\\s?s\\.)`, "gu"), act: "zak:280/2009" },
+  { pattern: new RegExp(`${B}horní\\p{L}*\\s+${ZAKON}`, "giu"), act: "zak:44/1988" },
+  { pattern: new RegExp(`${B}azylov\\p{L}+\\s+${ZAKON}`, "giu"), act: "zak:325/1999" },
+  { pattern: new RegExp(`${B}cizineck\\p{L}+\\s+${ZAKON}`, "giu"), act: "zak:326/1999" },
+  { pattern: new RegExp(`${B}silniční\\p{L}*\\s+${ZAKON}`, "giu"), act: "zak:13/1997" },
+  { pattern: new RegExp(`${B}hospodářsk\\p{L}+\\s+zákoník(?:u|em|a)?${E}`, "giu"), act: "zak:109/1964" },
+  // Short names of acts replaced by a new one of the same name: the decision's year picks.
+  { pattern: new RegExp(`${B}stavební\\p{L}*\\s+${ZAKON}`, "giu"), act: "zak:183/2006", before: [[2007, "zak:50/1976"]] },
+  { pattern: new RegExp(`${B}celní\\p{L}*\\s+${ZAKON}`, "giu"), act: "zak:242/2016", before: [[2017, "zak:13/1993"]] },
+  // Declined forms the act table lacks; the decision's year then decides (RECODIFIED).
+  { pattern: new RegExp(`${B}tr\\.\\s?zákoník\\p{L}*${E}`, "gu"), act: "zak:40/2009" },
+  { pattern: new RegExp(`${B}trestní\\p{L}*\\s+zákon(?:a|u|em|e)?${E}`, "giu"), act: "zak:40/2009" },
 ];
 
 /**
@@ -81,6 +109,7 @@ const NAMED_SOURCES: Array<{ pattern: RegExp; act: string }> = [
 const RECODIFIED: Array<{ text: RegExp; act: string; until: number; old: string }> = [
   { text: /^(?:obč\.\s?zák|ObčZ|občansk\p{L}+\s+zákoník)/iu, act: "zak:89/2012", until: 2014, old: "zak:40/1964" },
   { text: /^(?:tr\.\s?zák|TrZ|trestní(?:ho|m)?\s+zákon(?!\p{L}))/iu, act: "zak:40/2009", until: 2010, old: "zak:140/1961" },
+  { text: /^(?:spr\.\s?ř|správní\p{L}*\s+řád)/iu, act: "zak:500/2004", until: 2006, old: "zak:71/1967" },
   { text: /^(?:obch\.\s?zák|ObchZ)/iu, act: "zak:513/1991", until: 9999, old: "zak:513/1991" },
 ];
 
@@ -120,8 +149,9 @@ export function findActMentions(t: string, lookup: ActLookup | null, year: numbe
     const re = new RegExp(entry.pattern.source, entry.pattern.flags.includes("g") ? entry.pattern.flags : `${entry.pattern.flags}g`);
     for (const m of t.matchAll(re)) out.push({ start: m.index, end: m.index + m[0].length, act: recodified(entry.act, m[0], year) });
   }
-  for (const { pattern, act } of NAMED_SOURCES) {
-    for (const m of t.matchAll(pattern)) out.push({ start: m.index, end: m.index + m[0].length, act });
+  for (const { pattern, act, before } of NAMED_SOURCES) {
+    const then = (year !== null && before?.find(([until]) => year < until)?.[1]) || act;
+    for (const m of t.matchAll(pattern)) out.push({ start: m.index, end: m.index + m[0].length, act: recodified(then, m[0], year) });
   }
   if (lookup) {
     for (const m of t.matchAll(NAME_HEAD)) {
@@ -150,7 +180,8 @@ function dedupeMentions(mentions: ActMention[]): ActMention[] {
   return kept;
 }
 
-const DEFINITION_RE = /\(\s*dále\s+(?:jen|též|také|i)?\s*(?:jako\s+)?[„"“]([^”"“„]{1,40})[”"“]\s*(?:nebo\s+[„"“]([^”"“„]{1,40})[”"“]\s*)?\)/gu;
+const DEFINITION_RE =
+  /\(\s*dále\s+(?:jen|též|také|i)?\s*(?:jako\s+)?(?:[„"“]([^”"“„]{1,40})[”"“]\s*(?:nebo\s+[„"“]([^”"“„]{1,40})[”"“]\s*)?|(\p{L}[\p{L}.]*(?:\s+[\p{L}.]+){0,3}?)\s*)\)/gu;
 /** How far before "(dále jen" the defined act may be named. */
 const DEFINITION_REACH = 300;
 
@@ -160,10 +191,31 @@ export interface Definition {
   at: number;
 }
 
+/** Acts an alias already means globally ("o. s. ř.", "obč. zák." — with the act it replaced). */
+const KNOWN = new Map<string, Set<string>>();
+const ABBREVIATION_RES = ACT_ABBREVIATIONS.map((entry) => ({ entry, re: new RegExp(entry.pattern.source, entry.pattern.flags.replace("g", "")) }));
+
+function knownActs(alias: string): Set<string> {
+  const cached = KNOWN.get(alias);
+  if (cached) return cached;
+  const acts = new Set<string>();
+  KNOWN.set(alias, acts);
+  for (const { entry, re } of ABBREVIATION_RES) {
+    const m = re.exec(alias);
+    if (m && m.index === 0 && m[0].length === alias.length) {
+      acts.add(entry.act);
+      for (const r of RECODIFIED) if (r.act === entry.act) acts.add(r.old);
+    }
+  }
+  return acts;
+}
+
 /**
  * "(dále jen „X“)" definitions bound to the main act of their clause: the
- * first act mention in the reach before it that is not an amendment named
- * after "ve znění", and after the previous definition. Pure.
+ * last act mention in the reach before it that is not an amendment ("ve
+ * znění zákona č. …"), after the previous definition. An alias with a
+ * global meaning ("o. s. ř.") binds only to that act — when the clause
+ * names another, the definition is a slip and the global meaning stands. Pure.
  */
 export function findDefinitions(t: string, mentions: ActMention[]): Definition[] {
   const defs: Definition[] = [];
@@ -171,13 +223,17 @@ export function findDefinitions(t: string, mentions: ActMention[]): Definition[]
   for (const m of t.matchAll(DEFINITION_RE)) {
     const from = Math.max(floor, m.index - DEFINITION_REACH);
     const inReach = mentions.filter((x) => x.start >= from && x.end <= m.index);
-    const amend = t.slice(from, m.index).search(/ve\s+znění|novel/iu);
-    const main = inReach.find((x) => amend === -1 || x.start < from + amend) ?? inReach[0];
+    const amendment = (x: ActMention) => /(?:ve\s+znění|novel\p{L}*|změn\p{L}*|doplněn\p{L}*)[\s\p{L},.]{0,25}$/iu.test(t.slice(Math.max(0, x.start - 40), x.start));
     floor = m.index + m[0].length;
-    if (!main) continue;
-    for (const alias of [m[1], m[2]]) {
+    for (const alias of [m[1], m[2], m[3]]) {
       const a = alias?.trim();
-      if (a && a.length >= 1) defs.push({ alias: a, act: main.act, at: m.index + m[0].length });
+      if (!a) continue;
+      // Unquoted, only an act-like alias: "(dále jen zákon)", "(dále jen Úmluva)", "(dále jen o.s.ř.)" — not "(dále jen žalovaný)".
+      if (alias === m[3] && !/^(?:zákon\p{L}*|\p{Lu}.*|(?:\p{L}{1,4}\.\s?)+)$/u.test(a)) continue;
+      const known = knownActs(a);
+      const last = [...inReach].reverse();
+      const main = known.size ? last.find((x) => known.has(x.act)) : (last.find((x) => !amendment(x)) ?? last[0]);
+      if (main) defs.push({ alias: a, act: main.act, at: m.index + m[0].length });
     }
   }
   return defs;
@@ -213,6 +269,21 @@ function numbersBetween(a: number, b: number, cap = 30): string[] {
  * segments) and the end position. Pure.
  */
 function parseSubLevels(t: string, pos: number): { paths: string[][]; end: number } {
+  // Groups in a row, each from its odstavec: "odst. 1 písm. e), odst. 2".
+  const NEXT_GROUP = /\s*(?:,|a|i)?\s*(?=odst\.\s*\d)/uy;
+  let { paths, end } = parseGroup(t, pos);
+  for (;;) {
+    NEXT_GROUP.lastIndex = end;
+    if (!paths.length || !NEXT_GROUP.test(t)) break;
+    const next = parseGroup(t, NEXT_GROUP.lastIndex);
+    if (!next.paths.length) break;
+    paths = [...paths, ...next.paths];
+    end = next.end;
+  }
+  return { paths, end };
+}
+
+function parseGroup(t: string, pos: number): { paths: string[][]; end: number } {
   const LIST_SEP = /\s*(?:,|a|nebo|či|resp\.)\s*/uy;
   const RANGE = /\s*(?:až|[-‐‑–])\s*/uy;
   const take = (re: RegExp, at: number) => {
@@ -237,7 +308,7 @@ function parseSubLevels(t: string, pos: number): { paths: string[][]; end: numbe
         continue;
       }
       const s = take(LIST_SEP, end);
-      const sn = s ? take(/(?:odst\.\s*)?(\d{1,3})(?![\p{N}.]|\s*[§/])/uy, s.end) : null;
+      const sn = s ? take(/(\d{1,3})(?![\p{N}.]|\s*[§/])/uy, s.end) : null; // a repeated "odst." starts a new group
       if (s && sn) {
         odst.push(sn.m[1]);
         end = sn.end;
@@ -246,20 +317,20 @@ function parseSubLevels(t: string, pos: number): { paths: string[][]; end: numbe
       break;
     }
   }
-  const p = take(/\s*,?\s*písm(?:ene?|eno)?\.?\s*([a-z]{1,2})\)?/uy, end);
+  const p = take(/\s*,?\s*písm(?:ene?|eno)?\.?\s*([a-z]{1,2})[)/]?/uy, end);
   if (p) {
     pism = [p.m[1]];
     end = p.end;
     for (;;) {
       const r = take(RANGE, end);
-      const rn = r ? take(/([a-z])\)/uy, r.end) : null;
+      const rn = r ? take(/([a-z])[)/]/uy, r.end) : null;
       if (r && rn) {
         pism = [...pism.slice(0, -1), ...lettersBetween(pism.at(-1)!, rn.m[1])];
         end = rn.end;
         continue;
       }
       const s = take(LIST_SEP, end);
-      const sn = s ? take(/(?:písm\.\s*)?([a-z]{1,2})\)/uy, s.end) : null;
+      const sn = s ? take(/(?:písm\.\s*)?([a-z]{1,2})[)/]/uy, s.end) : null;
       if (s && sn) {
         pism.push(sn.m[1]);
         end = sn.end;
@@ -275,7 +346,7 @@ function parseSubLevels(t: string, pos: number): { paths: string[][]; end: numbe
   }
   // "věty první", "věta druhá", "věty za středníkem": the sentence is a level too.
   let veta: string[] = [];
-  const v = take(/\s*,?\s*vět(?:a|y|ou|u|ě)\s+(první|druh\p{L}*|třetí|čtvrt\p{L}*|pát\p{L}*|poslední|před\s+středníkem|za\s+středníkem)/uy, end);
+  const v = take(/\s*,?\s*vět(?:a|y|ou|u|ě)\s+(první|prvá|druh\p{L}*|třetí|čtvrt\p{L}*|pát\p{L}*|poslední|před\s+středníkem|za\s+středníkem)/uy, end);
   if (v) {
     const w = v.m[1].toLowerCase();
     veta = [w.startsWith("prv") ? "1" : w.startsWith("dru") ? "2" : w.startsWith("tř") ? "3" : w.startsWith("čtv") ? "4" : w.startsWith("pát") ? "5" : w.startsWith("posl") ? "posl" : w.startsWith("před") ? "pred" : "za"];
@@ -330,9 +401,35 @@ function parseRefs(t: string): Array<{ refs: Ref[]; start: number; end: number }
 }
 
 const BACK_REF =
-  /^\s*,?\s*(?:téhož|citovan\p{L}*|cit\.|uveden\p{L}*|výše\s+uveden\p{L}*|shora\s+uveden\p{L}*|tohoto|této|daného|předmětn\p{L}*|posledně\s+citovan\p{L}*)\s+(?:zákon\p{L}*|předpis\p{L}*|řád\p{L}*|nařízení|směrnic\p{L}*|vyhlášk\p{L}*|tarif\p{L}*|úmluv\p{L}*|smlouv\p{L}*|listin\p{L}*|zákoník\p{L}*)/iu;
-/** Words that may stand between a reference and its act: "§ 2913 zákona č. …" needs none; "§ 2913, ve znění …" is not an act. */
-const GAP = /^[\s,]{0,3}$/;
+  /^\s*,?\s*(?:téhož|stejn\p{L}*|citovan\p{L}*|cit\.|uveden\p{L}*|výše\s+uveden\p{L}*|shora\s+uveden\p{L}*|tohoto|této|daného|předmětn\p{L}*|posledně\s+citovan\p{L}*)\s+(zák\.|zákon\p{L}*|předpis\p{L}*|řád\p{L}*|nařízení|směrnic\p{L}*|vyhlášk\p{L}*|tarif\p{L}*|úmluv\p{L}*|smlouv\p{L}*|listin\p{L}*|zákoník\p{L}*)/iu;
+/** The kind a back reference names: "téhož zákona" a zákon, "uvedené vyhlášky" a vyhláška; others any. */
+function kindOf(noun: string): string | null {
+  const n = noun.toLowerCase();
+  return n.startsWith("vyhl") ? "vyhláška" : n.startsWith("nařízení") ? "nařízení" : /^(?:zák|řád)/u.test(n) ? "zákon" : null;
+}
+
+const VYHLASKY = new Set(["zak:177/1996", "zak:196/2001", "zak:330/2001"]);
+
+/** The kind of act a mention is, from its words and those just before it ("vyhlášky č. 177/1996 Sb."). */
+function mentionKind(t: string, x: ActMention): string {
+  const around = t.slice(Math.max(0, x.start - 25), x.end);
+  if (VYHLASKY.has(x.act) || /vyhl(?:\.|ášk\p{L}*)\s*(?:č\.\s*)?\S*$/iu.test(around)) return "vyhláška";
+  if (/nařízení\p{L}*[^§]*$/iu.test(around)) return "nařízení";
+  return "zákon";
+}
+
+/**
+ * Words that may stand between a reference and its act: none ("§ 2913 zákona
+ * č. …" — the mention starts with "zákona"), "a násl.", or the kind word
+ * before a bare number ("§ 8 vyhlášky č. 177/1996 Sb."). "§ 2913, ve znění
+ * …" is not an act.
+ */
+const GAP = /^,?\s*(?:a\s+násl\.\s*)?(?:(?:vyhlášk\p{L}*|vyhl\.|nařízení(?:\s+vlády)?|zákonn\p{L}*\s+opatření|sdělení|ústavní\p{L}*\s+zákon\p{L}*)\s+)?(?:č\.\s*)?[\s,]{0,3}$/u;
+/**
+ * What joins references that share the act named after the last of them:
+ * "§ 107 a § 361 tr. zák.", "§ 8 odst. 1 ve spojení s § 7 vyhlášky …".
+ */
+const CHAIN = /^\s*(?:,|;|a|i|nebo|či|resp\.|ve\s+spojení\s+s|ve\s+spoj\.\s+s|v\s+návaznosti\s+na|a\s+násl\.)?\s*(?:a\s+)?(?:(?:ustanovení|ust\.)\s+)?$/u;
 
 /**
  * The provisions `text` cites, with acts resolved (see the header).
@@ -345,7 +442,8 @@ export function extractProvisions(text: string, lookup: ActLookup | null = null,
   // A defined alias is a mention of its act from its definition on; it beats any global meaning.
   const defined: ActMention[] = [];
   for (const d of defs) {
-    for (const m of t.slice(d.at).matchAll(new RegExp(`${B}${escapeAlias(d.alias)}${E}`, "gu"))) {
+    const alias = /^zákon(?:a|u|em|e|ě)?$/u.test(d.alias) ? ZAKON : `${escapeAlias(d.alias)}${E}`;
+    for (const m of t.slice(d.at).matchAll(new RegExp(`${B}${alias}`, "gu"))) {
       defined.push({ start: d.at + m.index, end: d.at + m.index + m[0].length, act: d.act });
     }
   }
@@ -355,13 +453,24 @@ export function extractProvisions(text: string, lookup: ActLookup | null = null,
     ...base.filter((x) => !definedSpans.some(([s, e]) => x.start < e && s < x.end)),
   ]);
 
-  const out: ProvisionMention[] = [];
-  for (const span of parseRefs(t)) {
+  const spans = parseRefs(t);
+  const acts = spans.map((span) => {
     const after = mentions.find((x) => x.start >= span.end && GAP.test(t.slice(span.end, x.start)));
-    let act = after?.act ?? "";
-    if (!act && BACK_REF.test(t.slice(span.end, span.end + 60))) {
-      act = [...mentions].reverse().find((x) => x.end <= span.start)?.act ?? "";
+    if (after) return after.act;
+    const back = BACK_REF.exec(t.slice(span.end, span.end + 60));
+    if (back) {
+      const want = kindOf(back[1]);
+      return [...mentions].reverse().find((x) => x.end <= span.start && (!want || mentionKind(t, x) === want))?.act ?? "";
     }
+    return "";
+  });
+  // Back to front: an unresolved reference joined to the next one takes its act.
+  for (let i = spans.length - 2; i >= 0; i--) {
+    if (!acts[i] && acts[i + 1] && CHAIN.test(t.slice(spans[i].end, spans[i + 1].start))) acts[i] = acts[i + 1];
+  }
+  const out: ProvisionMention[] = [];
+  for (const [i, span] of spans.entries()) {
+    const act = acts[i];
     for (const ref of span.refs) {
       const top = `${ref.head}:${ref.n}`;
       const keys = new Set<string>([top]);

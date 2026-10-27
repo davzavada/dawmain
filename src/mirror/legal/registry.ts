@@ -70,8 +70,8 @@ const ISSUER =
 /**
  * Names an act is cited by, lowercase: "<kind> o <subject>" from the title
  * (cut where amendments or a second subject begin), and the short title.
- * Only subjects of two words or more — "zákon o obcích" yes, but a title
- * whose subject is one generic word would match far too much. Pure.
+ * One-word subjects too ("zákon o obcích", "zákon o telekomunikacích"): the
+ * extractor takes a name only right after a § and prefers the longest. Pure.
  */
 export function titleNames(title: string): string[] {
   const t = clean(title);
@@ -88,11 +88,13 @@ export function titleNames(title: string): string[] {
         .split(/\s+a\s+o\s+změn|\s+a\s+o\s+doplněn|,\s*kterým|,\s*ve znění|\s*\(|;|\.\s*$/u)[0]
         .replace(/[.,]+$/, "")
         .trim();
-      if (subject.split(/\s+/).length >= 2 && subject.length <= 120) names.add(`${kind} o ${subject}`.toLowerCase());
+      if (subject && subject.length <= 120) names.add(`${kind} o ${subject}`.toLowerCase());
     }
   }
+  // An implementing act's title may end with the act it implements: "(zákon o …)" in a vyhláška is not its name.
   const short = shortTitleOf(t);
-  if (short && short.split(/\s+/).length >= 2) names.add(short.toLowerCase());
+  const shortKind = short ? actKind(short.charAt(0).toUpperCase() + short.slice(1)) : null;
+  if (short && short.split(/\s+/).length >= 2 && (!shortKind || shortKind === kind)) names.add(short.toLowerCase());
   return [...names];
 }
 

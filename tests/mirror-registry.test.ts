@@ -16,12 +16,13 @@ describe("act names from official titles (e-Sbírka)", () => {
     expect(titleNames("Zákon ze dne 13. července 1999 o pojištění odpovědnosti za škodu způsobenou provozem vozidla a o změně některých souvisejících zákonů (zákon o pojištění odpovědnosti z provozu vozidla)")).toContain("zákon o pojištění odpovědnosti z provozu vozidla");
   });
 
-  it("keeps out one-word subjects and remarks in parentheses", () => {
-    expect(titleNames("Zákon o obcích")).toEqual([]);
+  it("takes one-word subjects, keeps out remarks in parentheses", () => {
+    expect(titleNames("Zákon o obcích")).toEqual(["zákon o obcích"]);
     expect(shortTitleOf("Zákon o zrušení … (úplné znění, jak vyplývá z pozdějších změn a doplnění)")).toBeNull();
     expect(shortTitleOf("Nařízení vlády o soutěži (II. kolo)")).toBeNull();
     expect(shortTitleOf("Zákon o obcích (obecní zřízení)")).toBe("obecní zřízení");
     expect(actKind("Nařízení vlády o …")).toBe("nařízení vlády");
+    expect(titleNames("Vyhláška, kterou se provádí zákon o pojištění (zákon o pojištění odpovědnosti z provozu vozidla)")).toEqual([]);
   });
 
   it("reads the Sbírka zákonů and the Sbírka mezinárodních smluv, skipping unnumbered notices", () => {
