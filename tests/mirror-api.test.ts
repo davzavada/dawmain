@@ -1,4 +1,5 @@
 import path from "node:path";
+import { gzipSync } from "node:zlib";
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Hono } from "hono";
@@ -197,6 +198,21 @@ describe("GET /v1/decisions", () => {
     expect(html.match(/<hr class="dissent">/g)).toHaveLength(1);
     expect(html.indexOf('<hr class="dissent">')).toBeLessThan(html.indexOf("Odlišné stanovisko"));
     expect(html).toContain("Promlčení &lt;b&gt;nelze&lt;/b&gt;");
+  });
+
+  it("format=original: the court's formatting from decision_raw, the plain text without it", async () => {
+    const plain = await (await get("/v1/decisions/us/4-296-24_1?format=original")).text();
+    expect(plain).toContain('<main data-format="text">');
+    const page = `<input id="docContentHidden" value="\\qc \\b NÁLEZ\\b0\\par\\pard Ústavní soud rozhodl takto: stížnosti se vyhovuje.\\par">`;
+    await pg.query(
+      `INSERT INTO mirror.decision_raw (decision_id, url, status, content_type, bytes, sha256, gz)
+       SELECT id, url, 200, 'text/html; charset=utf-8', $1, 'x', $2 FROM mirror.decision WHERE source = 'us' AND source_id = '4-296-24_1'`,
+      [page.length, gzipSync(Buffer.from(page))],
+    );
+    const html = await (await get("/v1/decisions/us/4-296-24_1?format=original")).text();
+    expect(html).toContain('<main data-format="original">');
+    expect(html).toContain('<p class="al-center"><strong>NÁLEZ</strong></p>');
+    expect(html).toContain("Promlčení"); // the header and právní věta as with format=html
   });
 
   it("draws a real picture inline", async () => {

@@ -41,7 +41,11 @@ function image(img: RenderImage): string {
   return `<p class="img"><img src="data:${img.mime};base64,${Buffer.from(img.bytes).toString("base64")}"${size} alt="obrázek ${img.ord + 1}"></p>`;
 }
 
-export function renderDecisionHtml(d: FullDecision, images: RenderImage[]): string {
+/**
+ * `formatted`: the decision with the court's formatting (./original.ts), shown
+ * instead of the plain text when there is one; <main data-format> says which.
+ */
+export function renderDecisionHtml(d: FullDecision, images: RenderImage[], formatted: string | null = null): string {
   const body = d.body ?? "";
   // Cut points: every picture, and the start of every dissent (NALUS draws a
   // rule there itself: then the picture is the rule, no second one).
@@ -75,12 +79,15 @@ header{font-family:system-ui,sans-serif;border-bottom:1px solid #ccc;margin-bott
 h1{font-size:1.4rem;margin:0 0 .3rem}.meta{color:#555;font-size:.9rem}
 .lv{background:#f4f4f0;padding:.8rem 1rem;border-left:3px solid #999}
 hr.dissent{border:0;border-top:2px solid #666;margin:2.5rem 0 1rem}
+.al-center{text-align:center}.al-right{text-align:right}.al-justify{text-align:justify}
+main table{border-collapse:collapse;margin:1rem 0}main td,main th{border:1px solid #ccc;padding:.3rem .5rem;vertical-align:top}
+.anon{background:#eee;padding:0 .2em}
 .img img{max-width:100%;height:auto}.img-missing{color:#777;font-style:italic}
 @media (prefers-color-scheme:dark){body{background:#151515;color:#ddd}.lv{background:#222}.meta{color:#aaa}}
 </style></head><body>
 <header><h1>${escape(d.caseNumber ?? d.id)}</h1>
 <p class="meta">${meta.map((m) => escape(String(m))).join(" · ")} · <a href="${escape(d.url)}">oficiální zdroj</a></p></header>
-${d.legalSentence ? `<section class="lv"><strong>Právní věta.</strong> ${escape(d.legalSentence)}</section>\n` : ""}<main>
-${body ? html : "<p><em>Text rozhodnutí zatím není stažený.</em></p>"}
+${d.legalSentence ? `<section class="lv"><strong>Právní věta.</strong> ${escape(d.legalSentence)}</section>\n` : ""}<main data-format="${formatted ? "original" : "text"}">
+${formatted ?? (body ? html : "<p><em>Text rozhodnutí zatím není stažený.</em></p>")}
 </main></body></html>`;
 }

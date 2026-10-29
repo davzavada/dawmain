@@ -13,6 +13,7 @@ import {
   MAX_LIMIT,
 } from "./queries";
 import { renderDecisionHtml } from "./render";
+import { originalOf } from "./original";
 import {
   ACT_GROUPS,
   ACTS_MAX_LIMIT,
@@ -35,7 +36,7 @@ import {
  * mirror-api.service on LXC `app`, listening on its LAN address only:
  *
  *   GET /v1/search?q=&source=&court=&type=&category=&from=&to=&case=&limit=   (category: NS A–E, "A,B"; source: "ns,nss")
- *   GET /v1/decisions/:source/:id[?page=N | ?format=html]
+ *   GET /v1/decisions/:source/:id[?page=N | ?format=html | ?format=original]   original: with the court's formatting (decision_raw)
  *   GET /v1/decisions/:source/:id/images/:ord
  *   GET /v1/decisions/:source/:id/provisions        the § / články it cites
  *   GET /v1/provisions?cite= | act=&provision= [&source=&category=&from=&to=&limit=&offset=]
@@ -244,10 +245,12 @@ export function createMirrorApi(options: {
       throw new BadRequest("source must be us, ns, nss, justice or sdeu");
     const decision = await getDecision(db, source, id);
     if (!decision) return c.json({ error: "not found" }, 404);
-    if (c.req.query("format") === "html") {
-      return c.html(
-        renderDecisionHtml(decision, await getImages(db, source, id)),
-      );
+    const format = c.req.query("format");
+    if (format === "html" || format === "original") {
+      // original: the court's formatting from decision_raw where it can be read, the plain text otherwise.
+      const images = await getImages(db, source, id);
+      const formatted = format === "original" ? await originalOf(db, source, id, images) : null;
+      return c.html(renderDecisionHtml(decision, images, formatted));
     }
     const page = Number(c.req.query("page") ?? "1");
     if (!(Number.isInteger(page) && page >= 1))
