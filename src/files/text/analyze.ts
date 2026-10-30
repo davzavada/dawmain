@@ -293,6 +293,8 @@ export interface TsQueryBuild {
   terms: string[];
   /** Quoted phrases, each as its list of (primary) terms. */
   phrases: string[][];
+  /** Words typed with a trailing * ("nájem*"), folded: matched as prefixes. */
+  prefixes: string[];
 }
 
 const QUOTES = /["„“”‟«»]/g;
@@ -316,15 +318,28 @@ function operand(variants: string[], weights: string): string {
 interface Word {
   folded: string;
   variants: string[];
+  /** Typed with a trailing * ("nájem*"): its folded form as a prefix, not its stems. */
+  prefix?: boolean;
 }
 
 function words(text: string): Word[] {
   const out: Word[] = [];
   for (const t of tokenize(text)) {
+    const folded = foldWord(t.lower);
+    // "nájem*": every word that starts so (nájemce, nájemné) — at least two letters, or it matches everything.
+    if (text[t.end] === "*" && /^[a-z0-9]{2,}$/.test(folded)) {
+      out.push({ folded, variants: [folded], prefix: true });
+      continue;
+    }
     const variants = queryTerms(t.lower);
-    if (variants.length) out.push({ folded: foldWord(t.lower), variants });
+    if (variants.length) out.push({ folded, variants });
   }
   return out;
+}
+
+/** A word's operand: its stems, or — typed with * — its folded form as a prefix. */
+function wordOperand(w: Word, weights: string): string {
+  return w.prefix ? `'${w.folded}':*${weights}` : operand(w.variants, weights);
 }
 
 /**
@@ -369,13 +384,13 @@ export function buildTsQuery(input: string, opts?: { weights?: string; loneStopw
   });
 
   const isStop = (item: { phrase: boolean; words: Word[] }) =>
-    !item.phrase && (STOPWORDS.has(item.words[0].folded) || (!lone && CITATION_CUES.has(item.words[0].folded)));
+    !item.phrase && !item.words[0].prefix && (STOPWORDS.has(item.words[0].folded) || (!lone && CITATION_CUES.has(item.words[0].folded)));
   // Stopwords go, unless nothing else is left ("to je ono") and lone stopwords may stay.
   const content = items.some((item) => !isStop(item)) || !lone ? items.filter((item) => !isStop(item)) : items;
   const seen = new Set<string>();
   const chosen = content
     .filter((item) => {
-      const key = item.words.map((w) => w.variants.join("|")).join(" ");
+      const key = item.words.map((w) => (w.prefix ? "*" : "") + w.variants.join("|")).join(" ");
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -383,9 +398,7 @@ export function buildTsQuery(input: string, opts?: { weights?: string; loneStopw
     .slice(0, MAX_QUERY_OPERANDS);
 
   const operands = chosen.map((item) =>
-    item.words.length === 1
-      ? operand(item.words[0].variants, weights)
-      : `( ${item.words.map((w) => operand(w.variants, weights)).join(" <-> ")} )`,
+    item.words.length === 1 ? wordOperand(item.words[0], weights) : `( ${item.words.map((w) => wordOperand(w, weights)).join(" <-> ")} )`,
   );
   const terms = [...new Set(chosen.flatMap((item) => item.words.flatMap((w) => w.variants)))];
   return {
@@ -393,5 +406,6 @@ export function buildTsQuery(input: string, opts?: { weights?: string; loneStopw
     or: operands.length >= 2 ? operands.join(" | ") : null,
     terms,
     phrases: chosen.filter((item) => item.phrase).map((item) => item.words.map((w) => w.variants[0])),
+    prefixes: chosen.flatMap((item) => item.words.filter((w) => w.prefix).map((w) => w.folded)),
   };
 }

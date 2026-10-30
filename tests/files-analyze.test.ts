@@ -150,10 +150,20 @@ describe("buildTsQuery", () => {
     expect(q.phrases).toEqual([]);
   });
   it("one term → or is null; empty / punctuation → nothing searchable", () => {
-    expect(buildTsQuery("odpovědnost")).toEqual({ and: "'odpovednost':*", or: null, terms: ["odpovednost"], phrases: [] });
+    expect(buildTsQuery("odpovědnost")).toEqual({ and: "'odpovednost':*", or: null, terms: ["odpovednost"], phrases: [], prefixes: [] });
     for (const input of ["", "   ", "&|!()<->:*'\"", "„“"]) {
-      expect(buildTsQuery(input)).toEqual({ and: null, or: null, terms: [], phrases: [] });
+      expect(buildTsQuery(input)).toEqual({ and: null, or: null, terms: [], phrases: [], prefixes: [] });
     }
+  });
+  it("word* is a prefix of the typed form, in a phrase too; a lone * or a one-letter prefix is nothing", () => {
+    const q = buildTsQuery("nájem* smlouva");
+    expect(q.and).toBe("'najem':* & " + buildTsQuery("smlouva").and);
+    expect(q.prefixes).toEqual(["najem"]);
+    expect(q.terms).toContain("najem");
+    expect(buildTsQuery('"nájem* bytu"').and).toBe(`( 'najem':* <-> ${buildTsQuery("bytu").and} )`);
+    expect(buildTsQuery("a*").prefixes).toEqual([]);
+    // A prefix that is also a stopword stays: the star says it is meant.
+    expect(buildTsQuery("na* škody").prefixes).toEqual(["na"]);
   });
   it("keeps stopwords when the query has nothing else", () => {
     expect(buildTsQuery("to je ono").and).toBe("'to' & 'je' & 'ono':*");
@@ -162,7 +172,7 @@ describe("buildTsQuery", () => {
   it("loneStopwords: false — next to a stripped identifier a lone stopword or citation cue searches nothing", () => {
     // "k § 2913", "podle § 2913 OZ", "srov. 25 Cdo 1234/2019" after stripIdentifiers.
     for (const rest of ["k", "podle", "dle", "srov.", "viz", "cit.", "k podle"]) {
-      expect(buildTsQuery(rest, { loneStopwords: false }), rest).toEqual({ and: null, or: null, terms: [], phrases: [] });
+      expect(buildTsQuery(rest, { loneStopwords: false }), rest).toEqual({ and: null, or: null, terms: [], phrases: [], prefixes: [] });
     }
     // Real words stay; the stopwords and cues next to them go, as without the option.
     expect(buildTsQuery("srov. výpověď podle", { loneStopwords: false }).and).toBe(buildTsQuery("výpověď").and);

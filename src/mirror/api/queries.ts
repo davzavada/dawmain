@@ -95,12 +95,13 @@ interface ChunkRow {
   dissent_starts: number[] | null;
 }
 
-function plan(input: SearchInput): { tsAnd: string | null; tsOr: string | null; terms: string[]; keys: string[]; caseKeys: string[] } {
+function plan(input: SearchInput): { tsAnd: string | null; tsOr: string | null; terms: string[]; keys: string[]; caseKeys: string[]; exact: boolean } {
   const text = input.q?.trim() ?? "";
   const ids = text ? queryIdentKeys(text) : { keys: [] as string[] };
   const ts = buildTsQuery(text ? stripIdentifiers(text) : "", { loneStopwords: ids.keys.length === 0 });
   const caseKeys = input.caseNumber ? queryIdentKeys(input.caseNumber).keys.filter((k) => k.startsWith("sz:")) : [];
-  return { tsAnd: ts.and, tsOr: ts.or, terms: ts.terms, keys: ids.keys, caseKeys };
+  // A phrase in quotes or a word* asks for what BM25 cannot check: word order, a prefix of the typed form.
+  return { tsAnd: ts.and, tsOr: ts.or, terms: ts.terms, keys: ids.keys, caseKeys, exact: ts.phrases.length > 0 || ts.prefixes.length > 0 };
 }
 
 async function runChannel(
@@ -280,9 +281,10 @@ export async function searchDecisions(db: Queryable, input: SearchInput): Promis
   const p = plan(input);
   const keys = [...new Set([...p.keys, ...p.caseKeys])];
   if (!p.tsAnd && keys.length === 0) return { hits: [], channel: null, terms: [], identKeys: [] };
-  // BM25 for words alone (the court-name filter on its first candidates); identifiers (sp. zn., §, the case filter) keep the chunk channels.
-  const words = input.q ? stripIdentifiers(input.q).trim() : "";
-  if (input.bm25 && p.tsAnd && words && keys.length === 0) {
+  // BM25 for words alone (the court-name filter on its first candidates); identifiers (sp. zn., §, the case filter),
+  // phrases and word* keep the chunk channels — BM25 only picks the decisions they read (quotes and stars off).
+  const words = input.q ? stripIdentifiers(input.q).replace(/["„“”‟«»*]/g, " ").replace(/\s+/g, " ").trim() : "";
+  if (input.bm25 && p.tsAnd && words && keys.length === 0 && !p.exact) {
     let rows = await runBm25(db, input, words, true, p.tsAnd);
     let channel: SearchResult["channel"] = "and";
     if (rows.length === 0) {
@@ -291,7 +293,7 @@ export async function searchDecisions(db: Queryable, input: SearchInput): Promis
     }
     return { hits: rows.map((r) => toHit(r, p.terms, [])), channel, terms: p.terms, identKeys: [] };
   }
-  // Words with an identifier: the words' chunks only within BM25's first decisions.
+  // Words with an identifier, a phrase or a word*: the words' chunks only within BM25's first decisions.
   const within = input.bm25 && p.tsAnd && words ? await bm25Candidates(db, input, words, WITHIN_CANDIDATES) : undefined;
   // The case filter alone is not a search query; with nothing else, it lists that case's decisions.
   const rankKeys = p.tsAnd || p.keys.length ? p.keys : p.caseKeys;
