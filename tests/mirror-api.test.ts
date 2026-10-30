@@ -136,6 +136,17 @@ describe("GET /v1/search", () => {
     expect(marked).toEqual(expect.arrayContaining(["spravedlivý", "proces", "promlčení"]));
   });
 
+  it("a phrase in quotes keeps word order; word* finds every word that starts so", async () => {
+    const ids = async (q: string) =>
+      ((await (await get(`/v1/search?q=${encodeURIComponent(q)}`)).json()).hits as Array<{ id: string }>).map((h) => h.id);
+    expect(await ids('"spravedlivý proces"')).toEqual(["4-296-24_1"]);
+    expect(await ids('"proces spravedlivý"')).toEqual([]);
+    expect(await ids("spravedliv*")).toEqual(["4-296-24_1"]);
+    const body = await (await get(`/v1/search?q=${encodeURIComponent("stěžovat*")}`)).json();
+    expect(body.hits.length).toBe(2);
+    expect(body.terms).toContain("stezovat");
+  });
+
   it("falls back to OR when AND finds nothing", async () => {
     const body = await (await get("/v1/search?q=" + encodeURIComponent("odmítá kosmonaut"))).json();
     expect(body.channel).toBe("or");
