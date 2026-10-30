@@ -359,6 +359,23 @@ describe("parseNsDecision", () => {
     expect(decision.metadata["Datum rozhodnutí"]).toBe("2026-05-20");
   });
 
+  it("drops a leading citation note when the decision opens another way (WebSearch, live 3 Tdo 1140/2023)", () => {
+    const html = `<html><body>
+<p>Citace rozhodnutí Nejvyššího soudu by měla obsahovat formu rozhodnutí, označení soudu, datum rozhodnutí, spisovou značku, případně údaj o uveřejnění ve Sbírce soudních rozhodnutí a stanovisek a odkaz na zdroj. Vzor: usnesení Nejvyššího soudu ze dne 11. 11. 2001, sp. zn. 21 Cdo 123/2001, uveřejněné pod č. 11/2003 Sbírky soudních rozhodnutí a stanovisek, část trestní, dostupné na www.nsoud.cz.</p>
+<p>3 Tdo 1140/2023-</p><p>USNESENÍ</p>
+<p>Předseda senátu Nejvyššího soudu rozhodl dne 7. 2. 2024 v řízení o dovolání …</p>
+</body></html>`;
+    const decision = parseNsDecision(html, "0123456789ABCDEF0123456789ABCDEF");
+    expect(decision.text).toMatch(/^3 Tdo 1140\/2023-\s+USNESENÍ/);
+    expect(decision.text).not.toContain("Citace rozhodnutí");
+  });
+
+  it("leaves no text when the page carries only the citation note (live 29 Cdo 4492/2010)", () => {
+    const html = `<html><body><table id="box-table-a"><tr><td class="left-part">Spisová značka:</td><td class="right-part">29 Cdo 4492/2010</td></tr></table>
+<p>Citace rozhodnutí Nejvyššího soudu by měla obsahovat formu rozhodnutí, označení soudu, datum rozhodnutí, spisovou značku, případně údaj o uveřejnění ve Sbírce soudních rozhodnutí a stanovisek a odkaz na zdroj. Vzor: usnesení Nejvyššího soudu ze dne 11. 11. 2001, sp. zn. 21 Cdo 123/2001, uveřejněné pod č. 11/2003 Sbírky soudních rozhodnutí a stanovisek, část občanskoprávní a obchodní, dostupné na www.nsoud.cz.</p></body></html>`;
+    expect(parseNsDecision(html, "0123456789ABCDEF0123456789ABCDEF").text).toBe("");
+  });
+
   it("clips the body between the opening and the citation note", () => {
     const decision = parseNsDecision(DETAIL_HTML, "0123456789ABCDEF0123456789ABCDEF");
     expect(decision.text).toMatch(/^Nejvyšší soud rozhodl/);

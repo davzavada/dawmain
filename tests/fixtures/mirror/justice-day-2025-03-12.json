@@ -1,0 +1,75 @@
+{
+ "items": [
+  {
+   "jednaciCislo": "9 C 311/2024-50",
+   "soud": "Okresní soud v Prostějově",
+   "autor": "JUDr. Jakub Štos",
+   "ecli": "ECLI:CZ:OSPV:2025:9.C.311.2024.1",
+   "predmetRizeni": "O zaplacení 14 017,90 Kč s příslušenstvím",
+   "datumVydani": "2025-02-07",
+   "datumZverejneni": "2025-03-12",
+   "klicovaSlova": [],
+   "zminenaUstanoveni": [
+    "§ 72 z. č. 458/2000 Sb."
+   ],
+   "odkaz": "https://rozhodnuti.justice.cz/api/finaldoc/d2965a2d-ec0d-476b-983f-75e716972829"
+  },
+  {
+   "jednaciCislo": "15 C 39/2023-220",
+   "soud": "Okresní soud v Uherském Hradišti",
+   "autor": "Mgr. Martina Jagošová",
+   "ecli": "ECLI:CZ:OSUH:2024:15.C.39.2023.1",
+   "predmetRizeni": "150 077,62 Kč s příslušenstvím",
+   "datumVydani": "2024-02-23",
+   "datumZverejneni": "2025-03-12",
+   "klicovaSlova": [
+    "smlouva kupní",
+    "smlouva darovací",
+    "smlouva o dílo",
+    "právní domněnka",
+    "smlouva o úvěru",
+    "spoluvlastnictví",
+    "smlouva o zápůjčce",
+    "bezdůvodné obohacení",
+    "podílové spoluvlastnictví",
+    "převod vlastnictví"
+   ],
+   "zminenaUstanoveni": [
+    "§ 7 vyhl. č. 177/1996 Sb.",
+    "§ 118a z. č. 99/1963 Sb.",
+    "§ 120 z. č. 99/1963 Sb.",
+    "§ 132 z. č. 99/1963 Sb.",
+    "§ 142 z. č. 99/1963 Sb.",
+    "§ 146 z. č. 99/1963 Sb.",
+    "§ 160 z. č. 99/1963 Sb.",
+    "§ 3028 z. č. 89/2012 Sb."
+   ],
+   "odkaz": "https://rozhodnuti.justice.cz/api/finaldoc/a1defdf3-f853-4f66-b568-5915f4e0f0aa"
+  },
+  {
+   "jednaciCislo": "60 Co 177/2024-318",
+   "soud": "Krajský soud v Brně",
+   "autor": "JUDr. Jiří Rezek",
+   "ecli": "ECLI:CZ:KSBR:2024:60.Co.177.2024.1",
+   "predmetRizeni": "o odvolání žalobce a žalované proti rozsudku Okresního soudu v Uherském Hradišti ze dne 23. 2. 2024, č. j. 15 C 39/2023-220, ve znění opravného usnesení Okresního soudu v Uherském Hradišti ze dne 16. 5. 2024, č. j. 15 C 39/2023-256, a o odvolání žalované proti doplňujícímu rozsudku Okresního soudu v Uherském Hradišti ze dne 28. 5. 2024, č. j. 15 C 39/2023-263,",
+   "datumVydani": "2024-11-19",
+   "datumZverejneni": "2025-03-12",
+   "klicovaSlova": [
+    "smlouva kupní",
+    "peněžité plnění",
+    "rozsudek doplňující",
+    "smlouva o úvěru",
+    "bezdůvodné obohacení",
+    "započtení pohledávky",
+    "neplatnost právního jednání",
+    "zastavení řízení"
+   ],
+   "zminenaUstanoveni": [
+    "§ 1876 z. č. 89/2012 Sb."
+   ],
+   "odkaz": "https://rozhodnuti.justice.cz/api/finaldoc/d45909ab-dc3c-4b85-9c63-3f9bad575add"
+  }
+ ],
+ "totalPages": 3,
+ "pageNumber": 0
+}

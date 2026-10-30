@@ -268,6 +268,41 @@ async function discard(response: Response): Promise<void> {
   await response.body?.cancel().catch(() => undefined);
 }
 
+/**
+ * The part URLs to read from a Cellar HTTP 300 ("Multiple-Choice") body.
+ * The body lists MANIFESTATIONS (`li title="manifestation"`), each with its
+ * items (parts) in `stream_order`. Two manifestations are alternatives of the
+ * same text — live 62011CJ0241: an .xhtml and an .html rendition, both order
+ * 1 — so only the first is read; its items are the parts, in order. The
+ * links come as http:// on Cellar's own host: upgraded to https, anything on
+ * another host dropped (they come out of a response body). Pure.
+ */
+export function cellarChoiceParts(body: string): string[] {
+  const host = new URL(CELLAR_BASE).host;
+  const manifestations = body.split(/<li title="manifestation">/).slice(1);
+  const blocks = manifestations.length ? manifestations : [body];
+  for (const block of blocks) {
+    // Items of the manifestation; a listing without item markup is a plain list of links.
+    const itemized = block.split(/<li title="item">/).slice(1);
+    const segments = itemized.length ? itemized : [...block.matchAll(/<a href="[^"]+"/g)].map((m) => m[0]);
+    const items = segments
+      .map((segment, i) => ({
+        url: /<a href="(https?:\/\/[^"]+)"/.exec(segment)?.[1] ?? "",
+        order: Number(/id="streamOrder">(\d+)</.exec(segment)?.[1] ?? i + 1),
+      }))
+      .filter(({ url }) => {
+        try {
+          return new URL(url).host === host;
+        } catch {
+          return false;
+        }
+      })
+      .map(({ url, order }) => ({ url: url.replace(/^http:\/\//, "https://"), order }));
+    if (items.length) return [...new Map(items.sort((a, b) => a.order - b.order).map((i) => [i.url, i.url])).values()];
+  }
+  return [];
+}
+
 export interface CellarText {
   text: string;
   /** ISO 639-1 of the text served — "en" when the requested language had none. */
@@ -301,24 +336,13 @@ export async function fetchCellarDocument(
   const attempt = async (lang3: string, what: string, budgetHint?: string): Promise<string | null> => {
     const response = await get(`${CELLAR_BASE}${path}`, lang3, what, budgetHint);
     if (response.status === 300) {
-      // Multi-part document: the body lists sibling part URLs — fetch in
-      // parallel (order preserved by Promise.all) and concat. A failed part
-      // fails the WHOLE retrieval: silently joining around a hole would
-      // present a judgment with a missing middle as complete text.
-      const listing = await response.text();
-      // These URLs come out of a RESPONSE BODY — the only such fetch targets in
-      // the codebase. Keep them on Cellar's own origin so a doctored listing
-      // cannot make the deployment fetch (and echo back) arbitrary addresses.
-      const cellarOrigin = new URL(CELLAR_BASE).origin;
-      const allParts = [...listing.matchAll(/href="(http[^"]+)"/g)]
-        .map((m) => m[1])
-        .filter((href) => {
-          try {
-            return new URL(href).origin === cellarOrigin;
-          } catch {
-            return false;
-          }
-        });
+      // Multi-part document or alternative renditions: cellarChoiceParts
+      // picks one manifestation and its parts — fetched in parallel (order
+      // preserved by Promise.all) and joined. A failed part fails the WHOLE
+      // retrieval: silently joining around a hole would present a judgment
+      // with a missing middle as complete text. The URLs come out of a
+      // RESPONSE BODY, so cellarChoiceParts keeps them on Cellar's own host.
+      const allParts = cellarChoiceParts(await response.text());
       const parts = allParts.slice(0, PART_CAP);
       if (!parts.length) return null;
       const texts = await Promise.all(

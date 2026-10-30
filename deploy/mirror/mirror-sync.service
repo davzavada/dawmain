@@ -1,0 +1,22 @@
+# Daily sync of the mirror (docs/infra/v1-plan.md, krok 6), started by
+# mirror-sync.timer: per source the due fetch_queue rows, then the last days'
+# publications. A run that a source stops (429/403) is recorded in sync_run
+# and the next night tries again.
+[Unit]
+Description=Dawmain mirror daily sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=mirror
+Group=mirror
+WorkingDirectory=/opt/dawmain
+EnvironmentFile=/etc/mirror/env
+Environment=NODE_ENV=production
+ExecStart=/opt/dawmain/node_modules/.bin/tsx scripts/mirror.ts sync
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/tmp

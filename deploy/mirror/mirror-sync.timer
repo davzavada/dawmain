@@ -1,0 +1,12 @@
+# 03:30 local time (the container runs Europe/Prague), every night; a night
+# the server was off is caught up at boot (Persistent).
+[Unit]
+Description=Dawmain mirror daily sync at 03:30
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target
