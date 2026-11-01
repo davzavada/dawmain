@@ -1,7 +1,7 @@
 import { searchNs } from "@/src/sources/ns";
 import type { NssHit } from "@/src/sources/nss";
 import { readCursor, type RunCounts } from "./db/store";
-import { currentMonth as nssCurrentMonth, discoverNss, fetchNssDecision } from "./crawl/nss";
+import { discoverNss, fetchNssDecision } from "./crawl/nss";
 import { NSS_PARSER_VERSION } from "./map/nss";
 import { discoverJusticeDay, fetchJusticeDecision, listJusticeDays, type JusticeEntry } from "./crawl/justice";
 import { JUSTICE_PARSER_VERSION } from "./map/justice";
@@ -53,10 +53,9 @@ export interface SyncOptions {
   now?: Date;
 }
 
-/** NSS is synced only once its backfill has reached this month (the two would share one 403 budget). */
-export async function nssBackfillDone(ctx: CrawlContext, now = new Date()): Promise<boolean> {
-  const next = (await readCursor<{ next?: string }>(ctx.db, "nss"))?.next;
-  return next !== undefined && next > nssCurrentMonth(now);
+/** NSS is synced only once its backfill has finished (the two would share one 403 budget). */
+export async function nssBackfillDone(ctx: CrawlContext): Promise<boolean> {
+  return (await readCursor<{ done?: boolean }>(ctx.db, "nss"))?.done === true;
 }
 
 export async function syncSource(ctx: CrawlContext, source: MirrorSource, options: SyncOptions, counts: RunCounts): Promise<void> {
@@ -87,7 +86,7 @@ export async function syncSource(ctx: CrawlContext, source: MirrorSource, option
   }
 
   if (source === "nss") {
-    if (!(await nssBackfillDone(ctx, now))) {
+    if (!(await nssBackfillDone(ctx))) {
       ctx.log("nss: sync přeskočen — backfill ještě běží (sdílí s ním limit NSS)");
       return;
     }

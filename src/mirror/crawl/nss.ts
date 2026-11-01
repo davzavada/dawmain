@@ -52,7 +52,7 @@ export function nextMonth(month: string): string {
   return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
 }
 
-export function currentMonth(now = new Date()): string {
+function currentMonth(now = new Date()): string {
   return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
@@ -182,11 +182,13 @@ export interface NssBackfillOptions {
 export async function backfillNss(ctx: CrawlContext, options: NssBackfillOptions, counts: RunCounts): Promise<void> {
   const pilot = options.months !== undefined;
   let months = options.months;
+  let next = NSS_FIRST_MONTH;
   if (!months) {
     const cursor = await readCursor<{ next?: string }>(ctx.db, "nss");
     const last = currentMonth();
+    next = cursor?.next ?? NSS_FIRST_MONTH;
     months = [];
-    for (let m = cursor?.next ?? NSS_FIRST_MONTH; m <= last; m = nextMonth(m)) months.push(m);
+    for (let m = next; m <= last; m = nextMonth(m)) months.push(m);
   }
   const perMonth = options.limit ? Math.ceil(options.limit / months.length) : undefined;
   let left = options.limit ?? Infinity;
@@ -210,6 +212,11 @@ export async function backfillNss(ctx: CrawlContext, options: NssBackfillOptions
     );
     left -= take.length;
     if (ctx.shouldStop?.()) break;
-    if (!pilot && !options.limit) await writeCursor(ctx.db, "nss", { next: nextMonth(month) });
+    if (!pilot && !options.limit) {
+      next = nextMonth(month);
+      await writeCursor(ctx.db, "nss", { next });
+    }
   }
+  // Said once, for good: the month moves on after this and the cursor does not (the sync keeps NSS current).
+  if (!pilot && !options.limit && !ctx.shouldStop?.()) await writeCursor(ctx.db, "nss", { next, done: true });
 }

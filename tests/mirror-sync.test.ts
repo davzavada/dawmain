@@ -3,7 +3,8 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
 import type { Db } from "@/src/mirror/db/client";
-import { writeCursor } from "@/src/mirror/db/store";
+import { readCursor, writeCursor } from "@/src/mirror/db/store";
+import { backfillNss } from "@/src/mirror/crawl/nss";
 import { Pacer } from "@/src/mirror/http";
 import { daysAgo, nssBackfillDone, SYNC_DAYS } from "@/src/mirror/sync";
 import { sdeuCelexQuery, sdeuRecentQuery } from "@/src/mirror/crawl/sdeu";
@@ -29,14 +30,16 @@ describe("sync windows", () => {
     expect(SYNC_DAYS).toEqual({ us: 7, ns: 7, nss: 7, justice: 14, sdeu: 7 });
   });
 
-  it("syncs NSS only once its backfill has passed the current month", async () => {
+  it("syncs NSS only once its backfill has finished, also in the months after", async () => {
     const ctx = { db, pacer: new Pacer(0), log: () => undefined };
-    const now = new Date("2026-10-26T03:30:00Z");
-    expect(await nssBackfillDone(ctx, now)).toBe(false); // no cursor yet
+    expect(await nssBackfillDone(ctx)).toBe(false); // no cursor yet
     await writeCursor(db, "nss", { next: "2008-06" });
-    expect(await nssBackfillDone(ctx, now)).toBe(false);
-    await writeCursor(db, "nss", { next: "2026-11" });
-    expect(await nssBackfillDone(ctx, now)).toBe(true);
+    expect(await nssBackfillDone(ctx)).toBe(false);
+    // Nothing left to fetch: the backfill says it has finished, and the cursor stays where it was.
+    await writeCursor(db, "nss", { next: "2099-01" });
+    await backfillNss(ctx, {}, { fetched: 0, changed: 0, failed: 0 });
+    expect(await nssBackfillDone(ctx)).toBe(true);
+    expect(await readCursor(db, "nss")).toEqual({ next: "2099-01", done: true });
     await pg.query("DELETE FROM mirror.sync_cursor WHERE source = 'nss'");
   });
 });
