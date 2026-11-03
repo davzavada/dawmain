@@ -22,7 +22,7 @@ import type { RenderImage } from "./render";
  *
  *   us       GetText HTML, the RTF in #docContentHidden: \b \i \ul \qc \qr \qj, \par, pictures by order
  *   ns       WebSearch HTML: the page without its metadata tables, chrome and citation note
- *   nss      DokumentOriginal/Html (a Word export): its <body>
+ *   nss      DokumentOriginal/Html (a Word export): its <body>, formatting read from the styles
  *   justice  finaldoc JSON: header, verdict, justification, information
  *            paragraphs with their styles (alignment, bold, italic)
  *
@@ -61,11 +61,54 @@ function alignment(el: Element): string | null {
   return value === "center" || value === "right" || value === "justify" ? `al-${value}` : null;
 }
 
-/** The children of `node`, cleaned: allowlisted tags, their few attributes, text escaped. */
-function cleanChildren(nodes: AnyNode[], picture: () => string): string {
+/** Character formatting in force, inherited down the tree as a browser does. Outermost first. */
+const MARKS = ["strong", "em", "u", "sup", "sub"] as const;
+type Marks = Partial<Record<(typeof MARKS)[number], boolean>>;
+
+function styleProp(style: string, prop: string): string | undefined {
+  return new RegExp(`(?:^|;)\\s*${prop}\\s*:\\s*([^;]+)`, "i").exec(style)?.[1].trim().toLowerCase();
+}
+
+/** A Word export writes bold, italics, underline and scripts only as styles, on spans and list items. */
+function marksOf(el: Element, inherited: Marks): Marks {
+  const style = el.attribs.style;
+  if (!style) return inherited;
+  const marks = { ...inherited };
+  const weight = styleProp(style, "font-weight");
+  if (weight) marks.strong = /^(bold|bolder|[6-9]00)$/.test(weight);
+  const slant = styleProp(style, "font-style");
+  if (slant) marks.em = slant === "italic" || slant === "oblique";
+  // A descendant cannot take a parent's underline away, so "none" changes nothing.
+  if (/underline/.test(styleProp(style, "text-decoration") ?? styleProp(style, "text-decoration-line") ?? "")) marks.u = true;
+  const shift = styleProp(style, "vertical-align");
+  if (shift) {
+    marks.sup = shift === "super";
+    marks.sub = shift === "sub";
+  }
+  return marks;
+}
+
+function marked(text: string, marks: Marks): string {
+  if (!text.trim()) return text;
+  return MARKS.reduceRight((inner, mark) => (marks[mark] ? `<${mark}>${inner}</${mark}>` : inner), text);
+}
+
+/** One word in Word's runs is several spans (even a letter each): one tag for it. */
+function joinMarks(html: string): string {
+  return MARKS.reduce((out, mark) => out.replace(new RegExp(`</${mark}>(\\s*)<${mark}>`, "g"), "$1"), html);
+}
+
+/**
+ * The children of `node`, cleaned: allowlisted tags, their few attributes, text escaped.
+ * `marks`: read character formatting from styles too, starting from these.
+ */
+function cleanChildren(nodes: AnyNode[], picture: () => string, marks: Marks | null = null): string {
   let out = "";
   for (const node of nodes) {
-    if (node.type === "text") out += escape((node as unknown as { data: string }).data);
+    if (node.type === "text") {
+      const text = escape((node as unknown as { data: string }).data);
+      out += marks ? marked(text, marks) : text;
+    }
     else if (node.type === "tag" || node.type === "script" || node.type === "style") {
       const el = node as Element;
       const name = el.name.toLowerCase();
@@ -76,7 +119,7 @@ function cleanChildren(nodes: AnyNode[], picture: () => string): string {
         out += picture();
         continue;
       }
-      const inner = cleanChildren(el.children as AnyNode[], picture);
+      const inner = cleanChildren(el.children as AnyNode[], picture, marks && marksOf(el, marks));
       const tag = name in RENAME ? RENAME[name] : KEEP.has(name) ? name : "";
       if (!tag) {
         out += inner;
@@ -137,7 +180,7 @@ export function nssOriginalHtml(html: string, images: RenderImage[]): string | n
   const $ = loadHtml(html);
   const body = $("body").get(0);
   if (!body) return null;
-  const out = wrapLoose(cleanChildren(body.children as AnyNode[], pictures(images)));
+  const out = wrapLoose(joinMarks(cleanChildren(body.children as AnyNode[], pictures(images), {})));
   return out.replace(/<[^>]+>|\s/g, "").length > 20 ? out : null;
 }
 

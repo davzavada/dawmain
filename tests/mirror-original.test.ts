@@ -59,6 +59,39 @@ describe("NSS (Word HTML)", () => {
   });
 });
 
+describe("NSS (formatting in styles)", () => {
+  const body = (html: string) => nssOriginalHtml(`<html><body>${html}<p>Dost textu, aby dokument prošel kontrolou délky.</p></body></html>`, [])!;
+
+  it("reads bold, italics, underline and scripts from span styles", () => {
+    const html = body(
+      `<p style="text-align:center"><span style="font-family:Garamond; font-weight:bold">ROZSUDEK</span></p>
+       <p><span style="font-style:italic">kurzíva</span> <span style="text-decoration:underline">podtržené</span> m<span style="vertical-align:super">2</span> <span style="font-weight:bold; font-style:italic">obojí</span></p>`,
+    );
+    expect(html).toContain('<p class="al-center"><strong>ROZSUDEK</strong></p>');
+    expect(html).toContain("<em>kurzíva</em> <u>podtržené</u> m<sup>2</sup> <strong><em>obojí</em></strong>");
+  });
+
+  it("inherits from a list item, and a span can switch it off", () => {
+    const html = body(`<ul><li style="font-weight:bold"><span>tučně</span> <span style="font-weight:normal">obyčejně</span></li></ul>`);
+    expect(html).toContain("<li><strong>tučně</strong> obyčejně</li>");
+  });
+
+  it("joins a word split over spans and leaves spaces unmarked", () => {
+    const html = body(`<p><span style="font-weight:bold">R</span><span style="font-weight:bold">O</span> <span style="font-weight:bold">Z</span><span style="font-weight:bold"> </span></p>`);
+    expect(html).toContain("<p><strong>RO Z</strong></p>");
+  });
+
+  it("is not fooled by look-alike properties, and takes a link's underline as nothing", () => {
+    const html = body(`<p><span style="-aw-font-weight:bold; x-font-style:italic">prostý</span> <a href="https://x" style="text-decoration:none">odkaz</a></p>`);
+    expect(html).toContain("<p>prostý odkaz</p>");
+  });
+
+  it("leaves NS to its tags: its page wraps the body in a span of its own", () => {
+    const html = nsOriginalHtml(`<html><body><span style="font-style:italic"><p>Dost textu, aby dokument prošel kontrolou délky.</p></span></body></html>`, [])!;
+    expect(html).not.toContain("<em>");
+  });
+});
+
 describe("justice (finaldoc JSON)", () => {
   it("builds paragraphs with their styles and marks anonymised text", () => {
     const html = justiceOriginalHtml(fixture("mirror/justice-finaldoc-d2965a2d.json"))!;
