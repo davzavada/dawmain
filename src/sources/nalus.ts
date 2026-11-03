@@ -56,14 +56,108 @@ export interface NalusDecision {
  * "V Brně 30. června 2026\n \n \n \n Veronika Křesťanová v. r.").
  */
 export function stripRtfMarkers(raw: string): string {
-  return raw
+  return removeRtfGroups(raw, isPictureGroup)
     .replace(/\\par\b/g, "\n")
     .replace(/\\b0?\b/g, "")
-    .replace(/\\[a-z]+\d*\b/g, "")
+    .replace(/\\[a-z]+-?\d*\b/g, "")
+    // What is left of RTF syntax: group braces (a literal brace is escaped,
+    // \{ \}), then the escapes themselves.
+    .replace(/(?<!\\)[{}]/g, "")
+    .replace(/\\([{}\\])/g, "$1")
     .replace(/[ \t]+/g, " ")
     .replace(/ *\n */g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+/**
+ * Groups that carry a picture, not text: {\*\shppict …}, {\nonshppict …} and
+ * a bare {\pict …}. Live 4-296-24_1: the line above an odlišné stanovisko is
+ * a 609×1 PNG plus its WMF fallback, ~2 kB of hex that stripRtfMarkers used
+ * to leave in the text. extractRtfPictures reads them before they go.
+ */
+function isPictureGroup(group: string): boolean {
+  return /^\{\\(?:\*\\shppict|nonshppict|pict)\b/.test(group);
+}
+
+/** End (exclusive) of the group opening at `start`, braces balanced, escapes skipped. */
+function groupEnd(raw: string, start: number): number {
+  let depth = 0;
+  for (let i = start; i < raw.length; i++) {
+    const ch = raw[i];
+    if (ch === "\\") i++;
+    else if (ch === "{") depth++;
+    else if (ch === "}" && --depth === 0) return i + 1;
+  }
+  return raw.length;
+}
+
+/** `raw` without the outermost groups `drop` matches, each replaced by `filler`. */
+function removeRtfGroups(raw: string, drop: (group: string) => boolean, filler = ""): string {
+  let out = "";
+  let from = 0;
+  for (let i = raw.indexOf("{"); i !== -1; i = raw.indexOf("{", i + 1)) {
+    if (i < from || (i > 0 && raw[i - 1] === "\\")) continue;
+    const end = groupEnd(raw, i);
+    if (!drop(raw.slice(i, Math.min(end, i + 40)))) continue;
+    out += raw.slice(from, i) + filler;
+    from = end;
+    i = end - 1;
+  }
+  return out + raw.slice(from);
+}
+
+export interface RtfPicture {
+  /** Where the picture stands in stripRtfMarkers(raw): an offset into the decision's text. */
+  offset: number;
+  mime: "image/png" | "image/jpeg" | "image/x-wmf" | "image/x-emf";
+  data: Uint8Array;
+  width?: number;
+  height?: number;
+}
+
+const BLIP_MIME: Array<[RegExp, RtfPicture["mime"]]> = [
+  [/\\pngblip\b/, "image/png"],
+  [/\\jpegblip\b/, "image/jpeg"],
+  [/\\emfblip\b/, "image/x-emf"],
+  [/\\wmetafile\d*\b/, "image/x-wmf"],
+];
+
+/**
+ * The pictures of an RTF text (docContentHidden), in order. Where a picture
+ * comes twice — the PNG/JPEG of \shppict and the metafile fallback of
+ * \nonshppict at the same place — only the bitmap is kept. Width and height
+ * are pixels: a PNG's own header, else \picw / \pich. Pure — unit-tested.
+ */
+export function extractRtfPictures(raw: string): RtfPicture[] {
+  const found: RtfPicture[] = [];
+  for (let i = raw.indexOf("{\\pict"); i !== -1; i = raw.indexOf("{\\pict", i + 1)) {
+    const end = groupEnd(raw, i);
+    // The picture's own properties only: nested groups (\*\picprop, \*\blipuid)
+    // out — as a space, or "\bliptag322049122{…}89504e…" would glue the tag's
+    // number to the data.
+    const body = removeRtfGroups(raw.slice(i + 1, end - 1), () => true, " ");
+    const mime = BLIP_MIME.find(([re]) => re.test(body))?.[1];
+    // The data follows the last control word (whose numeric parameter is not data).
+    const hex = body
+      .replace(/^[\s\S]*\\[a-zA-Z]+-?\d*[ ]?/, "")
+      .replace(/\s+/g, "");
+    if (!/^[0-9a-fA-F]*$/.test(hex)) continue;
+    if (!mime || !hex || hex.length < 16) continue;
+    const data = Uint8Array.from(hex.match(/../g)!, (b) => parseInt(b, 16));
+    const png = mime === "image/png" && data.length >= 24;
+    const view = new DataView(data.buffer);
+    const width = png ? view.getUint32(16) : Number(/\\picw(\d+)/.exec(body)?.[1]) || undefined;
+    const height = png ? view.getUint32(20) : Number(/\\pich(\d+)/.exec(body)?.[1]) || undefined;
+    let outer = raw.lastIndexOf("{\\*\\shppict", i);
+    const fallback = raw.lastIndexOf("{\\nonshppict", i);
+    if (fallback > outer) outer = fallback;
+    const at = outer !== -1 && groupEnd(raw, outer) >= end ? outer : i;
+    found.push({ offset: stripRtfMarkers(raw.slice(0, at)).length, mime, data, width, height });
+    i = end - 1;
+  }
+  const bitmap = (p: RtfPicture) => p.mime === "image/png" || p.mime === "image/jpeg";
+  return found.filter((p, k) => bitmap(p) || !found.some((q, j) => j !== k && q.offset === p.offset && bitmap(q)));
 }
 
 /**
