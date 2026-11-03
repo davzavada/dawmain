@@ -71,23 +71,6 @@ const PLATFORMS: Platform[] = [
       },
       loginStep,
       {
-        title: "Skill (nepovinné)",
-        body: (
-          <>
-            <p>
-              Rešeršní návod – jak s databázemi pracovat a jak citovat – si asistent vyžádá od
-              konektoru sám, vždy v aktuální verzi. Nic dalšího instalovat nemusíte. Chcete-li ho
-              mít i jako skill, stáhněte si ho:
-            </p>
-            {skillDownload}
-            <p>
-              a v <strong>Nastavení → Funkce</strong>, v části <strong>Skills</strong>, zvolte{" "}
-              <strong>Nahrát skill</strong>. Po změnách na webu ho pak musíte nahrát znovu.
-            </p>
-          </>
-        ),
-      },
-      {
         ...firstQuestion(
           <>
             Otevřete novou konverzaci a v nabídce nástrojů u pole pro zprávu zkontrolujte,
