@@ -1,0 +1,124 @@
+{
+ "queries": [
+  {
+   "id": "pozustali",
+   "q": "náhrada nemajetkové újmy pozůstalým"
+  },
+  {
+   "id": "nadbytecnost",
+   "q": "výpověď z pracovního poměru pro nadbytečnost"
+  },
+  {
+   "id": "promlceni-skody",
+   "q": "promlčení náhrady škody"
+  },
+  {
+   "id": "vyvlastneni",
+   "q": "vyvlastnění"
+  },
+  {
+   "id": "bezduvodne-obohaceni",
+   "q": "bezdůvodné obohacení plnění bez právního důvodu"
+  },
+  {
+   "id": "vydrzeni",
+   "q": "vydržení vlastnického práva dobrá víra"
+  },
+  {
+   "id": "dobre-mravy",
+   "q": "rozpor s dobrými mravy smluvní pokuta"
+  },
+  {
+   "id": "odstoupeni",
+   "q": "odstoupení od smlouvy podstatné porušení"
+  },
+  {
+   "id": "najem-vypoved",
+   "q": "výpověď z nájmu bytu"
+  },
+  {
+   "id": "spoluvlastnictvi",
+   "q": "zrušení a vypořádání podílového spoluvlastnictví"
+  },
+  {
+   "id": "sjm",
+   "q": "vypořádání společného jmění manželů"
+  },
+  {
+   "id": "vyzivne",
+   "q": "výživné pro nezletilé dítě"
+  },
+  {
+   "id": "dedictvi",
+   "q": "neplatnost závěti"
+  },
+  {
+   "id": "pracovni-urazy",
+   "q": "odpovědnost zaměstnavatele za pracovní úraz"
+  },
+  {
+   "id": "okamzite-zruseni",
+   "q": "okamžité zrušení pracovního poměru zvlášť hrubým způsobem"
+  },
+  {
+   "id": "podvod",
+   "q": "trestný čin podvodu"
+  },
+  {
+   "id": "ne-bis-in-idem",
+   "q": "ne bis in idem"
+  },
+  {
+   "id": "nutna-obrana",
+   "q": "nutná obrana"
+  },
+  {
+   "id": "odposlech",
+   "q": "odposlech a záznam telekomunikačního provozu"
+  },
+  {
+   "id": "svj-insolvence",
+   "q": "insolvenční návrh věřitele šikanózní"
+  },
+  {
+   "id": "odporovatelnost",
+   "q": "odporovatelnost právních jednání"
+  },
+  {
+   "id": "dan-zneuziti",
+   "q": "zneužití práva daňové"
+  },
+  {
+   "id": "dukazni-bremeno-dph",
+   "q": "důkazní břemeno daňového subjektu nadměrný odpočet DPH"
+  },
+  {
+   "id": "azyl-dublin",
+   "q": "zajištění cizince Dublinské nařízení"
+  },
+  {
+   "id": "stavebni-povoleni",
+   "q": "územní rozhodnutí účastenství v řízení"
+  },
+  {
+   "id": "informace",
+   "q": "poskytování informací podle zákona o svobodném přístupu k informacím"
+  },
+  {
+   "id": "prestupek-promlceni",
+   "q": "zánik odpovědnosti za přestupek"
+  },
+  {
+   "id": "spravedlivy-proces",
+   "q": "právo na spravedlivý proces nepřiměřená délka řízení"
+  },
+  {
+   "id": "predvidatelnost",
+   "q": "legitimní očekávání předvídatelnost rozhodování"
+  },
+  {
+   "id": "gdpr",
+   "q": "ochrana osobních údajů"
+  }
+ ]
+}
