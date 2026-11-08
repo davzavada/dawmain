@@ -175,6 +175,52 @@ describe("GET /v1/search", () => {
   });
 });
 
+describe("GET /v1/search: ranking, courts, lanes", () => {
+  beforeAll(async () => {
+    const db: Db = {
+      query: (text, params) => pg.query(text, params) as never,
+      transaction: (fn) => pg.transaction((tx) => fn({ query: (text, params) => tx.query(text, params) as never })),
+    };
+    const body = (n: number) => `Stěžovatel namítá, že soudy pominuly vyvažování kvádrů. ${"Vyvažování kvádrů je klíčové. ".repeat(n)}Konec.`;
+    await saveDecision(db, record({ sourceId: "1-20-25_1", caseNumber: "I. ÚS 20/25", decisionType: "usneseni", decidedOn: "2025-05-01", text: { body: body(2), source: "us:gettext-hidden" } }));
+    await saveDecision(db, record({ sourceId: "3-30-25_1", caseNumber: "III. ÚS 30/25", decisionType: "nalez", decidedOn: "2025-02-01", text: { body: body(1), source: "us:gettext-hidden" } }));
+    const nss = { source: "nss" as const, decisionType: "rozsudek" as const, url: "https://vyhledavac.nssoud.cz/DokumentDetail/Index/1" };
+    await saveDecision(db, record({ ...nss, sourceId: "900001", caseNumber: "1 As 1/2025", court: "Nejvyšší správní soud (tříčlenný senát NSS)", decidedOn: "2025-04-01", text: { body: body(1), source: "nss:text" } }));
+    await saveDecision(db, record({ ...nss, sourceId: "900002", caseNumber: "30 A 2/2024", court: "Krajský soud v Brně", decidedOn: "2025-06-01", text: { body: body(1), source: "nss:text" } }));
+  });
+  const q = encodeURIComponent("vyvažování kvádrů");
+  const ids = async (extra: string) => ((await (await get(`/v1/search?q=${q}${extra}`)).json()).hits as Array<{ id: string }>).map((h) => h.id);
+
+  it("puts a nález before an usnesení that matches as well", async () => {
+    expect(await ids("&source=us")).toEqual(["3-30-25_1", "1-20-25_1"]);
+  });
+
+  it("leaves out the regional administrative courts unless asked for or named", async () => {
+    expect(await ids("&source=nss")).toEqual(["900001"]);
+    expect((await ids("&source=nss&regional=1")).sort()).toEqual(["900001", "900002"]);
+    expect(await ids(`&source=nss&court=${encodeURIComponent("Krajský soud")}`)).toEqual(["900002"]);
+  });
+
+  it("sorts by date on request", async () => {
+    expect(await ids("&source=us&sort=newest")).toEqual(["1-20-25_1", "3-30-25_1"]);
+  });
+
+  it("answers one lane per court", async () => {
+    const body = await (await get(`/v1/search?q=${q}&per_source=1`)).json();
+    expect(Object.keys(body.lanes).sort()).toEqual(["justice", "ns", "nss", "us"]);
+    expect(body.lanes.us.hits.map((h: { id: string }) => h.id)).toEqual(["3-30-25_1"]);
+    expect(body.lanes.nss.hits.map((h: { id: string }) => h.id)).toEqual(["900001"]);
+    expect(body.lanes.ns.hits).toEqual([]);
+    const two = await (await get(`/v1/search?q=${q}&per_source=5&source=us,nss`)).json();
+    expect(Object.keys(two.lanes).sort()).toEqual(["nss", "us"]);
+  });
+
+  it("rejects a bad sort or lane size", async () => {
+    expect((await get(`/v1/search?q=${q}&sort=random`)).status).toBe(400);
+    expect((await get(`/v1/search?q=${q}&per_source=0`)).status).toBe(400);
+  });
+});
+
 describe("GET /v1/decisions", () => {
   it("returns metadata, one text page and the pictures", async () => {
     const body = await (await get("/v1/decisions/us/4-296-24_1")).json();

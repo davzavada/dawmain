@@ -2,7 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import type { Queryable } from "../db/client";
 import { mirrorStatus } from "../status";
-import type { DecisionType, MirrorSource } from "../types";
+import { MIRROR_SOURCES, type DecisionType, type MirrorSource } from "../types";
 import {
   decisionPage,
   getDecision,
@@ -10,6 +10,7 @@ import {
   getImages,
   isMirrorSource,
   searchDecisions,
+  type SearchInput,
   MAX_LIMIT,
 } from "./queries";
 import { renderDecisionHtml } from "./render";
@@ -36,6 +37,7 @@ import {
  * mirror-api.service on LXC `app`, listening on its LAN address only:
  *
  *   GET /v1/search?q=&source=&court=&type=&category=&from=&to=&case=&limit=   (category: NS A–E, "A,B"; source: "ns,nss")
+ *                  &sort=relevance|newest &regional=1 (NSS with the regional courts) &per_source=N (one lane per court)
  *   GET /v1/decisions/:source/:id[?page=N | ?format=html | ?format=original]   original: with the court's formatting (decision_raw)
  *   GET /v1/decisions/:source/:id/images/:ord
  *   GET /v1/decisions/:source/:id/provisions        the § / články it cites
@@ -214,25 +216,44 @@ export function createMirrorApi(options: {
     }
     if (!q.q?.trim() && !q.case?.trim())
       throw new BadRequest("q or case is required");
-    const started = performance.now();
-    const result = await slow(
-      db,
-      (conn) =>
-        searchDecisions(conn, {
-          q: q.q?.slice(0, 1000),
-          sources: courts,
-          court: q.court || undefined,
-          type: (q.type || undefined) as DecisionType | undefined,
-          from: date(q.from, "from"),
-          to: date(q.to, "to"),
-          caseNumber: q.case || undefined,
-          categories: categories(q.category),
-          limit,
+    if (q.sort && q.sort !== "relevance" && q.sort !== "newest")
+      throw new BadRequest("sort must be relevance or newest");
+    const perSource = q.per_source ? Number(q.per_source) : undefined;
+    if (
+      perSource !== undefined &&
+      !(Number.isInteger(perSource) && perSource >= 1 && perSource <= MAX_LIMIT)
+    ) {
+      throw new BadRequest(`per_source must be 1–${MAX_LIMIT}`);
+    }
+    const input: SearchInput = {
+      q: q.q?.slice(0, 1000),
+      sources: courts,
+      court: q.court || undefined,
+      type: (q.type || undefined) as DecisionType | undefined,
+      from: date(q.from, "from"),
+      to: date(q.to, "to"),
+      caseNumber: q.case || undefined,
+      categories: categories(q.category),
+      regional: q.regional === "1" || q.regional === "true",
+      sort: (q.sort || undefined) as SearchInput["sort"],
+      limit,
       bm25: bm25.peek()?.data === true,
-        }),
-      SEARCH_TIMEOUT_MS,
-      SEARCH_WORK_MEM,
-    );
+    };
+    const run = (one: SearchInput) =>
+      slow(db, (conn) => searchDecisions(conn, one), SEARCH_TIMEOUT_MS, SEARCH_WORK_MEM);
+    const started = performance.now();
+    if (perSource !== undefined) {
+      // One lane per court, as caselaw_search: a court with many matches does not push the others out.
+      const lanes = courts ?? MIRROR_SOURCES.filter((s) => s !== "sdeu");
+      const results = await Promise.all(lanes.map((s) => run({ ...input, sources: [s], limit: perSource })));
+      return c.json({
+        lanes: Object.fromEntries(lanes.map((s, i) => [s, { hits: results[i].hits, channel: results[i].channel }])),
+        terms: results[0]?.terms ?? [],
+        identKeys: results[0]?.identKeys ?? [],
+        tookMs: Math.round(performance.now() - started),
+      });
+    }
+    const result = await run(input);
     return c.json({
       ...result,
       tookMs: Math.round(performance.now() - started),

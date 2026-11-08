@@ -29,6 +29,30 @@ const IDENT_SCORE = 0.5;
 export const BM25_CANDIDATES = 5000;
 /** Words with an identifier: the words' chunks are read for this many BM25-first decisions (~20 chunks each). */
 const WITHIN_CANDIDATES = 1000;
+/** BM25's first decisions that the importance prior reorders. */
+const RERANK_CANDIDATES = 200;
+
+/**
+ * How much a decision weighs beside its text match: a nález of the Ústavní soud before its usnesení, the
+ * plenum before a senate, a stanovisko before both. Measured by scripts/mirror-eval.ts against the live
+ * NALUS ranking: ÚS parity 4 % → 20 % (top 10), NS unchanged; the NS categories (A–E) made NS worse, so
+ * they weigh nothing.
+ */
+function prior(d: string): string {
+  return `(CASE WHEN ${d}.decision_type = 'stanovisko' THEN 1.5 ELSE 1 END
+    * CASE WHEN ${d}.source = 'us' AND ${d}.decision_type = 'nalez' THEN 2 ELSE 1 END
+    * CASE WHEN ${d}.source = 'us' AND ${d}.case_number LIKE 'Pl.%' THEN 1.3 ELSE 1 END)`;
+}
+
+/** Mirror NSS holds the regional administrative courts too; caselaw_search's NSS lane does not. */
+function topCourtsOnly(d: string): string {
+  return `(${d}.source <> 'nss' OR coalesce(${d}.court, 'Nejvyšší správní soud') ILIKE 'Nejvyšší správní soud%')`;
+}
+
+/** The regional administrative courts are left out unless asked for, or unless a court is named. */
+function withoutRegional(input: SearchInput): boolean {
+  return !input.regional && !input.court && (!input.sources?.length || input.sources.includes("nss"));
+}
 
 export interface SearchInput {
   q?: string;
@@ -42,6 +66,10 @@ export interface SearchInput {
   caseNumber?: string;
   /** NS categories, any of them (["A", "B"]). */
   categories?: string[];
+  /** NSS with the regional administrative courts (krajské soudy); default the NSS itself only. */
+  regional?: boolean;
+  /** "relevance" (default: text match × importance) or "newest" (date of the decision, newest first). */
+  sort?: "relevance" | "newest";
   limit?: number;
   /** The BM25 index over decision_text is built (decision_text_bm25, pg_search). */
   bm25?: boolean;
@@ -121,7 +149,7 @@ async function runChannel(
        FROM mirror.decision_chunk c, q
        WHERE $1::text IS NOT NULL AND ($3::text[] IS NULL OR c.source = ANY($3)) AND c.tsv @@ q.tsq${
          // The words only in the decisions BM25 found (decision_id index); without BM25 every chunk is read.
-         within ? " AND c.decision_id = ANY($11::bigint[])" : ""
+         within ? " AND c.decision_id = ANY($13::bigint[])" : ""
        }
        UNION ALL
        SELECT c.source, c.decision_id, c.char_start, c.char_end, c.tsv, c.ident_keys
@@ -139,7 +167,7 @@ async function runChannel(
      ),
      top AS (
        SELECT d.id, d.source, d.source_id, d.case_number, d.court, d.decision_type, d.category, d.decided_on, d.published_on, d.ecli, d.url,
-              b.score, b.char_start, b.char_end
+              b.score * ${prior("d")} AS score, b.char_start, b.char_end
        FROM best b
        JOIN mirror.decision d ON d.id = b.decision_id
        WHERE ($3::text[] IS NULL OR d.source = ANY($3))
@@ -150,7 +178,8 @@ async function runChannel(
          AND (cardinality($8::text[]) = 0 OR EXISTS (
                SELECT 1 FROM mirror.decision_chunk c2 WHERE c2.decision_id = d.id AND c2.ident_keys && $8::text[]))
          AND (cardinality($10::text[]) = 0 OR d.category = ANY($10::text[]))
-       ORDER BY b.score DESC, d.decided_on DESC NULLS LAST
+         AND (NOT $11::boolean OR ${topCourtsOnly("d")})
+       ORDER BY CASE WHEN $12::boolean THEN d.decided_on END DESC NULLS LAST, score DESC, d.decided_on DESC NULLS LAST
        LIMIT $9
      )
      -- The text only for the hits kept, not for every candidate.
@@ -160,7 +189,7 @@ async function runChannel(
             substr(t.body, r.char_start + 1, r.char_end - r.char_start) AS chunk
      FROM top r
      JOIN mirror.decision_text t ON t.decision_id = r.id
-     ORDER BY r.score DESC, r.decided_on DESC NULLS LAST`,
+     ORDER BY CASE WHEN $12::boolean THEN r.decided_on END DESC NULLS LAST, r.score DESC, r.decided_on DESC NULLS LAST`,
     [
       tsquery,
       keys,
@@ -172,6 +201,8 @@ async function runChannel(
       caseKeys,
       limit,
       input.categories ?? [],
+      withoutRegional(input),
+      input.sort === "newest",
       ...(within ? [within] : []),
     ],
   );
@@ -242,19 +273,29 @@ async function runBm25(db: Queryable, input: SearchInput, text: string, all: boo
   const limit = Math.min(Math.max(1, Math.floor(input.limit ?? 20)), MAX_LIMIT);
   const params: unknown[] = [text, tsquery, limit];
   const where = bm25Where(input, all, params);
-  // The court name is not in the index: the BM25-first candidates, then the court, then the limit.
-  const court = input.court ? `AND d.court ILIKE '%' || $${params.push(input.court)} || '%'` : "";
+  const newest = input.sort === "newest";
+  // The court is not in the index: the BM25-first candidates, then the court, then the prior, then the limit.
+  const courts = [
+    input.court ? `d.court ILIKE '%' || $${params.push(input.court)} || '%'` : "",
+    withoutRegional(input) ? topCourtsOnly("d") : "",
+  ].filter(Boolean);
+  const pool = newest ? "$3" : String(RERANK_CANDIDATES);
   const { rows } = await db.query<ChunkRow & Record<string, unknown>>(
     `WITH top AS (
        SELECT t.decision_id, pdb.score(t.decision_id) AS score
        FROM mirror.decision_text t
        WHERE ${where}
-       ORDER BY pdb.score(t.decision_id) DESC
-       LIMIT ${court ? BM25_CANDIDATES : "$3"}
+       ORDER BY ${newest ? "t.decided_on DESC NULLS LAST" : "pdb.score(t.decision_id) DESC"}
+       LIMIT ${courts.length ? BM25_CANDIDATES : pool}
+     ),
+     filtered AS (
+       SELECT top.decision_id, top.score * ${prior("d")} AS score, d.decided_on
+       FROM top JOIN mirror.decision d ON d.id = top.decision_id
+       ${courts.length ? `WHERE ${courts.join(" AND ")}` : ""}
+       ORDER BY ${newest ? "d.decided_on DESC NULLS LAST" : "top.score DESC"} LIMIT ${pool}
      ),
      kept AS (
-       SELECT top.* FROM top JOIN mirror.decision d ON d.id = top.decision_id WHERE true ${court}
-       ORDER BY top.score DESC LIMIT $3
+       SELECT * FROM filtered ORDER BY ${newest ? "decided_on DESC NULLS LAST, score DESC" : "score DESC"} LIMIT $3
      ),
      best AS (
        SELECT DISTINCT ON (c.decision_id) c.decision_id, c.char_start, c.char_end
@@ -270,7 +311,7 @@ async function runBm25(db: Queryable, input: SearchInput, text: string, all: boo
      JOIN mirror.decision d ON d.id = top.decision_id
      JOIN mirror.decision_text t ON t.decision_id = top.decision_id
      LEFT JOIN best b ON b.decision_id = top.decision_id
-     ORDER BY top.score DESC, d.decided_on DESC NULLS LAST`,
+     ORDER BY ${newest ? "d.decided_on DESC NULLS LAST, top.score DESC" : "top.score DESC, d.decided_on DESC NULLS LAST"}`,
     params,
   );
   return rows;
