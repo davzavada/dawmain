@@ -145,12 +145,39 @@ function cleanChildren(nodes: AnyNode[], picture: () => string, marks: Marks | n
   return out;
 }
 
+/**
+ * The fragment cut into its top-level blocks and the text between them. Blocks nest (a table's cell
+ * holds paragraphs, a list a list): a block ends at its own closing tag, not at the first one.
+ */
+function topLevel(html: string): { block: boolean; html: string }[] {
+  const parts: { block: boolean; html: string }[] = [];
+  const tag = /<(\/?)(p|ul|ol|table)\b[^>]*>|<hr\b[^>]*>/g;
+  let depth = 0;
+  let from = 0;
+  for (let m = tag.exec(html); m; m = tag.exec(html)) {
+    if (!m[2]) {
+      if (depth > 0) continue;
+      parts.push({ block: false, html: html.slice(from, m.index) }, { block: true, html: m[0] });
+      from = tag.lastIndex;
+    } else if (!m[1]) {
+      if (depth++ === 0) {
+        parts.push({ block: false, html: html.slice(from, m.index) });
+        from = m.index;
+      }
+    } else if (depth > 0 && --depth === 0) {
+      parts.push({ block: true, html: html.slice(from, tag.lastIndex) });
+      from = tag.lastIndex;
+    }
+  }
+  parts.push({ block: depth > 0, html: html.slice(from) });
+  return parts;
+}
+
 /** Text left directly between blocks becomes paragraphs (split on blank <br><br>). */
 function wrapLoose(html: string): string {
-  const parts = html.split(/(<(?:p|ul|ol|table)[\s>][\s\S]*?<\/(?:p|ul|ol|table)>|<hr[^>]*>)/);
-  return parts
-    .map((part) => {
-      if (/^<(p|ul|ol|table|hr)[\s>]/.test(part)) return part;
+  return topLevel(html)
+    .map(({ block, html: part }) => {
+      if (block) return part;
       return part
         .split(/(?:\s*<br>\s*){2,}/)
         .map((p) => p.replace(/^(\s|<br>)+|(\s|<br>)+$/g, ""))

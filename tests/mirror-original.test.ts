@@ -92,6 +92,17 @@ describe("NSS (formatting in styles)", () => {
   });
 });
 
+describe("blocks inside blocks", () => {
+  it("keeps a table with paragraphs in its cells, and lists in lists, whole", () => {
+    const html = nssOriginalHtml(
+      `<html><body><table><tr><td><p>vlevo</p></td><td><p>vpravo</p></td></tr></table>volný text<ul><li>a<ul><li>b</li></ul></li></ul><hr><p>Dost textu, aby dokument prošel kontrolou délky.</p></body></html>`,
+      [],
+    )!;
+    expect(html).toContain("<table><tr><td><p>vlevo</p></td><td><p>vpravo</p></td></tr></table><p>volný text</p><ul><li>a<ul><li>b</li></ul></li></ul>");
+    expect(html).not.toMatch(/<p>(\s|<\/?\w+>)*<\/(td|tr|table|li|ul)>/);
+  });
+});
+
 describe("justice (finaldoc JSON)", () => {
   it("builds paragraphs with their styles and marks anonymised text", () => {
     const html = justiceOriginalHtml(fixture("mirror/justice-finaldoc-d2965a2d.json"))!;
