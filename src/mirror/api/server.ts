@@ -14,6 +14,7 @@ import {
   MAX_LIMIT,
 } from "./queries";
 import { renderDecisionHtml } from "./render";
+import { CITED_BY_MAX_LIMIT, linksOfDecision } from "./citations";
 import { originalOf } from "./original";
 import {
   ACT_GROUPS,
@@ -41,6 +42,7 @@ import {
  *   GET /v1/decisions/:source/:id[?page=N | ?format=html | ?format=original]   original: with the court's formatting (decision_raw)
  *   GET /v1/decisions/:source/:id/images/:ord
  *   GET /v1/decisions/:source/:id/provisions        the § / články it cites
+ *   GET /v1/decisions/:source/:id/citations[?limit=&offset=&source=]   the decisions it cites, and those citing it
  *   GET /v1/provisions?cite= | act=&provision= [&source=&category=&from=&to=&limit=&offset=]
  *                                                   decisions citing a provision
  *   GET /v1/acts?q=&group=cz|eu|intl&limit=          the act registry, for a picker
@@ -290,6 +292,22 @@ export function createMirrorApi(options: {
       etag: `"${image.sha256}"`,
       "cache-control": "private, max-age=86400",
     });
+  });
+
+  app.get("/v1/decisions/:source/:id/citations", async (c) => {
+    const { source, id } = c.req.param();
+    if (!isMirrorSource(source))
+      throw new BadRequest("source must be us, ns, nss, justice or sdeu");
+    const q = c.req.query();
+    const limit = q.limit ? Number(q.limit) : undefined;
+    if (limit !== undefined && !(Number.isInteger(limit) && limit >= 1 && limit <= CITED_BY_MAX_LIMIT))
+      throw new BadRequest(`limit must be 1–${CITED_BY_MAX_LIMIT}`);
+    const offset = q.offset ? Number(q.offset) : undefined;
+    if (offset !== undefined && !(Number.isInteger(offset) && offset >= 0))
+      throw new BadRequest("offset must be 0 or more");
+    const links = await linksOfDecision(db, source, id, { limit, offset, citedBySource: sources(c.req.queries("source")) });
+    if (!links) return c.json({ error: "not found" }, 404);
+    return c.json(links);
   });
 
   app.get("/v1/decisions/:source/:id/provisions", async (c) => {

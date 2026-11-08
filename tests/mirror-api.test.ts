@@ -280,6 +280,27 @@ describe("GET /v1/decisions", () => {
   });
 });
 
+describe("GET /v1/decisions/:source/:id/citations", () => {
+  it("links the citing decision and the cited one, both ways", async () => {
+    const citing = await (await get("/v1/decisions/us/1-10-25_1/citations")).json();
+    const cited = citing.cites.find((c: { display: string }) => c.display === "IV. ÚS 296/24");
+    expect(cited).toMatchObject({ key: "sz:4us296-2024", mentions: 1 });
+    expect(cited.decisions.map((d: { id: string }) => d.id)).toEqual(["4-296-24_1"]);
+    // Its own sp. zn. is no citation.
+    expect(citing.cites.some((c: { display: string }) => c.display === "I. ÚS 10/25")).toBe(false);
+
+    const target = await (await get("/v1/decisions/us/4-296-24_1/citations")).json();
+    expect(target.citedBy.total).toBe(1);
+    expect(target.citedBy.hits[0]).toMatchObject({ source: "us", id: "1-10-25_1", caseNumber: "I. ÚS 10/25", mentions: 1 });
+    expect((await (await get("/v1/decisions/us/4-296-24_1/citations?source=ns")).json()).citedBy.total).toBe(0);
+  });
+
+  it("answers 404 for an unknown decision and 400 for bad paging", async () => {
+    expect((await get("/v1/decisions/us/nope/citations")).status).toBe(404);
+    expect((await get("/v1/decisions/us/4-296-24_1/citations?limit=0")).status).toBe(400);
+  });
+});
+
 describe("search by cited provision", () => {
   it("finds a decision by any level of the provision, from a key or a citation", async () => {
     for (const url of [

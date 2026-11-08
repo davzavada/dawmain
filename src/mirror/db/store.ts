@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { deriveChunks, findDissents } from "../index";
+import { citationsOf, ownKeys, writeCitations, writeKeys } from "../citations";
 import type { DecisionImage, DecisionRecord, MirrorSource, RawDocument } from "../types";
 import type { Db, Queryable } from "./client";
 
@@ -118,6 +119,8 @@ export async function saveDecision(db: Db, input: DecisionRecord, options: { rei
       if (record.images) await writeImages(tx, record.images, id);
       await writeDissents(tx, record, id);
     }
+    // Own keys follow the case numbers even when the text stays.
+    await writeKeys(tx, id, ownKeys(record));
     if (record.raw) await writeRaw(tx, id, record.raw);
     return { id, inserted, textChanged };
   });
@@ -189,10 +192,11 @@ export async function writeImages(tx: Queryable, images: DecisionImage[], id: nu
   }
 }
 
-/** Replace the chunks of decision `id` with those derived from `record`. */
+/** Replace the chunks of decision `id` with those derived from `record`, and what it cites. */
 export async function writeChunks(tx: Queryable, record: DecisionRecord, id: number): Promise<number> {
   await tx.query("DELETE FROM mirror.decision_chunk WHERE source = $1 AND decision_id = $2", [record.source, id]);
   const chunks = deriveChunks(record);
+  await writeCitations(tx, id, citationsOf(chunks, ownKeys(record)));
   if (chunks.length === 0) return 0;
   await tx.query(
     `INSERT INTO mirror.decision_chunk (source, decision_id, ord, char_start, char_end, tsv, ident_keys)

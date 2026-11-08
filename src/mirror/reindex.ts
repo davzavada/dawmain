@@ -1,4 +1,5 @@
 import type { Db } from "./db/client";
+import { ownKeys, writeKeys } from "./citations";
 import { writeChunks, writeDissents, type RunCounts } from "./db/store";
 import type { DecisionRecord, DecisionType, MirrorSource } from "./types";
 
@@ -55,6 +56,7 @@ export async function reindexSource(ctx: ReindexContext, source: MirrorSource, c
         await ctx.db.transaction(async (tx) => {
           await writeChunks(tx, record, id);
           await writeDissents(tx, record, id);
+          await writeKeys(tx, id, ownKeys(record));
         });
         counts.fetched++;
         counts.changed++;
