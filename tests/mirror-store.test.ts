@@ -6,6 +6,7 @@ import { gunzipSync } from "node:zlib";
 import { dequeue, enqueue, finishRun, idsWithText, saveDecision, startRun, writeRaw } from "@/src/mirror/db/store";
 import { mirrorStatus } from "@/src/mirror/status";
 import { reindexSource } from "@/src/mirror/reindex";
+import { backfillCitations } from "@/src/mirror/citations";
 import type { DecisionRecord } from "@/src/mirror/types";
 
 /** The crawler's writes against the real schema (PGlite). */
@@ -236,6 +237,36 @@ describe("reindex", () => {
     expect(counts.fetched).toBe(Number((await pg.query<{ n: number }>("SELECT count(*)::int AS n FROM mirror.decision_text")).rows[0].n));
     expect(await dissents()).toEqual(["1. S T A N O V I S K O", "Odlišné stanovisko soudce Y"]);
     expect((await pg.query("SELECT 1 FROM mirror.decision_chunk WHERE decision_id = $1", [id])).rows.length).toBeGreaterThan(0);
+  });
+});
+
+describe("citations", () => {
+  it("are written with the text, and backfilled for every decision across id lengths", async () => {
+    const justice = (n: number) =>
+      record({
+        source: "justice",
+        sourceId: `c0ffee00-0000-4000-8000-${String(n).padStart(12, "0")}`,
+        url: `https://rozhodnuti.justice.cz/rozhodnuti/?id=${n}`,
+        court: "Okresní soud v Prostějově",
+        caseNumber: `${n} C ${n}/2025`,
+        caseNumbers: [`${n} C ${n}/2025`],
+        decisionType: "rozsudek",
+        ecli: null,
+        text: { body: `Soud odkazuje na rozsudek sp. zn. 21 Cdo 1124/2022. Věc ${n}.`, source: "justice:finaldoc" },
+      });
+    for (let n = 1; n <= 12; n++) await saveDecision(db, justice(n));
+    const count = async (table: string) =>
+      Number((await pg.query<{ n: number }>(`SELECT count(*)::int AS n FROM mirror.${table} x JOIN mirror.decision d ON d.id = x.${table === "decision_key" ? "decision_id" : "citing_id"} WHERE d.source = 'justice'`)).rows[0].n);
+    expect(await count("decision_key")).toBe(12);
+    expect(await count("decision_citation")).toBe(12);
+    await pg.query("DELETE FROM mirror.decision_key");
+    await pg.query("DELETE FROM mirror.decision_citation");
+    // Batches of 5 over ids of one and two digits: none skipped.
+    const counts = { fetched: 0, changed: 0, failed: 0 };
+    await backfillCitations({ db, log: () => undefined }, "justice", counts, 5);
+    expect(counts.fetched).toBe(12);
+    expect(await count("decision_key")).toBe(12);
+    expect(await count("decision_citation")).toBe(12);
   });
 });
 

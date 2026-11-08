@@ -74,13 +74,15 @@ export async function backfillCitations(
   ctx: { db: Db; log: (line: string) => void; progress?: (counts: RunCounts) => Promise<void>; shouldStop?: () => boolean },
   source: MirrorSource,
   counts: RunCounts,
+  batch = BATCH,
 ): Promise<void> {
   let lastId = 0;
   for (;;) {
     if (ctx.shouldStop?.()) return;
+    // By the bigint: a text id would order "99997" after "1140277" and skip it.
     const { rows } = await ctx.db.query<{ id: string; case_numbers: string[] | null; ecli: string | null }>(
-      "SELECT id::text, case_numbers, ecli FROM mirror.decision WHERE source = $1 AND id > $2 ORDER BY id LIMIT $3",
-      [source, lastId, BATCH],
+      "SELECT d.id, d.case_numbers, d.ecli FROM mirror.decision d WHERE d.source = $1 AND d.id > $2 ORDER BY d.id LIMIT $3",
+      [source, lastId, batch],
     );
     if (rows.length === 0) return;
     const ids = rows.map((r) => Number(r.id));
