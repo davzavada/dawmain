@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseJusticeDecision } from "@/src/sources/justice";
-import { justiceCaseNumbers, justiceType, justiceUuid, mapJustice, type JusticeListItem } from "@/src/mirror/map/justice";
+import { justiceCaseNumbers, justiceType, justiceUuid, mapJustice, plausibleDecidedOn, type JusticeListItem } from "@/src/mirror/map/justice";
 
 const fixture = (name: string) => JSON.parse(readFileSync(path.join(__dirname, "fixtures", "mirror", name), "utf8"));
 
@@ -42,6 +42,17 @@ describe("mapJustice (live 2025-03-12, d2965a2d)", () => {
     const json = fixture("justice-finaldoc-d2965a2d.json");
     const flagged = { ...json, metadata: { ...json.metadata, specialType: ["ESLP"] } };
     expect(mapJustice(uuid, item, parseJusticeDecision(flagged, uuid)).sourceFlags).toEqual(["ESLP"]);
+  });
+
+  it("leaves out an impossible datum vydání and says so", () => {
+    expect(plausibleDecidedOn("2944-04-30", "2026-11-08")).toBeNull();
+    expect(plausibleDecidedOn("1168-10-28", "2026-11-08")).toBeNull();
+    expect(plausibleDecidedOn("2026-11-08", "2026-11-08")).toBe("2026-11-08");
+    expect(plausibleDecidedOn("1990-01-01", "2026-11-08")).toBe("1990-01-01");
+    const json = fixture("justice-finaldoc-d2965a2d.json");
+    const record = mapJustice(uuid, { ...item, datumVydani: "2944-04-30" }, parseJusticeDecision({ ...json, metadata: { ...json.metadata, decisionAt: "2944-04-30" } }, uuid));
+    expect(record.decidedOn).toBeNull();
+    expect(record.sourceFlags).toEqual(["decided_on_implausible"]);
   });
 
   it("names the types and splits the č. j.", () => {

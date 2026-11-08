@@ -38,6 +38,18 @@ export function justiceType(type: unknown): DecisionType | null {
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 const iso = (v: unknown): string | null => (typeof v === "string" && ISO.test(v.slice(0, 10)) ? v.slice(0, 10) : null);
 
+/** Flag of a record whose datum vydání the source gives as an impossible date (kept in sourceMeta). */
+export const IMPLAUSIBLE_DATE_FLAG = "decided_on_implausible";
+
+/**
+ * The source's datum vydání unless it cannot be one: in the future or before 1990 (the source has
+ * 1168-10-28, 2944-04-30 — typos, some of them the court's own). No date beats a made-up one: the text
+ * carries no signature date to take instead, and guessing the year would look right and be wrong.
+ */
+export function plausibleDecidedOn(date: string | null, today = new Date().toISOString().slice(0, 10)): string | null {
+  return date !== null && date >= "1990-01-01" && date <= today ? date : null;
+}
+
 /** "9 C 311/2024-50" → ["9 C 311/2024", "9 C 311/2024-50"]: the sp. zn., then the č. j. */
 export function justiceCaseNumbers(jednaciCislo: string | undefined, parts: JusticeCaseNumber | undefined): string[] {
   const cj = jednaciCislo?.replace(/\s+/g, " ").trim() || formatCaseNumber(parts);
@@ -53,6 +65,9 @@ export function mapJustice(
 ): DecisionRecord {
   const m = decision.metadata;
   const caseNumbers = justiceCaseNumbers(item.jednaciCislo, m.caseNumber as JusticeCaseNumber | undefined);
+  const given = iso(item.datumVydani) ?? iso(m.decisionAt);
+  const decidedOn = plausibleDecidedOn(given);
+  const flags = Array.isArray(m.specialType) ? m.specialType.filter((f): f is string => typeof f === "string" && f.length > 0) : [];
   return {
     source: "justice",
     sourceId: uuid,
@@ -62,8 +77,8 @@ export function mapJustice(
     caseNumbers,
     decisionType: justiceType(m.type),
     sourceMeta: { item, document: m },
-    sourceFlags: Array.isArray(m.specialType) ? m.specialType.filter((f): f is string => typeof f === "string" && f.length > 0) : [],
-    decidedOn: iso(item.datumVydani) ?? iso(m.decisionAt),
+    sourceFlags: given !== null && decidedOn === null ? [...flags, IMPLAUSIBLE_DATE_FLAG] : flags,
+    decidedOn,
     legalSentence: null,
     ecli: item.ecli?.trim() || (typeof m.ecli === "string" ? m.ecli : null),
     publishedOn: iso(item.datumZverejneni) ?? iso(m.publishedAt),
