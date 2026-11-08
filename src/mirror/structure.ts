@@ -122,7 +122,12 @@ export function deriveStructure(body: string, given?: Section[]): Structure {
     const oduv = all.find((l) => within(l) && (!takto || l.start > takto.start) && ODUVODNENI.test(l.folded));
     const pouc = all.find((l) => within(l) && (oduv ? l.start > oduv.start : takto ? l.start > takto.start : true) && POUCENI.test(l.folded));
     const vyrokStart = takto ? takto.end + 1 : null;
-    const oduvStart = oduv ? oduv.start : null;
+    // Or at the end of the výrok's own line: "Návrh se o d m í t á. Odůvodnění:".
+    const inline = oduv
+      ? null
+      : all.find((l) => within(l) && takto && l.start > takto.start && l.text.length < 300 && /odůvodnění:$/.test(l.folded) && !ODUVODNENI.test(l.folded));
+    const inlineAt = inline ? inline.start + inline.text.search(/O\s*d\s*ů\s*v\s*o\s*d\s*n\s*ě\s*n\s*í\s*:\s*$/i) : -1;
+    const oduvStart = oduv ? oduv.start : inline && inlineAt >= inline.start ? inlineAt : null;
     const poucStart = pouc ? pouc.start : null;
     const cut = (from: number, ...ends: Array<number | null>) => trimEnd(Math.min(mainEnd, ...ends.filter((e): e is number => e !== null && e > from)));
     sections = [];
@@ -153,8 +158,12 @@ export function deriveStructure(body: string, given?: Section[]): Structure {
 function vyrokBlocksEnd(body: string, start: number): number {
   const blocks = [...body.slice(start).matchAll(/[^\n](?:[^\n]|\n(?!\s*\n))*/g)];
   let end = start + (blocks[0] ? blocks[0].index + blocks[0][0].length : 0);
+  // Only points of the kind the výrok opened with: after "I. …" a "1. …" is the reasons' first paragraph,
+  // and "I." alone on its line is a heading over them.
+  const kind = (text: string) => (/^\s*[IVX]{1,5}\.\s+\S/.test(text) ? "roman" : /^\s*\d{1,2}\.\s+\S/.test(text) ? "arabic" : /^\s*[a-z]\)\s/.test(text) ? "letter" : null);
+  const opened = blocks[0] ? kind(blocks[0][0]) : null;
   for (const block of blocks.slice(1)) {
-    if (!VYROK_POINT.test(block[0])) break;
+    if (opened === null || kind(block[0]) !== opened || !VYROK_POINT.test(block[0])) break;
     end = start + block.index + block[0].length;
   }
   return end;
