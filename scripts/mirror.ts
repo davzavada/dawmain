@@ -145,8 +145,9 @@ async function runRaw(args: string[]): Promise<number> {
 }
 
 /**
- * Daily sync: for every source (or --source), first the due fetch_queue rows
- * (a "retry" run), then the last days' publications (a "sync" run). Each is
+ * Daily sync: for every source (or --source), first the last days' publications
+ * (a "sync" run), then the due fetch_queue rows (a "retry" run): what is new
+ * comes before what failed, as the two share the source's limit. Each is
  * its own sync_run row; one source failing or stopped does not hold the
  * others back. Exit status: the worst of the runs (3 = a source stopped).
  */
@@ -165,7 +166,7 @@ async function runSync(args: string[]): Promise<number> {
   const sources = (only ? [only] : SYNCED_SOURCES) as MirrorSource[];
   let worst = 0;
   for (const source of sources) {
-    for (const mode of ["retry", "sync"] as const) {
+    for (const mode of ["sync", "retry"] as const) {
       if (mode === "retry" && args.includes("--no-retry")) continue;
       const code = await runTracked(source, mode, async (ctx, counts) => {
         const { rps, concurrency } = rate(source, ctx.log);
@@ -174,7 +175,7 @@ async function runSync(args: string[]): Promise<number> {
         else await syncSource(crawl, source, { days, concurrency }, counts);
       });
       worst = Math.max(worst, code);
-      if (code === EXIT_SOURCE_STOPPED) break; // the source refused us: no sync after a stopped retry
+      if (code === EXIT_SOURCE_STOPPED) break; // the source refused us: no retry after a stopped sync
     }
     // What the sync brought, read for cited provisions (no network).
     worst = Math.max(worst, await runProvisions(source));
