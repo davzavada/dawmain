@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { deriveChunks, findDissents } from "../index";
 import { citationsOf, ownKeys, writeCitations, writeKeys } from "../citations";
+import { structureOf } from "../structure";
+import { writeStructure } from "../structure-db";
 import type { DecisionImage, DecisionRecord, MirrorSource, RawDocument } from "../types";
 import type { Db, Queryable } from "./client";
 
@@ -118,6 +120,8 @@ export async function saveDecision(db: Db, input: DecisionRecord, options: { rei
       await writeChunks(tx, record, id);
       if (record.images) await writeImages(tx, record.images, id);
       await writeDissents(tx, record, id);
+      const raw = record.raw && record.raw.status >= 200 && record.raw.status < 300 ? record.raw.bytes : null;
+      await writeStructure(tx, id, record.text.body, structureOf(record.source, record.text.body, raw));
     }
     // Own keys follow the case numbers even when the text stays.
     await writeKeys(tx, id, ownKeys(record));

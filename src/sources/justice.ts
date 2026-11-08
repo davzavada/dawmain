@@ -466,7 +466,8 @@ export interface JusticeDecision {
 }
 
 /** Parse a finaldoc response — leniently, the field types drift. Pure. */
-export function parseJusticeDecision(json: unknown, uuid: string): JusticeDecision {
+/** The finaldoc's four sections as text, each as parseJusticeDecision puts it into the decision's text. */
+export function justiceSectionTexts(json: unknown): { header: string; verdict: string; justification: string; information: string } {
   // Paragraph = { texts: [{ text, anonStyle }], … }; read without trusting
   // the shape, which has drifted before (a bare string is taken as it is).
   const data = json as {
@@ -476,7 +477,6 @@ export function parseJusticeDecision(json: unknown, uuid: string): JusticeDecisi
     verdict?: unknown;
     justification?: unknown;
     information?: unknown;
-    metadata?: Record<string, unknown> | null;
   };
 
   const flatText = (value: unknown): string => (typeof value === "string" ? value : "");
@@ -500,14 +500,18 @@ export function parseJusticeDecision(json: unknown, uuid: string): JusticeDecisi
   // parties, the decision under review) and the poučení. Each section falls
   // back to its own flat field, so one drifted null array cannot drop the
   // odůvodnění while the rest of the document still reads as complete.
-  const text = [
-    joinParagraphs(data.header),
-    joinParagraphs(data.verdict) || flatText(data.verdictText),
-    joinParagraphs(data.justification) || flatText(data.justificationText),
-    joinParagraphs(data.information),
-  ]
-    .filter((part) => part.trim())
-    .join("\n\n");
+  return {
+    header: joinParagraphs(data.header),
+    verdict: joinParagraphs(data.verdict) || flatText(data.verdictText),
+    justification: joinParagraphs(data.justification) || flatText(data.justificationText),
+    information: joinParagraphs(data.information),
+  };
+}
+
+export function parseJusticeDecision(json: unknown, uuid: string): JusticeDecision {
+  const data = json as { metadata?: Record<string, unknown> | null };
+  const parts = justiceSectionTexts(json);
+  const text = [parts.header, parts.verdict, parts.justification, parts.information].filter((part) => part.trim()).join("\n\n");
   if (!text.trim()) {
     throw new SourceError(
       SOURCE,

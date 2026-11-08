@@ -10,6 +10,7 @@
  *                                                   without --quarters: from the cursor to today
  *   npx tsx scripts/mirror.ts reindex --source us   rebuild chunks and dissents from the stored text (no network)
  *   npx tsx scripts/mirror.ts citations [--source us]  own keys and cited decisions from the stored chunks (no network)
+ *   npx tsx scripts/mirror.ts structure [--source us]  sections, numbered paragraphs, headings and výroky from the stored text (no network)
  *   npx tsx scripts/mirror.ts sync [--source us] [--days 7] [--no-retry]
  *                                                   fetch_queue retry + the last days' publications
  *   npx tsx scripts/mirror.ts acts import [--skip-eu]  act registry from e-Sbírka and Cellar
@@ -33,6 +34,7 @@ import { closeMirrorPools, loadMirrorEnv, mirrorPool, mirrorUrl, poolDb, type Db
 import { finishRun, startRun, updateRun, type RunCounts, type RunMode } from "../src/mirror/db/store";
 import { reindexSource } from "../src/mirror/reindex";
 import { backfillCitations } from "../src/mirror/citations";
+import { backfillStructure } from "../src/mirror/structure-db";
 import { provisionsSource } from "../src/mirror/provisions";
 import { loadActLookup } from "../src/mirror/legal/lookup";
 import type { ActLookup } from "../src/mirror/legal/provisions";
@@ -344,6 +346,14 @@ async function main(argv: string[]): Promise<number> {
     if (command === "backfill") return await runBackfill(args);
     if (command === "raw") return await runRaw(args);
     if (command === "reindex") return await runReindex(args);
+    if (command === "structure") {
+      const only = option(args, "--source");
+      if (only && !(MIRROR_SOURCES as readonly string[]).includes(only)) throw new Error(`unknown source ${only}`);
+      let worst = 0;
+      for (const source of (only ? [only] : SYNCED_SOURCES) as MirrorSource[])
+        worst = Math.max(worst, await runTracked(source, "reindex", (ctx, counts) => backfillStructure(ctx, source, counts)));
+      return worst;
+    }
     if (command === "citations") {
       const only = option(args, "--source");
       if (only && !(MIRROR_SOURCES as readonly string[]).includes(only)) throw new Error(`unknown source ${only}`);
@@ -382,7 +392,7 @@ async function main(argv: string[]): Promise<number> {
   } finally {
     await closeMirrorPools();
   }
-  console.error("usage: mirror migrate [--dry-run] | backfill --source us|ns|nss|justice|sdeu [--limit N] [--quarters …|--months …|--days …|--years …] | reindex --source … | citations [--source …] | raw --source us|ns|nss|justice [--limit N] | sync [--source …] [--days N] | acts import | status | api");
+  console.error("usage: mirror migrate [--dry-run] | backfill --source us|ns|nss|justice|sdeu [--limit N] [--quarters …|--months …|--days …|--years …] | reindex --source … | citations [--source …] | structure [--source …] | raw --source us|ns|nss|justice [--limit N] | sync [--source …] [--days N] | acts import | status | api");
   return 2;
 }
 

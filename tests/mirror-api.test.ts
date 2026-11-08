@@ -280,6 +280,63 @@ describe("GET /v1/decisions", () => {
   });
 });
 
+describe("structure and the search in výroky", () => {
+  const nsBody = [
+    "Nejvyšší soud rozhodl v senátě ve věci žalobce A. proti žalovanému B., t a k t o :",
+    "",
+    "I. Řízení se pro zpětvzetí dovolání zastavuje.",
+    "",
+    "O d ů v o d n ě n í :",
+    "",
+    "1. Žalobce podal dovolání proti rozsudku o trojúhelníkovém zápočtu.",
+    "2. Dovolání vzal zpět.",
+  ].join("\n");
+
+  beforeAll(async () => {
+    const db: Db = {
+      query: (text, params) => pg.query(text, params) as never,
+      transaction: (fn) => pg.transaction((tx) => fn({ query: (text, params) => tx.query(text, params) as never })),
+    };
+    await saveDecision(
+      db,
+      record({
+        source: "ns",
+        sourceId: "AB000000000000000000000000000001",
+        url: "https://sbirka.nsoud.cz/x",
+        court: "Nejvyšší soud",
+        caseNumber: "33 Cdo 1/2025",
+        caseNumbers: ["33 Cdo 1/2025"],
+        decisionType: "usneseni",
+        decidedOn: "2025-07-01",
+        text: { body: nsBody, source: "ns:webprint" },
+      }),
+    );
+  });
+
+  it("gives the decision's sections and numbered paragraphs", async () => {
+    const d = await (await get("/v1/decisions/ns/AB000000000000000000000000000001")).json();
+    expect(d.structure.sections.map((s: { kind: string }) => s.kind)).toEqual(["zahlavi", "vyrok", "oduvodneni"]);
+    expect(d.structure.paragraphs.map((p: { num: string }) => p.num)).toEqual(["1", "2"]);
+    const vyrok = d.structure.sections[1];
+    expect(nsBody.slice(vyrok.start, vyrok.end)).toBe("I. Řízení se pro zpětvzetí dovolání zastavuje.");
+  });
+
+  it("finds words in the výrok only when asked", async () => {
+    const ids = async (q: string, extra = "&in=vyrok") =>
+      ((await (await get(`/v1/search?q=${encodeURIComponent(q)}${extra}`)).json()).hits as Array<{ id: string }>).map((h) => h.id);
+    expect(await ids("zpětvzetí")).toEqual(["AB000000000000000000000000000001"]);
+    expect(await ids("trojúhelníkovém")).toEqual([]);
+    expect(await ids("trojúhelníkovém", "")).toEqual(["AB000000000000000000000000000001"]);
+    const hit = (await (await get(`/v1/search?q=zpětvzetí&in=vyrok`)).json()).hits[0];
+    expect(hit.excerpt).toBe("I. Řízení se pro zpětvzetí dovolání zastavuje.");
+  });
+
+  it("rejects an identifier in výroky and an unknown part", async () => {
+    expect((await get(`/v1/search?q=${encodeURIComponent("33 Cdo 1/2025")}&in=vyrok`)).status).toBe(400);
+    expect((await get("/v1/search?q=x&in=oduvodneni")).status).toBe(400);
+  });
+});
+
 describe("GET /v1/decisions/:source/:id/citations", () => {
   it("links the citing decision and the cited one, both ways", async () => {
     const citing = await (await get("/v1/decisions/us/1-10-25_1/citations")).json();

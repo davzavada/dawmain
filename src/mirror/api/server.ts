@@ -10,6 +10,7 @@ import {
   getImages,
   isMirrorSource,
   searchDecisions,
+  UnsupportedSearch,
   type SearchInput,
   MAX_LIMIT,
 } from "./queries";
@@ -39,6 +40,7 @@ import {
  *
  *   GET /v1/search?q=&source=&court=&type=&category=&from=&to=&case=&limit=   (category: NS A–E, "A,B"; source: "ns,nss")
  *                  &sort=relevance|newest &regional=1 (NSS with the regional courts) &per_source=N (one lane per court)
+ *                  &in=vyrok (the words in výroky only)
  *   GET /v1/decisions/:source/:id[?page=N | ?format=html | ?format=original]   original: with the court's formatting (decision_raw)
  *   GET /v1/decisions/:source/:id/images/:ord
  *   GET /v1/decisions/:source/:id/provisions        the § / články it cites
@@ -97,10 +99,11 @@ function sources(values: string[] | undefined): MirrorSource[] | undefined {
 }
 
 /** The BM25 index over decision_text is built and valid (CREATE INDEX CONCURRENTLY leaves it invalid until done). */
-async function bm25Ready(db: Queryable): Promise<boolean> {
+async function bm25Ready(db: Queryable, index = "decision_text_bm25"): Promise<boolean> {
   const { rows } = await db.query<{ ok: boolean }>(
     `SELECT EXISTS (SELECT 1 FROM pg_index i JOIN pg_class x ON x.oid = i.indexrelid JOIN pg_namespace n ON n.oid = x.relnamespace
-                    WHERE n.nspname = 'mirror' AND x.relname = 'decision_text_bm25' AND i.indisvalid) AS ok`,
+                    WHERE n.nspname = 'mirror' AND x.relname = $1 AND i.indisvalid) AS ok`,
+    [index],
   );
   return Boolean(rows[0]?.ok);
 }
@@ -188,7 +191,7 @@ export function createMirrorApi(options: {
   });
 
   app.onError((error, c) => {
-    if (error instanceof BadRequest)
+    if (error instanceof BadRequest || error instanceof UnsupportedSearch)
       return c.json({ error: error.message }, 400);
     // 57014: statement_timeout (5 s, the search 12 s) — the query, not the server, failed.
     if ((error as { code?: string }).code === "57014")
@@ -202,6 +205,8 @@ export function createMirrorApi(options: {
   // Whether the BM25 index is there and valid (rechecked hourly: it is built by hand, CONCURRENTLY).
   const bm25 = stale(() => bm25Ready(db), 3_600_000, "bm25 index");
   bm25.peek();
+  const verdictBm25 = stale(() => bm25Ready(db, "decision_verdict_bm25"), 3_600_000, "verdict bm25 index");
+  verdictBm25.peek();
   app.get("/v1/search", async (c) => {
     const q = c.req.query();
     const courts = sources(c.req.queries("source"));
@@ -220,6 +225,7 @@ export function createMirrorApi(options: {
       throw new BadRequest("q or case is required");
     if (q.sort && q.sort !== "relevance" && q.sort !== "newest")
       throw new BadRequest("sort must be relevance or newest");
+    if (q.in && q.in !== "vyrok") throw new BadRequest("in must be vyrok");
     const perSource = q.per_source ? Number(q.per_source) : undefined;
     if (
       perSource !== undefined &&
@@ -238,6 +244,8 @@ export function createMirrorApi(options: {
       categories: categories(q.category),
       regional: q.regional === "1" || q.regional === "true",
       sort: (q.sort || undefined) as SearchInput["sort"],
+      in: q.in ? "vyrok" : undefined,
+      verdictBm25: verdictBm25.peek()?.data === true,
       limit,
       bm25: bm25.peek()?.data === true,
     };

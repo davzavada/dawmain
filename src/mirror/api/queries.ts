@@ -3,6 +3,7 @@ import { bestWindow, findMatches } from "@/src/files/index/highlight";
 import { buildTsQuery } from "@/src/files/text/analyze";
 import { DOC_PAGE_CHARS, charPage } from "@/src/sources/shared/text";
 import type { Queryable } from "../db/client";
+import type { Structure } from "../structure";
 import { MIRROR_SOURCES, type DecisionType, type MirrorSource } from "../types";
 
 /**
@@ -70,6 +71,10 @@ export interface SearchInput {
   regional?: boolean;
   /** "relevance" (default: text match × importance) or "newest" (date of the decision, newest first). */
   sort?: "relevance" | "newest";
+  /** "vyrok": the words in the výrok only (decision_verdict), not in the whole text. */
+  in?: "vyrok";
+  /** The BM25 index over decision_verdict is built (decision_verdict_bm25); without it the výroky are scanned. */
+  verdictBm25?: boolean;
   limit?: number;
   /** The BM25 index over decision_text is built (decision_text_bm25, pg_search). */
   bm25?: boolean;
@@ -317,10 +322,75 @@ async function runBm25(db: Queryable, input: SearchInput, text: string, all: boo
   return rows;
 }
 
+/**
+ * Words in the výroky only: BM25 over decision_verdict (filters in the index as on decision_text), or
+ * without its index every výrok scanned for all the words. The excerpt is the výrok itself.
+ */
+async function runVerdict(db: Queryable, input: SearchInput, text: string, all: boolean): Promise<ChunkRow[]> {
+  const limit = Math.min(Math.max(1, Math.floor(input.limit ?? 20)), MAX_LIMIT);
+  const params: unknown[] = [text, limit];
+  const newest = input.sort === "newest";
+  const courts = [
+    input.court ? `d.court ILIKE '%' || $${params.push(input.court)} || '%'` : "",
+    withoutRegional(input) ? topCourtsOnly("d") : "",
+  ].filter(Boolean);
+  let top: string;
+  if (input.verdictBm25) {
+    const where = bm25Where(input, all, params).replace(/\bt\./g, "v.");
+    top = `SELECT v.decision_id, pdb.score(v.decision_id) AS score FROM mirror.decision_verdict v WHERE ${where}
+           ORDER BY ${newest ? "v.decided_on DESC NULLS LAST" : "pdb.score(v.decision_id) DESC"}
+           LIMIT ${courts.length ? BM25_CANDIDATES : newest ? "$2" : RERANK_CANDIDATES}`;
+  } else {
+    const words = text.split(/\s+/).filter((w) => w.length > 1).slice(0, 8);
+    const like = `v.body ILIKE ${all ? "ALL" : "ANY"}($${params.push(words.map((w) => `%${w.replace(/[%_\\]/g, "\\$&")}%`))}::text[])`;
+    const filters = [
+      "$1::text IS NOT NULL",
+      like,
+      input.sources?.length ? `v.source = ANY($${params.push(input.sources)}::text[])` : "",
+      input.type ? `v.decision_type = $${params.push(input.type)}` : "",
+      input.from ? `v.decided_on >= $${params.push(input.from)}::date` : "",
+      input.to ? `v.decided_on <= $${params.push(input.to)}::date` : "",
+      input.categories?.length ? `v.category = ANY($${params.push(input.categories)}::text[])` : "",
+    ].filter(Boolean);
+    top = `SELECT v.decision_id, 1.0::float8 AS score FROM mirror.decision_verdict v WHERE ${filters.join(" AND ")}
+           ORDER BY v.decided_on DESC NULLS LAST LIMIT ${BM25_CANDIDATES}`;
+  }
+  const { rows } = await db.query<ChunkRow & Record<string, unknown>>(
+    `WITH top AS (${top}),
+     kept AS (
+       SELECT top.decision_id, top.score * ${prior("d")} AS score FROM top JOIN mirror.decision d ON d.id = top.decision_id
+       ${courts.length ? `WHERE ${courts.join(" AND ")}` : ""}
+       ORDER BY ${newest ? "d.decided_on DESC NULLS LAST" : "top.score * " + prior("d") + " DESC"} LIMIT $2
+     )
+     SELECT d.source, d.source_id, d.case_number, d.court, d.decision_type, d.category, d.decided_on::text, d.published_on::text, d.ecli, d.url,
+            kept.score::float8 AS score,
+            coalesce((SELECT (x->>'start')::int FROM mirror.decision_structure s, jsonb_array_elements(s.sections) x
+                      WHERE s.decision_id = d.id AND x->>'kind' = 'vyrok' LIMIT 1), 0) AS char_start,
+            NULL::int[] AS dissent_starts, v.body AS chunk
+     FROM kept JOIN mirror.decision d ON d.id = kept.decision_id JOIN mirror.decision_verdict v ON v.decision_id = d.id
+     ORDER BY ${newest ? "d.decided_on DESC NULLS LAST, kept.score DESC" : "kept.score DESC, d.decided_on DESC NULLS LAST"}`,
+    params,
+  );
+  return rows;
+}
+
+export class UnsupportedSearch extends Error {}
+
 export async function searchDecisions(db: Queryable, input: SearchInput): Promise<SearchResult> {
   const p = plan(input);
   const keys = [...new Set([...p.keys, ...p.caseKeys])];
   if (!p.tsAnd && keys.length === 0) return { hits: [], channel: null, terms: [], identKeys: [] };
+  if (input.in === "vyrok") {
+    if (keys.length) throw new UnsupportedSearch("in=vyrok takes words only, not a sp. zn., § or ECLI");
+    const words = input.q ? input.q.trim() : "";
+    let rows = await runVerdict(db, input, words, true);
+    let channel: SearchResult["channel"] = "and";
+    if (rows.length === 0) {
+      channel = "or";
+      rows = await runVerdict(db, input, words, false);
+    }
+    return { hits: rows.map((r) => toHit(r, p.terms, [])), channel, terms: p.terms, identKeys: [] };
+  }
   // BM25 for words alone (the court-name filter on its first candidates); identifiers (sp. zn., §, the case filter) keep the chunk channels.
   const words = input.q ? stripIdentifiers(input.q).trim() : "";
   if (input.bm25 && p.tsAnd && words && keys.length === 0) {
@@ -371,6 +441,8 @@ export interface DecisionView {
   url: string;
   textSource: string | null;
   dissents: Array<{ ord: number; charStart: number; charEnd: number; heading: string | null }>;
+  /** Sections, numbered paragraphs and headings as offsets into the text (src/mirror/structure.ts); null before it is derived. */
+  structure: Structure | null;
   images: DecisionImageInfo[];
   firstSeenAt: string;
   lastChangedAt: string;
@@ -395,7 +467,9 @@ export async function getDecision(db: Queryable, source: MirrorSource, id: strin
                       FROM mirror.decision_dissent x WHERE x.decision_id = d.id), '[]'::json) AS dissents,
             coalesce((SELECT json_agg(json_build_object('ord', i.ord, 'charAt', i.char_at, 'mime', i.mime, 'width', i.width,
                                                         'height', i.height, 'bytes', length(b.bytes)) ORDER BY i.ord)
-                      FROM mirror.decision_image i JOIN mirror.image_blob b ON b.sha256 = i.sha256 WHERE i.decision_id = d.id), '[]'::json) AS images
+                      FROM mirror.decision_image i JOIN mirror.image_blob b ON b.sha256 = i.sha256 WHERE i.decision_id = d.id), '[]'::json) AS images,
+            (SELECT json_build_object('sections', s.sections, 'paragraphs', s.paragraphs, 'headings', s.headings)
+             FROM mirror.decision_structure s WHERE s.decision_id = d.id) AS structure
      FROM mirror.decision d LEFT JOIN mirror.decision_text t ON t.decision_id = d.id
      WHERE d.source = $1 AND d.source_id = $2`,
     [source, id],
@@ -419,6 +493,7 @@ export async function getDecision(db: Queryable, source: MirrorSource, id: strin
     textSource: (r.text_source as string | null) ?? null,
     dissents: (typeof r.dissents === "string" ? JSON.parse(r.dissents) : r.dissents) as DecisionView["dissents"],
     images: (typeof r.images === "string" ? JSON.parse(r.images) : r.images) as DecisionImageInfo[],
+    structure: r.structure === null || r.structure === undefined ? null : ((typeof r.structure === "string" ? JSON.parse(r.structure) : r.structure) as Structure),
     firstSeenAt: iso(r.first_seen_at)!,
     lastChangedAt: iso(r.last_changed_at)!,
     goneAt: iso(r.gone_at),
