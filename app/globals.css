@@ -1228,6 +1228,9 @@ main > footer a {
   text-align: left;
   cursor: pointer;
 }
+a.zd-menu-item {
+  text-decoration: none;
+}
 .zd-menu-item:hover,
 .zd-menu-item:focus-visible {
   background: var(--surface);
