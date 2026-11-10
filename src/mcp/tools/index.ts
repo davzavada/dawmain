@@ -16,6 +16,7 @@ import { registerDoctrine } from "./doctrine";
 import { registerFiles } from "./files";
 import { registerZotero } from "./zotero";
 import { zoteroConfigured } from "@/src/zotero/config";
+import { trackToolCall } from "../usage";
 
 /**
  * Every tool the server exposes. To add one: create `./<name>.ts` exporting a
@@ -125,6 +126,8 @@ function textOnly(server: McpServer): McpServer {
         name,
         rest,
         async (...args: unknown[]) => {
+          // args[1] is the request ctx (the caller's identity); counted once per call, whatever the outcome.
+          void trackToolCall(name, args[1]);
           const { structuredContent: _dropped, ...result } = await withinBudget(name, () => handler(...args));
           return result;
         },
