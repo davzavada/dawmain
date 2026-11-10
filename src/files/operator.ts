@@ -4,8 +4,7 @@ import { withScope } from "./db/client";
 import { deleteDocument } from "./db/documents";
 import { reindexBacklog, stuckDocuments, type StuckDocument } from "./db/documents-web";
 import { forgetPages, listAllLibraries, releasePages, type LibraryRow } from "./db/libraries";
-import { clerkClient } from "@clerk/nextjs/server";
-import { audit, blockContent, callUsage, documentHash, documentsByHash, getSystemState, setSystemState, tableUsage, usageSum, type CallerUsage, type TableUsage } from "./db/usage";
+import { audit, blockContent, documentHash, documentsByHash, getSystemState, setSystemState, tableUsage, usageSum, type TableUsage } from "./db/usage";
 import { effectiveMode, GUARDS_STATE_KEY, measureGuards, monthStartUtc, MODE_OVERRIDE_KEY, parseOverride, type GuardMeasurement } from "./guards";
 
 /**
@@ -52,35 +51,6 @@ export interface OperatorSnapshot {
   analyzerVersion: number;
   lastReindex: { at: string; done: number; failed: number; skipped: number; remaining: number; limited?: string } | null;
   lastTakedown: TakedownReport | null;
-  /** MCP tool calls per caller over USAGE_WINDOW_DAYS, busiest first. */
-  usage: CallerUsage[];
-  /** E-mail (or name) of each Clerk user id in `usage`, where Clerk answered. */
-  userLabels: Record<string, string>;
-}
-
-/** The window of the usage table on the operator page. */
-export const USAGE_WINDOW_DAYS = 30;
-
-/** Primary e-mail (else name) per Clerk user id — best effort: a Clerk failure leaves the ids bare. */
-async function userLabels(ids: string[]): Promise<Record<string, string>> {
-  const users = ids.filter((id) => USER_ID_RE.test(id)).slice(0, 500);
-  const labels: Record<string, string> = {};
-  if (users.length === 0) return labels;
-  try {
-    const client = await clerkClient();
-    for (let i = 0; i < users.length; i += 100) {
-      const { data } = await client.users.getUserList({ userId: users.slice(i, i + 100), limit: 100 });
-      for (const u of data) {
-        const email = u.emailAddresses.find((e) => e.id === u.primaryEmailAddressId)?.emailAddress ?? u.emailAddresses[0]?.emailAddress;
-        const name = [u.firstName, u.lastName].filter(Boolean).join(" ");
-        const label = email ?? (name || null);
-        if (label) labels[u.id] = label;
-      }
-    }
-  } catch {
-    // Ids only.
-  }
-  return labels;
 }
 
 /** Days from the month's start through today (usageSum counts `days` UTC days including today). */
@@ -106,7 +76,6 @@ export async function operatorSnapshot(now = new Date()): Promise<OperatorSnapsh
       lastReindex: await getSystemState<OperatorSnapshot["lastReindex"]>(db, REINDEX_STATE_KEY),
       lastTakedown: await getSystemState<TakedownReport>(db, TAKEDOWN_STATE_KEY),
       libraries: await listAllLibraries(db),
-      usage: await callUsage(db, USAGE_WINDOW_DAYS),
     };
   });
   const ids = system.libraries.map((l) => l.id);
@@ -135,8 +104,6 @@ export async function operatorSnapshot(now = new Date()): Promise<OperatorSnapsh
     analyzerVersion: ANALYZER_VERSION,
     lastReindex: system.lastReindex,
     lastTakedown: system.lastTakedown,
-    usage: system.usage,
-    userLabels: await userLabels(system.usage.map((u) => u.who)),
   };
 }
 

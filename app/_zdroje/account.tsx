@@ -1,7 +1,6 @@
 "use client";
 
 import { useUser } from "@clerk/nextjs";
-import Link from "next/link";
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { initials } from "./format";
 import { avatarSrc, hasPro } from "./hint";
@@ -62,37 +61,6 @@ function HintedAvatar() {
   );
 }
 
-/**
- * Whether the signed-in account is an operator (GET /api/operator), asked
- * once per page load and per account. Only shows or hides the "Provoz"
- * link — the operator page answers 404 to anyone else on its own.
- */
-let operatorCheck: { userId: string; result: Promise<boolean> } | null = null;
-
-function useOperator(userId: string | undefined): boolean {
-  const [operator, setOperator] = useState(false);
-  useEffect(() => {
-    if (!userId) return;
-    if (operatorCheck?.userId !== userId) {
-      operatorCheck = {
-        userId,
-        result: fetch("/api/operator", { cache: "no-store" })
-          .then((r) => (r.ok ? r.json() : null))
-          .then((body: unknown) => (body as { operator?: unknown } | null)?.operator === true)
-          .catch(() => false),
-      };
-    }
-    let live = true;
-    void operatorCheck.result.then((ok) => {
-      if (live) setOperator(ok);
-    });
-    return () => {
-      live = false;
-    };
-  }, [userId]);
-  return userId ? operator : false;
-}
-
 function AccountMenu({ zotero }: { zotero: boolean }) {
   const { user } = useUser();
   const { summary } = useZdroje();
@@ -110,7 +78,6 @@ function AccountMenu({ zotero }: { zotero: boolean }) {
   const shown = user ? initials(name) : (hinted ?? initials(name));
   const image = user ? user.imageUrl || null : hintedImage;
   const pro = hasPro(summary);
-  const operator = useOperator(user?.id);
 
   useEffect(() => {
     if (user) rememberAccount(initials(name), user.imageUrl || null);
@@ -201,12 +168,6 @@ function AccountMenu({ zotero }: { zotero: boolean }) {
                 <ZIcon name="library" />
                 <span>Zotero</span>
               </button>
-            ) : null}
-            {operator ? (
-              <Link href="/vlastni-zdroje/provoz" role="menuitem" className="zd-menu-item" onClick={() => setOpen(false)}>
-                <ZIcon name="users" />
-                <span>Provoz a používání</span>
-              </Link>
             ) : null}
             <button type="button" role="menuitem" className="zd-menu-item" onClick={choose(manageAccount)}>
               <ZIcon name="settings" />

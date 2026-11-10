@@ -4,7 +4,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { LIMITS } from "@/src/files/config";
 import { NEON_STORAGE_BYTES } from "@/src/files/guards";
-import { isOperator, operatorSnapshot, USAGE_WINDOW_DAYS, vacuumPlan, type OperatorSnapshot } from "@/src/files/operator";
+import { isOperator, operatorSnapshot, vacuumPlan, type OperatorSnapshot } from "@/src/files/operator";
 import { batchAllowance } from "@/src/files/reindex";
 import { formatCount } from "@/app/_zdroje/format";
 import { reindexBatchAction, setModeOverride, takedownAction } from "./actions";
@@ -89,7 +89,7 @@ export default async function OperatorPage() {
       </Link>
       <header className="legal-head">
         <h1>Provoz Vlastních zdrojů</h1>
-        <p className="muted">Kdo službu používá, pojistky bezplatných limitů, knihovny a fronta zpracování.</p>
+        <p className="muted">Pojistky bezplatných limitů, knihovny a fronta zpracování.</p>
       </header>
       {typeof data === "string" ? (
         <p className="zd-error">{data}</p>
@@ -97,77 +97,6 @@ export default async function OperatorPage() {
         <Snapshot data={data} />
       )}
     </div>
-  );
-}
-
-/** A UTC day (YYYY-MM-DD) as "10. 11. 2026". */
-function day(iso: string): string {
-  const [y, m, d] = iso.split("-");
-  return y && m && d ? `${Number(d)}. ${Number(m)}. ${y}` : iso;
-}
-
-const CALLER_LABELS: Record<string, string> = { shared: "sdílený přístupový kód", anon: "bez přihlášení" };
-
-/** Tools shown per caller; the rest is summed as "další". */
-const TOP_TOOLS = 4;
-
-function Usage({ data }: { data: OperatorSnapshot }) {
-  const rows = data.usage;
-  const total = rows.reduce((n, u) => n + u.calls, 0);
-  const total7 = rows.reduce((n, u) => n + u.calls7, 0);
-  const accounts = rows.filter((u) => u.who.startsWith("user_"));
-  const active7 = accounts.filter((u) => u.calls7 > 0).length;
-  return (
-    <section className="zd-ops-section">
-      <h2>Používání ({USAGE_WINDOW_DAYS} dní)</h2>
-      <p>
-        {formatCount(total)} volání nástrojů, z toho {formatCount(total7)} za posledních 7 dní · {formatCount(accounts.length)} účtů, z toho{" "}
-        {formatCount(active7)} aktivních za 7 dní
-      </p>
-      {rows.length === 0 ? (
-        <p className="zd-muted">Zatím žádná zaznamenaná volání.</p>
-      ) : (
-        <div className="zd-table-wrap">
-          <table className="zd-table">
-            <thead>
-              <tr>
-                <th>Kdo</th>
-                <th>Volání</th>
-                <th>7 dní</th>
-                <th>Aktivní dny</th>
-                <th>Naposledy</th>
-                <th>Nejčastější nástroje</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((u) => {
-                const rest = u.tools.slice(TOP_TOOLS).reduce((n, t) => n + t.calls, 0);
-                return (
-                  <tr key={u.who}>
-                    <td>{data.userLabels[u.who] ?? CALLER_LABELS[u.who] ?? <code>{u.who}</code>}</td>
-                    <td>{formatCount(u.calls)}</td>
-                    <td>{formatCount(u.calls7)}</td>
-                    <td>{u.activeDays}</td>
-                    <td>{day(u.lastDay)}</td>
-                    <td className="zd-small">
-                      {u.tools
-                        .slice(0, TOP_TOOLS)
-                        .map((t) => `${t.tool} ${formatCount(t.calls)}`)
-                        .join(", ")}
-                      {rest > 0 ? `, další ${formatCount(rest)}` : ""}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-      <p className="zd-muted zd-small">
-        Každé volání nástroje přes MCP, podle účtu a nástroje (dny v UTC). Jen počty, nikdy obsah dotazů. Počítá se jen tehdy, když
-        Vlastní zdroje nejsou vypnuté (zápis jde do jejich databáze); počty se mažou po 12 měsících a se smazáním účtu.
-      </p>
-    </section>
   );
 }
 
@@ -182,8 +111,6 @@ function Snapshot({ data }: { data: OperatorSnapshot }) {
   const vacuum = reclaimable >= LIMITS.dbBytesCap * VACUUM_HINT_SHARE ? vacuumPlan(data.tables, g.dbBytes, NEON_STORAGE_BYTES) : null;
   return (
     <>
-      <Usage data={data} />
-
       <section className="zd-ops-section">
         <h2>Režim</h2>
         <p>

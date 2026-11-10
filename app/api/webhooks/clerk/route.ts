@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 import { USER_ID_RE } from "@/src/files/config";
 import { withScope } from "@/src/files/db/client";
 import { getLibraries, markLibraryForPurge } from "@/src/files/db/libraries";
-import { audit, forgetTermsAcceptance, forgetUserUsage } from "@/src/files/db/usage";
+import { audit, forgetTermsAcceptance } from "@/src/files/db/usage";
 import { filesJson, logFilesError } from "@/src/files/errors";
 import { envOnlyMode } from "@/src/files/guards";
 
@@ -63,7 +63,6 @@ async function scheduleLibraryPurge(id: unknown, kind: "user" | "org"): Promise<
     await withScope([libraryId], async (db) => {
       if (kind === "user") {
         await forgetTermsAcceptance(db, libraryId);
-        await forgetUserUsage(db, libraryId);
       }
       // Most accounts never stored anything: no library row, nothing to mark.
       if ((await getLibraries(db, [libraryId])).length === 0) return;
