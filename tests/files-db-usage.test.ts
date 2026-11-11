@@ -4,7 +4,10 @@ import {
   acceptTerms,
   audit,
   bumpUsage,
+  callUsage,
   computeHoursEstimate,
+  forgetUserUsage,
+  recordToolCall,
   getSystemState,
   hasAcceptedTerms,
   setSystemState,
@@ -132,5 +135,52 @@ describe("audit", () => {
 
   it("the app role may not rewrite history", async () => {
     await expect(scoped([], (db) => db.query("DELETE FROM audit_log"))).rejects.toThrow(/permission denied/);
+  });
+});
+
+describe("tool-call usage", () => {
+  it("counts calls per caller and tool, and sums them per caller", async () => {
+    await scoped([], async (db) => {
+      await recordToolCall(db, "user_calls1", "esbirka_search");
+      await recordToolCall(db, "user_calls1", "esbirka_search");
+      await recordToolCall(db, "user_calls1", "ns_search");
+      await recordToolCall(db, "shared", "ns_search");
+      // Not a caller key or not a tool name: ignored.
+      await recordToolCall(db, "user:x", "ns_search");
+      await recordToolCall(db, "anon", "ns_search; DROP");
+    });
+    await t.owner.query(
+      `INSERT INTO usage_daily (day, scope, tool_calls) VALUES
+         ((now() AT TIME ZONE 'UTC')::date - 10, 'calls:user_calls1:ns_search', 5),
+         ((now() AT TIME ZONE 'UTC')::date - 40, 'calls:user_calls1:ns_search', 100)`,
+    );
+    const usage = await scoped([], (db) => callUsage(db, 30));
+    const today = new Date().toISOString().slice(0, 10);
+    // The per-day series: one slot per day of the window, today last, adding up to the total.
+    for (const u of usage) {
+      expect(u.daily).toHaveLength(30);
+      expect(u.daily.reduce((a, b) => a + b, 0)).toBe(u.calls);
+    }
+    expect(usage.find((u) => u.who === "user_calls1")?.daily[19]).toBe(5); // ten days ago
+    expect(usage.map(({ daily: _daily, ...rest }) => rest)).toEqual([
+      {
+        who: "user_calls1",
+        calls: 8,
+        calls7: 3,
+        activeDays: 2,
+        lastDay: today,
+        tools: [
+          { tool: "ns_search", calls: 6 },
+          { tool: "esbirka_search", calls: 2 },
+        ],
+      },
+      { who: "shared", calls: 1, calls7: 1, activeDays: 1, lastDay: today, tools: [{ tool: "ns_search", calls: 1 }] },
+    ]);
+  });
+
+  it("goes with the account", async () => {
+    await scoped([], (db) => forgetUserUsage(db, "user_calls1"));
+    const usage = await scoped([], (db) => callUsage(db, 365));
+    expect(usage.map((u) => u.who)).toEqual(["shared"]);
   });
 });

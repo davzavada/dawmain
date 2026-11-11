@@ -1,6 +1,7 @@
 "use client";
 
 import { useUser } from "@clerk/nextjs";
+import Link from "next/link";
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { initials } from "./format";
 import { avatarSrc, hasPro } from "./hint";
@@ -61,6 +62,37 @@ function HintedAvatar() {
   );
 }
 
+/**
+ * Whether the signed-in account is an admin named in the deployment settings (GET /api/operator), asked
+ * once per page load and per account. Only shows or hides the "Provoz"
+ * link — the Správa page answers 404 to anyone else on its own.
+ */
+let operatorCheck: { userId: string; result: Promise<boolean> } | null = null;
+
+function useOperator(userId: string | undefined): boolean {
+  const [operator, setOperator] = useState(false);
+  useEffect(() => {
+    if (!userId) return;
+    if (operatorCheck?.userId !== userId) {
+      operatorCheck = {
+        userId,
+        result: fetch("/api/operator", { cache: "no-store" })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((body: unknown) => (body as { operator?: unknown } | null)?.operator === true)
+          .catch(() => false),
+      };
+    }
+    let live = true;
+    void operatorCheck.result.then((ok) => {
+      if (live) setOperator(ok);
+    });
+    return () => {
+      live = false;
+    };
+  }, [userId]);
+  return userId ? operator : false;
+}
+
 function AccountMenu({ zotero }: { zotero: boolean }) {
   const { user } = useUser();
   const { summary } = useZdroje();
@@ -78,6 +110,9 @@ function AccountMenu({ zotero }: { zotero: boolean }) {
   const shown = user ? initials(name) : (hinted ?? initials(name));
   const image = user ? user.imageUrl || null : hintedImage;
   const pro = hasPro(summary);
+  // An admin by role (Clerk's public metadata is readable here) or by the deployment's own list (asked once).
+  const listed = useOperator(user?.id);
+  const operator = listed || user?.publicMetadata?.role === "admin";
 
   useEffect(() => {
     if (user) rememberAccount(initials(name), user.imageUrl || null);
@@ -168,6 +203,13 @@ function AccountMenu({ zotero }: { zotero: boolean }) {
                 <ZIcon name="library" />
                 <span>Zotero</span>
               </button>
+            ) : null}
+            {operator ? (
+              <Link href="/sprava" role="menuitem" className="zd-menu-item" onClick={() => setOpen(false)}>
+                <ZIcon name="users" />
+                <span>Správa</span>
+                <span className="zd-menu-tag">Správce</span>
+              </Link>
             ) : null}
             <button type="button" role="menuitem" className="zd-menu-item" onClick={choose(manageAccount)}>
               <ZIcon name="settings" />
