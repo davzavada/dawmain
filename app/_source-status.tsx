@@ -147,23 +147,30 @@ export function SourceList() {
   const rows = DATABASES.map((db) => toRow(db, answers[db.canaryId]));
   return DATABASE_GROUPS.map((group) => {
     const items = rows.filter((row) => row.group === group);
+    // A group whose every row is gated off carries the lock in its head, where the count would be (as Vlastní zdroje does).
+    const gatedOff = (row: Row) => row.id === GATED_ID && !ukazOn;
+    const groupLocked = items.length > 0 && items.every(gatedOff);
     return (
       <div key={group} className="source-group">
         <div className="source-group-head">
           <span className="source-group-name">{group}</span>
-          <span className="source-group-count">{items.length}</span>
+          {groupLocked ? (
+            <ZIcon name="lock" size={13} className="zd-group-lock zd-group-lock-idle" />
+          ) : (
+            <span className="source-group-count">{items.length}</span>
+          )}
         </div>
         <ul>
           {items.map((row) => {
             const look = LOOK[row.id] ?? { icon: "list", color: "var(--soft)" };
-            if (row.id === GATED_ID && !ukazOn) {
+            if (gatedOff(row)) {
               return (
                 <li key={row.id} className="source zd-row-locked">
                   <Icon name={look.icon} style={{ color: "var(--idle)" }} />
                   <div className="source-name">
                     <span className="source-title">
                       {row.label}
-                      <ZIcon name="lock" size={13} />
+                      {groupLocked ? null : <ZIcon name="lock" size={13} />}
                     </span>
                     <span className="source-desc">Jen po potvrzení. Zapíná ji správce, doktrína se do té doby ve výsledcích neukáže.</span>
                   </div>
