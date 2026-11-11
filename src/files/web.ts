@@ -222,7 +222,7 @@ export async function summaryFor(userId: string, opts: { fresh?: boolean } = {})
       counts: lib.pro && loadedCounts ? (counts[lib.id] ?? null) : null,
     }),
   );
-  return { state: "ok", mode, termsAccepted, libraries };
+  return { state: "ok", mode, termsAccepted, libraries, ukaz: access.ukaz === true };
 }
 
 // ---------------------------------------------------------------------------
