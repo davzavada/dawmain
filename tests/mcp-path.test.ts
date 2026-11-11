@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMcpHandler } from "mcp-handler";
 import type { McpServer } from "@modelcontextprotocol/server";
+import { withGuideHint } from "@/src/mcp/guide-hint";
 import { CALL_BUDGET_MS, registerAllTools, runWithCallClock } from "@/src/mcp/tools";
 import { registerPing } from "@/src/mcp/tools/ping";
 import { registerProbe } from "@/src/mcp/tools/probe";
@@ -32,7 +33,9 @@ type Handler = (...args: unknown[]) => Promise<Record<string, unknown>>;
 function registerTheOldWay(server: McpServer, zotero: boolean): void {
   const target = {
     registerTool(name: string, config: Record<string, unknown>, handler: Handler) {
-      const { outputSchema: _structured, ...rest } = config;
+      const { outputSchema: _structured, ...bare } = config;
+      // The pointer at dawmain_guide in the search tools' descriptions (src/mcp/guide-hint.ts) is part of the boundary.
+      const rest = withGuideHint(name, bare);
       return (server as unknown as { registerTool: (...args: unknown[]) => unknown }).registerTool(
         name,
         rest,

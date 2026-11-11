@@ -16,6 +16,7 @@ import { registerDoctrine } from "./doctrine";
 import { registerFiles } from "./files";
 import { registerZotero } from "./zotero";
 import { zoteroConfigured } from "@/src/zotero/config";
+import { withGuideHint } from "../guide-hint";
 import { trackToolCall } from "../usage";
 
 /**
@@ -120,7 +121,8 @@ async function withinBudget(name: string, run: () => Promise<ToolResult>): Promi
 function textOnly(server: McpServer): McpServer {
   return {
     registerTool(name: string, config: ToolConfig, handler: ToolHandler) {
-      const { outputSchema: _structured, ...rest } = config;
+      const { outputSchema: _structured, ...bare } = config;
+      const rest = withGuideHint(name, bare);
       // A method call on the real server — registerTool relies on `this`.
       return (server as unknown as { registerTool: (...args: unknown[]) => unknown }).registerTool(
         name,
