@@ -47,6 +47,8 @@ export type SummaryResponse =
       termsAccepted: boolean;
       /** The personal library (Pro or not); empty for a banned account. */
       libraries: LibrarySummary[];
+      /** UKAŽ (the doctrine tools) is switched on for this account; the home page shows the row greyed out without it. Absent in older hints: off. */
+      ukaz?: boolean;
     };
 
 /** One row of the modal's document list. */

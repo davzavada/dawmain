@@ -128,7 +128,7 @@ Names follow one pattern: `<zdroj>_search` finds, `<zdroj>_get_*` reads.
 | Czech legislative history — důvodová zpráva, rozdílová tabulka, RIA, platné znění s vyznačením změn, usnesení výborů, the readings | `psp_search` (titles of sněmovní tisky, by `period` or `year`) → `psp_get_tisk {period, number}` (the process with dates + every document, each with its reading call) → `psp_get_text` (`part: 0` = the bill with its důvodová zpráva; `document_id` = an attached PDF/DOCX) |
 | EU legislation | `eurlex_search` (titles/CELEX/ECLI only, NOT full text) → `eurlex_get_document` |
 | EU legislative materials (travaux) | `eurlex_get_history {celex}` — the act's whole dossier: proposal + explanatory memorandum, impact assessments, EESC/CoR opinions, EP/Council positions; or `eurlex_search` with `types: ["proposal", "opinion", …]` |
-| Literature — monographs, commentaries, articles (doctrine) | `doctrine_search` — UKAŽ (Univerzita Karlova, Primo: the UK catalogue + the Central Discovery Index) → `doctrine_get_record {id}` for the record in full: the whole abstract and table of contents |
+| Literature — monographs, commentaries, articles (doctrine; an admin switches UKAŽ on per account) | `doctrine_search` — UKAŽ (Univerzita Karlova, Primo: the UK catalogue + the Central Discovery Index) → `doctrine_get_record {id}` for the record in full: the whole abstract and table of contents |
 | The user's own books, commentaries, articles and templates (Vlastní soubory — Pro, personal sign-in) | `files_search` → `files_get_document` (the outline first, then `section` / `mn` / `footnote`); `files_list` lists the documents |
 | The user's own Zotero library — references, notes, annotations, PDFs (Pro, personal sign-in, Zotero connected; only where the deployment offers the tools) | `zotero_search` → `zotero_get_item {key}` → `zotero_get_text {key}`; `zotero_cite` formats citations; `zotero_list` names the libraries, collections, tags and saved searches; `zotero_save` adds one new item when the user asks (connected with „Číst a ukládat“) |
 | A source misbehaves | `dawmain_probe_sources` |
@@ -556,6 +556,12 @@ headings, a taste of the abstract and contents, the link to the record and its `
 whole: the full abstract, the table of contents, subject headings, identifiers and
 access links. Neither fetches the text of the work.
 
+**Answered "není zapnutá"? Stop.** UKAŽ is switched on per account by the Dawmain admin.
+If a `doctrine_*` answer says it is not enabled for this account, never call
+`doctrine_*` again in the conversation, continue with the official sources and say
+nothing more about it unless the user asked for literature — then tell them it is not
+switched on for their account and that the admin can enable it.
+
 | Chci | Parametr |
 |---|---|
 | literaturu k tématu | `query` — or `queries: ["genocide intent", "genocida úmysl"]` for both languages at once |
@@ -843,7 +849,9 @@ Stopping the search never shortens the reading: what you cite, you have read who
    add `doctrine_search` too: the UKAŽ catalogue gives the works worth going through
    next (see **Další zdroje** in the memo); when the case law is thin or the topic is
    international law, doctrine may carry the argument itself — the Central Discovery
-   Index carries the international journals and series too.
+   Index carries the international journals and series too. UKAŽ is switched on per
+   account: an answer that it is not enabled ends `doctrine_*` for the conversation,
+   silently, and the memo then has no **Další zdroje**.
 3. **Screen and aim.** From the hit lines and previews pick the decisions that may
    decide the issue; `find` in the doubtful ones; a court-specific search where the
    fan-out was too coarse.
@@ -887,4 +895,5 @@ the UKAŽ catalogue (`doctrine_search`) most relevant to the question that the m
 not already use: author, title, year, publisher and the record link, one line each,
 with a few words on why each is worth reading. They are catalogue records, not texts
 you read — never summarise what they say from an abstract. Leave out works the user's
-own library already holds. Nothing relevant found: leave the section out.
+own library already holds. Nothing relevant found, or `doctrine_*` refused for this
+account: leave the section out and say nothing about it.

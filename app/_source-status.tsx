@@ -8,6 +8,8 @@ import {
   type DatabaseStatus,
 } from "@/src/mcp/databases";
 import { Icon, type IconName } from "./_icons";
+import { ZIcon } from "./_zdroje/icons";
+import { useZdroje } from "./_zdroje/store";
 
 /**
  * The source checks in the browser: the summary in the header and the
@@ -135,8 +137,13 @@ function host(href: string): string {
   return new URL(href).host;
 }
 
+/** The row of the literature catalogue (UKAŽ): switched on per account by an admin, greyed out with a lock until then, as the own sources are. */
+const GATED_ID = "primo";
+
 export function SourceList() {
   const answers = useStatuses();
+  const { summary } = useZdroje();
+  const ukazOn = summary?.state === "ok" && summary.ukaz === true;
   const rows = DATABASES.map((db) => toRow(db, answers[db.canaryId]));
   return DATABASE_GROUPS.map((group) => {
     const items = rows.filter((row) => row.group === group);
@@ -149,6 +156,20 @@ export function SourceList() {
         <ul>
           {items.map((row) => {
             const look = LOOK[row.id] ?? { icon: "list", color: "var(--soft)" };
+            if (row.id === GATED_ID && !ukazOn) {
+              return (
+                <li key={row.id} className="source zd-row-locked">
+                  <Icon name={look.icon} style={{ color: "var(--idle)" }} />
+                  <div className="source-name">
+                    <span className="source-title">
+                      {row.label}
+                      <ZIcon name="lock" size={13} />
+                    </span>
+                    <span className="source-desc">Jen po potvrzení. Zapíná ji správce, doktrína se do té doby ve výsledcích neukáže.</span>
+                  </div>
+                </li>
+              );
+            }
             return (
               <li key={row.id} className="source">
                 <Icon name={look.icon} style={{ color: look.color }} />
