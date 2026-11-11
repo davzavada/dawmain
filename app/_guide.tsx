@@ -2,6 +2,7 @@
 
 import { useEffect, useSyncExternalStore, type ReactNode } from "react";
 import { CopyField } from "./_copy";
+import { claudeInstallLink } from "./_install-link";
 import { platformFromHash, setPlatform, usePlatform, type PlatformId } from "./_platform";
 
 /**
@@ -60,9 +61,18 @@ const PLATFORMS: Platform[] = [
         body: (
           <>
             <p>
-              Na <a href="https://claude.ai/settings/connectors">claude.ai</a> otevřete{" "}
-              <strong>Nastavení → Konektory</strong> a zvolte{" "}
-              <strong>Přidat vlastní konektor</strong>. Jako název napište <em>Dawmain</em> a do
+              Klikněte na tlačítko. Na claude.ai se otevře okno{" "}
+              <strong>Přidat vlastní konektor</strong> s vyplněným názvem i adresou – stačí je
+              potvrdit.
+            </p>
+            <a className="button" href={claudeInstallLink(endpoint)} target="_blank" rel="noopener noreferrer">
+              Přidat Dawmain do Claude
+            </a>
+            <p>
+              Kdyby se okno neotevřelo: na{" "}
+              <a href="https://claude.ai/settings/connectors">claude.ai</a> otevřete{" "}
+              <strong>Nastavení → Konektory</strong>, zvolte{" "}
+              <strong>Přidat vlastní konektor</strong>, jako název napište <em>Dawmain</em> a do
               pole s adresou vložte:
             </p>
             <CopyField value={endpoint} label="Zkopírovat adresu" />

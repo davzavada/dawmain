@@ -29,6 +29,9 @@ interface Call {
 let calls: Call[];
 let sessions: Map<string, { variant: Variant; pageSize: number } | null>;
 let nextSession: number;
+let formGets = 0;
+/** The next criteria POST answers HTTP 500 — what a form state the server no longer accepts gets. */
+let postFailsOnce = false;
 /** What the server answers for each full-text value (absent = 30 hits). */
 let catalog: Record<string, Variant>;
 /** Kept sessions the server has forgotten (expiry). */
@@ -73,6 +76,8 @@ beforeEach(() => {
   calls = [];
   sessions = new Map();
   nextSession = 0;
+  formGets = 0;
+  postFailsOnce = false;
   catalog = {};
   expired = new Set();
   bannerOverride = null;
@@ -95,16 +100,23 @@ beforeEach(() => {
     if (init.signal?.aborted) throw init.signal.reason;
     const sessionId = /ASP\.NET_SessionId=([^;]+)/.exec(call.cookie)?.[1];
     if (url.pathname.endsWith("/Search.aspx") && call.method === "GET") {
-      const id = `s${nextSession++}`;
-      sessions.set(id, null);
-      return html(FORM, { headers: { "set-cookie": `ASP.NET_SessionId=${id}; path=/` } });
+      // The form GET's own session is never used: the POST opens the one the results live in.
+      return html(FORM, { headers: { "set-cookie": `ASP.NET_SessionId=form${formGets++}; path=/` } });
     }
     if (url.pathname.endsWith("/Search.aspx") && call.method === "POST") {
+      if (postFailsOnce) {
+        postFailsOnce = false;
+        return new Response("Validation of viewstate MAC failed", { status: 500 });
+      }
       const text = call.body?.get("ctl00$MainContent$text") ?? "";
       const variant = catalog[text] ?? { base: 1000, total: 30 };
       if (!variant.total) return html(ZERO_HITS);
-      sessions.set(sessionId as string, { variant, pageSize: Number(call.body?.get("ctl00$MainContent$resultsPageSize")) });
-      return new Response(null, { status: 302, headers: { location: "/Search/Results.aspx" } });
+      const id = sessionId ?? `s${nextSession++}`;
+      sessions.set(id, { variant, pageSize: Number(call.body?.get("ctl00$MainContent$resultsPageSize")) });
+      return new Response(null, {
+        status: 302,
+        headers: { location: "/Search/Results.aspx", ...(sessionId ? {} : { "set-cookie": `ASP.NET_SessionId=${id}; path=/` }) },
+      });
     }
     if (url.pathname.endsWith("/Results.aspx")) {
       const state = sessionId ? sessions.get(sessionId) : null;
@@ -212,11 +224,11 @@ describe("paging rides the search's own session", () => {
       "POST Search.aspx",
       "GET Results.aspx",
       "GET Results.aspx?page=1",
-      "GET Search.aspx",
+      // The form state is kept: the fallback is POST + results, no form GET.
       "POST Search.aspx",
       "GET Results.aspx?page=1",
     ]);
-    expect(calls[6].cookie).toContain("s1");
+    expect(calls[5].cookie).toContain("s1");
     expect(second.content[0].text).toContain("21. usnesení sp. zn. I. ÚS 1020/26");
   });
 
@@ -225,7 +237,7 @@ describe("paging rides the search's own session", () => {
     await tools.us_search(args({ query: "svoboda projevu" }));
     bannerOverride = 31;
     await tools.us_search(args({ query: "svoboda projevu", page: 1 }));
-    expect(kinds().slice(3)).toEqual(["GET Results.aspx?page=1", "GET Search.aspx", "POST Search.aspx", "GET Results.aspx?page=1"]);
+    expect(kinds().slice(3)).toEqual(["GET Results.aspx?page=1", "POST Search.aspx", "GET Results.aspx?page=1"]);
   });
 
   it("a kept session serving another page's rows (same total, hits present) is not trusted", async () => {
@@ -233,7 +245,7 @@ describe("paging rides the search's own session", () => {
     await tools.us_search(args({ query: "svoboda projevu" }));
     ignorePageOnce = true;
     const second = await tools.us_search(args({ query: "svoboda projevu", page: 1 }));
-    expect(kinds().slice(3)).toEqual(["GET Results.aspx?page=1", "GET Search.aspx", "POST Search.aspx", "GET Results.aspx?page=1"]);
+    expect(kinds().slice(3)).toEqual(["GET Results.aspx?page=1", "POST Search.aspx", "GET Results.aspx?page=1"]);
     expect(second.content[0].text).toContain("21. usnesení sp. zn. I. ÚS 1020/26");
     expect(second.content[0].text).not.toContain("1. usnesení sp. zn. I. ÚS 1000/26");
   });
@@ -246,11 +258,55 @@ describe("paging rides the search's own session", () => {
       "GET Search.aspx",
       "POST Search.aspx",
       "GET Results.aspx",
-      "GET Search.aspx",
       "POST Search.aspx",
       "GET Results.aspx?page=1",
     ]);
-    expect(calls[5].cookie).not.toBe(calls[2].cookie);
+    expect(calls[4].cookie).not.toBe(calls[2].cookie);
+  });
+});
+
+describe("the form state is kept across searches", () => {
+  it("a second search sends no form GET, and no cookie of the form's", async () => {
+    const tools = await loadTools();
+    await tools.us_search(args({ query: "alfa" }));
+    await tools.us_search(args({ query: "beta" }));
+    expect(kinds()).toEqual(["GET Search.aspx", "POST Search.aspx", "GET Results.aspx", "POST Search.aspx", "GET Results.aspx"]);
+    expect(calls.filter((call) => call.method === "POST").map((call) => call.cookie)).toEqual(["", ""]);
+    expect(calls[4].cookie).toBe("ASP.NET_SessionId=s1");
+  });
+
+  it("zero hits on a kept form are confirmed on a fresh one before they are reported", async () => {
+    catalog = { nula: { base: 0, total: 0 } };
+    const tools = await loadTools();
+    await tools.us_search(args({ query: "alfa" }));
+    const result = await tools.us_search(args({ query: "nula" }));
+    expect(kinds().slice(3)).toEqual(["POST Search.aspx", "GET Search.aspx", "POST Search.aspx"]);
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent?.total).toBe(0);
+  });
+
+  it("zero hits on a form this search loaded itself are not asked twice", async () => {
+    catalog = { nula: { base: 0, total: 0 } };
+    const tools = await loadTools();
+    await tools.us_search(args({ query: "nula" }));
+    expect(kinds()).toEqual(["GET Search.aspx", "POST Search.aspx"]);
+  });
+
+  it("a kept form NALUS answers with HTTP 500 is replaced and the search still answers", async () => {
+    const tools = await loadTools();
+    await tools.us_search(args({ query: "alfa" }));
+    postFailsOnce = true;
+    const result = await tools.us_search(args({ query: "beta" }));
+    expect(kinds().slice(3)).toEqual(["POST Search.aspx", "GET Search.aspx", "POST Search.aspx", "GET Results.aspx"]);
+    expect(result.content[0].text).toContain("30 decisions:");
+  });
+
+  it("an HTTP 500 on a fresh form is the answer — no second form", async () => {
+    const tools = await loadTools();
+    postFailsOnce = true;
+    const result = await tools.us_search(args({ query: "alfa" }));
+    expect(result.isError).toBe(true);
+    expect(kinds()).toEqual(["GET Search.aspx", "POST Search.aspx"]);
   });
 });
 
@@ -274,17 +330,18 @@ describe("multi-variant paging", () => {
     return interleave(lists, (sz) => sz).slice(page * 20, page * 20 + 20);
   };
 
-  it("page 2 of 3 variants costs 9 requests (was 27), page 3 next costs none — same hits as the 20-row pages", async () => {
+  it("page 2 of 3 variants costs 7 requests (one shared form GET; was 27), page 3 next costs none — same hits as the 20-row pages", async () => {
     const tools = await loadTools();
     const queries = ["alfa beta", "gama delta", "epsilon zeta"];
     const page2 = await tools.us_search(args({ queries, page: 2 }));
-    expect(calls).toHaveLength(9);
+    expect(calls).toHaveLength(7);
+    expect(kinds().filter((kind) => kind === "GET Search.aspx")).toHaveLength(1);
     expect(calls.filter((call) => call.method === "POST").every((call) => call.body?.get("ctl00$MainContent$resultsPageSize") === "80")).toBe(true);
     const items = (page2.structuredContent?.items as Array<{ sz: string }>).map((hit) => hit.sz);
     expect(items).toEqual(expectedPage(queries, 2));
 
     const page3 = await tools.us_search(args({ queries, page: 3 }));
-    expect(calls).toHaveLength(9);
+    expect(calls).toHaveLength(7);
     expect((page3.structuredContent?.items as Array<{ sz: string }>).map((hit) => hit.sz)).toEqual(expectedPage(queries, 3));
   });
 
@@ -307,15 +364,16 @@ describe("multi-variant paging", () => {
     );
   });
 
-  it("a zero-hit variant costs 2 requests once, then nothing; a 15-hit one is not re-read for page 1", async () => {
+  it("a zero-hit variant costs its POST once, then nothing; a 15-hit one is not re-read for page 1", async () => {
     const tools = await loadTools();
     await tools.us_search(args({ queries: ["alfa beta", "nula", "malo"] }));
-    expect(calls).toHaveLength(3 + 2 + 3);
+    // One form GET for the three variants, then POST + results (the zero-hit one: POST only).
+    expect(calls).toHaveLength(1 + 2 + 1 + 2);
     const page1 = await tools.us_search(args({ queries: ["alfa beta", "nula", "malo"], page: 1 }));
     // Only "alfa beta" is read again (40 rows); "nula" and "malo" are known.
-    const fresh = calls.slice(8);
-    expect(fresh).toHaveLength(3);
-    expect(fresh[1].body?.get("ctl00$MainContent$text")).toBe("alfa beta");
+    const fresh = calls.slice(6);
+    expect(fresh).toHaveLength(2);
+    expect(fresh[0].body?.get("ctl00$MainContent$text")).toBe("alfa beta");
     expect(page1.content[0].text).toContain('Variants: "alfa beta" 150 · "nula" 0 · "malo" 15');
   });
 

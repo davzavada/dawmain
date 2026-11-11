@@ -1,6 +1,25 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clerkConfigured, tokenMatches } from "@/src/mcp/config";
-import { authMode, verifyRequestAuth } from "@/src/mcp/auth";
+import { authMode, resetVerifiedTokens, verifyRequestAuth } from "@/src/mcp/auth";
+
+/** Clerk's backend, scripted: which tokens it accepts, and how often it was asked. */
+const clerk = vi.hoisted(() => ({ accepted: new Set<string>(), asked: [] as string[], down: false }));
+vi.mock("@clerk/nextjs/server", () => ({
+  clerkClient: async () => ({
+    authenticateRequest: async (request: Request) => {
+      const token = (request.headers.get("authorization") ?? "").replace(/^Bearer /, "");
+      clerk.asked.push(token);
+      if (clerk.down) throw new Error("Clerk unreachable");
+      const ok = clerk.accepted.has(token);
+      return {
+        isAuthenticated: ok,
+        reason: "token-invalid",
+        message: "",
+        toAuth: () => ({ isAuthenticated: ok, tokenType: "oauth_token", clientId: "client_1", scopes: ["profile"], userId: "user_1" }),
+      };
+    },
+  }),
+}));
 
 /**
  * The endpoint's gate (src/mcp/auth.ts): shared token + Clerk OAuth. These
@@ -83,5 +102,58 @@ describe("verifyRequestAuth + authMode", () => {
     expect(authMode()).toBe("oauth+token");
     delete process.env.MCP_BEARER_TOKEN;
     expect(authMode()).toBe("oauth");
+  });
+});
+
+describe("verified OAuth tokens are remembered for a minute", () => {
+  const oauth = (token: string) => new Request("http://localhost/api/mcp", { headers: { authorization: `Bearer ${token}` } });
+
+  beforeEach(() => {
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = "pk_test_x";
+    process.env.CLERK_SECRET_KEY = "sk_test_x";
+    clerk.accepted = new Set(["oat_good"]);
+    clerk.asked = [];
+    clerk.down = false;
+    resetVerifiedTokens();
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+    delete process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+    delete process.env.CLERK_SECRET_KEY;
+  });
+
+  it("asks Clerk once for a token it accepted, and returns the same identity", async () => {
+    const first = await verifyRequestAuth(oauth("oat_good"), "oat_good");
+    const second = await verifyRequestAuth(oauth("oat_good"), "oat_good");
+    expect(first).toMatchObject({ clientId: "client_1", extra: { userId: "user_1" } });
+    expect(second).toEqual(first);
+    expect(clerk.asked).toEqual(["oat_good"]);
+  });
+
+  it("asks again after 60 s — a revoked token stops working within the minute", async () => {
+    vi.useFakeTimers();
+    await verifyRequestAuth(oauth("oat_good"), "oat_good");
+    clerk.accepted.clear();
+    vi.advanceTimersByTime(59_000);
+    expect(await verifyRequestAuth(oauth("oat_good"), "oat_good")).toBeDefined();
+    vi.advanceTimersByTime(2_000);
+    expect(await verifyRequestAuth(oauth("oat_good"), "oat_good")).toBeUndefined();
+    expect(clerk.asked).toHaveLength(2);
+  });
+
+  it("never remembers a rejection, a Clerk failure, or another token", async () => {
+    expect(await verifyRequestAuth(oauth("oat_bad"), "oat_bad")).toBeUndefined();
+    clerk.accepted.add("oat_bad");
+    expect(await verifyRequestAuth(oauth("oat_bad"), "oat_bad")).toBeDefined();
+
+    clerk.down = true;
+    expect(await verifyRequestAuth(oauth("oat_other"), "oat_other")).toBeUndefined();
+    clerk.down = false;
+    expect(await verifyRequestAuth(oauth("oat_other"), "oat_other")).toBeUndefined();
+    expect(clerk.asked).toEqual(["oat_bad", "oat_bad", "oat_other", "oat_other"]);
   });
 });

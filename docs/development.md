@@ -32,7 +32,7 @@ Uživatelský popis je v [README](../README.md).
 | `zotero_list` | Zotero | knihovny (osobní + skupiny klíče), kolekce a štítky; `query`, `limit` (≤ 100), `page` |
 | `dawmain_ping` | — | které nasazení odpovědělo |
 | `dawmain_probe_sources` | — | diagnostika všech upstreamů z nasazené funkce; `include_raw` pro záchyt fixtures, `discover` pro hledání neověřených endpointů |
-| `dawmain_guide` | — | rešeršní návod (`skills/dawmain-reserse/SKILL.md` bez front matter) vcelku, čtený ze stromu repa za běhu (`outputFileTracingIncludes` v `next.config.ts` ho přibalí do funkce); instrukce serveru říkají modelu zavolat ho jednou na začátku každé rešerše — skill v claude.ai tak nikdo instalovat nemusí a každá konverzace čte nasazenou verzi; test hlídá velikost pod `SKILL_MAX_CHARS` |
+| `dawmain_guide` | — | rešeršní návod (`skills/dawmain-reserse/SKILL.md` bez front matter) v jedné odpovědi, přizpůsobený volajícímu (`tailorManual`: sekce zdrojů, které účet nemá — Vlastní soubory, Zotero, UKAŽ — se vynechají a poznámka pod nadpisem říká jejich nástroje nevolat; pravidla jsou táž jako v branách nástrojů, při výpadku Clerku se nevynechá nic), čtený ze stromu repa za běhu (`outputFileTracingIncludes` v `next.config.ts` ho přibalí do funkce); instrukce serveru říkají modelu zavolat ho jednou na začátku každé rešerše — skill v claude.ai tak nikdo instalovat nemusí a každá konverzace čte nasazenou verzi; test hlídá velikost pod `SKILL_MAX_CHARS` |
 
 Nástroje `files_*` sáhnou do databáze až po třech kontrolách, které se jí
 nedotknou, v tomto pořadí: režim z env (`FILES_MODE`) → přihlášení OAuth
@@ -267,8 +267,13 @@ proto v něm žije to, co se ladí často.
 Model ho dostane od konektoru samotného: instrukce serveru (ty čte na
 začátku každé konverzace se zapnutým konektorem, stejně jako popisy
 nástrojů) nesou spouštěcí fráze ze skillu a pokyn zavolat `dawmain_guide`
-jednou před první rešerší; nástroj vrátí celý návod (~57 tis. znaků, ~15
+jednou před první rešerší; nástroj vrátí návod (celý ~57 tis. znaků, ~15
 tis. tokenů — zhruba jedna stránka rozsudku) ve verzi, která je nasazená.
+Účet bez Vlastních souborů, Zotera a UKAŽ — tedy většina — dostane návod
+bez jejich tří sekcí (~43 tis. znaků) s poznámkou tyto nástroje nevolat:
+celý návod mu jinak v prvním kole každé rešerše ukládal tři volání
+(`files_search`, `zotero_search`, `doctrine_search`), která mohla odpovědět
+jen „pro tento účet není“. Stažený skill (`/dawmain-reserse.md`) zůstává celý.
 Nic se neinstaluje a nic nezastarává; merge do main = aktualizovaný návod
 pro všechny. Soubor se do funkce dostane přes `outputFileTracingIncludes`
 (route `/dawmain-reserse.md` pro stažení ho čte při buildu, nástroj za běhu).
@@ -282,6 +287,15 @@ má, nese si vlastní kopii, kterou musí sám obnovovat.
 - Neměnná data se cachují per warm instance: metadata a historie znění
   e-Sbírky (10 min), NSS handshake (10 min), texty dokumentů (10 min)
   a výsledky hledání (5 min).
+- NALUS: stav formuláře (`__VIEWSTATE` a spol.) se drží 10 min a sdílí ho
+  všechna hledání instance. Živě ověřeno (2026-11): jeden stav odpoví na
+  libovolný počet POSTů s kritérii — souběžně, bez cookie z GETu formuláře
+  i po 11 minutách — a session otevře NALUS až na POSTu. Hledání tak stojí
+  POST + výsledky místo formulář + POST + výsledky (měřeno 1,7 s místo
+  4,6 s) a tři varianty na studené instanci sdílí jeden GET formuláře.
+  Odpověď 200 (nula shod) nebo HTTP chyba na stavu, který si volání samo
+  nenačetlo, se nejdřív zopakuje na čerstvém formuláři; teprve ta druhá se
+  hlásí.
 - NS: fulltext hledá v celé databázi a řadí se podle relevance
   (`SearchOrder=1`). Dřív se používalo pořadí pohledu (`SearchOrder=4`), což
   je pořadí interních UNID — prvních 20 z 1 501 shod byla náhodná směs let
@@ -337,7 +351,12 @@ Endpoint přijímá dvě credentials naráz (stačí kterákoli); logika žije v
    `src/mcp/auth.ts`, ne přes `auth()` z middlewaru — takže na `proxy.ts`
    nezávisí. `proxy.ts` (Clerk middleware na stránkách, `/api` a `/__clerk`;
    bez `protect()`, takže nic nezamyká) slouží stránkám (nabídka účtu); bez
-   klíčů je no-op.
+   klíčů je no-op. Přijatý token se pamatuje 60 s na instanci (podle
+   SHA-256, jen přijetí, nikdy odmítnutí): token Clerku je neprůhledný a
+   jeho ověření je dotaz na backend API Clerku, který by bezstavový
+   transport platil u každého HTTP požadavku (initialize, tools/list, každé
+   tools/call). Odvolaný nebo propadlý token tak platí nejvýš o minutu déle
+   — stejnou minutu, po kterou se cachuje přístup účtu.
 2. **Sdílený přístupový kód** (`MCP_BEARER_TOKEN`) — původní schéma,
    ponechané pro existující klienty; token se přijímá z `Authorization`,
    `X-API-Key` i `cf-aig-authorization` (stačí, když sedí kterákoli).

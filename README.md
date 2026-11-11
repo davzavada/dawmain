@@ -63,8 +63,11 @@ a nástroje `zotero_*` se objeví, až bude Zotero na webu zapnuté.
 https://dawmain.davidzavada.cz/api/mcp
 ```
 
-V aplikaci claude.ai: **Nastavení → Konektory → Přidat vlastní konektor** a
-vložit adresu výše.
+V Claude stačí
+[tento odkaz](https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=Dawmain&connectorUrl=https%3A%2F%2Fdawmain.davidzavada.cz%2Fapi%2Fmcp):
+otevře okno „Přidat vlastní konektor“ s vyplněným názvem i adresou, které jen
+potvrdíte. Ručně: **Nastavení → Konektory → Přidat vlastní konektor** a vložit
+adresu výše. Návod pro ChatGPT je na [webu](https://dawmain.davidzavada.cz/#chatgpt).
 
 Po přidání konektoru se otevře přihlášení - stačí registrace e-mailem.
 Starší přístupové kódy fungují dál.
