@@ -758,6 +758,53 @@ export function knownNalusTotal(input: NalusSearchInput): number | undefined {
   }
 }
 
+/**
+ * The search form's WebForms state (__VIEWSTATE and friends), kept for 10
+ * minutes and shared by every search of the instance. Measured live
+ * (2026-11): one state answers any number of criteria POSTs — in parallel,
+ * with no cookie from the form GET, 11 minutes later — and NALUS opens the
+ * session on the POST itself (Set-Cookie on its 302). So a search costs
+ * POST + results GET instead of form GET + POST + results GET (a third of
+ * its upstream time), and three variants starting together on a cold
+ * instance share one form GET instead of sending three.
+ */
+const FORM_TTL_MS = 10 * 60 * 1000;
+const FORM_KEY = "form";
+interface KeptForm {
+  state: Record<string, string>;
+  loadedAt: number;
+}
+const formCache = new TtlCache<KeptForm>(FORM_TTL_MS, 1);
+
+function loadForm(deadlineAt: number | undefined): Promise<KeptForm> {
+  return formCache.through(FORM_KEY, async () => {
+    const response = await nalusFetch(`${BASE}/Search.aspx`, {}, deadlineAt);
+    return { state: parseFormState(await response.text()), loadedAt: Date.now() };
+  });
+}
+
+/** The criteria POST. 302 → results in the session it opened; 200 → the form again. */
+async function postCriteria(
+  state: Record<string, string>,
+  session: CookieSession,
+  input: NalusSearchInput,
+  pageSize: number,
+  deadlineAt: number | undefined,
+): Promise<Response> {
+  const response = await nalusFetch(
+    `${BASE}/Search.aspx`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", referer: `${BASE}/Search.aspx` },
+      body: buildNalusForm(state, input, pageSize).toString(),
+      redirect: "manual",
+    },
+    deadlineAt,
+  );
+  session.absorb(response);
+  return response;
+}
+
 export async function searchNalus(
   input: NalusSearchInput,
   page: number,
@@ -808,35 +855,44 @@ async function runSearchNalus(
     sessionCache.delete(sessionKey);
   }
 
-  const session = new CookieSession();
-
-  // Step 1: the form — fresh viewstate every time (the tokens are per-GET).
-  const formResponse = await nalusFetch(`${BASE}/Search.aspx`, {}, deadlineAt);
-  session.absorb(formResponse);
-  const state = parseFormState(await formResponse.text());
-
-  // Step 2: the criteria POST. 302 → results in session; 200 → zero hits.
-  const postResponse = await nalusFetch(
-    `${BASE}/Search.aspx`,
-    {
-      method: "POST",
-      headers: {
-        "content-type": "application/x-www-form-urlencoded",
-        cookie: session.header(),
-        referer: `${BASE}/Search.aspx`,
-      },
-      body: buildNalusForm(state, input, pageSize).toString(),
-      redirect: "manual",
+  // Steps 1 + 2: the criteria POST on the kept form state. A 200 (or an
+  // HTTP error) on a state this call did not see loaded is not yet an answer
+  // — it may be the state that aged — so it is asked once more on a fresh
+  // form; only that second answer is classified.
+  const started = Date.now();
+  let form = await loadForm(deadlineAt);
+  let session = new CookieSession();
+  let postResponse: Response | null = await postCriteria(form.state, session, input, pageSize, deadlineAt).catch(
+    (error: unknown) => {
+      if (form.loadedAt >= started || !(error instanceof SourceError) || error.kind !== "UPSTREAM_ERROR") throw error;
+      return null;
     },
-    deadlineAt,
   );
-  session.absorb(postResponse);
+  if (postResponse?.status !== 302 && form.loadedAt < started) {
+    await postResponse?.body?.cancel().catch(() => undefined);
+    formCache.delete(FORM_KEY);
+    form = await loadForm(deadlineAt);
+    session = new CookieSession();
+    postResponse = await postCriteria(form.state, session, input, pageSize, deadlineAt);
+  }
+  if (!postResponse) throw new SourceError(SOURCE, "UPSTREAM_ERROR", "NALUS did not answer the search.", "Try again in a minute.");
   if (postResponse.status !== 302) {
     classifyNalusPostBody(await postResponse.text());
     totalCache.set(memoKey("nalus-total", [input]), 0);
     return { hits: [], total: 0, empty: true };
   }
   await postResponse.body?.cancel().catch(() => undefined);
+  if (!session.size) {
+    // The results live in the session the POST opens; without its cookie
+    // there is nothing to read them from.
+    formCache.delete(FORM_KEY);
+    throw new SourceError(
+      SOURCE,
+      "SESSION_EXPIRED",
+      "NALUS accepted the search without opening a session.",
+      "Call again — the next search starts from a fresh form; if it persists, run dawmain_probe_sources (canary 'nalus').",
+    );
+  }
 
   // Step 3: the results page (0-indexed), same session.
   const resultsResponse = await nalusFetch(

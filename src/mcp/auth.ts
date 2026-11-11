@@ -5,7 +5,9 @@ import {
   generateClerkProtectedResourceMetadata,
 } from "@clerk/mcp-tools/server";
 import type { AuthInfo } from "@modelcontextprotocol/server";
+import { createHash } from "node:crypto";
 import { getPublicOrigin } from "mcp-handler";
+import { TtlCache } from "@/src/sources/shared/cache";
 import { clerkConfigured, getBearerToken, getClerkPublishableKey, tokenMatches } from "./config";
 
 /**
@@ -65,6 +67,35 @@ export function authMode(): AuthMode {
 }
 
 /**
+ * OAuth tokens Clerk accepted in the last minute, by SHA-256 of the token
+ * (the token itself is never a key anyone could read out of a heap dump).
+ *
+ * A Clerk access token is opaque: verifying one is a round trip to Clerk's
+ * backend API, and the stateless transport pays it on EVERY HTTP request —
+ * initialize, notifications/initialized, tools/list and each tools/call, so
+ * a research of thirty calls verified the same token thirty-odd times
+ * before any upstream was asked. One verification per token and minute per
+ * warm instance takes that off every call after the first.
+ *
+ * Only acceptances are kept, never a rejection (a token rejected during a
+ * Clerk hiccup must work on the next request). The price is that a token
+ * revoked or expired at Clerk keeps working here for up to 60 s — the same
+ * minute the account's access (Pro, ban, feature switches) is already
+ * cached for in src/files/access.ts.
+ */
+const VERIFIED_TTL_MS = 60_000;
+let verifiedTokens = new TtlCache<AuthInfo>(VERIFIED_TTL_MS, 500);
+
+function tokenKey(token: string): string {
+  return createHash("sha256").update(token).digest("base64");
+}
+
+/** Tests: forget every verified token. */
+export function resetVerifiedTokens(): void {
+  verifiedTokens = new TtlCache<AuthInfo>(VERIFIED_TTL_MS, 500);
+}
+
+/**
  * The `verifyToken` callback for `withMcpAuth`. Checks EVERY header the
  * shared secret may ride in, not just the first: a client that also sends an
  * unrelated Authorization header must not be locked out when the real token
@@ -86,6 +117,9 @@ export async function verifyRequestAuth(
     }
   }
   if (bearerToken && clerkConfigured()) {
+    const key = tokenKey(bearerToken);
+    const known = verifiedTokens.get(key);
+    if (known) return known;
     try {
       // authenticateRequest (instead of the middleware-backed auth()) keeps
       // verification self-contained in this route AND surfaces the concrete
@@ -97,7 +131,9 @@ export async function verifyRequestAuth(
         console.warn(`Clerk rejected the OAuth token: ${state.reason ?? "?"} — ${state.message ?? ""}`);
         return undefined;
       }
-      return verifyClerkToken(state.toAuth(), bearerToken) ?? undefined;
+      const info = verifyClerkToken(state.toAuth(), bearerToken) ?? undefined;
+      if (info) verifiedTokens.set(key, info);
+      return info;
     } catch (error) {
       // A throw means something operational (Clerk unreachable, bad secret
       // key) rather than a bad token. Either way: 401.
