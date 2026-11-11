@@ -36,4 +36,10 @@ export interface Access {
    * `features.zotero` not switched off.
    */
   zotero: boolean;
+  /**
+   * May use the doctrine tools (doctrine_*, UKAŽ): switched on by an admin,
+   * `publicMetadata.features.ukaz === true`. Off until then, Pro or not.
+   * Optional so older fixtures need not mention it; absent means off.
+   */
+  ukaz?: boolean;
 }

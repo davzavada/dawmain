@@ -458,7 +458,8 @@ dalšího kromě tří proměnných Zotera na konci tabulky). Po změně Redeplo
 | `FILES_USER_HASH_SECRET` | klíč HMAC pro pseudonym nahrávajícího, který dostává AI Gateway k rozpočítání spotřeby (`gateway.user`, čte `src/files/ingest.ts`); dlouhý náhodný řetězec. Změna klíče = nové pseudonymy v přehledu Gateway | `CLERK_SECRET_KEY` |
 | `FILES_GLOBAL_MAX_PAGES` | strop stran pro celou instalaci | 30 000 |
 | `FILES_PERSONAL_PAGES` | kvóta osobní knihovny (stran) | 3 000 |
-| `FILES_OPERATOR_IDS` | Clerk `user_…` oddělená čárkou — přístup na `/vlastni-zdroje/provoz` | — |
+| `FILES_OPERATOR_IDS` | Clerk `user_…` oddělená čárkou — přístup na `/vlastni-zdroje/provoz` (a zároveň správce na `/sprava`) | — |
+| `ADMIN_USER_IDS` | Clerk `user_…` oddělená čárkou — správci na `/sprava` bez ohledu na Clerk: první správce a cesta zpět. Další správce se povyšují na stránce Správa (`publicMetadata.role = "admin"`) | — |
 | `FILES_AI_BUDGET_USD` | klouzavý 30denní rozpočet AI v celých USD; nad ním jen heuristiky | 4 |
 | `FILES_GLOBAL_UPLOADS_PER_DAY` | nahrání za den ve všech knihovnách dohromady | 200 |
 | `FILES_CPU_MS_DAY` | CPU zpracování (nahrání, zpracování, přeindexování) za den v ms | 600 000 (10 min) |
@@ -939,3 +940,22 @@ tělo 403 „Invalid key“ a host přesměrování `/file` (pak zúžit
    nejvýš jednou za hodinu, mimo Clerk) čtou ten samý seznam.
 5. Anotace, `isoDate`, `find`/stránkovací popisy a `fail()` ber
    z `src/mcp/tools/shared.ts`, nekopíruj je.
+
+## Správa (`/sprava`)
+
+Stránka jen pro správce (jinak 404): účty z Clerku s rolí, Pro, přepínači
+funkcí a využitím nástrojů. Vstup je v menu avataru vpravo nahoře (položka
+Správa). Správce je účet z `ADMIN_USER_IDS` / `FILES_OPERATOR_IDS` nebo s
+`publicMetadata.role === "admin"`; každé načtení i každá akce to ověřuje znovu
+(`src/admin/server.ts`). Vlastní roli správce si správce odebrat nemůže a
+správce z proměnných prostředí nejde odebrat vůbec.
+
+Co přepínače zapisují (do `publicMetadata`, odkud to čte `src/files/access.ts`):
+`role` (`"admin"` / `"user"`), `pro`, `features.files` a `features.zotero`
+(`false` vypíná), `features.ukaz` (UKAŽ, `doctrine_*`; zapíná se jen výslovným
+`true`, hlídá to `src/mcp/doctrine-gate.ts`; sdílený přístupový kód a volání bez
+účtu ho mají jako dřív). Změna se projeví do minuty (cache přístupu).
+
+Využití: počty volání nástrojů podle účtu a dne (`usage_daily`, scope
+`calls:<kdo>:<nástroj>`, `src/mcp/usage.ts`), nikdy obsah volání. Počítá se jen
+tehdy, když jsou Vlastní zdroje zapnuté (zápis jde do jejich databáze).

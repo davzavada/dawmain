@@ -105,6 +105,18 @@ export function operatorIds(): string[] {
     .filter((s) => /^user_[A-Za-z0-9]+$/.test(s));
 }
 
+/**
+ * Clerk user ids that are admins whatever Clerk says: the way in before
+ * anyone holds `publicMetadata.role = "admin"` and the way back if the last
+ * admin locks themselves out. ADMIN_USER_IDS, plus the operators of the
+ * Vlastní zdroje page (FILES_OPERATOR_IDS). Empty entries dropped.
+ */
+export function adminEnvIds(): string[] {
+  return [...(process.env.ADMIN_USER_IDS ?? "").split(","), ...(process.env.FILES_OPERATOR_IDS ?? "").split(",")]
+    .map((s) => s.trim())
+    .filter((s, i, all) => /^user_[A-Za-z0-9]+$/.test(s) && all.indexOf(s) === i);
+}
+
 export function cronSecret(): string | undefined {
   return process.env.CRON_SECRET?.trim() || undefined;
 }
