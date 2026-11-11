@@ -12,7 +12,12 @@ Budu rád, pokud nástroj vyzkoušíte :)
 ## Jak to funguje?
 
 V oficiálních databázích server hledá živě - funguje jako nachytřený Google a
-nic si z nich nekopíruje. Konkrétně je napojený na judikaturu:
+nic si z nich nekopíruje. Kdo má režim Pro, může připojit svou knihovnu Zotero
+a nahrát vlastní soubory. Režim Pro je taky zdarma, jen je v testovacím
+provozu - napište mi případně e-mail o přístup (kontakt je na
+[webu](https://dawmain.davidzavada.cz)).
+
+Konkrétně je server napojený na judikaturu:
 
 - Nejvyššího soudu - dostupné [zde](https://rozhodnuti.nsoud.cz)
 - Nejvyššího správního soudu - dostupné [zde](https://vyhledavac.nssoud.cz)
@@ -35,7 +40,7 @@ zda je dílo k věci. Text díla se nestahuje; k němu vede odkaz na záznam
 (u licencovaných titulů přes vzdálený přístup UK). (Peace Palace Library
 byla vyřazena: její WorldCat Discovery blokuje adresy serverů.)
 
-**Vlastní zdroje (Pro).** Kdo má režim Pro (je zdarma, přiděluji ho ručně), si
+**Vlastní zdroje (Pro).** Kdo má režim Pro (je zdarma, v testovacím provozu ho přiděluji ručně), si
 na webu nahraje vlastní knihy, články, komentáře a vzory - pro sebe, nebo pro
 celý tým. Dokument se převede na text přímo v prohlížeči, takže originál
 počítač neopustí; na server jde jen text. Asistent v dokumentech pak hledá a
