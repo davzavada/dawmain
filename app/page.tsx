@@ -31,7 +31,8 @@ export default function Home() {
         <p className="lead">
           V oficiálních databázích server hledá živě – funguje jako nachytřený Google a nic si z
           nich nekopíruje. Kdo má režim Pro, může připojit svou knihovnu Zotero a nahrát vlastní
-          soubory.
+          soubory. Režim Pro je taky zdarma, jen je v testovacím provozu – napište mi případně
+          e-mail o přístup: <Mail />.
         </p>
         <a href={OWL_URL} className="project-card">
           <img src="/owl.svg" alt="" width={36} height={36} />
