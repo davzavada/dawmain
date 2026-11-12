@@ -1263,6 +1263,11 @@ a.zd-menu-item {
   color: var(--body);
 }
 
+span.source-title:has(> svg) {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
 .zd-row-locked .source-title,
 .zd-row-locked .source-desc,
 :root[data-hint-files-locked] .zd-hint-files .source-title,
@@ -1271,8 +1276,7 @@ a.zd-menu-item {
 }
 .zd-own .zd-row-locked > .icon,
 :root[data-hint-files-locked] .zd-own .zd-hint-files > .icon,
-.source-group.locked .zd-group-lock,
-.zd-group-lock-idle {
+.source-group.locked .zd-group-lock {
   color: var(--idle);
 }
 
