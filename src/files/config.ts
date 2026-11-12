@@ -46,7 +46,7 @@ function intEnv(name: string, fallback: number): number {
 /** Quotas and guard thresholds (see the plan's free-tier table). */
 export const LIMITS = {
   get personalPages() {
-    return intEnv("FILES_PERSONAL_PAGES", 3_000);
+    return intEnv("FILES_PERSONAL_PAGES", 10_000);
   },
   get globalPages() {
     return intEnv("FILES_GLOBAL_MAX_PAGES", 30_000);
