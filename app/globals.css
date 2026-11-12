@@ -767,6 +767,16 @@ main > footer a {
   main {
     padding: 20px 16px 32px;
   }
+  /* No note under the steps and a shorter gap before the footer: no empty space at the end. */
+  .connect > .guide-note {
+    display: none;
+  }
+  .steps > li:last-child {
+    border-bottom: 0;
+  }
+  main > footer {
+    margin-top: 16px;
+  }
 }
 
 /* ==========================================================================
