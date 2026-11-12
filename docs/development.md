@@ -476,7 +476,7 @@ dalšího kromě tří proměnných Zotera na konci tabulky). Po změně Redeplo
 | `FILES_META_MODEL` | model pro návrh metadat přes AI Gateway | `google/gemini-2.5-flash-lite` |
 | `FILES_USER_HASH_SECRET` | klíč HMAC pro pseudonym nahrávajícího, který dostává AI Gateway k rozpočítání spotřeby (`gateway.user`, čte `src/files/ingest.ts`); dlouhý náhodný řetězec. Změna klíče = nové pseudonymy v přehledu Gateway | `CLERK_SECRET_KEY` |
 | `FILES_GLOBAL_MAX_PAGES` | strop stran pro celou instalaci | 30 000 |
-| `FILES_PERSONAL_PAGES` | kvóta osobní knihovny (stran) | 3 000 |
+| `FILES_PERSONAL_PAGES` | kvóta osobní knihovny (stran) | 10 000 |
 | `FILES_OPERATOR_IDS` | Clerk `user_…` oddělená čárkou — přístup na `/vlastni-zdroje/provoz` (a zároveň správce na `/sprava`) | — |
 | `ADMIN_USER_IDS` | Clerk `user_…` oddělená čárkou — správci na `/sprava` bez ohledu na Clerk: první správce a cesta zpět. Další správce se povyšují na stránce Správa (`publicMetadata.role = "admin"`) | — |
 | `FILES_AI_BUDGET_USD` | klouzavý 30denní rozpočet AI v celých USD; nad ním jen heuristiky | 4 |
