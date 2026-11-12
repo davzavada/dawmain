@@ -21,9 +21,13 @@ export interface DatabaseStatus {
   detail?: string;
 }
 
-/** The headings the home page sorts the databases under, in this order. */
-export const DATABASE_GROUPS = ["Judikatura", "Předpisy", "Literatura"] as const;
-export type DatabaseGroup = (typeof DATABASE_GROUPS)[number];
+/**
+ * The headings the home page sorts the public databases under, in this order.
+ * A "Pro" database (UKAŽ, switched on per account) is listed in the Pro group
+ * instead, beside Vlastní soubory and Zotero (app/_zdroje/own-sources.tsx).
+ */
+export const DATABASE_GROUPS = ["Judikatura", "Předpisy"] as const;
+export type DatabaseGroup = (typeof DATABASE_GROUPS)[number] | "Pro";
 
 /**
  * The databases shown on the page, each tied to the SOURCE constant its
@@ -94,7 +98,7 @@ export const DATABASES: Array<{
   },
   {
     label: "UKAŽ",
-    group: "Literatura",
+    group: "Pro",
     href: "https://cuni.primo.exlibrisgroup.com/discovery/search?vid=420CKIS_INST:UKAZ",
     source: "UKAŽ (Univerzita Karlova, Primo)",
     canaryId: "primo",

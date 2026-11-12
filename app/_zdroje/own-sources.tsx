@@ -2,19 +2,21 @@
 
 import type { MouseEvent, ReactNode } from "react";
 import { Icon } from "@/app/_icons";
+import { UkazRow } from "@/app/_source-status";
 import type { SummaryResponse } from "@/src/files/web-types";
-import { filesRowView } from "./hint";
+import { FILES_DESC, filesRowView } from "./hint";
 import { ZIcon } from "./icons";
 import { openFiles, openZotero, requestSignIn, useZdroje } from "./store";
 import { useZoteroStatus } from "./zotero-status";
 
 /**
- * The "Vlastní zdroje" group at the top of the home page's source list
- * (wireframe 01, 02): two rows — Zotero (only where the deployment can
- * connect it) and Vlastní soubory. Visitors see both greyed out with a
- * lock and a click signs them in (01); signed in, Zotero shows the
- * connected account and Vlastní soubory the documents and pages, with
- * "Spravovat" opening the modal (02). The rows read the shared summary
+ * The "Pro" group at the top of the home page's source list (wireframe 01,
+ * 02): Vlastní soubory, Zotero (always listed; locked where the deployment
+ * cannot connect it) and UKAŽ (switched on per account by an admin, app/_source-status.tsx).
+ * Visitors see them greyed out with a lock, each with one line on what it
+ * is, and a click signs them in (01); signed in, Vlastní soubory shows the
+ * documents and pages, with "Spravovat" opening the modal, and Zotero the
+ * connected account (02). The rows read the shared summary
  * (./store.ts) and the Zotero status, so the page itself stays
  * static and never waits for them. Until Clerk loads, the group renders
  * both the visitor's and the signed-in variant; the sign-in hint (./hint.ts)
@@ -41,12 +43,14 @@ export function OwnSourcesGroup({ zotero }: { zotero: boolean }) {
     return (
       <>
         <Group signedIn={false} className="zd-hint-out">
-          {zotero ? <ZoteroRow signedIn={false} /> : null}
           <FilesInvite auth={auth} />
+          {zotero ? <ZoteroRow signedIn={false} /> : <ZoteroUnavailable signedIn={false} />}
+          <UkazRow signedIn={false} />
         </Group>
         <Group signedIn className="zd-hint-in">
-          {zotero ? <ZoteroRowView desc={LOADING} /> : null}
           <HintedFilesRow />
+          {zotero ? <ZoteroRowView desc={LOADING} /> : <ZoteroUnavailable signedIn />}
+          <UkazRow signedIn />
         </Group>
       </>
     );
@@ -54,8 +58,9 @@ export function OwnSourcesGroup({ zotero }: { zotero: boolean }) {
   const signedIn = auth === "signed_in";
   return (
     <Group signedIn={signedIn}>
-      {zotero ? <ZoteroRow signedIn={signedIn} /> : null}
       {signedIn ? <FilesRow auth={auth} summary={summary} /> : <FilesInvite auth={auth} />}
+      {zotero ? <ZoteroRow signedIn={signedIn} /> : <ZoteroUnavailable signedIn={signedIn} />}
+      <UkazRow signedIn={signedIn} />
     </Group>
   );
 }
@@ -65,7 +70,7 @@ function Group({ signedIn, className, children }: { signedIn: boolean; className
   return (
     <div className={classes}>
       <div className="source-group-head">
-        <span className="source-group-name">Vlastní zdroje</span>
+        <span className="source-group-name">Pro</span>
         {signedIn ? null : <ZIcon name="lock" size={13} className="zd-group-lock" />}
       </div>
       <ul>{children}</ul>
@@ -74,6 +79,9 @@ function Group({ signedIn, className, children }: { signedIn: boolean; className
 }
 
 const LOADING = "Načítám…";
+
+/** What Zotero is: the visitor's line, and the line of an account without Pro (the group's heading says Pro). */
+const ZOTERO_DESC = "Vaše knihovna, ve které asistent hledá a čte, a když povolíte, i ukládá nalezené dokumenty.";
 
 /** Visitors (and, until Clerk loads, the visitor's variant): what the files are, and a click signs in. */
 function FilesInvite({ auth }: { auth: string }) {
@@ -84,7 +92,7 @@ function FilesInvite({ auth }: { auth: string }) {
         <button type="button" className="source-title zd-row-button" onClick={requestSignIn} disabled={auth !== "signed_out"}>
           Vlastní soubory
         </button>
-        <span className="source-desc">Nahrané knihy, články, komentáře a vzory, ve kterých asistent hledá vedle oficiálních databází. V režimu Pro.</span>
+        <span className="source-desc">{FILES_DESC}</span>
       </div>
     </li>
   );
@@ -147,7 +155,7 @@ function ZoteroRow({ signedIn }: { signedIn: boolean }) {
   let locked = false;
   let connected = false;
   if (visitor) {
-    desc = "Asistent v ní bude hledat a číst, a když povolíte, i ukládat nalezené dokumenty. V režimu Pro.";
+    desc = ZOTERO_DESC;
   } else if (status === undefined) {
     desc = LOADING;
   } else if (!ok) {
@@ -159,7 +167,7 @@ function ZoteroRow({ signedIn }: { signedIn: boolean }) {
     desc = `Účet ${ok.connection.username} - bez režimu Pro do knihovny asistent nevidí.`;
     locked = true;
   } else if (!ok.pro) {
-    desc = "Jen v režimu Pro. Přiděluji ho ručně a zdarma.";
+    desc = ZOTERO_DESC;
     locked = true;
   } else if (ok.revoked) {
     desc = "Klíč přestal platit - připojte Zotero znovu.";
@@ -172,16 +180,32 @@ function ZoteroRow({ signedIn }: { signedIn: boolean }) {
   return <ZoteroRowView desc={desc} locked={locked} connected={connected} onClick={visitor ? requestSignIn : openZotero} />;
 }
 
+/**
+ * Where the deployment cannot connect Zotero (no OAuth app or CREDENTIALS_SECRET): the row stays, greyed out,
+ * with nothing to click; its own lock only when signed in (a visitor's group carries the lock in its head).
+ */
+function ZoteroUnavailable({ signedIn }: { signedIn: boolean }) {
+  return <ZoteroRowView desc={ZOTERO_DESC} locked={signedIn} onClick={null} />;
+}
+
 /** The Zotero row itself; without a status yet (the hinted variant), a click opens the modal, which waits for Clerk. */
-function ZoteroRowView({ desc, locked = false, connected = false, onClick = openZotero }: { desc: string; locked?: boolean; connected?: boolean; onClick?: () => void }) {
+function ZoteroRowView({ desc, locked = false, connected = false, onClick = openZotero }: { desc: string; locked?: boolean; connected?: boolean; onClick?: (() => void) | null }) {
+  const lock = locked ? <ZIcon name="lock" size={13} /> : null;
   return (
     <li className={locked ? "source zd-own-row zd-row-locked" : "source zd-own-row"}>
       <Icon name="book" />
       <div className="source-name">
-        <button type="button" className="source-title zd-row-button" onClick={onClick}>
-          Zotero
-          {locked ? <ZIcon name="lock" size={13} /> : null}
-        </button>
+        {onClick ? (
+          <button type="button" className="source-title zd-row-button" onClick={onClick}>
+            Zotero
+            {lock}
+          </button>
+        ) : (
+          <span className="source-title">
+            Zotero
+            {lock}
+          </span>
+        )}
         <span className="source-desc">{desc}</span>
       </div>
       {connected ? (

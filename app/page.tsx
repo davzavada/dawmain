@@ -52,8 +52,9 @@ export default function Home() {
       <section id="zdroje" className="sources">
         <h2>Zdroje</h2>
         {/*
-          Client island: Zotero (only where the deployment can connect it — the OAuth app and
-          CREDENTIALS_SECRET) and Vlastní soubory, counts from GET /api/files/summary.
+          Client island, the Pro group: Vlastní soubory (counts from GET /api/files/summary),
+          Zotero (locked where the deployment cannot connect it — no OAuth app or CREDENTIALS_SECRET)
+          and UKAŽ (switched on per account).
         */}
         <OwnSourcesGroup zotero={zoteroConfigured()} />
         {/* Client island: the badges come from GET /api/status (static, checked hourly) after the page is up. */}

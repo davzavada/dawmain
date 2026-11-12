@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ZoteroStatus } from "@/src/zotero/web-types";
 
 /**
- * The Zotero row of the home page's "Vlastní zdroje" group (OwnSourcesGroup
+ * The Zotero row of the home page's "Pro" group (OwnSourcesGroup
  * in app/_zdroje/own-sources.tsx, with `zotero` only where the deployment
  * can connect Zotero): the connection state in one row, and the
  * way into the Zotero modal (?zotero=1) — or the sign-in for a visitor, who
@@ -118,10 +118,22 @@ describe("the Zotero row on the home page", () => {
     const g = group()!;
     expect(g).not.toBeNull();
     expect(g.locked).toBe(true);
-    expect(g.textContent).toContain("V režimu Pro");
+    expect(g.textContent).toContain("Vaše knihovna");
     expect(statusCalls()).toBe(0);
     await act(async () => g.querySelector<HTMLButtonElement>("button")!.click());
     expect(signIn).toHaveBeenCalledOnce();
+  });
+
+  it("stays in the group, locked and without a button, where the deployment cannot connect Zotero", async () => {
+    store.setAuth("signed_in");
+    await act(async () => root.render(createElement(OwnSourcesGroup, { zotero: false })));
+    await settle();
+    const g = group()!;
+    expect(g).not.toBeNull();
+    expect(g.locked).toBe(true);
+    expect(g.textContent).toContain("Vaše knihovna");
+    expect(g.querySelector("button")).toBeNull();
+    expect(statusCalls()).toBe(0);
   });
 
   it("offers to connect, and opens the Zotero modal (?zotero=1)", async () => {
@@ -170,11 +182,11 @@ describe("the Zotero row on the home page", () => {
 
   it("tells a revoked key from an unreadable one, is locked without Pro, and survives a server error", async () => {
     const cases: Array<[unknown, number, string]> = [
-      [{ ...NOT_CONNECTED, pro: false }, 200, "Jen v režimu Pro"],
+      [{ ...NOT_CONNECTED, pro: false }, 200, "Vaše knihovna"],
       [{ ...NOT_CONNECTED, revoked: { username: "jnovakova", revokedAt: "2026-09-20T10:00:00Z" } }, 200, "Klíč přestal platit"],
       [{ ...NOT_CONNECTED, unreadable: { username: "jnovakova" } }, 200, "Připojení je potřeba obnovit"],
       [{ error: "Stav připojení Zotera se teď nepodařilo zjistit." }, 503, "Stav připojení se teď nepodařilo zjistit."],
-      [{ state: "signed_out" }, 200, "V režimu Pro"],
+      [{ state: "signed_out" }, 200, "Vaše knihovna"],
     ];
     for (const [body, code, text] of cases) {
       await act(async () => root.unmount());
