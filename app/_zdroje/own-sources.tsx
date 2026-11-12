@@ -11,8 +11,8 @@ import { useZoteroStatus } from "./zotero-status";
 
 /**
  * The "Pro" group at the top of the home page's source list (wireframe 01,
- * 02): Vlastní soubory, Zotero (only where the deployment can connect it)
- * and UKAŽ (switched on per account by an admin, app/_source-status.tsx).
+ * 02): Vlastní soubory, Zotero (always listed; locked where the deployment
+ * cannot connect it) and UKAŽ (switched on per account by an admin, app/_source-status.tsx).
  * Visitors see them greyed out with a lock, each with one line on what it
  * is, and a click signs them in (01); signed in, Vlastní soubory shows the
  * documents and pages, with "Spravovat" opening the modal, and Zotero the
@@ -44,12 +44,12 @@ export function OwnSourcesGroup({ zotero }: { zotero: boolean }) {
       <>
         <Group signedIn={false} className="zd-hint-out">
           <FilesInvite auth={auth} />
-          {zotero ? <ZoteroRow signedIn={false} /> : null}
+          {zotero ? <ZoteroRow signedIn={false} /> : <ZoteroUnavailable signedIn={false} />}
           <UkazRow signedIn={false} />
         </Group>
         <Group signedIn className="zd-hint-in">
           <HintedFilesRow />
-          {zotero ? <ZoteroRowView desc={LOADING} /> : null}
+          {zotero ? <ZoteroRowView desc={LOADING} /> : <ZoteroUnavailable signedIn />}
           <UkazRow signedIn />
         </Group>
       </>
@@ -59,7 +59,7 @@ export function OwnSourcesGroup({ zotero }: { zotero: boolean }) {
   return (
     <Group signedIn={signedIn}>
       {signedIn ? <FilesRow auth={auth} summary={summary} /> : <FilesInvite auth={auth} />}
-      {zotero ? <ZoteroRow signedIn={signedIn} /> : null}
+      {zotero ? <ZoteroRow signedIn={signedIn} /> : <ZoteroUnavailable signedIn={signedIn} />}
       <UkazRow signedIn={signedIn} />
     </Group>
   );
@@ -180,16 +180,32 @@ function ZoteroRow({ signedIn }: { signedIn: boolean }) {
   return <ZoteroRowView desc={desc} locked={locked} connected={connected} onClick={visitor ? requestSignIn : openZotero} />;
 }
 
+/**
+ * Where the deployment cannot connect Zotero (no OAuth app or CREDENTIALS_SECRET): the row stays, greyed out,
+ * with nothing to click; its own lock only when signed in (a visitor's group carries the lock in its head).
+ */
+function ZoteroUnavailable({ signedIn }: { signedIn: boolean }) {
+  return <ZoteroRowView desc={ZOTERO_DESC} locked={signedIn} onClick={null} />;
+}
+
 /** The Zotero row itself; without a status yet (the hinted variant), a click opens the modal, which waits for Clerk. */
-function ZoteroRowView({ desc, locked = false, connected = false, onClick = openZotero }: { desc: string; locked?: boolean; connected?: boolean; onClick?: () => void }) {
+function ZoteroRowView({ desc, locked = false, connected = false, onClick = openZotero }: { desc: string; locked?: boolean; connected?: boolean; onClick?: (() => void) | null }) {
+  const lock = locked ? <ZIcon name="lock" size={13} /> : null;
   return (
     <li className={locked ? "source zd-own-row zd-row-locked" : "source zd-own-row"}>
       <Icon name="book" />
       <div className="source-name">
-        <button type="button" className="source-title zd-row-button" onClick={onClick}>
-          Zotero
-          {locked ? <ZIcon name="lock" size={13} /> : null}
-        </button>
+        {onClick ? (
+          <button type="button" className="source-title zd-row-button" onClick={onClick}>
+            Zotero
+            {lock}
+          </button>
+        ) : (
+          <span className="source-title">
+            Zotero
+            {lock}
+          </span>
+        )}
         <span className="source-desc">{desc}</span>
       </div>
       {connected ? (

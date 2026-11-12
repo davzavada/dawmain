@@ -124,6 +124,18 @@ describe("the Zotero row on the home page", () => {
     expect(signIn).toHaveBeenCalledOnce();
   });
 
+  it("stays in the group, locked and without a button, where the deployment cannot connect Zotero", async () => {
+    store.setAuth("signed_in");
+    await act(async () => root.render(createElement(OwnSourcesGroup, { zotero: false })));
+    await settle();
+    const g = group()!;
+    expect(g).not.toBeNull();
+    expect(g.locked).toBe(true);
+    expect(g.textContent).toContain("Vaše knihovna");
+    expect(g.querySelector("button")).toBeNull();
+    expect(statusCalls()).toBe(0);
+  });
+
   it("offers to connect, and opens the Zotero modal (?zotero=1)", async () => {
     await render();
     const g = group()!;

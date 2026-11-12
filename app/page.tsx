@@ -53,7 +53,7 @@ export default function Home() {
         <h2>Zdroje</h2>
         {/*
           Client island, the Pro group: Vlastní soubory (counts from GET /api/files/summary),
-          Zotero (only where the deployment can connect it — the OAuth app and CREDENTIALS_SECRET)
+          Zotero (locked where the deployment cannot connect it — no OAuth app or CREDENTIALS_SECRET)
           and UKAŽ (switched on per account).
         */}
         <OwnSourcesGroup zotero={zoteroConfigured()} />
