@@ -64,7 +64,7 @@ export default function Home() {
       <section id="pripojeni" className="connect">
         <h2>Jak se připojit</h2>
         <Guide endpoint={endpoint()} />
-        <p className="muted small">
+        <p className="muted small guide-note">
           Kdyby cokoli nešlo, napište mi na <Mail />.
         </p>
       </section>

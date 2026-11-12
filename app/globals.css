@@ -622,6 +622,10 @@ main > footer a {
   justify-content: center;
   font-variant-numeric: tabular-nums;
 }
+/* The note under the steps, aligned with their text (number 28px + gap 16px). */
+.connect > .guide-note {
+  padding-left: 44px;
+}
 .step-body {
   display: flex;
   flex-direction: column;
@@ -673,7 +677,8 @@ main > footer a {
 .copy code {
   flex: 1;
   min-width: 0;
-  word-break: break-all;
+  /* Break between words; inside one only when it alone is too long (the MCP address). */
+  overflow-wrap: anywhere;
   font-size: 13px;
   color: var(--text);
 }
