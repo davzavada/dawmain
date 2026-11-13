@@ -417,9 +417,9 @@ describe("operator page", () => {
     expect(html).toContain("přeindexování počká");
     expect(html).toMatch(/<button[^>]*disabled[^>]*>Přeindexovat dávku/);
     expect(html).toContain("Zablokovat a smazat kopie");
-    // No MIRROR_API_URL here: the switch is shown, the mirror button disabled.
-    expect(html).toContain("Zdroj judikatury");
-    expect(html).toMatch(/<button[^>]*disabled[^>]*>Zrcadlo/);
+    // No MIRROR_API_URL here: the mirror section says so.
+    expect(html).toContain("Zrcadlo judikatury");
+    expect(html).toContain("chybí MIRROR_API_URL");
   });
 });
 

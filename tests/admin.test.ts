@@ -60,7 +60,7 @@ describe("model", () => {
       false,
     );
     expect(u).toMatchObject({ name: "Petra Horáková", email: "petra@x.cz", role: "user", pro: true, banned: false });
-    expect(u.features).toEqual({ files: true, zotero: false, ukaz: true });
+    expect(u.features).toEqual({ files: true, zotero: false, ukaz: true, mirror: false });
     // Not Pro "true" strictly; UKAŽ only on a strict true.
     expect(toAdminUser({ id: OTHER, publicMetadata: { pro: "true", features: { ukaz: "yes" } } }, false)).toMatchObject({ pro: false, features: { ukaz: false } });
     expect(toAdminUser({ id: OTHER, locked: true }, false).banned).toBe(true);
@@ -138,7 +138,7 @@ describe("changes", () => {
     clerk.updateUserMetadata.mockResolvedValue({ id: OTHER, publicMetadata: { pro: true, features: { files: false, ukaz: true } } });
     const result = await applyChange(ME, OTHER, { kind: "feature", feature: "ukaz", on: true });
     expect(clerk.updateUserMetadata).toHaveBeenCalledWith(OTHER, { publicMetadata: { features: { files: false, ukaz: true } } });
-    expect(result.ok && result.user.features).toEqual({ files: false, zotero: true, ukaz: true });
+    expect(result.ok && result.user.features).toEqual({ files: false, zotero: true, ukaz: true, mirror: false });
   });
 
   it("answers a Clerk failure with a message, not a throw", async () => {

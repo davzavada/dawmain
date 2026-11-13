@@ -42,4 +42,10 @@ export interface Access {
    * Optional so older fixtures need not mention it; absent means off.
    */
   ukaz?: boolean;
+  /**
+   * Reads case law from the home mirror instead of the courts (the
+   * case-law tools, src/mcp/backend.ts): switched on by an admin,
+   * `publicMetadata.features.mirror === true`. Absent means off (live).
+   */
+  mirror?: boolean;
 }

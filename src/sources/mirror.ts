@@ -22,8 +22,27 @@ export const MIRROR_SOURCE_LABEL = "Zrcadlo judikatury";
 export type MirrorCourt = "ns" | "nss" | "us" | "justice";
 export const MIRROR_COURTS: readonly MirrorCourt[] = ["ns", "nss", "us", "justice"];
 
-const SEARCH_TIMEOUT_MS = 15_000;
-const READ_TIMEOUT_MS = 12_000;
+// One attempt, short: the live tool answers when the mirror does not, and
+// the call's whole budget is 54 s (src/mcp/tools/index.ts).
+const SEARCH_TIMEOUT_MS = 8_000;
+const READ_TIMEOUT_MS = 8_000;
+/** After a failure the mirror is skipped for this long (every account goes straight live). */
+export const MIRROR_PAUSE_MS = 60_000;
+
+/**
+ * The breaker, per instance: a mirror that failed (home connection down,
+ * the laptop asleep, Access refusing) is not asked again for MIRROR_PAUSE_MS,
+ * so the accounts switched to it do not each wait out a timeout before
+ * their live answer. A 404 (decision not there) is an answer, not a failure.
+ */
+let pausedUntil = 0;
+let pauseReason = "";
+
+/** Tests only. */
+export function resetMirrorBreaker(): void {
+  pausedUntil = 0;
+  pauseReason = "";
+}
 
 export interface MirrorConfig {
   url: string;
@@ -55,7 +74,28 @@ function headers(config: MirrorConfig): Record<string, string> {
   };
 }
 
-async function getJson<T>(path: string, timeoutMs: number): Promise<T | null> {
+async function getJson<T>(path: string, timeoutMs: number, opts: { probe?: boolean } = {}): Promise<T | null> {
+  if (!opts.probe && Date.now() < pausedUntil) {
+    throw new SourceError(
+      MIRROR_SOURCE_LABEL,
+      "UPSTREAM_UNREACHABLE",
+      `The case-law mirror is paused after a failure (${pauseReason}).`,
+      "The live court tools answer meanwhile.",
+    );
+  }
+  try {
+    const result = await fetchJson<T>(path, timeoutMs);
+    // A probe that got through ends a pause early.
+    if (opts.probe) pausedUntil = 0;
+    return result;
+  } catch (error) {
+    pausedUntil = Date.now() + MIRROR_PAUSE_MS;
+    pauseReason = error instanceof Error ? error.message.replace(/^The case-law mirror did not answer: /, "").replace(/\.$/, "") : String(error);
+    throw error;
+  }
+}
+
+async function fetchJson<T>(path: string, timeoutMs: number): Promise<T | null> {
   const config = mirrorConfig();
   if (!config) {
     throw new SourceError(
@@ -68,6 +108,7 @@ async function getJson<T>(path: string, timeoutMs: number): Promise<T | null> {
   const response = await fetchUpstream(MIRROR_SOURCE_LABEL, `${config.url}${path}`, {
     headers: headers(config),
     timeoutMs,
+    retry: false,
     // A 404 is an answer (no such decision), not the mirror being down.
     passStatus: () => false,
   });
@@ -86,7 +127,7 @@ async function getJson<T>(path: string, timeoutMs: number): Promise<T | null> {
       MIRROR_SOURCE_LABEL,
       "UPSTREAM_ERROR",
       `The case-law mirror did not answer: ${why}.`,
-      "The live court tools still work; the operator switches the source on /vlastni-zdroje/provoz.",
+      "The live court tools still work; an admin switches the source per account on the Správa page.",
     );
   }
   return (await response.json()) as T;
@@ -198,7 +239,8 @@ export interface MirrorStatusJson {
 }
 
 export async function mirrorApiStatus(): Promise<MirrorStatusJson | null> {
-  return getJson<MirrorStatusJson>("/v1/status", 8_000);
+  // The status page asks even while paused: it is how the operator sees why.
+  return getJson<MirrorStatusJson>("/v1/status", 8_000, { probe: true });
 }
 
 /** The excerpt with its matches marked «…» (the API sends char ranges). */

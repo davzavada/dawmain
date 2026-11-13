@@ -69,7 +69,7 @@ export function freezeAccess(access: Access): Access {
 
 /** An account that exists nowhere (or is banned): no libraries. */
 export function emptyAccess(userId: string, banned = false): Access {
-  return freezeAccess({ userId, banned, libraries: [], all: [], zotero: false, ukaz: false });
+  return freezeAccess({ userId, banned, libraries: [], all: [], zotero: false, ukaz: false, mirror: false });
 }
 
 /**
@@ -148,8 +148,13 @@ export function featureOff(metadata: unknown, feature: Feature): boolean {
  * featureOff: nothing but an explicit grant turns it on.
  */
 export function ukazOn(metadata: unknown): boolean {
+  return featureOn(metadata, "ukaz");
+}
+
+/** An opt-in feature (`ukaz`, `mirror`): on only when strictly `true`. */
+export function featureOn(metadata: unknown, feature: "ukaz" | "mirror"): boolean {
   const features = (metadata as { features?: unknown } | null | undefined)?.features;
-  return !!features && typeof features === "object" && (features as Record<string, unknown>).ukaz === true;
+  return !!features && typeof features === "object" && (features as Record<string, unknown>)[feature] === true;
 }
 
 /** The subset of Clerk's User the access needs (keeps tests and mocks small). */
@@ -181,7 +186,7 @@ export function buildAccess(user: ClerkUserLike): Access {
     quotaPages: quotaFrom(user.publicMetadata, LIMITS.personalPages),
   };
   const all = [personal];
-  return { userId, banned: false, libraries: all.filter((l) => l.pro), all, zotero, ukaz: ukazOn(user.publicMetadata) };
+  return { userId, banned: false, libraries: all.filter((l) => l.pro), all, zotero, ukaz: ukazOn(user.publicMetadata), mirror: featureOn(user.publicMetadata, "mirror") };
 }
 
 async function loadFromClerk(userId: string): Promise<Access> {
