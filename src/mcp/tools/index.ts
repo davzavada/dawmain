@@ -14,6 +14,10 @@ import { registerDoctrine } from "./doctrine";
 import { registerFiles } from "./files";
 import { registerZotero } from "./zotero";
 import { zoteroConfigured } from "@/src/zotero/config";
+import { mirrorConfigured } from "@/src/sources/mirror";
+import { caselawBackend } from "../backend";
+import { callerFromCtx } from "../caller";
+import { MIRROR_TOOLS, type MirrorAnswer } from "./mirror-route";
 
 /**
  * Every tool the server exposes. To add one: create `./<name>.ts` exporting a
@@ -112,6 +116,31 @@ async function withinBudget(name: string, run: () => Promise<ToolResult>): Promi
  * requires structuredContent wherever one is declared. Every handler is also
  * bounded by the call's budget here (CALL_BUDGET_MS).
  */
+/**
+ * The case-law tools (MIRROR_TOOLS) for an operator who switched "Zdroj
+ * judikatury" to the mirror (src/mcp/backend.ts): answered from the home
+ * mirror, or — when the mirror cannot answer this call — by the live tool,
+ * with the reason in front. Everyone else, and every other tool, goes
+ * straight to the live handler; the preference is read only for operators.
+ */
+async function routed(name: string, handler: ToolHandler, args: unknown[]): Promise<ToolResult> {
+  const viaMirror = MIRROR_TOOLS[name];
+  if (!viaMirror || !mirrorConfigured()) return handler(...args);
+  const caller = callerFromCtx(args[1]);
+  if (caller.kind !== "user" || (await caselawBackend(caller.userId)) !== "mirror") return handler(...args);
+  let answer: MirrorAnswer;
+  try {
+    answer = await viaMirror((args[0] ?? {}) as Record<string, unknown>);
+  } catch (error) {
+    answer = { fallback: `the mirror failed (${error instanceof Error ? error.message : String(error)})` };
+  }
+  if (!("fallback" in answer)) return answer;
+  const live = await handler(...args);
+  const content = Array.isArray(live.content) ? (live.content as Array<{ type: string; text?: string }>) : [];
+  const note = { type: "text", text: `[Mirror not used: ${answer.fallback} — answered live from the court.]` };
+  return { ...live, content: [note, ...content] };
+}
+
 function textOnly(server: McpServer): McpServer {
   return {
     registerTool(name: string, config: ToolConfig, handler: ToolHandler) {
@@ -121,7 +150,7 @@ function textOnly(server: McpServer): McpServer {
         name,
         rest,
         async (...args: unknown[]) => {
-          const { structuredContent: _dropped, ...result } = await withinBudget(name, () => handler(...args));
+          const { structuredContent: _dropped, ...result } = await withinBudget(name, () => routed(name, handler, args));
           return result;
         },
       );

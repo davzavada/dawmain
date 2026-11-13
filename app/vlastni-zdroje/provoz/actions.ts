@@ -4,6 +4,7 @@ import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import { isOperator, recordReindex, takedownContent, writeModeOverride } from "@/src/files/operator";
 import { reindexBatch } from "@/src/files/reindex";
+import { setCaselawBackend } from "@/src/mcp/backend";
 
 /**
  * Server Functions of the operator page. Each re-authenticates with Clerk
@@ -53,5 +54,14 @@ export async function takedownAction(formData: FormData): Promise<void> {
   if (formData.get("confirm") !== "yes") throw new Error("Not confirmed.");
   if (!/^([0-9a-fA-F]{64}|[0-9a-fA-F-]{36})$/.test(target) || !reason || reason.length > 500) throw new Error("Invalid takedown.");
   await takedownContent(actor, target, reason);
+  revalidatePath(PAGE);
+}
+
+/** "Zdroj judikatury": this operator's case-law tools read the courts live or the home mirror. */
+export async function setCaselawBackendAction(formData: FormData): Promise<void> {
+  const actor = await operator();
+  const value = String(formData.get("backend") ?? "");
+  if (value !== "live" && value !== "mirror") throw new Error("Invalid backend.");
+  await setCaselawBackend(actor, value);
   revalidatePath(PAGE);
 }

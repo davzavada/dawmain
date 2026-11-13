@@ -7,7 +7,9 @@ import { NEON_STORAGE_BYTES } from "@/src/files/guards";
 import { isOperator, operatorSnapshot, vacuumPlan, type OperatorSnapshot } from "@/src/files/operator";
 import { batchAllowance } from "@/src/files/reindex";
 import { formatCount } from "@/app/_zdroje/format";
-import { reindexBatchAction, setModeOverride, takedownAction } from "./actions";
+import { caselawBackend, type CaselawBackend } from "@/src/mcp/backend";
+import { mirrorApiStatus, mirrorConfigured, type MirrorStatusJson } from "@/src/sources/mirror";
+import { reindexBatchAction, setCaselawBackendAction, setModeOverride, takedownAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 // "Přeindexovat dávku" runs up to 200 documents in one Server Function call.
@@ -81,7 +83,7 @@ export default async function OperatorPage() {
   }
   if (!isOperator(userId)) notFound();
 
-  const data = await load();
+  const [data, caselaw] = await Promise.all([load(), loadCaselawSource(userId)]);
   return (
     <div className="zd-ops">
       <Link href="/" className="back">
@@ -91,12 +93,82 @@ export default async function OperatorPage() {
         <h1>Provoz Vlastních zdrojů</h1>
         <p className="muted">Pojistky bezplatných limitů, knihovny a fronta zpracování.</p>
       </header>
+      <CaselawSource {...caselaw} />
       {typeof data === "string" ? (
         <p className="zd-error">{data}</p>
       ) : (
         <Snapshot data={data} />
       )}
     </div>
+  );
+}
+
+const MIRROR_LABELS: Record<string, string> = { ns: "NS", nss: "NSS", us: "ÚS", justice: "Obecné soudy", sdeu: "SDEU" };
+
+/**
+ * "Zdroj judikatury": where this operator's case-law tools read from —
+ * the courts live, or the home mirror (src/mcp/backend.ts). The mirror's
+ * counts come from its /v1/status through the tunnel, which doubles as
+ * the check that Vercel reaches it.
+ */
+interface CaselawSourceData {
+  backend: CaselawBackend;
+  configured: boolean;
+  status: MirrorStatusJson | null;
+  problem: string | null;
+}
+
+async function loadCaselawSource(userId: string): Promise<CaselawSourceData> {
+  const backend = await caselawBackend(userId);
+  const configured = mirrorConfigured();
+  if (!configured) return { backend, configured, status: null, problem: "Na tomto nasazení chybí MIRROR_API_URL / MIRROR_API_TOKEN." };
+  try {
+    const status = await mirrorApiStatus();
+    return { backend, configured, status, problem: status ? null : "Zrcadlo neodpovídá (404)." };
+  } catch (error) {
+    return { backend, configured, status: null, problem: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function CaselawSource({ backend, configured, status, problem }: CaselawSourceData) {
+  return (
+    <section className="zd-ops-section">
+      <h2>Zdroj judikatury</h2>
+      <p>
+        Nástroje NS, NSS, ÚS a obecných soudů (caselaw_search, *_search, *_get_decision) teď pro vás čtou:{" "}
+        <strong>{backend === "mirror" ? "zrcadlo" : "živě ze soudů"}</strong>
+        {backend === "mirror" && problem ? " (zrcadlo nedostupné, odpovídá živý zdroj)" : ""}
+      </p>
+      <form action={setCaselawBackendAction} className="zd-ops-buttons">
+        {(["live", "mirror"] as const).map((b) => (
+          <button
+            key={b}
+            type="submit"
+            name="backend"
+            value={b}
+            disabled={b === "mirror" && !configured}
+            className={`zd-btn ${backend === b ? "zd-btn-primary" : "zd-btn-secondary"}`}
+          >
+            {b === "live" ? "Živě" : "Zrcadlo"}
+          </button>
+        ))}
+      </form>
+      {problem ? (
+        <p className="zd-error">{problem}</p>
+      ) : status?.sources?.length ? (
+        <p className="zd-muted zd-small">
+          Zrcadlo:{" "}
+          {status.sources
+            .filter((s) => (s.decisions ?? 0) > 0)
+            .map((s) => `${MIRROR_LABELS[s.source] ?? s.source} ${formatCount(s.decisions ?? 0)}${s.newestDecidedOn ? ` (do ${s.newestDecidedOn})` : ""}`)
+            .join(" · ")}{" "}
+          · stav k {when(status.asOf)}
+        </p>
+      ) : null}
+      <p className="zd-muted zd-small">
+        Platí jen pro váš účet. Co zrcadlo neumí (SDEU, další stránky výsledků, filtry jako soudce či předpis), odpoví živý zdroj s poznámkou. Změna se projeví do 30 s.
+      </p>
+    </section>
   );
 }
 
