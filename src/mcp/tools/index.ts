@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { CALL_BUDGET_MS, callStartedAt, runWithCallClock } from "@/src/sources/shared/clock";
 import { registerPing } from "./ping";
 import { registerProbe } from "./probe";
+import { registerGuide } from "./guide";
 import { registerEsbirka } from "./esbirka";
 import { registerNs } from "./ns";
 import { registerNalus } from "./nalus";
@@ -9,11 +10,14 @@ import { registerNss } from "./nss";
 import { registerCzCaselaw } from "./cz-caselaw";
 import { registerCuria } from "./curia";
 import { registerEurlex } from "./eurlex";
+import { registerPsp } from "./psp";
 import { registerJustice } from "./justice";
 import { registerDoctrine } from "./doctrine";
 import { registerFiles } from "./files";
 import { registerZotero } from "./zotero";
 import { zoteroConfigured } from "@/src/zotero/config";
+import { withGuideHint } from "../guide-hint";
+import { trackToolCall } from "../usage";
 import { mirrorConfigured } from "@/src/sources/mirror";
 import { caselawBackend } from "../backend";
 import { callerFromCtx } from "../caller";
@@ -36,6 +40,7 @@ import { MIRROR_TOOLS, type MirrorAnswer } from "./mirror-route";
 const registrars: Array<(server: McpServer) => void> = [
   registerPing,
   registerProbe,
+  registerGuide,
   registerEsbirka,
   registerNs,
   registerNalus,
@@ -44,6 +49,7 @@ const registrars: Array<(server: McpServer) => void> = [
   registerJustice,
   registerCuria,
   registerEurlex,
+  registerPsp,
   registerDoctrine,
   // Vlastní zdroje — the user's own uploads; gated per call (registration does no I/O).
   registerFiles,
@@ -144,12 +150,15 @@ async function routed(name: string, handler: ToolHandler, args: unknown[]): Prom
 function textOnly(server: McpServer): McpServer {
   return {
     registerTool(name: string, config: ToolConfig, handler: ToolHandler) {
-      const { outputSchema: _structured, ...rest } = config;
+      const { outputSchema: _structured, ...bare } = config;
+      const rest = withGuideHint(name, bare);
       // A method call on the real server — registerTool relies on `this`.
       return (server as unknown as { registerTool: (...args: unknown[]) => unknown }).registerTool(
         name,
         rest,
         async (...args: unknown[]) => {
+          // args[1] is the request ctx (the caller's identity); counted once per call, whatever the outcome.
+          void trackToolCall(name, args[1]);
           const { structuredContent: _dropped, ...result } = await withinBudget(name, () => routed(name, handler, args));
           return result;
         },

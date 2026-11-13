@@ -46,7 +46,7 @@ function intEnv(name: string, fallback: number): number {
 /** Quotas and guard thresholds (see the plan's free-tier table). */
 export const LIMITS = {
   get personalPages() {
-    return intEnv("FILES_PERSONAL_PAGES", 3_000);
+    return intEnv("FILES_PERSONAL_PAGES", 10_000);
   },
   get globalPages() {
     return intEnv("FILES_GLOBAL_MAX_PAGES", 30_000);
@@ -103,6 +103,18 @@ export function operatorIds(): string[] {
     .split(",")
     .map((s) => s.trim())
     .filter((s) => /^user_[A-Za-z0-9]+$/.test(s));
+}
+
+/**
+ * Clerk user ids that are admins whatever Clerk says: the way in before
+ * anyone holds `publicMetadata.role = "admin"` and the way back if the last
+ * admin locks themselves out. ADMIN_USER_IDS, plus the operators of the
+ * Vlastní zdroje page (FILES_OPERATOR_IDS). Empty entries dropped.
+ */
+export function adminEnvIds(): string[] {
+  return [...(process.env.ADMIN_USER_IDS ?? "").split(","), ...(process.env.FILES_OPERATOR_IDS ?? "").split(",")]
+    .map((s) => s.trim())
+    .filter((s, i, all) => /^user_[A-Za-z0-9]+$/.test(s) && all.indexOf(s) === i);
 }
 
 export function cronSecret(): string | undefined {

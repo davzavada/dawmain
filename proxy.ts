@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 /**
  * Clerk's proxy is what makes `auth()` work on the server: in the MCP route
  * (OAuth tokens), in the Vlastní zdroje and Zotero API routes (web session)
- * and on the operator page. Nowhere else: the pages are static and read the
+ * and on the operator and admin pages. Nowhere else: the pages are static and read the
  * account in the browser (ClerkProvider, app/_zdroje/clerk-bridge.tsx), so
  * the proxy only cost them time — a function call before every page, and
  * for a signed-in user whose one-minute session token had lapsed, Clerk's
@@ -30,8 +30,9 @@ export const config = {
     // /api/status: public, static and served by the CDN, which a proxy in front
     // would turn into a function call per request (app/api/status/route.ts).
     "/((?!api/status(?:/|$))(?:api|trpc).*)",
-    // The operator page and its Server Functions (auth() on the server); :path* includes the page itself.
+    // The operator page and the admin page with their Server Functions (auth() on the server); :path* includes the page itself.
     "/vlastni-zdroje/provoz/:path*",
+    "/sprava/:path*",
     // Clerk's own auto-proxy path.
     "/__clerk/:path*",
   ],

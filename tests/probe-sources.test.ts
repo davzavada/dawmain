@@ -70,6 +70,7 @@ describe("discover", () => {
     // discover loads the HTML parser lazily; load it now, so no real-time
     // module load sits between the fake-timer steps.
     await import("@/src/sources/shared/html");
+    await import("@/src/sources/psp");
     vi.useFakeTimers();
     const answer = (text: string, ms: number) =>
       new Promise<Response>((resolve) => setTimeout(() => resolve(new Response(text, { status: 200 })), ms));
@@ -80,6 +81,7 @@ describe("discover", () => {
         if (href === "https://rozhodnuti.justice.cz/") return answer('<script src="/main.js"></script>', 5_000);
         if (href === "https://rozhodnuti.justice.cz/main.js") return answer('fetch("/api/finaldoc/x")', 5_000);
         if (href === "https://vyhledavac.nssoud.cz/") return answer("<form></form>", 5_000);
+        if (href.startsWith("https://www.psp.cz/")) return answer("<html><body>Sněmovní tisky</body></html>", 5_000);
         return answer('"rok": 2024', 5_000); // the justice canary
       }),
     );
@@ -87,16 +89,17 @@ describe("discover", () => {
     void probe()
       .handler({ ...DEFAULTS, discover: true, sources: ["justice"] })
       .then((r) => (result = r));
-    // Sequentially: canary 5 s, then home 5 s + bundle 5 s, then the NSS form 5 s = 20 s.
+    // Sequentially: canary 5 s, then home 5 s + bundle 5 s, then the NSS form 5 s, then the psp.cz form 5 s = 25 s.
     await vi.advanceTimersByTimeAsync(10_000);
     expect(result).toBeDefined();
     const text = result!.content[0].text;
     expect(text).toContain("1/1 sources healthy");
     const json = JSON.parse(text.slice(text.indexOf("Discoveries:\n") + "Discoveries:\n".length));
-    // NSS answered first; the JSON still reads justice, then nss.
-    expect(Object.keys(json)).toEqual(["justice", "nss"]);
+    // NSS answered first; the JSON still reads justice, then nss, then psp.
+    expect(Object.keys(json)).toEqual(["justice", "nss", "psp"]);
     expect(json.justice).toEqual({ scripts_scanned: 1, api_paths: ["/api/finaldoc/x"] });
     expect(json.nss).toEqual({ conditions: [] });
+    expect(json.psp).toMatchObject({ http_status: 200, inferred_form: null, rows: [], page_links: [] });
   });
 
   it("an error in one part does not stop the other", async () => {
@@ -104,12 +107,13 @@ describe("discover", () => {
       "fetch",
       vi.fn(async (url: string | URL) => {
         if (String(url).includes("justice")) throw new Error("boom");
+        if (String(url).includes("psp.cz")) throw new Error("psp down");
         return new Response("<form></form>", { status: 200 });
       }),
     );
     const result = await probe().handler({ ...DEFAULTS, discover: true, sources: ["nss"] });
     const text = result.content[0].text;
     const json = JSON.parse(text.slice(text.indexOf("Discoveries:\n") + "Discoveries:\n".length));
-    expect(json).toEqual({ justice: { error: "boom" }, nss: { conditions: [] } });
+    expect(json).toEqual({ justice: { error: "boom" }, nss: { conditions: [] }, psp: { error: "psp down" } });
   });
 });

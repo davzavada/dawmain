@@ -3,6 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { PRIMO_MAX_RESULTS, PRIMO_PAGE_SIZE, SOURCE as PRIMO_SOURCE, getPrimoRecord, primoLanguage, searchPrimo } from "@/src/sources/primo";
 import { bibKey, formatAuthors, mergeDoiDuplicates, pageWindow, sliceWindow, type BibHit } from "@/src/sources/shared/bib";
 import { dedupeBy, uniqueQueries } from "@/src/sources/shared/text";
+import { doctrineRefusal } from "../doctrine-gate";
 import { READ_ONLY, toolFailure } from "./shared";
 import { failureLines, runVariants, variantFailureSchema, variantTotalsSchema } from "./variants";
 
@@ -153,7 +154,9 @@ export function registerDoctrine(server: McpServer): void {
       }),
       annotations: READ_ONLY,
     },
-    async ({ query, queries, title, author, subject, language, year_from, year_to, limit, page }) => {
+    async ({ query, queries, title, author, subject, language, year_from, year_to, limit, page }, ctx) => {
+      const refused = await doctrineRefusal(ctx);
+      if (refused) return refused;
       const variants = uniqueQueries(query, queries);
       if (!variants.length && !title?.trim() && !author?.trim() && !subject?.trim()) {
         return {
@@ -333,7 +336,9 @@ export function registerDoctrine(server: McpServer): void {
       }),
       annotations: READ_ONLY,
     },
-    async ({ id }) => {
+    async ({ id }, ctx) => {
+      const refused = await doctrineRefusal(ctx);
+      if (refused) return refused;
       try {
         // No outer deadline: fetchPrimo bounds each attempt at 20 s with one
         // retry (≈ 41.5 s worst case, inside the route's 60 s). A 20 s race

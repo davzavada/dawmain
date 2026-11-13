@@ -123,6 +123,7 @@ function textOf(result, label) {
 const EXPECTED_TOOLS = [
   "dawmain_ping",
   "dawmain_probe_sources",
+  "dawmain_guide",
   "esbirka_search",
   "esbirka_get_act",
   "esbirka_get_text",
@@ -140,6 +141,9 @@ const EXPECTED_TOOLS = [
   "eurlex_search",
   "eurlex_get_document",
   "eurlex_get_history",
+  "psp_search",
+  "psp_get_tisk",
+  "psp_get_text",
   "doctrine_search",
   "doctrine_get_record",
   // Vlastní zdroje — registered everywhere, gated per call (see checkFilesGate).

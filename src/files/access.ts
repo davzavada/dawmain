@@ -23,7 +23,9 @@ export type { Access, LibraryAccess } from "./access-types";
  *     `files` (Vlastní soubory: search, read, upload) and `zotero`. A
  *     switched-off library stays in `all` (list, delete, export), and only
  *     Pro itself decides the 90-day purge (libraryOwnerState below): a
- *     feature switched off never deletes anything.
+ *     feature switched off never deletes anything. `features.ukaz` works the
+ *     other way round: UKAŽ (doctrine_*) stays off until an admin sets it
+ *     to `true`.
  *
  * There are no shared (team) libraries: Clerk organizations are ignored.
  * `libraries` holds the Pro library (search, read, upload); `all` the
@@ -67,7 +69,7 @@ export function freezeAccess(access: Access): Access {
 
 /** An account that exists nowhere (or is banned): no libraries. */
 export function emptyAccess(userId: string, banned = false): Access {
-  return freezeAccess({ userId, banned, libraries: [], all: [], zotero: false });
+  return freezeAccess({ userId, banned, libraries: [], all: [], zotero: false, ukaz: false });
 }
 
 /**
@@ -140,6 +142,16 @@ export function featureOff(metadata: unknown, feature: Feature): boolean {
   return !!features && typeof features === "object" && (features as Record<string, unknown>)[feature] === false;
 }
 
+/**
+ * Features an admin switches on one by one: `publicMetadata.features.ukaz`
+ * must be strictly `true` (UKAŽ, the doctrine tools). The opposite of
+ * featureOff: nothing but an explicit grant turns it on.
+ */
+export function ukazOn(metadata: unknown): boolean {
+  const features = (metadata as { features?: unknown } | null | undefined)?.features;
+  return !!features && typeof features === "object" && (features as Record<string, unknown>).ukaz === true;
+}
+
 /** The subset of Clerk's User the access needs (keeps tests and mocks small). */
 export interface ClerkUserLike {
   id: string;
@@ -169,7 +181,7 @@ export function buildAccess(user: ClerkUserLike): Access {
     quotaPages: quotaFrom(user.publicMetadata, LIMITS.personalPages),
   };
   const all = [personal];
-  return { userId, banned: false, libraries: all.filter((l) => l.pro), all, zotero };
+  return { userId, banned: false, libraries: all.filter((l) => l.pro), all, zotero, ukaz: ukazOn(user.publicMetadata) };
 }
 
 async function loadFromClerk(userId: string): Promise<Access> {

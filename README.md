@@ -12,7 +12,12 @@ Budu rád, pokud nástroj vyzkoušíte :)
 ## Jak to funguje?
 
 V oficiálních databázích server hledá živě - funguje jako nachytřený Google a
-nic si z nich nekopíruje. Konkrétně je napojený na judikaturu:
+nic si z nich nekopíruje. Kdo má režim Pro, může připojit svou knihovnu Zotero
+a nahrát vlastní soubory. Režim Pro je taky zdarma, jen je v testovacím
+provozu - napište mi případně e-mail o přístup (kontakt je na
+[webu](https://dawmain.davidzavada.cz)).
+
+Konkrétně je server napojený na judikaturu:
 
 - Nejvyššího soudu - dostupné [zde](https://rozhodnuti.nsoud.cz)
 - Nejvyššího správního soudu - dostupné [zde](https://vyhledavac.nssoud.cz)
@@ -20,8 +25,11 @@ nic si z nich nekopíruje. Konkrétně je napojený na judikaturu:
 - obecných soudů - dostupné [zde](https://rozhodnuti.justice.cz)
 - Soudního dvora EU (InfoCuria) - dostupné [zde](https://infocuria.curia.europa.eu)
 
-Právní předpisy: [e-Sbírka](https://www.e-sbirka.cz), unijní legislativa,
-judikatura a legislativní materiály: [EUR-Lex](https://eur-lex.europa.eu).
+Právní předpisy: [e-Sbírka](https://www.e-sbirka.cz); české legislativní
+materiály (sněmovní tisky s důvodovou zprávou, rozdílovou tabulkou, RIA a
+průběhem projednávání): [Poslanecká sněmovna](https://www.psp.cz/sqw/tisky.sqw);
+unijní legislativa, judikatura a legislativní materiály:
+[EUR-Lex](https://eur-lex.europa.eu).
 
 Doktrína (knihy, kapitoly, články) přes
 [UKAŽ](https://cuni.primo.exlibrisgroup.com/discovery/search?vid=420CKIS_INST:UKAZ)
@@ -32,7 +40,7 @@ zda je dílo k věci. Text díla se nestahuje; k němu vede odkaz na záznam
 (u licencovaných titulů přes vzdálený přístup UK). (Peace Palace Library
 byla vyřazena: její WorldCat Discovery blokuje adresy serverů.)
 
-**Vlastní zdroje (Pro).** Kdo má režim Pro (je zdarma, přiděluji ho ručně), si
+**Vlastní zdroje (Pro).** Kdo má režim Pro (je zdarma, v testovacím provozu ho přiděluji ručně), si
 na webu nahraje vlastní knihy, články, komentáře a vzory - pro sebe, nebo pro
 celý tým. Dokument se převede na text přímo v prohlížeči, takže originál
 počítač neopustí; na server jde jen text. Asistent v dokumentech pak hledá a
@@ -60,11 +68,19 @@ a nástroje `zotero_*` se objeví, až bude Zotero na webu zapnuté.
 https://dawmain.davidzavada.cz/api/mcp
 ```
 
-V aplikaci claude.ai: **Nastavení → Konektory → Přidat vlastní konektor** a
-vložit adresu výše.
+V Claude stačí
+[tento odkaz](https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=Dawmain&connectorUrl=https%3A%2F%2Fdawmain.davidzavada.cz%2Fapi%2Fmcp):
+otevře okno „Přidat vlastní konektor“ s vyplněným názvem i adresou, které jen
+potvrdíte. Ručně: **Nastavení → Konektory → Přidat vlastní konektor** a vložit
+adresu výše. Návod pro ChatGPT je na [webu](https://dawmain.davidzavada.cz/#chatgpt).
 
 Po přidání konektoru se otevře přihlášení - stačí registrace e-mailem.
 Starší přístupové kódy fungují dál.
+
+Rešeršní návod (jak se ptát soudů, které filtry zužují hledání, jak číst a
+citovat) si asistent vyžádá od konektoru sám (`dawmain_guide`) na začátku
+každé rešerše, vždy v aktuální verzi - nic dalšího není třeba instalovat.
+Kdo chce, může si ho nahrát i jako skill (odkaz ke stažení je na webu).
 
 ---
 

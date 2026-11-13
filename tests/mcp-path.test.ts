@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMcpHandler } from "mcp-handler";
 import type { McpServer } from "@modelcontextprotocol/server";
+import { withGuideHint } from "@/src/mcp/guide-hint";
 import { CALL_BUDGET_MS, registerAllTools, runWithCallClock } from "@/src/mcp/tools";
 import { registerPing } from "@/src/mcp/tools/ping";
 import { registerProbe } from "@/src/mcp/tools/probe";
+import { registerGuide } from "@/src/mcp/tools/guide";
 import { registerEsbirka } from "@/src/mcp/tools/esbirka";
 import { registerNs } from "@/src/mcp/tools/ns";
 import { registerNalus } from "@/src/mcp/tools/nalus";
@@ -12,6 +14,7 @@ import { registerCzCaselaw } from "@/src/mcp/tools/cz-caselaw";
 import { registerJustice } from "@/src/mcp/tools/justice";
 import { registerCuria } from "@/src/mcp/tools/curia";
 import { registerEurlex } from "@/src/mcp/tools/eurlex";
+import { registerPsp } from "@/src/mcp/tools/psp";
 import { registerDoctrine } from "@/src/mcp/tools/doctrine";
 import { registerFiles } from "@/src/mcp/tools/files";
 import { registerZotero } from "@/src/mcp/tools/zotero";
@@ -30,7 +33,9 @@ type Handler = (...args: unknown[]) => Promise<Record<string, unknown>>;
 function registerTheOldWay(server: McpServer, zotero: boolean): void {
   const target = {
     registerTool(name: string, config: Record<string, unknown>, handler: Handler) {
-      const { outputSchema: _structured, ...rest } = config;
+      const { outputSchema: _structured, ...bare } = config;
+      // The pointer at dawmain_guide in the search tools' descriptions (src/mcp/guide-hint.ts) is part of the boundary.
+      const rest = withGuideHint(name, bare);
       return (server as unknown as { registerTool: (...args: unknown[]) => unknown }).registerTool(
         name,
         rest,
@@ -44,6 +49,7 @@ function registerTheOldWay(server: McpServer, zotero: boolean): void {
   for (const register of [
     registerPing,
     registerProbe,
+    registerGuide,
     registerEsbirka,
     registerNs,
     registerNalus,
@@ -52,6 +58,7 @@ function registerTheOldWay(server: McpServer, zotero: boolean): void {
     registerJustice,
     registerCuria,
     registerEurlex,
+    registerPsp,
     registerDoctrine,
     registerFiles,
   ]) {

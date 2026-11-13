@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   DATABASE_GROUPS,
   DATABASES,
@@ -8,6 +8,9 @@ import {
   type DatabaseStatus,
 } from "@/src/mcp/databases";
 import { Icon, type IconName } from "./_icons";
+import { ZIcon } from "./_zdroje/icons";
+import { requestSignIn, useZdroje } from "./_zdroje/store";
+import { useSourceTexts } from "./_zdroje/texts";
 
 /**
  * The source checks in the browser: the summary in the header and the
@@ -105,7 +108,6 @@ const LOOK: Record<string, { icon: IconName; color: string }> = {
   curia: { icon: "eu", color: "var(--blue)" },
   "esbirka-api": { icon: "list", color: "var(--green)" },
   "cellar-sparql": { icon: "eu", color: "var(--blue)" },
-  primo: { icon: "book", color: "var(--amber)" },
 };
 
 /** What a row needs to render; a pending row has no status yet. */
@@ -147,26 +149,95 @@ export function SourceList() {
           <span className="source-group-count">{items.length}</span>
         </div>
         <ul>
-          {items.map((row) => {
-            const look = LOOK[row.id] ?? { icon: "list", color: "var(--soft)" };
-            return (
-              <li key={row.id} className="source">
-                <Icon name={look.icon} style={{ color: look.color }} />
-                <div className="source-name">
-                  <a href={row.href}>{row.label}</a>
-                  <span className="source-host">{host(row.href)}</span>
-                </div>
-                <div className="source-state">
-                  {row.at && <span className="source-at">{row.at}</span>}
-                  <span className="badge" data-state={row.state}>
-                    {row.badge}
-                  </span>
-                </div>
-              </li>
-            );
-          })}
+          {items.map((row) => (
+            <DatabaseRow key={row.id} row={row} />
+          ))}
         </ul>
       </div>
     );
   });
+}
+
+function DatabaseRow({ row }: { row: Row }) {
+  const look = LOOK[row.id] ?? { icon: "list", color: "var(--soft)" };
+  return (
+    <li className="source">
+      <Icon name={look.icon} style={{ color: look.color }} />
+      <div className="source-name">
+        <a href={row.href}>{row.label}</a>
+        <span className="source-host">{host(row.href)}</span>
+      </div>
+      <StateBadge row={row} />
+    </li>
+  );
+}
+
+function StateBadge({ row }: { row: Row }) {
+  return (
+    <div className="source-state">
+      {row.at && <span className="source-at">{row.at}</span>}
+      <span className="badge" data-state={row.state}>
+        {row.badge}
+      </span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// UKAŽ in the Pro group
+
+const UKAZ = DATABASES.find((db) => db.canaryId === "primo")!;
+
+/**
+ * The UKAŽ row of the Pro group (app/_zdroje/own-sources.tsx): switched on
+ * per account by an admin, so greyed out with a lock until then. A visitor
+ * gets the group's lock and a click signs them in, as on the other rows.
+ * Switched on, it shows its check as the public databases do; only then is
+ * the status asked for.
+ */
+export function UkazRow({ signedIn }: { signedIn: boolean }) {
+  const { auth, summary } = useZdroje();
+  if (!signedIn) {
+    return (
+      <UkazRowView locked>
+        <button type="button" className="source-title zd-row-button" onClick={requestSignIn} disabled={auth !== "signed_out"}>
+          {UKAZ.label}
+        </button>
+      </UkazRowView>
+    );
+  }
+  if (summary?.state === "ok" && summary.ukaz === true) return <UkazRowOn />;
+  return (
+    <UkazRowView locked>
+      <span className="source-title">
+        {UKAZ.label}
+        <ZIcon name="lock" size={13} />
+      </span>
+    </UkazRowView>
+  );
+}
+
+function UkazRowOn() {
+  const answers = useStatuses();
+  const row = toRow(UKAZ, answers[UKAZ.canaryId]);
+  return (
+    <UkazRowView state={<StateBadge row={row} />}>
+      <a href={UKAZ.href}>{UKAZ.label}</a>
+    </UkazRowView>
+  );
+}
+
+function UkazRowView({ locked = false, state, children }: { locked?: boolean; state?: ReactNode; children: ReactNode }) {
+  // What UKAŽ is, worded as the other rows of the Pro group are — an editable text (sources.ukaz).
+  const texts = useSourceTexts();
+  return (
+    <li className={locked ? "source zd-own-row zd-row-locked" : "source zd-own-row"}>
+      <Icon name="book" />
+      <div className="source-name">
+        {children}
+        <span className="source-desc">{texts.ukaz}</span>
+      </div>
+      {state}
+    </li>
+  );
 }

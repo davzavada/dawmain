@@ -17,6 +17,9 @@ Uživatelský popis je v [README](../README.md).
 | `justice_search` / `justice_get_decision` | rozhodnuti.justice.cz | obecné soudy (okresní/krajské/vrchní): fulltext (`match` všechna slova/jedno ze slov/fráze), spisová značka, kódy soudů, druh rozhodnutí, datum vydání i zveřejnění, aplikovaný předpis a § (`applies_act` + `applies_section`) — vše server-side přes `/api/finaldoc`, backend SPA zachycený z živého požadavku; hit nese i `affects` (co rozhodnutí udělalo s rozhodnutím nižšího soudu: CHANGE/CONFIRM/CANCEL…) |
 | `sdeu_search` / `sdeu_get_document` | InfoCuria + Cellar | FULLTEXT judikatury SDEU (C i T) přes vlastní index soudu — hledá napříč všemi jazykovými verzemi; typ dokumentu, stav věci, citovaný předpis a článek (`cites_celex`/`cites_article`), předběžné otázky podle předkládajícího státu (`referred_from`), datumy — vše server-side dle zachyceného payloadu SPA | 
 | `eurlex_search` / `eurlex_get_document` | Cellar SPARQL (Publications Office) | EU legislativa, judikatura i legislativní materiály (návrhy COM, sdělení, zelené/bílé knihy, SWD, impact assessmenty, stanoviska EHSV/VR, postoje EP a Rady) dle názvů, CELEX/ECLI, typů a dat; texty z oficiálního Cellaru |
+| `psp_search` | www.psp.cz | sněmovní tisky přes vlastní formulář Sněmovny (`tisky.sqw`, GET, zachycený HAR 2026-10): název tisku (`na` — filtr webu, ne fulltext textů), číslo tisku (`tqb25`), druh tisku (`types` → zaškrtávátka `tqa27…`), jen neukončené (`tqa17`), a hledání podle čísla Sbírky (`act: "221/2006"` → záložka návrhů zákonů, `tqb18`/`tqb19`) — to jediné prokazatelně odpovídá napříč obdobími (živě: o=9, výsledek tisk 1110/4); `period` nebo `year` (ve volebním roce obě období) určí, v kterém období se formulář otevře a která období se v odpovědi nechají (ostatní se spočítají); `ra=100` řádků na požadavek, celkový počet z řádku „Celkem nalezen N tisk“, další stránky jen podle odkazů, které výpis tiskne (markup stránkování nezachycen), nejvýš 6; hit nese číslo, období z odkazu řádku, název a ostatní buňky (druh, stav / číslo Sb.) |
+| `psp_get_tisk` | www.psp.cz | jeden tisk (`historie.sqw?o=&t=`, zachyceno 50/10): název, „Stav projednávání ke dni“, schéma legislativního procesu v jednom řádku (✓ hotovo, ▶ aktuální fáze), text sekcí (Předkladatel, Poslanecká sněmovna, Vláda, Senát…) s daty, odkaz „Navržené změny předpisů“ a dokumenty z odkazů stránky — části tisku (`tiskt.sqw?O=&CT=&CT1=`, popsané větou, která je v průběhu jmenuje), stanovisko Parlamentního institutu (`text2.sqw?idd=`), usnesení výborů (`tiskt.sqw?v=ORGV&ct=` — není částí tisku, jen odkaz), každý s druhem podle slov popisku a s voláním `psp_get_text` |
+| `psp_get_text` | www.psp.cz | text části tisku (`period` + `number` + `part`) nebo souboru (`document_id`). psp.cz text do stránky `tiskt.sqw` nevkládá (zachyceno u 50/10, 362/6 i 1110/4): stránka nese jen `#main-content` s nadpisem, box „Celý sněmovní tisk“ / „Verze PDF“ / „Originál dokumentu“ a tabulku souborů seskupenou nadpisy („Návrh zákona včetně důvodové zprávy“, „Platné znění s vyznačením změn“; PDF i DOCX). U části proto nástroj sám vybere hlavní soubor (`mainDocument`: první skupina, DOCX před PDF; bez skupin celý tisk, PDF rendice před originálem), přečte ho a ostatní soubory vypíše s `document_id`. Formát podle prvních bajtů — PDF přes převodník Vlastních zdrojů (`pdfText` s `maxTotalPages` 5 000, 60 stran na volání, `pdf_pages` pro další), DOCX přes mammoth, HTML jako text; starý `.doc` se znovu stáhne jako `&pdf=1`; stránky 45k znaků, `find` |
 | `eurlex_get_history` | Cellar SPARQL (Publications Office) | travaux préparatoires aktu z dossieru interinstitucionálního postupu (`cdm:dossier_contains_work` — obsahuje i přijatý akt, takže kotví CELEX aktu i kteréhokoli dokumentu postupu, případně číslo postupu `2012/0011(COD)`); vrací návrh s důvodovou zprávou, impact assessmenty, stanoviska, postoje EP/Rady + číslo postupu, právní základ a stav (přijato/projednáváno/staženo) |
 | `doctrine_search` | cuni.primo.exlibrisgroup.com | doktrína: knihy, kapitoly a články z UKAŽ Univerzity Karlovy (Primo VE: katalog UK + Central Discovery Index licencovaných e-zdrojů); `query`/`queries` (≤ 3 varianty), `title`, `author`, `subject`, `language`, `year_from`/`year_to`; katalog stránkuje po 10, `limit` (≤ 20; nad 10 záznamy stručně, bez abstraktů) stáhne víc stránek v paralelní dávce a `page` kráčí dál (`total` = `total_local` + `total_central`) — vrací bibliografické záznamy s odkazem na záznam, abstraktem/obsahem a přístupovými odkazy, žádné plné texty; klient postavený na zachyceném požadavku SPA (HAR 2026-09), ověřený živě z produkce |
 | `doctrine_get_record` | cuni.primo.exlibrisgroup.com | jeden záznam v plném znění přes full-display endpoint Prima (ověřený živě): celý abstrakt, obsah (TOC), hesla, identifikátory a přístupové odkazy — hledání ukazuje jen začátek abstraktu a obsahu; text díla se nestahuje (k němu vede odkaz na záznam, licencované tituly si čtenář otevře sám přes vzdálený přístup UK) |
@@ -29,6 +32,7 @@ Uživatelský popis je v [README](../README.md).
 | `zotero_list` | Zotero | knihovny (osobní + skupiny klíče), kolekce a štítky; `query`, `limit` (≤ 100), `page` |
 | `dawmain_ping` | — | které nasazení odpovědělo |
 | `dawmain_probe_sources` | — | diagnostika všech upstreamů z nasazené funkce; `include_raw` pro záchyt fixtures, `discover` pro hledání neověřených endpointů |
+| `dawmain_guide` | — | rešeršní návod (`skills/dawmain-reserse/SKILL.md` bez front matter) v jedné odpovědi, přizpůsobený volajícímu (`tailorManual`: sekce zdrojů, které účet nemá — Vlastní soubory, Zotero, UKAŽ — se vynechají a poznámka pod nadpisem říká jejich nástroje nevolat; pravidla jsou táž jako v branách nástrojů, při výpadku Clerku se nevynechá nic), čtený ze stromu repa za běhu (`outputFileTracingIncludes` v `next.config.ts` ho přibalí do funkce); instrukce serveru říkají modelu zavolat ho jednou na začátku každé rešerše — skill v claude.ai tak nikdo instalovat nemusí a každá konverzace čte nasazenou verzi; test hlídá velikost pod `SKILL_MAX_CHARS` |
 
 Nástroje `files_*` sáhnou do databáze až po třech kontrolách, které se jí
 nedotknou, v tomto pořadí: režim z env (`FILES_MODE`) → přihlášení OAuth
@@ -79,6 +83,24 @@ sám přes odkaz na záznam (u licencovaných přes vzdálený přístup UK v
 prohlížeči). Co se o Unpaywallu, o přihlašovacím řetězu CAS a o proxy
 `ezproxy.is.cuni.cz` (host potvrzený HARem zadavatele) zjistilo, zůstává v
 `docs/research/doctrine-sources.json`; v kódu nezůstal žádný spící zbytek.
+**Poslanecká sněmovna** (`psp_*`, 2026-10): psp.cz není z vývojového sandboxu
+dosažitelný (proxy host odmítá); všechny stránky, na kterých klient stojí,
+jsou ale **zachycené z prohlížeče (HAR) a leží ve `tests/fixtures/psp/`**:
+vstup formuláře `sntisk.sqw?o=10`, výsledky `tisky.sqw` (jeden hit podle
+čísla Sbírky, prázdný výsledek, 2. strana hledání `na=zakon` s 1 856 hity a
+stránkováním `str=` v `p.paging`), `historie.sqw?o=10&t=50` a `tiskt.sqw` tří
+tisků (50/10, 362/6, 1110/4). Z nich: formulář má pole `na`, `tqb25`/`tqb26`,
+`tqa27–35/62–64`, `tqa17`, `ra`, záložka návrhů zákonů `tqb18`/`tqb19` (číslo
+Sbírky, odpovídá napříč obdobími); `na` je filtr názvu bez diakritiky
+(„zakon“ našel i „zákoník“); řádek výsledků nese podčíslo (11/0 a stanovisko
+vlády 11/1 zvlášť); stránky chodí jako `charset=Windows-1250` s obsahem v
+`#main-content`; **`tiskt.sqw` text nikdy nenese**, jen soubory — proto
+`psp_get_text` u části čte hlavní soubor sám. Po nasazení stačí
+`dawmain_probe_sources {sources: ["psp"]}` a živý průchod
+`psp_search {act: "89/2012"}` → `psp_get_tisk` → `psp_get_text` (ověří
+převod PDF/DOCX, který se ze záchytů ověřit nedá). Otevřená data Sněmovny
+(`hp.sqw?k=1300`, ZIP celé databáze) se záměrně nestahují — žádný dotaz nemá
+stahovat celou databázi. Senát (senat.cz) ani eKLEP pokryté nejsou.
 **EUIPO** (eSearchCLW i Guidelines) a **ÚPV** (isdv.upv.gov.cz) záměrně
 pokryté nejsou a kód pro ně v repu není: doložky EUIPO si vyhrazují zákaz TDM
 a scrapingu „jakýmikoli prostředky, včetně botů" mimo vědecký výzkum (bez
@@ -242,15 +264,38 @@ soudu, kdy přestat hledat a jak vypadá výstupní memo. Instrukce serveru
 (`src/mcp/server.ts`) klient cachuje od initialize, skill se dá měnit hned —
 proto v něm žije to, co se ladí často.
 
-Instalace: nahrát adresář jako skill v claude.ai (Nastavení → Capabilities →
-Skills). Skill předpokládá připojený konektor Dawmain; bez něj se má ozvat,
-ne hádat.
+Model ho dostane od konektoru samotného: instrukce serveru (ty čte na
+začátku každé konverzace se zapnutým konektorem, stejně jako popisy
+nástrojů) nesou spouštěcí fráze ze skillu a pokyn zavolat `dawmain_guide`
+jednou před první rešerší; nástroj vrátí návod (celý ~57 tis. znaků, ~15
+tis. tokenů — zhruba jedna stránka rozsudku) ve verzi, která je nasazená.
+Účet bez Vlastních souborů, Zotera a UKAŽ — tedy většina — dostane návod
+bez jejich tří sekcí (~43 tis. znaků) s poznámkou tyto nástroje nevolat:
+celý návod mu jinak v prvním kole každé rešerše ukládal tři volání
+(`files_search`, `zotero_search`, `doctrine_search`), která mohla odpovědět
+jen „pro tento účet není“. Stažený skill (`/dawmain-reserse.md`) zůstává celý.
+Nic se neinstaluje a nic nezastarává; merge do main = aktualizovaný návod
+pro všechny. Soubor se do funkce dostane přes `outputFileTracingIncludes`
+(route `/dawmain-reserse.md` pro stažení ho čte při buildu, nástroj za běhu).
+
+Ruční instalace v claude.ai (Nastavení → Capabilities → Skills, nahrát
+adresář) dál funguje jako volitelný spouštěč, nic na ní ale nezávisí; kdo ji
+má, nese si vlastní kopii, kterou musí sám obnovovat.
 
 ## Výkon a šetrnost ke zdrojům
 
 - Neměnná data se cachují per warm instance: metadata a historie znění
   e-Sbírky (10 min), NSS handshake (10 min), texty dokumentů (10 min)
   a výsledky hledání (5 min).
+- NALUS: stav formuláře (`__VIEWSTATE` a spol.) se drží 10 min a sdílí ho
+  všechna hledání instance. Živě ověřeno (2026-11): jeden stav odpoví na
+  libovolný počet POSTů s kritérii — souběžně, bez cookie z GETu formuláře
+  i po 11 minutách — a session otevře NALUS až na POSTu. Hledání tak stojí
+  POST + výsledky místo formulář + POST + výsledky (měřeno 1,7 s místo
+  4,6 s) a tři varianty na studené instanci sdílí jeden GET formuláře.
+  Odpověď 200 (nula shod) nebo HTTP chyba na stavu, který si volání samo
+  nenačetlo, se nejdřív zopakuje na čerstvém formuláři; teprve ta druhá se
+  hlásí.
 - NS: fulltext hledá v celé databázi a řadí se podle relevance
   (`SearchOrder=1`). Dřív se používalo pořadí pohledu (`SearchOrder=4`), což
   je pořadí interních UNID — prvních 20 z 1 501 shod byla náhodná směs let
@@ -273,7 +318,7 @@ ne hádat.
   (neohraničený fulltext je nad výchozích 15 s).
 - Texty dokumentů se vracejí po stránkách 45 000 znaků (bezpečně pod limity klientů) — typické rozhodnutí
   v jedné odpovědi; delší texty nesou pokyn agentovi pokračovat bez ptaní.
-- Timeouty: výchozí 15 s/request; odchylky: NSS POST 25 s, Cellar retrieval 25 s,
+- Timeouty: výchozí 15 s/request; odchylky: NSS POST 25 s, psp.cz soubor 25 s, Cellar retrieval 25 s,
   Cellar SPARQL 30 s, justice.cz hledání 45 s, e-Sbírka SPARQL 20 s, katalogy
   doktríny 20 s.
 - Délka invokace: `/api/mcp` má `maxDuration = 60`. Hobby s Fluid compute by
@@ -306,7 +351,12 @@ Endpoint přijímá dvě credentials naráz (stačí kterákoli); logika žije v
    `src/mcp/auth.ts`, ne přes `auth()` z middlewaru — takže na `proxy.ts`
    nezávisí. `proxy.ts` (Clerk middleware na stránkách, `/api` a `/__clerk`;
    bez `protect()`, takže nic nezamyká) slouží stránkám (nabídka účtu); bez
-   klíčů je no-op.
+   klíčů je no-op. Přijatý token se pamatuje 60 s na instanci (podle
+   SHA-256, jen přijetí, nikdy odmítnutí): token Clerku je neprůhledný a
+   jeho ověření je dotaz na backend API Clerku, který by bezstavový
+   transport platil u každého HTTP požadavku (initialize, tools/list, každé
+   tools/call). Odvolaný nebo propadlý token tak platí nejvýš o minutu déle
+   — stejnou minutu, po kterou se cachuje přístup účtu.
 2. **Sdílený přístupový kód** (`MCP_BEARER_TOKEN`) — původní schéma,
    ponechané pro existující klienty; token se přijímá z `Authorization`,
    `X-API-Key` i `cf-aig-authorization` (stačí, když sedí kterákoli).
@@ -426,8 +476,9 @@ dalšího kromě tří proměnných Zotera na konci tabulky). Po změně Redeplo
 | `FILES_META_MODEL` | model pro návrh metadat přes AI Gateway | `google/gemini-2.5-flash-lite` |
 | `FILES_USER_HASH_SECRET` | klíč HMAC pro pseudonym nahrávajícího, který dostává AI Gateway k rozpočítání spotřeby (`gateway.user`, čte `src/files/ingest.ts`); dlouhý náhodný řetězec. Změna klíče = nové pseudonymy v přehledu Gateway | `CLERK_SECRET_KEY` |
 | `FILES_GLOBAL_MAX_PAGES` | strop stran pro celou instalaci | 30 000 |
-| `FILES_PERSONAL_PAGES` | kvóta osobní knihovny (stran) | 3 000 |
-| `FILES_OPERATOR_IDS` | Clerk `user_…` oddělená čárkou — přístup na `/vlastni-zdroje/provoz` | — |
+| `FILES_PERSONAL_PAGES` | kvóta osobní knihovny (stran) | 10 000 |
+| `FILES_OPERATOR_IDS` | Clerk `user_…` oddělená čárkou — přístup na `/vlastni-zdroje/provoz` (a zároveň správce na `/sprava`) | — |
+| `ADMIN_USER_IDS` | Clerk `user_…` oddělená čárkou — správci na `/sprava` bez ohledu na Clerk: první správce a cesta zpět. Další správce se povyšují na stránce Správa (`publicMetadata.role = "admin"`) | — |
 | `FILES_AI_BUDGET_USD` | klouzavý 30denní rozpočet AI v celých USD; nad ním jen heuristiky | 4 |
 | `FILES_GLOBAL_UPLOADS_PER_DAY` | nahrání za den ve všech knihovnách dohromady | 200 |
 | `FILES_CPU_MS_DAY` | CPU zpracování (nahrání, zpracování, přeindexování) za den v ms | 600 000 (10 min) |
@@ -908,3 +959,53 @@ tělo 403 „Invalid key“ a host přesměrování `/file` (pak zúžit
    nejvýš jednou za hodinu, mimo Clerk) čtou ten samý seznam.
 5. Anotace, `isoDate`, `find`/stránkovací popisy a `fail()` ber
    z `src/mcp/tools/shared.ts`, nekopíruj je.
+
+## Správa (`/sprava`)
+
+Stránka jen pro správce (jinak 404): účty z Clerku s rolí, Pro, přepínači
+funkcí a využitím nástrojů. Vstup je v menu avataru vpravo nahoře (položka
+Správa). Správce je účet z `ADMIN_USER_IDS` / `FILES_OPERATOR_IDS` nebo s
+`publicMetadata.role === "admin"`; každé načtení i každá akce to ověřuje znovu
+(`src/admin/server.ts`). Vlastní roli správce si správce odebrat nemůže a
+správce z proměnných prostředí nejde odebrat vůbec.
+
+Co přepínače zapisují (do `publicMetadata`, odkud to čte `src/files/access.ts`):
+`role` (`"admin"` / `"user"`), `pro`, `features.files` a `features.zotero`
+(`false` vypíná), `features.ukaz` (UKAŽ, `doctrine_*`; zapíná se jen výslovným
+`true`, hlídá to `src/mcp/doctrine-gate.ts`; sdílený přístupový kód a volání bez
+účtu ho mají jako dřív). Změna se projeví do minuty (cache přístupu).
+
+Využití: počty volání nástrojů podle účtu a dne (`usage_daily`, scope
+`calls:<kdo>:<nástroj>`, `src/mcp/usage.ts`), nikdy obsah volání. Počítá se jen
+tehdy, když jsou Vlastní zdroje zapnuté (zápis jde do jejich databáze).
+
+### Texty (`/sprava/texty`)
+
+Správce tu přepíše texty webu, které nejsou „automatické“: nadpis a úvod
+hlavní stránky a text karty Owl, řádky pod Vlastními soubory, Zoterem a UKAŽ,
+datum účinnosti a celé znění Podmínek užití a Zásad ochrany osobních údajů.
+Seznam zdrojů s kontrolkami, návod k připojení, navigace a tlačítka zůstávají
+v kódu. Pole a jejich výchozí znění jsou v `src/content/texts.ts`; nové pole
+se přidá tam a na místě, kde se má zobrazit.
+
+- **Formát** (`src/content/markdown.tsx`): prázdný řádek odděluje odstavce,
+  jeden konec řádku je zalomení; `**tučně**`, `*kurzíva*`, `[text](adresa)`;
+  u právních stránek navíc `## Nadpis` (otevírá oddíl) a `- ` seznam. Renderuje
+  se do React elementů, nikdy do HTML řetězce, takže nic, co správce napíše,
+  se nestane značkou; odkaz smí vést jen na `http(s)`, `mailto:` nebo cestu
+  tohoto webu. Jednořádková pole jsou prostý text.
+- **Uložení** (`src/content/store.ts`): jen odchylky od výchozího znění, jako
+  jeden JSON pod klíčem `site_texts` v `system_state` databáze Vlastních
+  zdrojů. Pole uložené zpět na výchozí znění se z uložených smaže, takže se k
+  němu dostane i pozdější změna výchozího textu v kódu.
+- **Stránky zůstávají statické.** Texty čtou při buildu a po uložení
+  (`saveTextAction` volá `revalidatePath` pro `/`, `/podminky` a `/soukromi`),
+  nikdy při návštěvě — návštěva nesmí budit Neon. Když databáze není
+  nastavená nebo neodpoví, stránka ukáže výchozí znění z repa a editor hlásí,
+  že uložit nejde. Pozor: když čtení selže při buildu, zůstane na webu výchozí
+  znění, dokud se některé pole znovu neuloží nebo neproběhne další nasazení.
+- **Sliby v právních textech** hlídá `tests/files-legal-texts.test.ts` jen
+  nad výchozím zněním. Co správce uloží v editoru, už testy nevidí — kdo mění
+  Podmínky nebo Zásady, odpovídá za to, že sedí s tím, co kód dělá (lhůty
+  výmazu, zpracovatelé), a změní s nimi i „Účinné od“.
+- Do logu jde, kdo změnil které pole a kolik znaků, nikdy text sám.

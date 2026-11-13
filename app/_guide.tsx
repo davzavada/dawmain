@@ -2,6 +2,7 @@
 
 import { useEffect, useSyncExternalStore, type ReactNode } from "react";
 import { CopyField } from "./_copy";
+import { claudeInstallLink } from "./_install-link";
 import { platformFromHash, setPlatform, usePlatform, type PlatformId } from "./_platform";
 
 /**
@@ -60,31 +61,17 @@ const PLATFORMS: Platform[] = [
         body: (
           <>
             <p>
-              Na <a href="https://claude.ai/settings/connectors">claude.ai</a> otevřete{" "}
-              <strong>Nastavení → Konektory</strong> a zvolte{" "}
-              <strong>Přidat vlastní konektor</strong>. Jako název napište <em>Dawmain</em> a do
-              pole s adresou vložte:
+              Klikněte na tlačítko. Na claude.ai se otevře okno{" "}
+              <strong>Přidat vlastní konektor</strong> s vyplněným názvem i adresou – stačí je
+              potvrdit.
             </p>
-            <CopyField value={endpoint} label="Zkopírovat adresu" />
+            <a className="button" href={claudeInstallLink(endpoint)} target="_blank" rel="noopener noreferrer">
+              Přidat Dawmain do Claude
+            </a>
           </>
         ),
       },
       loginStep,
-      {
-        title: "Nahrajte skill",
-        body: (
-          <>
-            <p>
-              Skill asistenta naučí, jak s databázemi pracovat a jak citovat. Stáhněte si ho:
-            </p>
-            {skillDownload}
-            <p>
-              Pak otevřete <strong>Nastavení → Funkce</strong>, v části <strong>Skills</strong>{" "}
-              zvolte <strong>Nahrát skill</strong> a vyberte stažený soubor.
-            </p>
-          </>
-        ),
-      },
       {
         ...firstQuestion(
           <>
@@ -128,7 +115,9 @@ const PLATFORMS: Platform[] = [
         body: (
           <>
             <p>
-              Skill asistenta naučí, jak s databázemi pracovat a jak citovat. Stáhněte si ho:
+              Rešeršní návod – jak s databázemi pracovat a jak citovat – nabízí konektor i sám
+              (nástroj <em>dawmain_guide</em>); ChatGPT se ale instrukcemi konektoru neřídí tak
+              spolehlivě jako Claude, proto doporučujeme nahrát ho i jako skill. Stáhněte si ho:
             </p>
             {skillDownload}
             <p>

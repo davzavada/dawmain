@@ -204,10 +204,87 @@ export async function pruneUsage(db: Queryable): Promise<{ usage: number; activi
   return { usage: usage.rows.length, activity: activity.rows.length };
 }
 
-/** A deleted Clerk user: their per-document read counters go with the account. */
+/** A deleted Clerk user: their per-document read counters and tool-call counts go with the account. */
 export async function forgetUserUsage(db: Queryable, userId: string): Promise<void> {
   if (!USER_ID_RE.test(userId)) return;
-  await db.query("DELETE FROM usage_daily WHERE starts_with(scope, $1)", [`read:${userId}:`]);
+  await db.query("DELETE FROM usage_daily WHERE starts_with(scope, $1) OR starts_with(scope, $2)", [
+    `read:${userId}:`,
+    `${CALLS_PREFIX}${userId}:`,
+  ]);
+}
+
+// ---------------------------------------------------------------------------
+// Who uses the MCP tools (/soukromi, bod 2: "počty volání u účtu") — one
+// usage_daily row per UTC day, caller and tool, scope 'calls:<who>:<tool>'.
+// Counts only: never the arguments of a call. Kept USAGE_KEEP_DAYS.
+
+const CALLS_PREFIX = "calls:";
+const TOOL_NAME_RE = /^[a-z0-9_]{1,64}$/;
+
+/** A Clerk user id, or one of the two callers without an account. */
+export type CallerKey = string | "shared" | "anon";
+
+/** Count one tool call of `who` (a Clerk user id, "shared" or "anon"). Anything else is ignored. */
+export async function recordToolCall(db: Queryable, who: CallerKey, tool: string): Promise<void> {
+  if (!(who === "shared" || who === "anon" || USER_ID_RE.test(who)) || !TOOL_NAME_RE.test(tool)) return;
+  await bumpUsage(db, `${CALLS_PREFIX}${who}:${tool}`, { tool_calls: 1 });
+}
+
+export interface CallerUsage {
+  who: CallerKey;
+  /** Calls over the window, and over its last 7 days. */
+  calls: number;
+  calls7: number;
+  /** Days with at least one call. */
+  activeDays: number;
+  /** Last day with a call (YYYY-MM-DD, UTC). */
+  lastDay: string;
+  /** Calls per UTC day over the window, oldest first, today last (length = the window). */
+  daily: number[];
+  /** Calls per tool, most used first. */
+  tools: Array<{ tool: string; calls: number }>;
+}
+
+/** Tool calls per caller over the last `days` UTC days including today, busiest first. System scope. */
+export async function callUsage(db: Queryable, days: number): Promise<CallerUsage[]> {
+  const span = Number.isFinite(days) ? Math.max(1, Math.floor(days)) : 1;
+  const { rows } = await db.query(
+    `SELECT day::text AS day, substr(scope, ${CALLS_PREFIX.length + 1}) AS rest, tool_calls,
+            day > ${TODAY_UTC} - 7 AS recent, (${TODAY_UTC} - day)::int AS ago
+       FROM usage_daily
+      WHERE starts_with(scope, '${CALLS_PREFIX}') AND tool_calls > 0 AND day > ${TODAY_UTC} - $1::int`,
+    [span],
+  );
+  const byWho = new Map<string, { calls: number; calls7: number; days: Set<string>; lastDay: string; tools: Map<string, number>; daily: number[] }>();
+  for (const r of rows) {
+    const rest = String(r.rest);
+    const cut = rest.indexOf(":");
+    if (cut <= 0) continue;
+    const who = rest.slice(0, cut);
+    const tool = rest.slice(cut + 1);
+    const n = num(r.tool_calls);
+    const day = String(r.day);
+    let u = byWho.get(who);
+    if (!u) byWho.set(who, (u = { calls: 0, calls7: 0, days: new Set(), lastDay: day, tools: new Map(), daily: new Array<number>(span).fill(0) }));
+    u.calls += n;
+    const slot = span - 1 - num(r.ago);
+    if (slot >= 0 && slot < span) u.daily[slot] += n;
+    if (r.recent === true) u.calls7 += n;
+    u.days.add(day);
+    if (day > u.lastDay) u.lastDay = day;
+    u.tools.set(tool, (u.tools.get(tool) ?? 0) + n);
+  }
+  return [...byWho.entries()]
+    .map(([who, u]) => ({
+      who,
+      calls: u.calls,
+      calls7: u.calls7,
+      activeDays: u.days.size,
+      lastDay: u.lastDay,
+      daily: u.daily,
+      tools: [...u.tools.entries()].map(([tool, calls]) => ({ tool, calls })).sort((a, b) => b.calls - a.calls || a.tool.localeCompare(b.tool)),
+    }))
+    .sort((a, b) => b.calls - a.calls || a.who.localeCompare(b.who));
 }
 
 /** A purged library: its own counters go with it (the 'global' totals stay). */

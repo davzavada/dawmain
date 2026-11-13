@@ -32,6 +32,36 @@ export async function decodeBody(response: Response, fallbackCharset = "utf-8"):
 }
 
 /**
+ * decodeBody for HTML whose server names no charset in Content-Type: the
+ * document's own <meta charset> (or http-equiv Content-Type) decides, read
+ * from the ASCII-safe head of the body. psp.cz pages are served that way in
+ * windows-1250 as well as UTF-8, and a wrong guess turns every Czech
+ * letter into mojibake the model would faithfully quote. A header charset
+ * still wins; a body that declares nothing is UTF-8.
+ */
+export async function decodeHtmlBody(response: Response): Promise<string> {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (/charset=/i.test(contentType)) return decodeBody(response);
+  const buffer = await response.arrayBuffer();
+  const head = new TextDecoder("latin1").decode(buffer.slice(0, 4096));
+  const declared = metaCharset(head);
+  if (declared) {
+    try {
+      return new TextDecoder(declared).decode(buffer);
+    } catch {
+      // An unknown label falls through to UTF-8.
+    }
+  }
+  return new TextDecoder("utf-8").decode(buffer);
+}
+
+/** The charset an HTML head declares, lower-cased, or null. Pure. */
+export function metaCharset(head: string): string | null {
+  const m = /<meta[^>]+charset=["']?\s*([\w-]+)/i.exec(head);
+  return m ? m[1].toLowerCase() : null;
+}
+
+/**
  * Cheap "does this look like markup?" test. Deliberately bounded: the obvious
  * /<\w+[^>]*>/ backtracks quadratically on text full of "<" with no ">"
  * (measured: 15 s on 200 kB — a normal decision length), which would burn the

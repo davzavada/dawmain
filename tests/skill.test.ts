@@ -57,7 +57,7 @@ describe("SKILL.md is pinned to the registered tool surface", () => {
     const named = [
       // Retired prefixes (nalus_, curia_, cz_) stay in the pattern, so a
       // pre-rename name left in the skill fails here instead of mid-rešerše.
-      ...SKILL.matchAll(/\b((?:dawmain|esbirka|ns|nss|us|nalus|caselaw|cz|justice|sdeu|curia|eurlex|doctrine|files|zotero)_[a-z_]+)\b/g),
+      ...SKILL.matchAll(/\b((?:dawmain|esbirka|ns|nss|us|nalus|caselaw|cz|justice|sdeu|curia|eurlex|psp|doctrine|files|zotero)_[a-z_]+)\b/g),
     ].map((match) => match[1]);
     expect(named.length).toBeGreaterThan(20);
     expect([...new Set(named)].filter((name) => !(name in tools))).toEqual([]);
@@ -113,6 +113,9 @@ describe("SKILL.md is pinned to the registered tool surface", () => {
     // A connection without a library answers once and is left alone.
     expect(SKILL).toContain("the account has no library ends `files_*` for the conversation");
     expect(SKILL).toContain("add `doctrine_search` too");
+    // UKAŽ is switched on per account: a refusal ends doctrine_* for the conversation, silently.
+    expect(SKILL).toContain("an answer that it is not enabled ends `doctrine_*` for the conversation");
+    expect(SKILL).toContain("**Answered \"není zapnutá\"? Stop.**");
     expect(SKILL).toMatch(/\*\*Další zdroje\*\* — "Bylo by dobré projít i tyto zdroje:"/);
     expect(SKILL).toContain("never summarise what they say from an abstract");
   });

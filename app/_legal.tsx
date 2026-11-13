@@ -1,18 +1,19 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { CONTACT } from "@/src/content/contact";
+import { DEFAULT_TEXTS } from "@/src/content/texts";
 
 /**
  * Shared furniture for the two legal pages. Underscore-prefixed, so Next
  * never routes it: a component file that happens to live in app/.
  */
 
-/** Both documents state the same effective date; bump it when they change. */
-export const EFFECTIVE = "6. 10. 2026";
+/** Both documents state the same effective date (an editable text, legal.effective); this is its default. */
+export const EFFECTIVE = DEFAULT_TEXTS["legal.effective"];
 
-/** Where the controller / operator is reachable: the one contact for both. */
-export const CONTACT = "davzavada@gmail.com";
+export { CONTACT };
 
-export function LegalHeader({ title }: { title: string }) {
+export function LegalHeader({ title, effective = EFFECTIVE }: { title: string; effective?: string }) {
   return (
     <>
       <Link href="/" className="back">
@@ -20,7 +21,7 @@ export function LegalHeader({ title }: { title: string }) {
       </Link>
       <header className="legal-head">
         <h1>{title}</h1>
-        <p className="muted">Účinné od {EFFECTIVE}</p>
+        <p className="muted">Účinné od {effective}</p>
       </header>
     </>
   );

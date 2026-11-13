@@ -1,6 +1,6 @@
 ---
 name: dawmain-reserse
-description: Conduct Czech and EU legal research through the Dawmain MCP connector (live queries into e-Sbírka, NS, NSS, Ústavní soud, obecné soudy, SDEU and EUR-Lex, plus the literature in the UKAŽ catalogue of Univerzita Karlova) and deliver a research memo — question, answer, argument — citing every authority in the running text (decisions: quotation, bod, sp. zn., link; statutes without links). Use this whenever the user asks what the law, the courts or the doctrine say, in phrasings like "právní rešerše", "rešerše k", "co na to judikatura", "najdi judikaturu k § X", "jak to soudy vykládají", "je na to nějaký rozsudek", "platí ještě", "co říká zákon o", "najdi mi rozhodnutí", "co na to doktrína", "najdi literaturu k", "je k tomu komentář nebo článek", or describes a legal problem and expects an answer grounded in statute, case law and literature. Requires the Dawmain connector; if its tools are absent, say so instead of guessing.
+description: Conduct Czech and EU legal research through the Dawmain MCP connector (live queries into e-Sbírka, sněmovní tisky, NS, NSS, Ústavní soud, obecné soudy, SDEU, EUR-Lex and the UKAŽ literature catalogue) and deliver a memo — question, answer, argument — citing every authority in the running text. Use this for ANY question whose answer turns on Czech or EU law, including everyday practical ones that never name a statute or a court: "je možné / lze / smím / musím…", "je to platné", "co mi hrozí, když", "jak mám postupovat" about a smlouva, podpis (vlastnoruční, elektronický), plná moc, výpověď, lhůta, nájem, pracovní poměr, GDPR, dědictví, firma, úřad. Also the research phrasings: "právní rešerše", "co na to judikatura", "najdi judikaturu k § X", "jak to soudy vykládají", "platí ještě", "co říká zákon o", "co chtěl zákonodárce", "důvodová zpráva", "sněmovní tisk", "co na to doktrína", "najdi literaturu k". Requires the Dawmain connector; if its tools are absent, say so instead of guessing.
 ---
 
 # Rešerše přes Dawmain
@@ -125,9 +125,10 @@ Names follow one pattern: `<zdroj>_search` finds, `<zdroj>_get_*` reads.
 | Which act, and its wording | `esbirka_search` → `esbirka_get_act` → `esbirka_get_text` (one § via `section: "§ 12"`, one article via `section: "čl. 36"`; any date) |
 | Lower courts (okresní/krajské/vrchní) | `justice_search` → `justice_get_decision` — full text, spisová značka, soud, druh, data, and applied provision |
 | CJEU | `sdeu_search` → `sdeu_get_document` (`language: "cs"` falls back to English) |
+| Czech legislative history — důvodová zpráva, rozdílová tabulka, RIA, platné znění s vyznačením změn, usnesení výborů, the readings | `psp_search` (titles of sněmovní tisky, by `period` or `year`) → `psp_get_tisk {period, number}` (the process with dates + every document, each with its reading call) → `psp_get_text` (`part: 0` = the bill with its důvodová zpráva; `document_id` = an attached PDF/DOCX) |
 | EU legislation | `eurlex_search` (titles/CELEX/ECLI only, NOT full text) → `eurlex_get_document` |
 | EU legislative materials (travaux) | `eurlex_get_history {celex}` — the act's whole dossier: proposal + explanatory memorandum, impact assessments, EESC/CoR opinions, EP/Council positions; or `eurlex_search` with `types: ["proposal", "opinion", …]` |
-| Literature — monographs, commentaries, articles (doctrine) | `doctrine_search` — UKAŽ (Univerzita Karlova, Primo: the UK catalogue + the Central Discovery Index) → `doctrine_get_record {id}` for the record in full: the whole abstract and table of contents |
+| Literature — monographs, commentaries, articles (doctrine; an admin switches UKAŽ on per account) | `doctrine_search` — UKAŽ (Univerzita Karlova, Primo: the UK catalogue + the Central Discovery Index) → `doctrine_get_record {id}` for the record in full: the whole abstract and table of contents |
 | The user's own books, commentaries, articles and templates (Vlastní soubory — Pro, personal sign-in) | `files_search` → `files_get_document` (the outline first, then `section` / `mn` / `footnote`); `files_list` lists the documents |
 | The user's own Zotero library — references, notes, annotations, PDFs (Pro, personal sign-in, Zotero connected; only where the deployment offers the tools) | `zotero_search` → `zotero_get_item {key}` → `zotero_get_text {key}`; `zotero_cite` formats citations; `zotero_list` names the libraries, collections, tags and saved searches; `zotero_save` adds one new item when the user asks (connected with „Číst a ukládat“) |
 | A source misbehaves | `dawmain_probe_sources` |
@@ -200,6 +201,10 @@ so re-running a search after reading is cheap.
 - **NSS lane of `caselaw_search`** — NSS decisions only (the grand chamber included);
   `include_regional: true` lets the krajské správní soudy in, and every hit from a
   court other than the lane's own names it.
+- **Czech legislative materials** — when the question turns on the purpose of a
+  Czech provision (proč to tam je, co chtěl zákonodárce, which EU directive a §
+  transposes), the důvodová zpráva and the rozdílová tabulka of the bill answer it:
+  `psp_search` → `psp_get_tisk` → `psp_get_text`; own section below.
 - **EU legislation** — `eurlex_search` matches titles and identifiers only; for the
   text of judgments use `sdeu_search`.
 - **EU legislative materials** — when the question turns on purpose or history of an
@@ -235,6 +240,45 @@ as a whole — its structure, or every place a term occurs.
 ("občanský zákoník" → 89/2012). Its date filters are e-Sbírka's own "předmětné
 datum", not "in force on" — for the law as of a date use `esbirka_get_text` with
 `date`.
+
+## Poslanecká sněmovna (psp.cz): sněmovní tisky a legislativní proces
+
+| Chci | Volání |
+|---|---|
+| tisk k vyhlášenému zákonu | `psp_search` + `act: "89/2012"` — the Sbírka number finds the bill in whatever period (the one lookup that needs no period) |
+| tisk podle názvu | `psp_search` + `query: "občanský zákoník"` and the `period` the bill was debated in (`year: 2011` picks it; an election year gives both periods); `types: ["bills"]` keeps only návrhy zákonů |
+| tisk podle čísla | `psp_search` + `number: 362`, `period: 6` — the number is the 362 of "362/0" |
+| průběh projednávání a dokumenty | `psp_get_tisk {period: 6, number: 362}` — the stage line (✓ done, ▶ current), the sections with dates (předkladatel, čtení, výbory, vláda, Senát, prezident, Sbírka), the acts amended, and every document with the call that reads it |
+| důvodová zpráva | `psp_get_text {period: 6, number: 362, part: 0}` — reads the part's main file: the návrh zákona followed by its důvodová zpráva (obecná, zvláštní část) in one document; `find: "K § 2201"` jumps to the provision; a PDF comes 60 pages per call (`pdf_pages: "61-120"` for the rest), a DOCX whole |
+| rozdílová tabulka, RIA, platné znění s vyznačením změn, celý tisk | the part's other files, listed in that answer: `psp_get_text {document_id: 266806}` |
+| stanovisko vlády, usnesení výborů, pozměňovací návrhy | the tisk's further parts (`part: 1`, …) as `psp_get_tisk` lists them |
+
+**The search matches titles, not texts.** `query` is the Chamber's own "Název tisku"
+filter — a diacritics-insensitive substring of the title ("obcansky zakonik" finds
+"Novela z. - občanský zákoník"), so a short phrase as it stands in the title, not a
+list of words; a bare "zákon" matches almost everything. For an act already in the
+Sbírka, `act` is the surer path — it answers across periods. A title query that
+finds nothing usually has the wrong period — an act published in year Y was debated
+in the period sitting in Y−1 (zákon č. 89/2012 Sb. = tisk 362 of the 6th period,
+2011); pass `year` with the year of the bill, or the `period` from the table in the
+parameter description. Hits come per part: "11/0" is the bill, "11/1" the
+stanovisko vlády to it.
+
+**The text is a file.** psp.cz does not print a tisk's text on the page; `psp_get_text`
+on a part reads its main file for you (the bill with its důvodová zpráva) and names
+the part's other files — rozdílová tabulka, RIA, platné znění s vyznačením změn,
+"Celý sněmovní tisk" — by `document_id`. Follow its continuation lines (`page`,
+`pdf_pages`) without asking.
+
+**Cite the material, not the search.** A důvodová zpráva is quoted like a decision —
+blockquote, then "důvodová zpráva k vládnímu návrhu občanského zákoníku, sněmovní
+tisk 362/0, 6. volební období, zvláštní část, k § 2201" with the tiskt.sqw link from
+the tool. It states the drafter's intent; it is not the law — read the provision in
+`esbirka_get_text` beside it and say when the enacted wording differs from the bill
+(the rozdílová tabulka and the usnesení výborů show where it changed).
+
+**Not covered:** the Senát (senat.cz) and the legislative process before the
+Chamber (eKLEP, připomínková řízení) — say so and point at senat.cz / odok.cz.
 
 ## Nejvyšší soud: pole a operátory
 
@@ -511,6 +555,12 @@ headings, a taste of the abstract and contents, the link to the record and its `
 `doctrine_get_record {id: "alma990020025980106986"}` then returns that one record
 whole: the full abstract, the table of contents, subject headings, identifiers and
 access links. Neither fetches the text of the work.
+
+**Answered "není zapnutá"? Stop.** UKAŽ is switched on per account by the Dawmain admin.
+If a `doctrine_*` answer says it is not enabled for this account, never call
+`doctrine_*` again in the conversation, continue with the official sources and say
+nothing more about it unless the user asked for literature — then tell them it is not
+switched on for their account and that the admin can enable it.
 
 | Chci | Parametr |
 |---|---|
@@ -799,12 +849,16 @@ Stopping the search never shortens the reading: what you cite, you have read who
    add `doctrine_search` too: the UKAŽ catalogue gives the works worth going through
    next (see **Další zdroje** in the memo); when the case law is thin or the topic is
    international law, doctrine may carry the argument itself — the Central Discovery
-   Index carries the international journals and series too.
+   Index carries the international journals and series too. UKAŽ is switched on per
+   account: an answer that it is not enabled ends `doctrine_*` for the conversation,
+   silently, and the memo then has no **Další zdroje**.
 3. **Screen and aim.** From the hit lines and previews pick the decisions that may
    decide the issue; `find` in the doubtful ones; a court-specific search where the
    fan-out was too coarse.
 4. **Read the statute you cite.** `esbirka_get_text` with `section` — never paraphrase a
-   provision you have not read. Historical matters: pass the reference `date`.
+   provision you have not read. Historical matters: pass the reference `date`. When
+   the purpose of the provision decides the point, read its důvodová zpráva too
+   (`psp_search` → `psp_get_tisk` → `psp_get_text`).
 5. **Read whole the decisions you will cite.** Every page, in parallel, without asking.
 6. **Check it is still good law.** Section above.
 7. **Write the memo.**
@@ -841,4 +895,5 @@ the UKAŽ catalogue (`doctrine_search`) most relevant to the question that the m
 not already use: author, title, year, publisher and the record link, one line each,
 with a few words on why each is worth reading. They are catalogue records, not texts
 you read — never summarise what they say from an abstract. Leave out works the user's
-own library already holds. Nothing relevant found: leave the section out.
+own library already holds. Nothing relevant found, or `doctrine_*` refused for this
+account: leave the section out and say nothing about it.
