@@ -10,6 +10,7 @@ import {
 import { Icon, type IconName } from "./_icons";
 import { ZIcon } from "./_zdroje/icons";
 import { requestSignIn, useZdroje } from "./_zdroje/store";
+import { useSourceTexts } from "./_zdroje/texts";
 
 /**
  * The source checks in the browser: the summary in the header and the
@@ -186,8 +187,6 @@ function StateBadge({ row }: { row: Row }) {
 // UKAŽ in the Pro group
 
 const UKAZ = DATABASES.find((db) => db.canaryId === "primo")!;
-/** What UKAŽ is, worded as the other rows of the Pro group are. */
-const UKAZ_DESC = "Katalog literatury Univerzity Karlovy, ve kterém asistent dohledává doktrínu.";
 
 /**
  * The UKAŽ row of the Pro group (app/_zdroje/own-sources.tsx): switched on
@@ -229,12 +228,14 @@ function UkazRowOn() {
 }
 
 function UkazRowView({ locked = false, state, children }: { locked?: boolean; state?: ReactNode; children: ReactNode }) {
+  // What UKAŽ is, worded as the other rows of the Pro group are — an editable text (sources.ukaz).
+  const texts = useSourceTexts();
   return (
     <li className={locked ? "source zd-own-row zd-row-locked" : "source zd-own-row"}>
       <Icon name="book" />
       <div className="source-name">
         {children}
-        <span className="source-desc">{UKAZ_DESC}</span>
+        <span className="source-desc">{texts.ukaz}</span>
       </div>
       {state}
     </li>

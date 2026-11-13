@@ -7,6 +7,7 @@ import { withScope } from "@/src/files/db/client";
 import { callUsage, type CallerUsage } from "@/src/files/db/usage";
 import { effectiveMode } from "@/src/files/guards";
 import { AdminConsole, type AdminRow } from "./console";
+import { AdminTabs } from "./_tabs";
 
 export const dynamic = "force-dynamic";
 
@@ -64,6 +65,7 @@ export default async function AdminPage() {
         <h1>Správa</h1>
         <p className="muted">Uživatelé, oprávnění a využití.</p>
       </header>
+      <AdminTabs active="users" />
       {failed ? (
         <p className="zd-error">Účty se nepodařilo načíst z Clerku. Zkus stránku obnovit za chvíli.</p>
       ) : (

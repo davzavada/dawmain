@@ -2,6 +2,8 @@ import { Guide } from "./_guide";
 import { Mail } from "./_legal";
 import { SourceList } from "./_source-status";
 import { OwnSourcesGroup } from "./_zdroje/own-sources";
+import { Markdown } from "@/src/content/markdown";
+import { siteTexts } from "@/src/content/store";
 import { zoteroConfigured } from "@/src/zotero/config";
 
 /** The author's other project, linked from the intro. */
@@ -18,30 +20,23 @@ function endpoint(): string {
   return `${origin}/api/mcp`;
 }
 
-export default function Home() {
+/**
+ * Static. The intro and the lines under the Pro sources are editable texts
+ * (src/content/texts.ts), read at build and after an admin saves them on
+ * /sprava/texty — never per visit.
+ */
+export default async function Home() {
+  const texts = await siteTexts();
   return (
     <div className="home">
       <section id="uvod" className="intro">
-        <h1>MCP server pro právní systémy</h1>
-        <p className="lead">
-          Právní rešerše s AI jsou super. Přístup k judikatuře a právním předpisům s AI by ale podle
-          mě neměl vést jen přes komerční nástroje. Data jsou dnes dobře dostupná a provoz je v
-          zásadě zdarma. Proto jsem vytvořil nekomerční alternativu. Budu rád, když ji vyzkoušíte :)
-        </p>
-        <p className="lead">
-          V oficiálních databázích server hledá živě – funguje jako nachytřený Google a nic si z
-          nich nekopíruje. Kdo má režim Pro, může připojit svou knihovnu Zotero a nahrát vlastní
-          soubory. Režim Pro je taky zdarma, jen je v testovacím provozu – napište mi případně
-          e-mail o přístup: <Mail />.
-        </p>
+        <h1>{texts["home.title"]}</h1>
+        <Markdown source={texts["home.lead"]} paragraphClass="lead" />
         <a href={OWL_URL} className="project-card">
           <img src="/owl.svg" alt="" width={36} height={36} />
           <span className="project-text">
             <span className="project-name">Owl</span>
-            <span className="project-desc">
-              Pokud vás zajímá monitoring recentní rozhodovací praxe a doktrinálního vývoje,
-              podívejte se na můj další projekt.
-            </span>
+            <span className="project-desc">{texts["home.owl"]}</span>
           </span>
           <span className="project-arrow" aria-hidden="true">
             →
@@ -56,7 +51,10 @@ export default function Home() {
           Zotero (locked where the deployment cannot connect it — no OAuth app or CREDENTIALS_SECRET)
           and UKAŽ (switched on per account).
         */}
-        <OwnSourcesGroup zotero={zoteroConfigured()} />
+        <OwnSourcesGroup
+          zotero={zoteroConfigured()}
+          texts={{ files: texts["sources.files"], zotero: texts["sources.zotero"], ukaz: texts["sources.ukaz"] }}
+        />
         {/* Client island: the badges come from GET /api/status (static, checked hourly) after the page is up. */}
         <SourceList />
       </section>

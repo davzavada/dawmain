@@ -2604,3 +2604,129 @@ button.zd-file-row:hover .zd-file-title {
     transition: none;
   }
 }
+
+/* Správa: the two pages of the admin area, and the text editor (/sprava/texty) */
+
+.adm-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--line);
+}
+.adm-tabs a {
+  padding: 8px 12px;
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font-size: 14px;
+}
+.adm-tabs a:hover {
+  color: var(--text);
+  text-decoration: none;
+}
+.adm-tabs a[aria-current="page"] {
+  color: var(--text);
+  font-weight: 500;
+  border-bottom-color: var(--text);
+}
+.adm-texts {
+  grid-template-columns: minmax(0, 260px) minmax(0, 1fr);
+}
+.adm-text-group {
+  padding: 12px 8px 8px;
+}
+.adm-text-group + .adm-text-group {
+  border-top: 1px solid var(--line);
+}
+.adm-text-group h2 {
+  padding: 0 8px 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.adm-text-group ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.adm-text-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+.adm-text-item:hover {
+  background: var(--surface);
+}
+.adm-text-item[aria-current="true"] {
+  background: var(--accent-bg);
+  font-weight: 500;
+}
+.adm-text-flag {
+  flex: none;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.adm-text-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px 16px;
+}
+.adm-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.55;
+  resize: vertical;
+}
+.adm-text-over {
+  color: var(--rose);
+}
+.adm-text-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.adm-text-preview-head {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.adm-text-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--body);
+}
+.adm-text-preview .legal section:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+@media (max-width: 900px) {
+  .adm-texts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
