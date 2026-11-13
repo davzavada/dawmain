@@ -7,6 +7,7 @@ import type { SummaryResponse } from "@/src/files/web-types";
 import { FILES_DESC, filesRowView } from "./hint";
 import { ZIcon } from "./icons";
 import { openFiles, openZotero, requestSignIn, useZdroje } from "./store";
+import { DEFAULT_SOURCE_TEXTS, SourceTextsContext, useSourceTexts, type SourceTexts } from "./texts";
 import { useZoteroStatus } from "./zotero-status";
 
 /**
@@ -37,7 +38,16 @@ function intercept(auth: string) {
   };
 }
 
-export function OwnSourcesGroup({ zotero }: { zotero: boolean }) {
+/** `texts`: the editable lines under the rows, as the home page read them (the defaults without). */
+export function OwnSourcesGroup({ zotero, texts = DEFAULT_SOURCE_TEXTS }: { zotero: boolean; texts?: SourceTexts }) {
+  return (
+    <SourceTextsContext.Provider value={texts}>
+      <OwnSources zotero={zotero} />
+    </SourceTextsContext.Provider>
+  );
+}
+
+function OwnSources({ zotero }: { zotero: boolean }) {
   const { auth, summary } = useZdroje();
   if (auth === "loading") {
     return (
@@ -80,11 +90,12 @@ function Group({ signedIn, className, children }: { signedIn: boolean; className
 
 const LOADING = "Načítám…";
 
-/** What Zotero is: the visitor's line, and the line of an account without Pro (the group's heading says Pro). */
-const ZOTERO_DESC = "Vaše knihovna, ve které asistent hledá a čte, a když povolíte, i ukládá nalezené dokumenty.";
+/** What Zotero is: the visitor's line, and the line of an account without Pro (the group's heading says Pro). Its default wording; the rows show the editable text (useSourceTexts). */
+const ZOTERO_DESC = DEFAULT_SOURCE_TEXTS.zotero;
 
 /** Visitors (and, until Clerk loads, the visitor's variant): what the files are, and a click signs in. */
 function FilesInvite({ auth }: { auth: string }) {
+  const texts = useSourceTexts();
   return (
     <li className="source zd-own-row">
       <Icon name="upload" />
@@ -92,14 +103,18 @@ function FilesInvite({ auth }: { auth: string }) {
         <button type="button" className="source-title zd-row-button" onClick={requestSignIn} disabled={auth !== "signed_out"}>
           Vlastní soubory
         </button>
-        <span className="source-desc">{FILES_DESC}</span>
+        <span className="source-desc">{texts.files}</span>
       </div>
     </li>
   );
 }
 
 function FilesRow({ auth, summary }: { auth: string; summary: SummaryResponse | null }) {
-  const { desc, locked } = filesRowView(summary);
+  const view = filesRowView(summary);
+  const texts = useSourceTexts();
+  // filesRowView is pure and shared with the sign-in hint: where it answers with the description, show the edited one.
+  const desc = view.desc === FILES_DESC ? texts.files : view.desc;
+  const locked = view.locked;
   return (
     <li className={locked ? "source zd-own-row zd-row-locked" : "source zd-own-row"}>
       <Icon name="upload" />
@@ -147,6 +162,7 @@ function HintedFilesRow() {
  */
 function ZoteroRow({ signedIn }: { signedIn: boolean }) {
   const status = useZoteroStatus(signedIn);
+  const texts = useSourceTexts();
   const ok = status?.state === "ok" ? status : null;
   // The server may know better than the client that nobody is signed in (an expired session).
   const visitor = !signedIn || status?.state === "signed_out";
@@ -177,7 +193,7 @@ function ZoteroRow({ signedIn }: { signedIn: boolean }) {
     desc = "Připojte svou knihovnu - asistent v ní bude hledat, číst, a když povolíte, i ukládat.";
   }
 
-  return <ZoteroRowView desc={desc} locked={locked} connected={connected} onClick={visitor ? requestSignIn : openZotero} />;
+  return <ZoteroRowView desc={desc === ZOTERO_DESC ? texts.zotero : desc} locked={locked} connected={connected} onClick={visitor ? requestSignIn : openZotero} />;
 }
 
 /**
@@ -185,7 +201,7 @@ function ZoteroRow({ signedIn }: { signedIn: boolean }) {
  * with nothing to click; its own lock only when signed in (a visitor's group carries the lock in its head).
  */
 function ZoteroUnavailable({ signedIn }: { signedIn: boolean }) {
-  return <ZoteroRowView desc={ZOTERO_DESC} locked={signedIn} onClick={null} />;
+  return <ZoteroRowView desc={useSourceTexts().zotero} locked={signedIn} onClick={null} />;
 }
 
 /** The Zotero row itself; without a status yet (the hinted variant), a click opens the modal, which waits for Clerk. */

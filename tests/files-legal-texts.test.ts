@@ -19,8 +19,10 @@ vi.mock("next/link", () => ({
 }));
 vi.mock("next/navigation", () => ({ usePathname: () => pathname }));
 
-const { default: Soukromi } = await import("@/app/soukromi/page");
-const { default: Podminky } = await import("@/app/podminky/page");
+// The pages as they render the repository's own wording (the defaults of the
+// editable texts) — what an admin stores on /sprava/texty is theirs to keep true.
+const { PrivacyPage, TermsPage } = await import("@/app/_legal-pages");
+const { DEFAULT_TEXTS } = await import("@/src/content/texts");
 const { SiteNav } = await import("@/app/_nav");
 const { CONTACT, EFFECTIVE } = await import("@/app/_legal");
 const { PAGE_CHARS, metaModel } = await import("@/src/files/config");
@@ -36,8 +38,8 @@ function text(element: ReturnType<typeof createElement>): string {
     .replace(/\s+/g, " ");
 }
 
-const privacy = text(createElement(Soukromi));
-const terms = text(createElement(Podminky));
+const privacy = text(createElement(PrivacyPage, { texts: DEFAULT_TEXTS }));
+const terms = text(createElement(TermsPage, { texts: DEFAULT_TEXTS }));
 
 describe("privacy policy (/soukromi)", () => {
   it("names the operator as controller, with no processing contract for uploads", () => {

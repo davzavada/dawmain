@@ -978,3 +978,34 @@ Co přepínače zapisují (do `publicMetadata`, odkud to čte `src/files/access.
 Využití: počty volání nástrojů podle účtu a dne (`usage_daily`, scope
 `calls:<kdo>:<nástroj>`, `src/mcp/usage.ts`), nikdy obsah volání. Počítá se jen
 tehdy, když jsou Vlastní zdroje zapnuté (zápis jde do jejich databáze).
+
+### Texty (`/sprava/texty`)
+
+Správce tu přepíše texty webu, které nejsou „automatické“: nadpis a úvod
+hlavní stránky a text karty Owl, řádky pod Vlastními soubory, Zoterem a UKAŽ,
+datum účinnosti a celé znění Podmínek užití a Zásad ochrany osobních údajů.
+Seznam zdrojů s kontrolkami, návod k připojení, navigace a tlačítka zůstávají
+v kódu. Pole a jejich výchozí znění jsou v `src/content/texts.ts`; nové pole
+se přidá tam a na místě, kde se má zobrazit.
+
+- **Formát** (`src/content/markdown.tsx`): prázdný řádek odděluje odstavce,
+  jeden konec řádku je zalomení; `**tučně**`, `*kurzíva*`, `[text](adresa)`;
+  u právních stránek navíc `## Nadpis` (otevírá oddíl) a `- ` seznam. Renderuje
+  se do React elementů, nikdy do HTML řetězce, takže nic, co správce napíše,
+  se nestane značkou; odkaz smí vést jen na `http(s)`, `mailto:` nebo cestu
+  tohoto webu. Jednořádková pole jsou prostý text.
+- **Uložení** (`src/content/store.ts`): jen odchylky od výchozího znění, jako
+  jeden JSON pod klíčem `site_texts` v `system_state` databáze Vlastních
+  zdrojů. Pole uložené zpět na výchozí znění se z uložených smaže, takže se k
+  němu dostane i pozdější změna výchozího textu v kódu.
+- **Stránky zůstávají statické.** Texty čtou při buildu a po uložení
+  (`saveTextAction` volá `revalidatePath` pro `/`, `/podminky` a `/soukromi`),
+  nikdy při návštěvě — návštěva nesmí budit Neon. Když databáze není
+  nastavená nebo neodpoví, stránka ukáže výchozí znění z repa a editor hlásí,
+  že uložit nejde. Pozor: když čtení selže při buildu, zůstane na webu výchozí
+  znění, dokud se některé pole znovu neuloží nebo neproběhne další nasazení.
+- **Sliby v právních textech** hlídá `tests/files-legal-texts.test.ts` jen
+  nad výchozím zněním. Co správce uloží v editoru, už testy nevidí — kdo mění
+  Podmínky nebo Zásady, odpovídá za to, že sedí s tím, co kód dělá (lhůty
+  výmazu, zpracovatelé), a změní s nimi i „Účinné od“.
+- Do logu jde, kdo změnil které pole a kolik znaků, nikdy text sám.
