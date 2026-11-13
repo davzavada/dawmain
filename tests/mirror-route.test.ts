@@ -163,3 +163,40 @@ describe("per-account switch (Správa: features.mirror)", () => {
     }
   });
 });
+
+describe("same order as the courts where it is known", () => {
+  const hit = (id: string, date: string, published: string) => ({ ...HIT, source: "justice", id, date, published });
+  const urls = () => fetchMock.mock.calls.map((c) => new URL(String(c[0])));
+
+  it("NSS: newest first, in nss_search and in the caselaw_search lane; NS and ÚS keep relevance", async () => {
+    fetchMock.mockImplementation(async () => json({ hits: [], channel: "and", terms: [] }));
+    await MIRROR_TOOLS.nss_search({ query: "azyl" });
+    await MIRROR_TOOLS.caselaw_search({ query: "azyl" });
+    const sorts = urls().map((u) => [u.searchParams.get("source"), u.searchParams.get("sort")]);
+    expect(sorts).toContainEqual(["nss", "newest"]);
+    expect(sorts.filter(([s]) => s === "nss").every(([, sort]) => sort === "newest")).toBe(true);
+    expect(sorts.filter(([s]) => s === "ns" || s === "us").every(([, sort]) => sort === null)).toBe(true);
+  });
+
+  it("every word required: the mirror's any-word fallback is not shown", async () => {
+    fetchMock.mockImplementation(async () => json({ hits: [HIT], channel: "or", terms: [] }));
+    const out = textOf(await MIRROR_TOOLS.ns_search({ query: "x y" }));
+    expect(out).toContain("No hits");
+    expect(out).not.toContain(HIT.id);
+  });
+
+  it("justice: last 5 years by default, newest PUBLISHED first; sort decided keeps decision order", async () => {
+    fetchMock.mockImplementation(async () =>
+      json({ hits: [hit("a", "2026-10-01", "2026-10-05"), hit("b", "2026-09-01", "2026-11-01")], channel: "and", terms: [] }),
+    );
+    const out = textOf(await MIRROR_TOOLS.justice_search({ query: "výživné", limit: 2 }));
+    expect(out.indexOf("uuid: b")).toBeLessThan(out.indexOf("uuid: a"));
+    const u = urls()[0];
+    expect(u.searchParams.get("sort")).toBe("newest");
+    expect(u.searchParams.get("limit")).toBe("50");
+    expect(Number(u.searchParams.get("from")?.slice(0, 4))).toBe(new Date().getUTCFullYear() - 5);
+    const decided = textOf(await MIRROR_TOOLS.justice_search({ query: "výživné", sort: "decided", date_from: "2020-01-01", limit: 2 }));
+    expect(decided.indexOf("uuid: a")).toBeLessThan(decided.indexOf("uuid: b"));
+    expect(urls()[1].searchParams.get("from")).toBe("2020-01-01");
+  });
+});
