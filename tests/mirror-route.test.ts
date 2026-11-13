@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MIRROR_TOOLS } from "@/src/mcp/tools/mirror-route";
-import { markedExcerpt, mirrorConfig } from "@/src/sources/mirror";
-import { isOperatorId } from "@/src/mcp/backend";
+import { markedExcerpt, mirrorConfig, resetMirrorBreaker, searchMirror } from "@/src/sources/mirror";
 
 const HIT = {
   source: "ns",
@@ -32,6 +31,7 @@ beforeEach(() => {
   vi.stubEnv("MIRROR_CF_ACCESS_CLIENT_SECRET", "secret");
   fetchMock = vi.fn();
   vi.stubGlobal("fetch", fetchMock);
+  resetMirrorBreaker();
 });
 
 afterEach(() => {
@@ -127,11 +127,39 @@ describe("mirror routing", () => {
   });
 });
 
-describe("operator gate", () => {
-  it("only FILES_OPERATOR_IDS may switch", () => {
-    vi.stubEnv("FILES_OPERATOR_IDS", "user_abc");
-    expect(isOperatorId("user_abc")).toBe(true);
-    expect(isOperatorId("user_other")).toBe(false);
-    expect(isOperatorId(null)).toBe(false);
+describe("breaker", () => {
+  it("after a failure the mirror is skipped (no request) until the pause ends", async () => {
+    fetchMock.mockImplementation(async () => new Response("<html>login</html>", { status: 403, headers: { "content-type": "text/html" } }));
+    await expect(searchMirror({ q: "x" })).rejects.toThrow("Cloudflare Access");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const answer = await MIRROR_TOOLS.ns_search({ query: "x" });
+    expect((answer as { fallback: string }).fallback).toContain("paused");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("per-account switch (Správa: features.mirror)", () => {
+  it("only an account with features.mirror === true reads the mirror; banned, others and Clerk failures stay live", async () => {
+    const { __setAccessLoaderForTests, buildAccess } = await import("@/src/files/access");
+    const { caselawBackend } = await import("@/src/mcp/backend");
+    const meta: Record<string, unknown> = {
+      user_on: { features: { mirror: true } },
+      user_str: { features: { mirror: "true" } },
+      user_off: {},
+    };
+    __setAccessLoaderForTests(async (id) => {
+      if (id === "user_down") throw new Error("clerk down");
+      return buildAccess({ id, banned: id === "user_banned", publicMetadata: meta[id] ?? { features: { mirror: true } } });
+    });
+    try {
+      expect(await caselawBackend("user_on")).toBe("mirror");
+      expect(await caselawBackend("user_str")).toBe("live");
+      expect(await caselawBackend("user_off")).toBe("live");
+      expect(await caselawBackend("user_banned")).toBe("live");
+      expect(await caselawBackend("user_down")).toBe("live");
+      expect(await caselawBackend(null)).toBe("live");
+    } finally {
+      __setAccessLoaderForTests(null);
+    }
   });
 });

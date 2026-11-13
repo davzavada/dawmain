@@ -9,11 +9,15 @@
  *   role      "admin" makes the account an admin; anything else is a user;
  *   pro       true = Pro (Vlastní soubory, Zotero);
  *   features  { files, zotero } switch one Pro feature off with `false`;
- *             { ukaz } switches UKAŽ (doctrine_*) on with `true`.
+ *             { ukaz } switches UKAŽ (doctrine_*) on with `true`;
+ *             { mirror } switches the case-law tools to the home mirror
+ *             (src/mcp/backend.ts) with `true` — live courts otherwise.
  */
 
-export type AdminFeature = "files" | "zotero" | "ukaz";
-export const ADMIN_FEATURES: AdminFeature[] = ["files", "zotero", "ukaz"];
+export type AdminFeature = "files" | "zotero" | "ukaz" | "mirror";
+export const ADMIN_FEATURES: AdminFeature[] = ["files", "zotero", "ukaz", "mirror"];
+/** Off until an admin switches them on, Pro or not (the rest are Pro features, on unless switched off). */
+export const OPT_IN_FEATURES: readonly AdminFeature[] = ["ukaz", "mirror"];
 
 export interface AdminUser {
   id: string;
@@ -27,7 +31,7 @@ export interface AdminUser {
   /** Admin because of ADMIN_USER_IDS / FILES_OPERATOR_IDS: the role cannot be taken away here. */
   envAdmin: boolean;
   pro: boolean;
-  /** What the account may use now: files and zotero are on unless switched off, ukaz only when switched on. */
+  /** What the account may use now: files and zotero are on unless switched off, ukaz and mirror only when switched on. */
   features: Record<AdminFeature, boolean>;
   banned: boolean;
 }
@@ -78,7 +82,7 @@ export function toAdminUser(user: ClerkAdminUserLike, envAdmin: boolean): AdminU
     role: envAdmin || roleFrom(meta) === "admin" ? "admin" : "user",
     envAdmin,
     pro: meta.pro === true,
-    features: { files: features.files !== false, zotero: features.zotero !== false, ukaz: features.ukaz === true },
+    features: { files: features.files !== false, zotero: features.zotero !== false, ukaz: features.ukaz === true, mirror: features.mirror === true },
     banned: user.banned === true || user.locked === true,
   };
 }

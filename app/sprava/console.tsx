@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { dayBefore, formatDay, type AdminFeature, type AdminUser } from "@/src/admin/model";
+import { dayBefore, formatDay, OPT_IN_FEATURES, type AdminFeature, type AdminUser } from "@/src/admin/model";
 import { formatCount, initials } from "../_zdroje/format";
 import { changeUserAction } from "./actions";
 
@@ -29,6 +29,7 @@ const FEATURE_ROWS: Array<{ key: AdminFeature; title: string; hint: string }> = 
   { key: "files", title: "Vlastní soubory", hint: "Nahrávání a prohledávání vlastních dokumentů" },
   { key: "zotero", title: "Zotero", hint: "Připojení knihovny, čtení a ukládání" },
   { key: "ukaz", title: "Doktrína (UKAŽ)", hint: "Katalog literatury UK, zapíná se po potvrzení" },
+  { key: "mirror", title: "Judikatura ze zrcadla", hint: "NS, NSS, ÚS a obecné soudy z domácího zrcadla místo živých databází soudů" },
 ];
 
 const sum = (a: number[]) => a.reduce((x, y) => x + y, 0);
@@ -307,8 +308,9 @@ function Detail({
           <Switch label="Pro" on={user.pro} disabled={pending} onToggle={() => onChange(user, { kind: "pro", on: !user.pro }, user.pro ? "Pro vypnuto." : "Pro zapnuto.")} />
         </div>
         {FEATURE_ROWS.map((f) => {
-          const needsPro = f.key !== "ukaz" && !user.pro;
-          const on = f.key === "ukaz" ? user.features.ukaz : user.pro && user.features[f.key];
+          const optIn = OPT_IN_FEATURES.includes(f.key);
+          const needsPro = !optIn && !user.pro;
+          const on = optIn ? user.features[f.key] : user.pro && user.features[f.key];
           return (
             <div className="adm-row" key={f.key}>
               <div>
