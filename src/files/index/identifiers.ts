@@ -389,7 +389,7 @@ export function findIdentSpans(text: string, ctx?: { commentedAct?: string | nul
  * "směrnice 93/13/EHS". The kind word (any case ending) decides the CELEX
  * type; up to ~60 characters of issuer between it and the number.
  */
-const EU_ACT_RE =
+export const EU_ACT_RE =
   /(?<![\p{L}])(nařízení\p{L}*|směrnic\p{L}*|rozhodnutí\p{L}*)(?:\s+[\p{L}]+){0,6}?\s*(?:\((EU|ES|EHS|Euratom)\)\s*(?:č\.\s*)?(\d{1,4})\s*\/\s*(\d{1,4})(?![\p{N}\/])|(\d{1,4})\s*\/\s*(\d{1,4})\s*\/\s*(EU|ES|EHS|Euratom)(?![\p{L}]))/giu;
 
 /** CELEX sector-3 type letter of an EU act's kind word, in any case ending ("nařízením" → R), or null. */

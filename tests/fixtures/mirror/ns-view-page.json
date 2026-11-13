@@ -1,0 +1,72 @@
+{
+"@timestamp": "20261024T141719,78Z",
+"@toplevelentries": "165460",
+"viewentry": [
+{
+"@position": "1",
+"@unid": "00007CCB5DBCB0F0C1257F6F00369EAE",
+"@noteid": "1AE332",
+"@siblings": "165460",
+"entrydata": [
+{
+"@columnnumber": "0",
+"@name": "$19",
+"text": {
+"0": "00007CCB5DBCB0F0C1257F6F00369EAE"
+}
+},
+{
+"@columnnumber": "1",
+"@name": "znacka",
+"text": {
+"0": "23 Cdo 3470/2015"
+}
+}
+]
+},
+{
+"@position": "2",
+"@unid": "0000D824B0F3F730C1258E90004D6A8A",
+"@noteid": "29EB4E",
+"@siblings": "165460",
+"entrydata": [
+{
+"@columnnumber": "0",
+"@name": "$19",
+"text": {
+"0": "0000D824B0F3F730C1258E90004D6A8A"
+}
+},
+{
+"@columnnumber": "1",
+"@name": "znacka",
+"text": {
+"0": "6 Tdo 744/2026"
+}
+}
+]
+},
+{
+"@position": "3",
+"@unid": "0001F08FA544A52DC1257A4E00654DE5",
+"@noteid": "D918E",
+"@siblings": "165460",
+"entrydata": [
+{
+"@columnnumber": "0",
+"@name": "$19",
+"text": {
+"0": "0001F08FA544A52DC1257A4E00654DE5"
+}
+},
+{
+"@columnnumber": "1",
+"@name": "znacka",
+"text": {
+"0": "22 Cdo 1772/2010"
+}
+}
+]
+}
+]
+}

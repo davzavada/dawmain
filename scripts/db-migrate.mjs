@@ -4,6 +4,11 @@
  *
  *   DATABASE_URL_UNPOOLED=postgres://owner@…/db node scripts/db-migrate.mjs
  *   DATABASE_URL_UNPOOLED=… node scripts/db-migrate.mjs --dry-run   # list pending, change nothing
+ *   DATABASE_URL_UNPOOLED=… node scripts/db-migrate.mjs --dir src/mirror/db/migrations --no-rls-check
+ *
+ * --dir applies another set of migrations (the mirror's, via `scripts/mirror.ts
+ * migrate`); --no-rls-check is for such a set without row-level security,
+ * whose owner is an ordinary role.
  *
  * Runs with the OWNER connection (direct, not pooled — advisory locks and
  * DDL need a session), by hand before a deploy; never at build time and
@@ -102,13 +107,14 @@ async function appliedMigrations(client) {
 /**
  * Apply pending migrations through `client` (connected as the owner).
  * @param {Client} client
- * @param {{ dir?: string, dryRun?: boolean, log?: (line: string) => void }} [options]
+ * @param {{ dir?: string, dryRun?: boolean, rlsCheck?: boolean, log?: (line: string) => void }} [options]
+ *   rlsCheck: false only for a migration set without row-level security.
  * @returns {Promise<{ applied: string[], pending: string[] }>}
  */
 export async function migrate(client, options = {}) {
-  const { dir = MIGRATIONS_DIR, dryRun = false, log = console.log } = options;
+  const { dir = MIGRATIONS_DIR, dryRun = false, rlsCheck = true, log = console.log } = options;
   const files = readMigrations(dir);
-  await assertOwnerBypassesRls(client);
+  if (rlsCheck) await assertOwnerBypassesRls(client);
   await client.query("SELECT pg_advisory_lock($1)", [LOCK_KEY]);
   try {
     const { pending, missing } = plan(files, await appliedMigrations(client));
@@ -148,6 +154,13 @@ export async function migrate(client, options = {}) {
 
 async function main() {
   const dryRun = process.argv.includes("--dry-run");
+  const rlsCheck = !process.argv.includes("--no-rls-check");
+  const dirArg = process.argv.indexOf("--dir");
+  const dir = dirArg === -1 ? MIGRATIONS_DIR : path.resolve(process.argv[dirArg + 1] ?? "");
+  if (dirArg !== -1 && !process.argv[dirArg + 1]) {
+    console.error("--dir needs a path.");
+    process.exit(2);
+  }
   const url = process.env.DATABASE_URL_UNPOOLED?.trim();
   if (!url) {
     console.error("DATABASE_URL_UNPOOLED is not set (the owner's direct connection string).");
@@ -157,7 +170,7 @@ async function main() {
   const client = new pg.Client({ connectionString: url });
   await client.connect();
   try {
-    await migrate(client, { dryRun });
+    await migrate(client, { dir, dryRun, rlsCheck });
   } finally {
     await client.end();
   }

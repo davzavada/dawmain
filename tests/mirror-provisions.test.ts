@@ -1,0 +1,248 @@
+import { describe, expect, it } from "vitest";
+import { buildActLookup } from "@/src/mirror/legal/lookup";
+import { aggregateProvisions, extractProvisions } from "@/src/mirror/legal/provisions";
+
+const keys = (text: string, year: number | null = 2020, lookup = LOOKUP) =>
+  extractProvisions(text, lookup, year).map((p) => `${p.act || "?"} ${p.provision}`);
+
+const LOOKUP = buildActLookup([
+  { alias: "zákon o obchodních korporacích", act_id: "zak:90/2012", year: 2012 },
+  { alias: "zákon o daních z příjmů", act_id: "zak:586/1992", year: 1992 },
+  { alias: "zákon o trestním řízení soudním", act_id: "zak:141/1961", year: 1961 },
+  { alias: "zákon o trestním řízení soudním", act_id: "zak:64/1956", year: 1956 },
+  { alias: "zákon o azylu", act_id: "zak:325/1999", year: 1999 },
+  { alias: "zákon o mezinárodní justiční spolupráci ve věcech trestních", act_id: "zak:104/2013", year: 2013 },
+]);
+
+describe("provision references in decision texts", () => {
+  it("reads every level of a reference to a numbered act", () => {
+    expect(keys("podle § 2913 odst. 1 písm. b) zákona č. 89/2012 Sb.")).toEqual(["zak:89/2012 par:2913/o1/pb"]);
+  });
+
+  it("binds an abbreviation the decision defines to the main act, not its amendment", () => {
+    const text =
+      "zákona č. 99/1963 Sb., občanský soudní řád, ve znění zákona č. 296/2017 Sb. (dále jen „o. s. ř.“). Podle § 243c odst. 3 věty první o. s. ř. …";
+    expect(keys(text)).toContain("zak:99/1963 par:243c/o3/v1");
+  });
+
+  it("binds a definition to the act right before it; a known abbreviation only to its own act", () => {
+    const oz =
+      "podle § 3 zákona č. 168/1999 Sb., o pojištění, a podle § 2758 odst. 1 zákona č. 89/2012 Sb., občanského zákoníku, (dále jen „o. z.“). Dle § 2783 o. z. …";
+    expect(keys(oz).at(-1)).toBe("zak:89/2012 par:2783");
+    const slip = "podle § 1 zákona č. 89/2012 Sb. (dále jen „o. s. ř.“). Podle § 151 odst. 3 o. s. ř. …";
+    expect(keys(slip).at(-1)).toBe("zak:99/1963 par:151/o3");
+  });
+
+  it("looks back for an act of the kind the reference names", () => {
+    expect(keys("§ 7 vyhlášky č. 177/1996 Sb. a § 142 o. s. ř.; podle § 2 odst. 3 uvedené vyhlášky …").at(-1)).toBe("zak:177/1996 par:2/o3");
+    expect(keys("§ 142 o. s. ř. a § 7 vyhlášky č. 177/1996 Sb.; podle § 151 téhož zákona …").at(-1)).toBe("zak:99/1963 par:151");
+  });
+
+  it("expands letter ranges of EU articles and names primary law", () => {
+    const [gdpr] = extractProvisions("čl. 6 odst. 1 písm. a) až c) nařízení (EU) 2016/679", LOOKUP, 2020);
+    expect(gdpr.act).toBe("eu:32016R0679");
+    expect(gdpr.keys).toEqual(["cl:6", "cl:6/o1", "cl:6/o1/pa", "cl:6/o1/pb", "cl:6/o1/pc"]);
+    expect(keys("čl. 36 odst. 1 Listiny")).toEqual(["zak:2/1993 cl:36/o1"]);
+    expect(keys("čl. 267 SFEU")).toEqual(["eu:12016E/TXT cl:267"]);
+  });
+
+  it("expands § ranges and picks the civil code by the decision's year", () => {
+    expect(keys("§§ 2910 až 2913 obč. zák.")).toHaveLength(4);
+    expect(keys("§ 420 obč. zák.", 2010)).toEqual(["zak:40/1964 par:420"]);
+  });
+
+  it("finds acts by their names and the version in force by the year", () => {
+    expect(keys("podle § 52 odst. 1 zákona o obchodních korporacích a § 24 zákona o daních z příjmů.")).toEqual([
+      "zak:90/2012 par:52/o1",
+      "zak:586/1992 par:24",
+    ]);
+    expect(keys("§ 2 zákona o trestním řízení soudním", 1958)).toEqual(["zak:64/1956 par:2"]);
+    expect(keys("§ 2 zákona o trestním řízení soudním", 2000)).toEqual(["zak:141/1961 par:2"]);
+  });
+
+  it("takes one-word names, and shortened names only when three words or more say which act", () => {
+    expect(keys("§ 27 odst. 2 zákona o azylu")).toEqual(["zak:325/1999 par:27/o2"]);
+    expect(keys("§ 205 zákona o mezinárodní justiční spolupráci")).toEqual(["zak:104/2013 par:205"]);
+    expect(keys("§ 205 zákona o mezinárodní spolupráci")).toEqual(["? par:205"]);
+  });
+
+  it("gives references joined to the next one its act", () => {
+    expect(keys("§ 107 a § 361 tr. zákoníku")).toEqual(["zak:40/2009 par:107", "zak:40/2009 par:361"]);
+    expect(keys("§ 8 odst. 1 ve spojení s § 7 vyhlášky č. 177/1996 Sb.")).toEqual(["zak:177/1996 par:8/o1", "zak:177/1996 par:7"]);
+    expect(keys("§ 236 a násl. o. s. ř.")).toEqual(["zak:99/1963 par:236"]);
+    expect(keys("§ 13 advokátního tarifu a čl. 3 Úmluvy o právech dítěte")).toEqual(["zak:177/1996 par:13", "zak:104/1991 cl:3"]);
+  });
+
+  it("reads odstavce in a row, each with its own písmena", () => {
+    const [p] = extractProvisions("§ 283 odst. 1, odst. 2 písm. a), odst. 3 písm. b), c) zákona č. 40/2009 Sb.", LOOKUP, 2020);
+    expect(p.keys).toEqual(["par:283", "par:283/o1", "par:283/o2", "par:283/o2/pa", "par:283/o3", "par:283/o3/pb", "par:283/o3/pc"]);
+  });
+
+  it("reads the forms found in review round 1 (27. 10.)", () => {
+    // abbreviations without their last dot or without dots, AT, NV
+    expect(keys("§142 odst. 1 osř.")).toEqual(["zak:99/1963 par:142/o1"]);
+    expect(keys("[§ 241a odst. 2 písm. a) o. s. ř]")).toEqual(["zak:99/1963 par:241a/o2/pa"]);
+    expect(keys("§ 7 bod 5, § 11 odst. 1 a), d) AT")).toEqual(["zak:177/1996 par:7/b5", "zak:177/1996 par:11/o1/pa"]);
+    expect(keys("§ 2 NV č. 351/2013 Sb.")).toEqual(["zak:351/2013 par:2"]);
+    // what stands between: "bod 1.", the issuer, "zákona ČNR", parts of sentences
+    expect(keys("§ 14b odst. 1 bod 1. vyhl. č. 177/1996 Sb.")).toEqual(["zak:177/1996 par:14b/o1/b1"]);
+    expect(keys("§ 2a vyhlášky Ministerstva financí České republiky č. 205/1999 Sb.")).toEqual(["zak:205/1999 par:2a"]);
+    expect(keys("§ 31 odst. 9 zákona ČNR č. 337/1992 Sb.")).toEqual(["zak:337/1992 par:31/o9"]);
+    expect(keys("§ 243b odst. 2, část věty za středníkem, o. s. ř.")).toEqual(["zak:99/1963 par:243b/o2/vza"]);
+    expect(keys("§ 79 odst. 1, věty první a druhé, o. s. ř.")).toEqual(["zak:99/1963 par:79/o1/v1"]);
+    expect(keys("§ 257 odst. 1, poslední věta, celního zákona", 2005)).toEqual(["zak:13/1993 par:257/o1/vposl"]);
+    // but never across an amendment
+    expect(keys("§ 5 zákona, který byl změněn zákonem č. 100/2000 Sb.")).toEqual(["? par:5"]);
+    // chains
+    expect(keys("§ 51 odst. 1 písm. e), resp. § 56 odst. 4 zákona č. 235/2004 Sb.")[0]).toBe("zak:235/2004 par:51/o1/pe");
+    expect(keys("§ 75 odst. 1 a contrario; § 30 odst. 1 zákona o Ústavním soudu")[0]).toBe("zak:182/1993 par:75/o1");
+    expect(keys("čl. 2 odst. 2 a dále na čl. 2 odst. 3 a v čl. 4 odst. 1 Listiny")[0]).toBe("zak:2/1993 cl:2/o2");
+    // parsing
+    expect(keys("§ 43 odst. 1 písmeno e) zákona č. 182/1993 Sb.")).toEqual(["zak:182/1993 par:43/o1/pe"]);
+    expect(extractProvisions("§ 14b odst. 1 písm. a), b, c) zákona č. 1/2000 Sb.")[0].keys).toContain("par:14b/o1/pc");
+    expect(keys("§ 75 odst. 2 lit. a) zákona č. 182/1993 Sb.")).toEqual(["zak:182/1993 par:75/o2/pa"]);
+    expect(keys("§ 73 odst. 2 až 4. Podle")).toEqual(["? par:73/o2"]);
+    expect(keys("§ l42 odst. l o.s.ř.")).toEqual(["zak:99/1963 par:142/o1"]);
+    expect(keys("§ 1811/2 a 1820/1 zákona č. 89/2012 Sb.")).toEqual(["zak:89/2012 par:1811/o2", "zak:89/2012 par:1820/o1"]);
+    // a list of články is one reference each, not repeated for every "čl." inside it
+    expect(keys("čl. 7 odst. 1, čl. 10 odst. 1 a čl. 13 Listiny")).toEqual(["zak:2/1993 cl:7/o1", "zak:2/1993 cl:10/o1", "zak:2/1993 cl:13"]);
+  });
+
+  it("never guesses the act of a reference from the one before it (no paraphrase, decided 27. 10.)", () => {
+    const text = "Podle § 1824 o. z. sjednává-li se smlouva prostřednictvím prostředku komunikace na dálku, sdělí podnikatel spotřebiteli údaje uvedené v § 1811 odst. 2 a § 1820 odst. 1.";
+    expect(keys(text)).toEqual(["zak:89/2012 par:1824", "? par:1811/o2", "? par:1820/o1"]);
+  });
+
+  it("reads every combination of levels, the EU pododstavec too", () => {
+    const k = (text: string) => extractProvisions(`${text} zákona č. 1/2000 Sb.`)[0].keys.at(-1);
+    expect(k("§ 5 písm. a)")).toBe("par:5/pa");
+    expect(k("§ 5 bod 3")).toBe("par:5/b3");
+    expect(k("§ 5 věta první")).toBe("par:5/v1");
+    expect(k("§ 5 písm. a) bod 1")).toBe("par:5/pa/b1");
+    expect(k("§ 5 odst. 2 písm. a) bod 1 věta první")).toBe("par:5/o2/pa/b1/v1");
+    expect(extractProvisions("čl. 17 odst. 3 pododst. 2 nařízení (EU) 2016/679")[0].keys.at(-1)).toBe("cl:17/o3/s2");
+  });
+
+  it("fixes what the precision review of round 1 found", () => {
+    // a decision's own definition of a name holds; "daňový řád" before 2011 is 337/1992
+    expect(keys("§ 55b zákona č. 337/1992 Sb., o správě daní a poplatků (dále jen „daňový řád“). Podle § 4 daňového řádu …", 2010).at(-1)).toBe("zak:337/1992 par:4");
+    expect(keys("§ 50 odst. 3 daňového řádu", 2009)).toEqual(["zak:337/1992 par:50/o3"]);
+    // without a number in the decision, a name of two acts in force at once gets none (decided 27. 10.)
+    expect(keys("§ 50 odst. 3 daňového řádu", 2015)).toEqual(["? par:50/o3"]);
+    expect(keys("§ 50 odst. 3 daňového řádu zákona č. 280/2009 Sb.", 2015)[0]).toBe("zak:280/2009 par:50/o3");
+    // "trestního zákona" in 2003 is the old code
+    expect(keys("§ 248 odst. 1 trestního zákona", 2003)).toEqual(["zak:140/1961 par:248/o1"]);
+    // a back reference skips the amendment
+    expect(keys("§ 72 odst. 2 zákona č. 182/1993 Sb., o Ústavním soudu, ve znění zákona č. 77/1998 Sb.; § 75 odst. 2 téhož zákona").at(-1)).toBe("zak:182/1993 par:75/o2");
+    // levels: the last odstavec of a list takes the písmeno; both parts of a sentence
+    expect(extractProvisions("§ 265a odst. 1, 2 písm. h) tr. ř.")[0].keys).toEqual(["par:265a", "par:265a/o1", "par:265a/o2", "par:265a/o2/ph"]);
+    expect(keys("§ 160 odst. 1 věta prvá před středníkem o. s. ř.")).toEqual(["zak:99/1963 par:160/o1/v1/vpred"]);
+    expect(keys("§ 241 a odst. 3 o. s. ř.")).toEqual(["zak:99/1963 par:241a/o3"]);
+    // "§" of an act with články only
+    expect(keys("§ 89 odst. 2 Ústavy")).toEqual(["zak:1/1993 cl:89/o2"]);
+    // not citations
+    expect(keys("na čl. 23 spisu; Občanský zákoník I. § 1 až 654. Komentář")).toEqual([]);
+    // a paraphrase stays in its sentence and never gives a § act to a článek of a contract
+    expect(keys("Podle § 86 odst. 1 o. s. ř. je smlouva neplatná. Žalobkyni bylo podle § 1879 prokázáno postoupení.").at(-1)).toBe("? par:1879");
+    expect(keys("podle § 536 obch. zák. ve smlouvě v jejím článku IX").at(-1)).toBe("? cl:ix");
+    // the same name means the act the decision named
+    expect(keys("§ 36a zákona č. 367/1990 Sb., o obcích. … § 45 zákona o obcích", 2005, buildActLookup([
+      { alias: "zákon o obcích", act_id: "zak:128/2000", year: 2000 },
+      { alias: "zákon o obcích", act_id: "zak:367/1990", year: 1990 },
+    ])).at(-1)).toBe("zak:367/1990 par:45");
+    const amending = buildActLookup([], [], [{ id: "zak:297/2009", title: "Zákon, kterým se mění zákon č. 185/2001 Sb., o odpadech" }]);
+    // the number the decision writes stays — the registry only checks it
+    expect(keys("§ 37e zák. č. 297/2009 Sb.", 2015, amending)).toEqual(["zak:297/2009 par:37e"]);
+    expect(keys("§ 163 zákona č. 99/1964 Sb., občanský soudní řád")).toEqual(["zak:99/1964 par:163"]);
+    // round 2: two-digit years, case-law abbreviations
+    expect(keys("§ 4 zákona č. 168/99 Sb.")).toEqual(["zak:168/1999 par:4"]);
+    expect(keys("§ 31a odst. 3 písm. e) OdpŠk")).toEqual(["zak:82/1998 par:31a/o3/pe"]);
+  });
+
+  it("fixes what rounds 2 and 3 found", () => {
+    // a name of a recodified act follows the act of the pair the decision named by number, not the year
+    expect(keys("§ 630 občanského zákoníku č. 40/1964 Sb. … podle § 630 občanského zákoníku", 2017).at(-1)).toBe("zak:40/1964 par:630");
+    expect(keys("§ 46 zákona č. 71/1967 Sb., o správním řízení (správní řád). … § 46 správního řádu", 2006).at(-1)).toBe("zak:71/1967 par:46");
+    expect(keys("§ 60 odst. 1 zákona č. 65/1965 Sb., zákoníku práce. … § 249 zák. práce", 2007).at(-1)).toBe("zak:65/1965 par:249");
+    expect(keys("§ 5 odst. 2 rozpočtových pravidel republiky", 2006)).toEqual(["zak:576/1990 par:5/o2"]);
+    expect(keys("§ 187 odst. 1 tr. zák.", 2009)).toEqual(["zak:140/1961 par:187/o1"]);
+    expect(keys("§ 187 odst. 1 tr. zák.", 2015)).toEqual(["? par:187/o1"]);
+    // back references: the kind of act, with its issuer between; a nález is no zákon; the bare kind word
+    expect(keys("dle vyhlášky Ministerstva spravedlnosti č. 254/2015 Sb., podle § 151 odst. 3 o. s. ř. a dle § 2 odst. 1 uvedené vyhlášky").at(-1)).toBe("zak:254/2015 par:2/o1");
+    expect(keys("zákon č. 428/2012 Sb. upravuje …, nálezem Ústavního soudu vyhlášeným pod č. 177/2013 Sb.; podle § 15 tohoto zákona").at(-1)).toBe("zak:428/2012 par:15");
+    expect(keys("§ 7 vyhlášky č. 177/1996 Sb. … a § 13 odst. 3 vyhlášky v částce 300 Kč").at(-1)).toBe("zak:177/1996 par:13/o3");
+    // an acronym defined after another act keeps its own
+    expect(keys("§ 1 notářského řádu (dále jen „OdpŠk“). § 31a OdpŠk").at(-1)).toBe("zak:82/1998 par:31a");
+    // levels
+    expect(extractProvisions("§ 119 odst. 1 písm. b) bodu 1 a 6 zákona č. 326/1999 Sb.")[0].keys).toContain("par:119/o1/pb/b6");
+    expect(keys("§ 119 odst. 1 písm. b) bodu 1 a 6 zákona č. 326/1999 Sb.")).toHaveLength(1);
+    expect(keys("čl. II bodů 1 a 7 zákona č. 404/2012 Sb.")).toEqual(["zak:404/2012 cl:ii/b1"]);
+    expect(keys("§ 243g odst. 1 části první věty za středníkem o. s. ř.")).toEqual(["zak:99/1963 par:243g/o1/v1/vza"]);
+    expect(keys("§ 2664 o. z. věty prvé")).toEqual(["zak:89/2012 par:2664/v1"]);
+    expect(keys("§ 80 odst. (1) zák. č. 6/2002 Sb.")).toEqual(["zak:6/2002 par:80/o1"]);
+    expect(keys("§ 2079 a následujících zákona č. 89/2012 Sb.")).toEqual(["zak:89/2012 par:2079"]);
+    expect(keys("§ 39 obč. zákoníku. Zvolený", 2010)).toEqual(["zak:40/1964 par:39"]);
+    expect(keys("§ 15 odst. 1 zákona 92/91 Sb.")).toEqual(["zak:92/1991 par:15/o1"]);
+    expect(keys("§ 2521-3081). [Systém ASPI]")).toEqual([]);
+  });
+
+  it("fixes what rounds 3 and 4 found", () => {
+    // old and new codes: a number after the name, a number later in the decision, "dříve platného", never younger than the decision
+    expect(keys("§ 73 odst. 1 písm. c) zákoníku práce č. 65/1965 Sb.", 2008)).toEqual(["zak:65/1965 par:73/o1/pc"]);
+    expect(keys("§ 132a zák. práce; … § 132a zák. č. 65/1965 Sb. (zákoník práce)", 2010)[0]).toBe("zak:65/1965 par:132a");
+    expect(keys("§ 132 – 132a zák. práce dříve platného", 2010)[0]).toBe("zak:65/1965 par:132");
+    expect(keys("§ 119 a § 120 odst. 1 o. z.", 2005)).toEqual(["zak:40/1964 par:119", "zak:40/1964 par:120/o1"]);
+    expect(keys("§ 1188 občanského zákona", 2025)).toEqual(["? par:1188"]);
+    expect(keys("§ 1188 občanského zákona; zákon č. 89/2012 Sb.", 2025)[0]).toBe("zak:89/2012 par:1188");
+    expect(keys("§ 9 odst. 4 starého zákona o pozemkových úpravách", 2010)).toEqual(["zak:284/1991 par:9/o4"]);
+    // a defined name declines; an EU decision's three-part number
+    expect(keys("§ 16 odst. 7 zák. č. 588/1992 Sb., o dani z přidané hodnoty (dále jen „zákon o DPH“). § 16 odst. 7 zákona o DPH", 2005).at(-1)).toBe("zak:588/1992 par:16/o7");
+    expect(keys("čl. 3 písm. c) rozhodnutí Komise 2002/190/ES")).toEqual(["eu:32002D0190 cl:3/pc"]);
+    // the decree co-cited tells which successor act a shared name means
+    const vehicles = buildActLookup([
+      { alias: "zákon o pojištění odpovědnosti z provozu vozidla", act_id: "zak:168/1999", year: 1999 },
+      { alias: "zákon o pojištění odpovědnosti z provozu vozidla", act_id: "zak:30/2024", year: 2024 },
+    ]);
+    expect(keys("§ 24c odst. 1 zákona o pojištění odpovědnosti z provozu vozidla a § 2a vyhlášky č. 205/1999 Sb.", 2025, vehicles)[0]).toBe("zak:168/1999 par:24c/o1");
+    // a § never goes back to the Listina; the Protocols are acts of their own
+    expect(keys("čl. 36 Listiny … § 12 odst. 2 citovaného zákona")[1]).toBe("? par:12/o2");
+    expect(keys("čl. 1 Dodatkového protokolu k Úmluvě a čl. 2 Protokolu č. 7 k Úmluvě")).toEqual(["zak:209/1992-p1 cl:1", "zak:209/1992-p7 cl:2"]);
+    expect(keys("čl. 6 odst. 1 Evropské úmluvy o ochraně lidských práv")).toEqual(["zak:209/1992 cl:6/o1"]);
+    // numbers written otherwise
+    expect(keys("§ 18a odst. 2 zákona číslo 111/1994 Sb.")).toEqual(["zak:111/1994 par:18a/o2"]);
+    expect(keys("§ 1970 z.č. 89/2012, Sb.")).toEqual(["zak:89/2012 par:1970"]);
+  });
+
+  it("fixes what rounds 4 and 5 found", () => {
+    // the number overlapping a name decides; a definition prefers the act named by number
+    expect(keys("§ 221 odst. 1 trestního zákona č. 140/1961 Sb.", 2013)).toEqual(["zak:140/1961 par:221/o1"]);
+    expect(keys("§ 179 zákona č. 140/1961 Sb., trestního zákona (dále jen „tr. zák.“). § 250 odst. 3 tr. zák.", 2014).at(-1)).toBe("zak:140/1961 par:250/o3");
+    // "dříve" marks what follows it
+    expect(keys("§ 2279 odst. 2 o. z. (dříve § 706 odst. 2 obč. zák.)", 2026)).toEqual(["zak:89/2012 par:2279/o2", "zak:40/1964 par:706/o2"]);
+    // "této smlouvy" is no act; "této směrnice" only a directive; "směrnice 2008/48" without "/ES"
+    expect(keys("§ 2 zákona č. 172/1991 Sb. … v čl. IV této smlouvy").at(-1)).toBe("? cl:iv");
+    expect(keys("směrnice 2008/48 … v článku 8 této směrnice")).toEqual(["eu:32008L0048 cl:8"]);
+    // definitions: unquoted names; a bare "zákon" never takes a numbered act
+    expect(keys("§ 19 zákona č. 588/1992 Sb., o dani z přidané hodnoty (dále jen zákon o DPH). § 5 zákona o DPH", 2006).at(-1)).toBe("zak:588/1992 par:5");
+    expect(keys("§ 39 zákona č. 155/1995 Sb. (dále jen zákon). § 88 zákona č. 582/1991 Sb.", 2010).at(-1)).toBe("zak:582/1991 par:88");
+    // chains and gaps
+    expect(keys("§ 8 odst. 2 ve spojení s ustanovením § 1 odst. 1 písm. b) zákona o půdě")[0]).toBe("zak:229/1991 par:8/o2");
+    expect(keys("§ 4 odst. 5 zákona a vyhlášky č. 205/1999 Sb.")[0]).toBe("? par:4/o5");
+    expect(keys("komentář k § 216 bod 6.")).toEqual([]);
+  });
+
+  it("reads a § the stored text lost, and only with its act (review of decisions without references)", () => {
+    expect(keys("dovolací řízení podle 243b odst. 5 věty druhé občanského soudního řádu zastavil", 2009)).toEqual(["zak:99/1963 par:243b/o5/v2"]);
+    expect(keys("jeho návrh podle š 43 odst. 1 písm. a) zákona č. 182/1993 Sb. odmítl", 1997)).toEqual(["zak:182/1993 par:43/o1/pa"]);
+    expect(keys("uvedená v ustanovení 5 72 odst. 2 zákona č. 182/1993 Sb.", 1997)).toEqual(["zak:182/1993 par:72/o2"]);
+    expect(keys("§ 35ba odst. 1 písm. a) zákona č. 586/1992 Sb.")).toEqual(["zak:586/1992 par:35ba/o1/pa"]);
+    expect(keys("platba podle 2 odst. 1 smlouvy; lhůta podle 5 dnů")).toEqual([]);
+  });
+
+  it("aggregates mentions per provision with every level of the key", () => {
+    const rows = aggregateProvisions(extractProvisions("§ 2913 odst. 1 zákona č. 89/2012 Sb. a znovu § 2913 odst. 1 zákona č. 89/2012 Sb.", LOOKUP, 2020));
+    const row = rows.find((r) => r.provision === "par:2913/o1");
+    expect(row?.mentions).toBe(2);
+    expect(rows.some((r) => r.provision === "par:2913")).toBe(true);
+  });
+});
