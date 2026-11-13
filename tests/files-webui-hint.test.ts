@@ -20,7 +20,7 @@ import type { LibrarySummary, SummaryResponse } from "@/src/files/web-types";
 let clerkUser: unknown = undefined;
 vi.mock("@clerk/nextjs", () => ({ useUser: () => ({ isLoaded: clerkUser !== undefined, user: clerkUser }) }));
 
-const { applyHint, avatarSrc, encodeHint, filesRowView, hintCookie, hintView, parseHint, readHint, HINT_COOKIE, HINT_SCRIPT } = await import("@/app/_zdroje/hint");
+const { applyHint, avatarSrc, encodeHint, filesRowView, FILES_DESC, hintCookie, hintView, parseHint, readHint, HINT_COOKIE, HINT_SCRIPT } = await import("@/app/_zdroje/hint");
 const store = await import("@/app/_zdroje/store");
 const { AccountControl } = await import("@/app/_zdroje/account");
 const { OwnSourcesGroup } = await import("@/app/_zdroje/own-sources");
@@ -124,7 +124,7 @@ describe("the cookie keeps what the hint shows", () => {
   it("the view: crown with Pro, the files line, the lock without Pro", () => {
     expect(hintView(SUMMARY)).toEqual({ pro: true, files: { desc: "2 dokumenty · 12 stran", locked: false } });
     const noPro = { ...SUMMARY, libraries: [{ ...LIB, pro: false }] };
-    expect(hintView(noPro)).toEqual({ pro: false, files: { desc: "Jen v režimu Pro. Přiděluji ho ručně a zdarma.", locked: true } });
+    expect(hintView(noPro)).toEqual({ pro: false, files: { desc: FILES_DESC, locked: true } });
     expect(filesRowView(null)).toEqual({ desc: "Načítám…", locked: false });
     expect(filesRowView({ state: "unavailable", mode: "on" })).toEqual({ desc: "Teď dočasně vypnuté.", locked: false });
     const empty = { ...SUMMARY, libraries: [{ ...LIB, counts: { ...LIB.counts!, total: 0 } }] };
@@ -156,7 +156,7 @@ describe("before the first paint (applyHint, HINT_SCRIPT)", () => {
     applyHint(doc, HINT_COOKIE);
     expect(doc.documentElement.hasAttribute("data-hint-pro")).toBe(false);
     expect(doc.documentElement.hasAttribute("data-hint-files-locked")).toBe(true);
-    expect(cssVar(doc, "--hint-files")).toBe('"Jen v režimu Pro. Přiděluji ho ručně a zdarma."');
+    expect(cssVar(doc, "--hint-files")).toBe(`"${FILES_DESC}"`);
   });
 
   it("hands the picture to CSS as the very address the avatar loads", () => {

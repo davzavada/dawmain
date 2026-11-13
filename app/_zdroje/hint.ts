@@ -183,12 +183,15 @@ export interface HintView {
   files: FilesRowView;
 }
 
+/** What Vlastní soubory are: the visitor's line, and the line of an account without Pro (the group's heading says Pro). */
+export const FILES_DESC = "Nahrané knihy, články, komentáře a vzory, ve kterých asistent hledá vedle oficiálních databází.";
+
 /** The Vlastní soubory row for a signed-in user with this summary (null: not loaded yet). */
 export function filesRowView(summary: SummaryResponse | null): FilesRowView {
   if (summary?.state === "unavailable") return { desc: "Teď dočasně vypnuté.", locked: false };
   const library = summary?.state === "ok" ? (summary.libraries.find((l) => l.kind === "user") ?? null) : null;
   if (!library) return { desc: "Načítám…", locked: false };
-  if (!library.pro) return { desc: "Jen v režimu Pro. Přiděluji ho ručně a zdarma.", locked: true };
+  if (!library.pro) return { desc: FILES_DESC, locked: true };
   if (library.counts && library.counts.total > 0) {
     return { desc: `${countDocuments(library.counts.total)} · ${countPages(library.pagesUsed ?? 0)}`, locked: false };
   }

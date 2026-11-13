@@ -14,8 +14,7 @@ export default function Podminky() {
 
       <p>
         Dawmain provozuji zdarma a ve volném čase jako nekomerční projekt. Napsat mi můžete na{" "}
-        <Mail />. Smlouva mezi námi vzniká založením uživatelského účtu, a připojíte-li se starším
-        sdíleným přístupovým kódem, prvním použitím služby. Tak jako tak je bezplatná.
+        <Mail />. Smlouva mezi námi vzniká založením uživatelského účtu. Je bezplatná.
       </p>
 
       <Section heading="Účet a slušné užívání">

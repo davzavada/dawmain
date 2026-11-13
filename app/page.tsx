@@ -31,7 +31,8 @@ export default function Home() {
         <p className="lead">
           V oficiálních databázích server hledá živě – funguje jako nachytřený Google a nic si z
           nich nekopíruje. Kdo má režim Pro, může připojit svou knihovnu Zotero a nahrát vlastní
-          soubory.
+          soubory. Režim Pro je taky zdarma, jen je v testovacím provozu – napište mi případně
+          e-mail o přístup: <Mail />.
         </p>
         <a href={OWL_URL} className="project-card">
           <img src="/owl.svg" alt="" width={36} height={36} />
@@ -51,8 +52,9 @@ export default function Home() {
       <section id="zdroje" className="sources">
         <h2>Zdroje</h2>
         {/*
-          Client island: Zotero (only where the deployment can connect it — the OAuth app and
-          CREDENTIALS_SECRET) and Vlastní soubory, counts from GET /api/files/summary.
+          Client island, the Pro group: Vlastní soubory (counts from GET /api/files/summary),
+          Zotero (locked where the deployment cannot connect it — no OAuth app or CREDENTIALS_SECRET)
+          and UKAŽ (switched on per account).
         */}
         <OwnSourcesGroup zotero={zoteroConfigured()} />
         {/* Client island: the badges come from GET /api/status (static, checked hourly) after the page is up. */}
@@ -62,7 +64,7 @@ export default function Home() {
       <section id="pripojeni" className="connect">
         <h2>Jak se připojit</h2>
         <Guide endpoint={endpoint()} />
-        <p className="muted small">
+        <p className="muted small guide-note">
           Kdyby cokoli nešlo, napište mi na <Mail />.
         </p>
       </section>
