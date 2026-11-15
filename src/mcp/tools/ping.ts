@@ -3,6 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { authMode } from "../auth";
 import { SERVER_NAME, SERVER_VERSION } from "../config";
 import { envMode } from "@/src/files/config";
+import { appEnvironment, appRegion, gitCommit } from "@/src/runtime";
 import { zoteroConfigured } from "@/src/zotero/config";
 
 const outputSchema = z.object({
@@ -59,9 +60,10 @@ export function registerPing(server: McpServer): void {
         server: SERVER_NAME,
         version: SERVER_VERSION,
         serverTime: new Date().toISOString(),
-        environment: process.env.VERCEL_ENV ?? "local",
-        region: process.env.VERCEL_REGION ?? null,
-        commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? null,
+        environment: appEnvironment(),
+        // Which deployment answered: "home" on the Proxmox server, else Vercel's region.
+        region: appRegion(),
+        commit: gitCommit(),
         // Surfaces a misconfigured token: without this, an accidentally
         // anonymous deployment looks identical to a protected one.
         auth: authMode(),

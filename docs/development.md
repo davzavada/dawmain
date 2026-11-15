@@ -228,6 +228,33 @@ Vlastní zdroje se zapínají zvlášť — viz [Vlastní zdroje — provoz](#vl
    tělo odpovědi jako podklad pro fixture (po jednom zdroji — všechny naráz se
    nevejdou do rozpočtu odpovědi).
 
+## Nasazení doma (Proxmox)
+
+Tentýž commit běží i na domácím serveru v LXC `web`; postup stěhování,
+fáze a návrat jsou v [infra/migrace-z-vercelu.md](infra/migrace-z-vercelu.md).
+Co se oproti Vercelu liší v kódu (vše v `src/runtime.ts`, každá proměnná má
+Vercelí náhradu, takže na Vercelu se nic nemění):
+
+- `PUBLIC_URL`, `APP_ENV`, `APP_REGION`, `GIT_SHA` nahrazují `VERCEL_*`
+  (adresa na úvodní stránce a v odkazu na nahrávání, `dawmain_ping`).
+  `dawmain_ping` ukazuje `region: home`, takže se pozná, které nasazení
+  odpovědělo.
+- `DAWMAIN_REQUIRE_AUTH=1` — endpoint odmítne anonymní požadavky i bez tokenu
+  a bez Clerku (na Vercelu to dělá `VERCEL`). Fail-closed: vypíná jen
+  `0` / `false` / `off` / `no`.
+- `TRUST_FORWARDED_HOST=0` — adresa webu se neodvozuje z `X-Forwarded-Host`
+  a `-Proto`, které může poslat kdokoli; OAuth discovery nabízí `PUBLIC_URL`.
+- Build: `NEXT_OUTPUT=standalone` (samostatný `server.js`),
+  `NEXT_DEPLOYMENT_ID` (verze vydání). `deploy/web/deploy.sh` je nastaví,
+  sestaví vydání, na vedlejším portu ověří 401 bez tokenu a smoke test a
+  teprve pak přepne `current`; když se služba po restartu nezvedne, vrátí
+  předchozí vydání. Uživatel `dawmain` k tomu potřebuje jediné právo:
+  `dawmain ALL=(root) NOPASSWD: /bin/systemctl restart dawmain-web`
+  (soubor v `/etc/sudoers.d/`).
+- Denní úklid Vlastních zdrojů místo Vercel Cronu: `deploy/web/dawmain-cron.timer`
+  volá `/api/cron/files` s `CRON_SECRET`. Povolit až při přepnutí domény.
+- AI Gateway: místo OIDC `AI_GATEWAY_API_KEY`.
+
 ## Připojení klienta
 
 S OAuth (Clerk) stačí URL — klient si při prvním použití řekne o přihlášení

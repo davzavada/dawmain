@@ -7,6 +7,7 @@ import {
 import type { AuthInfo } from "@modelcontextprotocol/server";
 import { createHash } from "node:crypto";
 import { getPublicOrigin } from "mcp-handler";
+import { authForced, forwardedHostTrusted, productionOrigin } from "@/src/runtime";
 import { TtlCache } from "@/src/sources/shared/cache";
 import { clerkConfigured, getBearerToken, getClerkPublishableKey, tokenMatches } from "./config";
 
@@ -47,11 +48,12 @@ function extractTokens(request: Request): string[] {
  * Whether unauthenticated requests must be rejected. On Vercel always — a
  * blank, misspelled or environment-scoped variable would otherwise silently
  * publish the whole tool surface, on production and on every preview URL
- * alike, with nothing to notice it by. Locally only once an auth method is
- * actually configured, so `npm run dev` stays anonymous.
+ * alike, with nothing to notice it by. The home server says the same with
+ * DAWMAIN_REQUIRE_AUTH (src/runtime.ts). Locally only once an auth method
+ * is actually configured, so `npm run dev` stays anonymous.
  */
 export function authRequired(): boolean {
-  return Boolean(process.env.VERCEL || getBearerToken() || clerkConfigured());
+  return authForced() || Boolean(getBearerToken() || clerkConfigured());
 }
 
 /** What the deployment accepts — surfaced by `dawmain_ping`. */
@@ -158,6 +160,24 @@ function notConfigured(): Response {
 }
 
 /**
+ * The origin clients should use to reach this deployment. Where
+ * X-Forwarded-* is trusted (Vercel) mcp-handler reads it from the request,
+ * so a preview advertises its own address. At home (TRUST_FORWARDED_HOST=0)
+ * the server itself listens on plain http behind the tunnel, so the request
+ * URL would say http:// and the OAuth discovery would hand clients an
+ * address they cannot use: the fixed PUBLIC_URL is advertised instead.
+ */
+export function requestOrigin(request: Request): string {
+  if (forwardedHostTrusted()) return getPublicOrigin(request);
+  return productionOrigin() ?? new URL(request.url).origin;
+}
+
+/** For withMcpAuth's `resourceUrl` (the 401 challenge): fixed at home, per request on Vercel. */
+export function challengeOrigin(): string | undefined {
+  return forwardedHostTrusted() ? undefined : (productionOrigin() ?? undefined);
+}
+
+/**
  * RFC 9728 protected-resource metadata — how an MCP client that got a 401
  * finds the authorization server (Clerk, derived from the publishable key)
  * to log in with. Served at both well-known paths (root and path-inserted
@@ -172,7 +192,7 @@ export function protectedResourceMetadata(request: Request): Response {
     publishableKey,
     // The resource identifier is the MCP endpoint itself, not the site root —
     // clients compare it against the URL they connected to (RFC 8707).
-    resourceUrl: `${getPublicOrigin(request)}/api/mcp`,
+    resourceUrl: `${requestOrigin(request)}/api/mcp`,
     properties: {
       resource_name: "Dawmain",
       bearer_methods_supported: ["header"],

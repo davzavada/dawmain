@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { getPublicOrigin } from "mcp-handler";
+import { productionOrigin } from "@/src/runtime";
 import { personalProCaller, type ProCaller } from "@/src/mcp/pro-caller";
 import type { Access, LibraryAccess } from "@/src/files/access-types";
 import { LIMITS, type FilesMode } from "@/src/files/config";
@@ -157,14 +158,15 @@ export const GATE_TEXT = {
 } as const;
 
 /**
- * The public origin for the "upload here" link: the production URL Vercel
- * sets, else the request's own origin (when the transport passed the
- * request), else null. Only a plain scheme://host[:port] is accepted.
+ * The public origin for the "upload here" link: the production URL
+ * (PUBLIC_URL, else the one Vercel sets), else the request's own origin
+ * (when the transport passed the request), else null. Only a plain
+ * scheme://host[:port] is accepted.
  */
 export function siteOrigin(ctx: unknown): string | null {
   const plain = /^https?:\/\/[a-z0-9.-]+(?::\d{1,5})?$/i;
-  const production = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
-  if (production && plain.test(`https://${production}`)) return `https://${production}`;
+  const production = productionOrigin();
+  if (production) return production;
   try {
     const req = (ctx as { http?: { req?: unknown } } | null | undefined)?.http?.req;
     if (req instanceof Request) {
