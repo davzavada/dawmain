@@ -13,10 +13,15 @@ import { isUuid } from "./documents";
  * library id, 'user:<id>').
  */
 
-export type UsageField = "uploads" | "pages" | "ai_calls" | "ai_microusd" | "tool_calls" | "reads" | "cpu_ms" | "reindexes";
+/**
+ * The counters the server still keeps. usage_daily also has ai_calls and
+ * ai_microusd (migration 0001), left from the removed AI metadata proposal:
+ * nothing reads or writes them any more.
+ */
+export type UsageField = "uploads" | "pages" | "tool_calls" | "reads" | "cpu_ms" | "reindexes";
 
 /** Whitelist — the only strings ever interpolated as column names. */
-export const USAGE_FIELDS: readonly UsageField[] = ["uploads", "pages", "ai_calls", "ai_microusd", "tool_calls", "reads", "cpu_ms", "reindexes"];
+export const USAGE_FIELDS: readonly UsageField[] = ["uploads", "pages", "tool_calls", "reads", "cpu_ms", "reindexes"];
 const FIELD_SET = new Set<string>(USAGE_FIELDS);
 
 /** The former Neon host suspended an idle compute after 5 minutes: the estimate still counts that tail per active minute. */
@@ -28,7 +33,7 @@ const TODAY_UTC = "(now() AT TIME ZONE 'UTC')::date";
 /**
  * Add to today's (UTC) counters of `scope`, creating the row on first use.
  * Unknown fields, non-finite and non-positive amounts are ignored; amounts
- * are rounded to integers (ai_microusd is already micro-dollars).
+ * are rounded to integers.
  */
 export async function bumpUsage(db: Queryable, scope: string, fields: Partial<Record<UsageField, number>>): Promise<void> {
   const cols: string[] = [];

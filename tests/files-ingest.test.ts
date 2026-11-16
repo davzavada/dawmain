@@ -5,13 +5,34 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 /**
  * Ingest (src/files/ingest.ts) on PGlite with the real migrations, as
  * dawmain_app under RLS: claim → inflate → parse → metadata → derive →
- * one-transaction commit, failures, retries, the lease, `replaces`, the
- * AI budget and kickPendingIngests. The model call is mocked (no network);
- * everything else is the production code.
+ * one-transaction commit, failures, retries, the lease, `replaces` and
+ * kickPendingIngests. All of it is the production code; two seams are
+ * wrapped so a test can step in: the heuristic proposal (heuristicMeta,
+ * which runs the real one unless a test says otherwise) and a hook right
+ * after the claim, inside its transaction.
  */
 
-const propose = vi.hoisted(() => ({ fn: vi.fn() }));
-vi.mock("@/src/files/meta/propose", () => ({ proposeMetadata: propose.fn }));
+const seams = vi.hoisted(() => ({
+  heuristicMeta: vi.fn(),
+  real: null as null | ((...args: never[]) => unknown),
+  afterClaim: null as null | ((id: string) => Promise<void>),
+}));
+vi.mock("@/src/files/meta/heuristics", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/src/files/meta/heuristics")>();
+  seams.real = real.heuristicMeta as never;
+  return { ...real, heuristicMeta: seams.heuristicMeta };
+});
+vi.mock("@/src/files/db/documents", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/src/files/db/documents")>();
+  return {
+    ...real,
+    claimForIngest: async (...args: Parameters<typeof real.claimForIngest>) => {
+      const claimed = await real.claimForIngest(...args);
+      if (claimed && seams.afterClaim) await seams.afterClaim(args[1]);
+      return claimed;
+    },
+  };
+});
 
 import { ANALYZER_VERSION, LIMITS } from "@/src/files/config";
 import { setScopeRunner } from "@/src/files/db/client";
@@ -21,7 +42,7 @@ import { billablePages } from "@/src/files/dmd/billing";
 import { normalizeDmd } from "@/src/files/dmd/normalize";
 import { parseDmd } from "@/src/files/dmd/parse";
 import { __resetGuardsForTests, MODE_OVERRIDE_KEY } from "@/src/files/guards";
-import { aiBudget, inflatePending, IngestFailure, ingestDocument, kickPendingIngests, userHash } from "@/src/files/ingest";
+import { inflatePending, IngestFailure, ingestDocument, kickPendingIngests } from "@/src/files/ingest";
 import type { ConversionQuality, DocType, UploadMeta } from "@/src/files/types";
 import { createTestDb, type TestDb } from "./helpers/pglite";
 
@@ -87,8 +108,9 @@ beforeEach(() => {
   process.env.FILES_MODE = "on";
   setScopeRunner(t.runner);
   __resetGuardsForTests();
-  propose.fn.mockReset();
-  propose.fn.mockResolvedValue({ meta: {}, ai: "skipped", detail: null });
+  seams.heuristicMeta.mockReset();
+  seams.heuristicMeta.mockImplementation(seams.real!);
+  seams.afterClaim = null;
 });
 afterEach(async () => {
   process.env = { ...ENV };
@@ -172,7 +194,11 @@ describe("ingestDocument — success", () => {
     expect(await count("SELECT count(*) AS n FROM doc_footnotes WHERE doc_id = $1", [id])).toBe(6);
     expect(await count("SELECT count(*) AS n FROM doc_blocks WHERE doc_id = $1", [id])).toBeGreaterThan(0);
     expect(await lib(LIB)).toEqual({ page_count: pages, pages_reserved: 0, doc_count: 1 });
-    expect(propose.fn).toHaveBeenCalledTimes(1);
+    expect(seams.heuristicMeta).toHaveBeenCalledTimes(1);
+    // The stored proposal is the server's own: heuristics (and the file name), nothing else.
+    const sources = Object.values(d.proposed_meta as Record<string, { source: string }>).map((f) => f.source);
+    expect(sources.length).toBeGreaterThan(0);
+    for (const source of sources) expect(["heuristic", "pdf", "filename", "user"]).toContain(source);
   });
 
   it("the uploader's type hint wins; a commentary gets its § range and anchor label", async () => {
@@ -185,44 +211,13 @@ describe("ingestDocument — success", () => {
     expect((d.proposed_meta as Record<string, { source: string }>).doc_type.source).toBe("user");
   });
 
-  it("merges the AI proposal; with the review step on, its Czech note goes to status_detail", async () => {
-    propose.fn.mockResolvedValue({
-      meta: { title: { value: "Občanský zákoník. Komentář", source: "ai", confidence: 0.8 } },
-      ai: "failed",
-      detail: "Návrh metadat pomocí AI se nepodařil. Metadata jsou navržena jen z textu dokumentu.",
-    });
+  it("with the review step on, the document waits in review with no note", async () => {
     const { id } = await seed(LIB, commentaryDmd(4));
+    await t.owner.query(`UPDATE libraries SET settings = '{"autoConfirm": false}'::jsonb WHERE id = $1`, [LIB]);
     expect(await ingestDocument(id, LIB)).toBe("done");
     const d = await doc(id);
-    expect(d).toMatchObject({ status: "ready", title: "Občanský zákoník. Komentář", status_detail: null });
-
-    await t.owner.query(`UPDATE libraries SET settings = '{"autoConfirm": false}'::jsonb WHERE id = $1`, [LIB]);
-    const second = await seed(LIB, commentaryDmd(4, "druhý"));
-    expect(await ingestDocument(second.id, LIB)).toBe("done");
-    const r = await doc(second.id);
-    expect(r).toMatchObject({ status: "review", confirmed_at: null });
-    expect(r.status_detail).toMatch(/^Návrh metadat/);
-  });
-
-  it("passes an opaque user hash and the budget callbacks to the model call", async () => {
-    let seen: { userHash: string } | null = null;
-    propose.fn.mockImplementation(async (_input, opts) => {
-      seen = opts;
-      expect(await opts.allow()).toBe(true);
-      await opts.record(0.0012);
-      return { meta: {}, ai: "ok", detail: null };
-    });
-    const { id } = await seed(LIB, commentaryDmd(4));
-    expect(await ingestDocument(id, LIB)).toBe("done");
-    expect(seen!.userHash).toMatch(/^[0-9a-f]{32}$/);
-    expect(seen!.userHash).not.toContain("owner");
-    const { rows } = await t.owner.query<{ scope: string; ai_calls: number; ai_microusd: string }>(
-      "SELECT scope, ai_calls, ai_microusd FROM usage_daily WHERE ai_calls > 0 ORDER BY scope",
-    );
-    expect(rows.map((r) => [r.scope, r.ai_calls, Number(r.ai_microusd)])).toEqual([
-      ["global", 1, 1200],
-      [LIB, 1, 1200],
-    ]);
+    expect(d).toMatchObject({ status: "review", confirmed_at: null, status_detail: null });
+    expect(d.title).toBeTruthy();
   });
 
   it("records the run's CPU time", async () => {
@@ -231,14 +226,14 @@ describe("ingestDocument — success", () => {
     expect(await count("SELECT count(*) AS n FROM usage_daily WHERE scope = 'global' AND cpu_ms > 0", [])).toBe(1);
   });
 
-  it("autoConfirm (the default) → ready; aiProposals false → no model call", async () => {
+  it("autoConfirm (the default) → ready; a leftover aiProposals setting changes nothing", async () => {
     const { id } = await seed(ORG, commentaryDmd(4));
     await t.owner.query(`UPDATE libraries SET settings = '{"autoConfirm": true, "aiProposals": false}' WHERE id = $1`, [ORG]);
     expect(await ingestDocument(id, ORG)).toBe("done");
     const d = await doc(id);
     expect(d.status).toBe("ready");
     expect(d.confirmed_at).not.toBeNull();
-    expect(propose.fn).not.toHaveBeenCalled();
+    expect(seams.heuristicMeta).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -247,6 +242,7 @@ describe("ingestDocument — replaces (legacy re-uploads still in flight)", () =
     const old = await seed(LIB, commentaryDmd(6, "stará verze"));
     await t.owner.query(`UPDATE libraries SET settings = '{"autoConfirm": false}'::jsonb WHERE id = $1`, [LIB]);
     expect(await ingestDocument(old.id, LIB)).toBe("done");
+    const oldProposed = (await doc(old.id)).proposed_meta;
     await t.owner.query(
       `UPDATE documents SET status = 'ready', confirmed_at = now(), confirmed_by = 'user_owner', doc_type = 'komentar',
               title = 'Potvrzený název', authors = '{"Jan Petrov"}', commented_act = 'zak:89/2012' WHERE id = $1`,
@@ -265,7 +261,7 @@ describe("ingestDocument — replaces (legacy re-uploads still in flight)", () =
     expect(await doc(old.id)).toBeUndefined();
     expect(await count("SELECT count(*) AS n FROM chunks WHERE doc_id = $1", [old.id])).toBe(0);
     expect(await lib(LIB)).toEqual({ page_count: fresh.pages, pages_reserved: 0, doc_count: 1 });
-    expect(propose.fn).toHaveBeenCalledTimes(1); // only for the original
+    expect(d.proposed_meta).toEqual(oldProposed); // the original's proposal, not a new one
     const audit = await t.owner.query<{ action: string; detail: { replaced: string } }>("SELECT action, detail FROM audit_log WHERE doc_id = $1", [fresh.id]);
     expect(audit.rows).toEqual([expect.objectContaining({ action: "document.replaced", detail: expect.objectContaining({ replaced: old.id }) })]);
   });
@@ -312,11 +308,11 @@ describe("ingestDocument — lease and isolation", () => {
 
   it("the lease lost mid-run: nothing is written, the other run keeps the document", async () => {
     const { id } = await seed(LIB, commentaryDmd(4));
-    propose.fn.mockImplementation(async () => {
-      // Another run took over (e.g. after this one looked dead).
-      await t.owner.query("UPDATE documents SET run_token = gen_random_uuid() WHERE id = $1", [id]);
-      return { meta: {}, ai: "skipped", detail: null };
-    });
+    seams.afterClaim = async (claimed) => {
+      // Another run took over (e.g. after this one looked dead). Same
+      // connection, so this lands in the claim's transaction and commits with it.
+      await t.owner.query("UPDATE documents SET run_token = gen_random_uuid() WHERE id = $1", [claimed]);
+    };
     expect(await ingestDocument(id, LIB)).toBe("lost");
     const d = await doc(id);
     expect(d).toMatchObject({ status: "processing", pending_cleared: false });
@@ -368,7 +364,9 @@ describe("ingestDocument — failures", () => {
 
   it("unexpected failures are retried up to 3 attempts, then error + release; logs carry no content", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    propose.fn.mockRejectedValue(Object.assign(new Error("secret text of the document"), { code: "XX000" }));
+    seams.heuristicMeta.mockImplementation(() => {
+      throw Object.assign(new Error("secret text of the document"), { code: "XX000" });
+    });
     const { id, pages } = await seed(LIB, commentaryDmd(4));
     expect(await ingestDocument(id, LIB)).toBe("failed");
     expect(await doc(id)).toMatchObject({ status: "queued", attempts: 1, pending_cleared: false });
@@ -381,7 +379,7 @@ describe("ingestDocument — failures", () => {
     log.mockRestore();
 
     // A later success is impossible without a new upload.
-    propose.fn.mockResolvedValue({ meta: {}, ai: "skipped", detail: null });
+    seams.heuristicMeta.mockImplementation(seams.real!);
     expect(await ingestDocument(id, LIB)).toBe("lost");
   });
 
@@ -390,7 +388,7 @@ describe("ingestDocument — failures", () => {
     await t.owner.query("UPDATE documents SET status = 'processing', attempts = 3, lease_until = now() - interval '1 minute' WHERE id = $1", [id]);
     expect(await ingestDocument(id, LIB)).toBe("failed");
     expect(await doc(id)).toMatchObject({ status: "error", attempts: 4 });
-    expect(propose.fn).not.toHaveBeenCalled();
+    expect(seams.heuristicMeta).not.toHaveBeenCalled();
     expect(await lib(LIB)).toMatchObject({ pages_reserved: 0 });
   });
 
@@ -446,32 +444,7 @@ describe("kickPendingIngests", () => {
   });
 });
 
-describe("aiBudget", () => {
-  it("refuses once the rolling 30-day spend reaches LIMITS.aiBudgetUsd", async () => {
-    const budget = aiBudget(LIB);
-    expect(await budget.allow()).toBe(true);
-    await t.owner.query("INSERT INTO usage_daily (day, scope, ai_microusd) VALUES (current_date - 29, 'global', $1)", [LIMITS.aiBudgetUsd * 1_000_000]);
-    expect(await budget.allow()).toBe(false);
-    await t.owner.query("UPDATE usage_daily SET day = current_date - 30 WHERE scope = 'global'");
-    expect(await budget.allow()).toBe(true);
-  });
-
-  it("refuses after the library's daily proposals", async () => {
-    await t.owner.query("INSERT INTO usage_daily (day, scope, ai_calls) VALUES ((now() AT TIME ZONE 'UTC')::date, $1, $2)", [LIB, LIMITS.aiProposalsPerLibraryPerDay]);
-    expect(await aiBudget(LIB).allow()).toBe(false);
-    expect(await aiBudget(ORG).allow()).toBe(true);
-  });
-
-  it("books at least one micro-dollar per call, nothing negative", async () => {
-    await aiBudget(ORG).record(-5);
-    await aiBudget(ORG).record(0.0000001);
-    const { rows } = await t.owner.query<{ ai_calls: number; ai_microusd: string }>("SELECT ai_calls, ai_microusd FROM usage_daily WHERE scope = $1", [ORG]);
-    expect(rows[0].ai_calls).toBe(2);
-    expect(Number(rows[0].ai_microusd)).toBe(1);
-  });
-});
-
-describe("inflatePending / userHash", () => {
+describe("inflatePending", () => {
   it("round-trips valid text and checks the hash", () => {
     const text = "Příliš žluťoučký kůň [s. 1]";
     expect(inflatePending(gz(text), sha256(text))).toBe(text);
@@ -496,12 +469,6 @@ describe("inflatePending / userHash", () => {
         expect((e as IngestFailure).retryable).toBe(false);
       }
     }
-  });
-
-  it("userHash is stable, opaque and per user", () => {
-    expect(userHash("user_abc")).toBe(userHash("user_abc"));
-    expect(userHash("user_abc")).not.toBe(userHash("user_abd"));
-    expect(userHash("user_abc")).not.toContain("abc");
   });
 });
 

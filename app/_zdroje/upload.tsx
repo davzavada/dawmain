@@ -14,7 +14,7 @@ import { buildUploadMeta, gzipText, missingBrowserFeatures, sha256Text, UNSUPPOR
 /**
  * Upload inside the Vlastní soubory modal (wireframe 04): drop files, and
  * each one — one at a time, the rest wait in a queue — is converted to text
- * in the browser, gzipped and posted, with no further step. The server's AI
+ * in the browser, gzipped and posted, with no further step. The server
  * classifies it (komentář, článek, kniha…) and proposes the metadata; the
  * document is searchable once it is processed, and the user changes the
  * type or the metadata later in its row of the list. Only the converted Markdown text goes to the server; the
@@ -216,7 +216,7 @@ export function Uploader({ library, onUploaded }: { library: LibrarySummary; onU
             Přetáhněte soubory sem, nebo <span className="zd-link">vyberte z počítače</span>
           </span>
           <span className="zd-dropzone-sub">
-            PDF, DOCX, TXT nebo MD, nejvýš {maxMb} MB. Převádí se na text přímo ve vašem prohlížeči; typ dokumentu rovnou zařadí AI.
+            PDF, DOCX, TXT nebo MD, nejvýš {maxMb} MB. Převádí se na text přímo ve vašem prohlížeči; typ dokumentu rovnou zařadí server.
           </span>
         </button>
         <input

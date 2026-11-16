@@ -16,8 +16,20 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
  * one transaction and a bump in another.
  */
 
-const propose = vi.hoisted(() => ({ fn: vi.fn() }));
-vi.mock("@/src/files/meta/propose", () => ({ proposeMetadata: propose.fn }));
+// A seam inside ingest's awaits: runs right after the claim, in its transaction.
+const hooks = vi.hoisted(() => ({ afterClaim: null as null | (() => Promise<void>), claims: 0 }));
+vi.mock("@/src/files/db/documents", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/src/files/db/documents")>();
+  return {
+    ...real,
+    claimForIngest: async (...args: Parameters<typeof real.claimForIngest>) => {
+      const claimed = await real.claimForIngest(...args);
+      hooks.claims += 1;
+      if (claimed && hooks.afterClaim) await hooks.afterClaim();
+      return claimed;
+    },
+  };
+});
 
 import { __setAccessLoaderForTests, buildAccess, type Access } from "@/src/files/access";
 import { LIMITS, TERMS_VERSION } from "@/src/files/config";
@@ -108,8 +120,8 @@ beforeEach(async () => {
   setScopeRunner(t.runner);
   __resetGuardsForTests();
   __setAccessLoaderForTests(async (userId) => access(userId));
-  propose.fn.mockReset();
-  propose.fn.mockResolvedValue({ meta: {}, ai: "skipped", detail: null });
+  hooks.afterClaim = null;
+  hooks.claims = 0;
   for (const user of ["user_a", "user_q", "user_back"]) await t.runner([], (db) => acceptTerms(db, user, TERMS_VERSION));
 });
 afterEach(async () => {
@@ -295,17 +307,16 @@ describe("the daily upload limits (security:F5, ops:FT-5)", () => {
       Number((await t.owner.query<{ cpu_ms: number }>("SELECT cpu_ms FROM usage_daily WHERE scope = 'global'")).rows[0]?.cpu_ms ?? 0);
     const afterUpload = await cpuOf();
     expect(afterUpload).toBeGreaterThan(0);
-    // Stand-in for an MCP call running on the same instance while ingest waits for the model.
-    propose.fn.mockImplementation(async () => {
+    // Stand-in for an MCP call running on the same instance while ingest waits for the database.
+    hooks.afterClaim = async () => {
       await Promise.resolve();
       const until = process.cpuUsage().user + 300_000;
       while (process.cpuUsage().user < until) {
         // burn 300 ms of CPU
       }
-      return { meta: {}, ai: "skipped", detail: null };
-    });
+    };
     expect(await ingestDocument(id, "user_a")).toBe("done");
-    expect(propose.fn).toHaveBeenCalledTimes(1);
+    expect(hooks.claims).toBe(1);
     const booked = (await cpuOf()) - afterUpload;
     expect(booked).toBeGreaterThan(0);
     expect(booked).toBeLessThan(200);

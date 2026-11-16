@@ -19,13 +19,13 @@
  *
  * Text is markup-stripped (page markers, [^n] refs, [m. č. N] prefixes,
  * escapes) with each block on one line; headings keep a "# " prefix and
- * every page starts with a "--- s. <label> ---" line, so the heuristics and
- * the model can still see what was a heading and where a page began. A page
+ * every page starts with a "--- s. <label> ---" line, so the heuristics
+ * can still see what was a heading and where a page began. A page
  * already included whole in `front` is not repeated in `colophon` or
  * `authorsPage`.
  *
- * Everything here is document-derived and untrusted: it goes to the model
- * inside a <document> wrapper and is never rendered as tool prose.
+ * Everything here is document-derived and untrusted: only the heuristics
+ * read it, on the server, and it is never rendered as tool prose.
  *
  * Pure — unit-tested (tests/files-meta-input.test.ts).
  */

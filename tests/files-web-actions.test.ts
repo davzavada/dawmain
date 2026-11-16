@@ -5,14 +5,12 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 /**
  * The operator data (src/files/operator.ts), the re-derivation of stored documents
  * (src/files/reindex.ts) and the web repository functions
- * (src/files/db/documents-web.ts). Clerk, after(), next/cache and the model
- * call are mocked; the database is PGlite with the real migrations.
+ * (src/files/db/documents-web.ts). Clerk, after() and next/cache are mocked; the database is PGlite with the real migrations.
  */
 
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   after: [] as Array<() => unknown>,
-  propose: vi.fn(),
   revalidatePath: vi.fn(),
 }));
 
@@ -29,7 +27,6 @@ vi.mock("next/server", async (importOriginal) => ({
   },
 }));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
-vi.mock("@/src/files/meta/propose", () => ({ proposeMetadata: mocks.propose }));
 
 import { POST as uploadPOST } from "@/app/api/files/documents/route";
 import { __setAccessLoaderForTests, buildAccess } from "@/src/files/access";
@@ -100,8 +97,6 @@ beforeEach(async () => {
   mocks.auth.mockReset();
   mocks.after.length = 0;
   mocks.revalidatePath.mockReset();
-  mocks.propose.mockReset();
-  mocks.propose.mockResolvedValue({ meta: {}, ai: "skipped", detail: null });
   for (const user of ["user_a", "user_b"]) await t.runner([], (db) => acceptTerms(db, user, TERMS_VERSION));
 });
 afterEach(async () => {

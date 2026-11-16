@@ -1,7 +1,7 @@
 /**
- * Deterministic metadata proposals — what the review form shows when the
- * AI is unavailable or out of budget, and what wins over the AI for
- * identifiers and dates (mergeProposals). Built for the Czech legal
+ * Deterministic metadata proposals — the only metadata proposal there is:
+ * ingest stores it and the review form shows it, nothing leaves the
+ * server. Built for the Czech legal
  * literature the feature is for:
  *
  *   books        the tiráž ("© C. H. Beck, 2019", "ISBN 978-80-7400-…
@@ -376,11 +376,6 @@ export function stripDegrees(s: string): { text: string; had: boolean } {
   const before = s.replace(DEGREE_BEFORE_RE, "");
   const text = before.replace(DEGREE_AFTER_RE, "").replace(/\s+/g, " ").trim();
   return { text, had: text.length !== s.replace(/\s+/g, " ").trim().length };
-}
-
-/** A lone surname as a model may list it ("Beran"): a capitalized name word that is not a title-page word. Pure. */
-export function isSurnameWord(token: string): boolean {
-  return WORD_TOKEN_RE.test(token) && !NAME_STOP.has(fold(token));
 }
 
 function capitalizeWord(w: string): string {

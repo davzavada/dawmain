@@ -1,5 +1,5 @@
 import "server-only";
-import { ANALYZER_VERSION, envMode, LIMITS, operatorIds, USER_ID_RE, UUID_RE, type FilesMode } from "./config";
+import { ANALYZER_VERSION, envMode, operatorIds, USER_ID_RE, UUID_RE, type FilesMode } from "./config";
 import { withScope } from "./db/client";
 import { deleteDocument } from "./db/documents";
 import { reindexBacklog, stuckDocuments, type StuckDocument } from "./db/documents-web";
@@ -34,9 +34,6 @@ export interface OperatorSnapshot {
   guards: GuardMeasurement;
   /** Per table: physical and estimated live bytes (the VACUUM FULL plan). */
   tables: TableUsage[];
-  /** Rolling 30-day AI spend in USD, and the budget. */
-  aiSpentUsd: number;
-  aiBudgetUsd: number;
   /** CPU booked by uploads, ingests and re-derivations (usage_daily.cpu_ms): today and over 30 days (UPLOAD_GUARDS caps). */
   cpuMsToday: number;
   cpuMs30Days: number;
@@ -66,7 +63,6 @@ export async function operatorSnapshot(now = new Date()): Promise<OperatorSnapsh
       override: parseOverride(await getSystemState<unknown>(db, MODE_OVERRIDE_KEY)),
       guards: await measureGuards(db, now),
       tables: await tableUsage(db),
-      aiMicro: await usageSum(db, "global", "ai_microusd", 30),
       cpuToday: await usageSum(db, "global", "cpu_ms", 1),
       cpu30: await usageSum(db, "global", "cpu_ms", 30),
       uploads: await usageSum(db, "global", "uploads", days),
@@ -90,8 +86,6 @@ export async function operatorSnapshot(now = new Date()): Promise<OperatorSnapsh
     override: system.override,
     guards: system.guards,
     tables: system.tables,
-    aiSpentUsd: system.aiMicro / 1_000_000,
-    aiBudgetUsd: LIMITS.aiBudgetUsd,
     cpuMsToday: system.cpuToday,
     cpuMs30Days: system.cpu30,
     uploadsThisMonth: system.uploads,
