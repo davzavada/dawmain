@@ -39,6 +39,19 @@ if [ -d "$REL" ] && [ "$(readlink -f "$BASE/current")" = "$REL" ]; then
   exit 0
 fi
 
+CHECK_PID=""
+# On ANY exit: stop the side-port check server, and drop this release's
+# directory unless it is the live one (a failed build must not pile up).
+cleanup() {
+  local rc=$?
+  if [ -n "$CHECK_PID" ]; then kill "$CHECK_PID" 2>/dev/null || true; wait "$CHECK_PID" 2>/dev/null || true; fi
+  if [ "$rc" -ne 0 ] && [ -d "$REL" ] && [ "$(readlink -f "$BASE/current" 2>/dev/null)" != "$REL" ]; then
+    rm -rf "$REL"
+    echo "Removed the unfinished release $SHORT; the live release is untouched." >&2
+  fi
+}
+trap cleanup EXIT
+
 log "Unpacking $SHORT"
 rm -rf "$REL"
 mkdir -p "$REL"
@@ -83,8 +96,6 @@ log "Checking the release on port $CHECK_PORT"
   echo $! >"$REL/check.pid"
 )
 CHECK_PID="$(cat "$REL/check.pid")"
-stop_check() { kill "$CHECK_PID" 2>/dev/null || true; wait "$CHECK_PID" 2>/dev/null || true; }
-trap stop_check EXIT
 
 for _ in $(seq 1 60); do
   curl -fsS -o /dev/null "http://127.0.0.1:$CHECK_PORT/api/status" && break
@@ -107,8 +118,8 @@ if [ -n "${MCP_BEARER_TOKEN:-}" ]; then
 else
   echo "MCP_BEARER_TOKEN is not set: skipping the authenticated smoke test."
 fi
-stop_check
-trap - EXIT
+kill "$CHECK_PID" 2>/dev/null || true; wait "$CHECK_PID" 2>/dev/null || true
+CHECK_PID=""
 
 log "Switching to $SHORT"
 ln -sfn "$REL" "$BASE/current.new"
