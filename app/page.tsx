@@ -12,8 +12,8 @@ const OWL_URL = "https://owl.davidzavada.cz/";
 
 /**
  * The MCP address the guide offers, fixed at build (the page is static): the
- * production domain (PUBLIC_URL, else the one Vercel names). The guide swaps
- * in the address the browser is actually on (a preview, localhost) — on
+ * production domain (PUBLIC_URL). The guide swaps in the address the browser
+ * is actually on (a test instance, localhost) — on
  * production it is the same.
  */
 function endpoint(): string {

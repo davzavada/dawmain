@@ -51,8 +51,8 @@ function call(version: string): Request {
 }
 
 async function loadRoute() {
-  // Anonymous local mode: no Vercel, no access code, no Clerk.
-  for (const name of ["VERCEL", "MCP_BEARER_TOKEN", "CLERK_SECRET_KEY", "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"]) {
+  // Anonymous local mode: no auth flag, no access code, no Clerk.
+  for (const name of ["DAWMAIN_REQUIRE_AUTH", "MCP_BEARER_TOKEN", "CLERK_SECRET_KEY", "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"]) {
     vi.stubEnv(name, "");
   }
   return import("@/app/api/mcp/route");

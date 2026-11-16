@@ -15,7 +15,7 @@ import { NextResponse } from "next/server";
  * Env is checked inline (not via src/mcp/config) so this file stays
  * runtime-agnostic: without keys clerkMiddleware() would throw on every
  * request, so fall back to a no-op — the MCP endpoint then runs on the
- * shared access code alone and still fails closed on Vercel (see
+ * shared access code alone and still fails closed in production (see
  * src/mcp/auth.ts), and the Vlastní zdroje routes answer "unavailable".
  */
 const clerkConfigured = Boolean(
@@ -27,7 +27,7 @@ export default clerkConfigured ? clerkMiddleware() : () => NextResponse.next();
 export const config = {
   matcher: [
     // The API routes (MCP, /api/files/*, /api/zotero/*, webhooks, cron) — except
-    // /api/status: public, static and served by the CDN, which a proxy in front
+    // /api/status: public, static and served from Next's cache, which a proxy in front
     // would turn into a function call per request (app/api/status/route.ts).
     "/((?!api/status(?:/|$))(?:api|trpc).*)",
     // The admin pages with their Server Functions (auth() on the server); :path* includes the page itself.

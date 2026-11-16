@@ -159,7 +159,7 @@ export const GATE_TEXT = {
 
 /**
  * The public origin for the "upload here" link: the production URL
- * (PUBLIC_URL, else the one Vercel sets), else the request's own origin
+ * (PUBLIC_URL), else the request's own origin
  * (when the transport passed the request), else null. Only a plain
  * scheme://host[:port] is accepted.
  */

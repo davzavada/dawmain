@@ -6,9 +6,10 @@ import { globalUsage } from "./db/libraries";
 import { computeHoursEstimate, dbUsage, getSystemState } from "./db/usage";
 
 /**
- * Free-tier guards. Exceeding a Vercel Hobby or Neon Free limit pauses the
- * WHOLE deployment (the public MCP tools included), so Vlastní zdroje steps
- * back long before that:
+ * Free-tier guards, sized for the former host: there, exceeding a Vercel
+ * Hobby or Neon Free limit paused the WHOLE deployment (the public MCP tools
+ * included), so Vlastní zdroje steps back long before that. On the own
+ * server the same thresholds still apply until they are reviewed:
  *
  *   envOnlyMode()   FILES_MODE / FILES_DATABASE_URL — no I/O, checked first
  *                   (tool registration, callers without Pro never wake the DB);
@@ -34,12 +35,12 @@ const MODE_CACHE_MS = 30_000;
  * Physical size (share of LIMITS.dbBytesCap) that turns the feature
  * read-only even when the live estimate is lower: free space inside the
  * files is reused, but should the estimate be wrong the files grow. The
- * owner's cap itself (plan: "Globálně DB ≤ 400 MB"), well under Neon Free's
- * 0.5 GB, which counts every database of the project and is only checked
- * here every 30 s while ingests keep writing.
+ * owner's cap itself (plan: "Globálně DB ≤ 400 MB"), well under the 0.5 GB
+ * the guards were built for (the former Neon Free plan), which is only
+ * checked here every 30 s while ingests keep writing.
  */
 export const PHYSICAL_BACKSTOP = 1;
-/** Neon Free's storage limit (0.5 GB): writes that grow the database fail beyond it. */
+/** The former Neon Free storage limit (0.5 GB), still the ceiling of the size guards and VACUUM planning. */
 export const NEON_STORAGE_BYTES = 500_000_000;
 /** system_state key the operator page writes: "on" | "readonly" | "off" (or { mode }). */
 export const MODE_OVERRIDE_KEY = "mode_override";
@@ -260,7 +261,7 @@ export function allowToolCall(key: string, now = Date.now(), capacity: number = 
 /**
  * A mutating browser request must come from this site: the Origin header is
  * required and its host must equal the request's host (x-forwarded-host
- * where trusted — Vercel; the home server uses Host), and Sec-Fetch-Site, when sent, must not say cross-site. Route
+ * only where explicitly trusted, TRUST_FORWARDED_HOST; by default Host), and Sec-Fetch-Site, when sent, must not say cross-site. Route
  * Handlers get no CSRF protection of their own (Server Actions do). Pure.
  */
 export function sameOrigin(request: Request): boolean {

@@ -13,7 +13,7 @@ import { SourceError } from "@/src/sources/shared/errors";
  * zoteroFetch (src/zotero/http.ts) — the only code that talks to
  * api.zotero.org. What it protects is not visible in a happy-path test: the
  * key must stay in a header and never follow a redirect, and the shared
- * Vercel IP must not be blocked by Zotero for invalid keys or impatience.
+ * server IP must not be blocked by Zotero for invalid keys or impatience.
  * fetch is stubbed; api.zotero.org is never reached.
  */
 

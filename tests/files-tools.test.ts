@@ -1096,8 +1096,8 @@ describe("pure helpers", () => {
   });
 
   it("siteOrigin prefers the production URL, accepts only a plain origin", () => {
-    const prev = process.env.VERCEL_PROJECT_PRODUCTION_URL;
-    delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
+    const prev = process.env.PUBLIC_URL;
+    delete process.env.PUBLIC_URL;
     const req = (headers: Record<string, string>) => ({ http: { req: new Request("https://a.example/api/mcp", { headers }) } });
     expect(siteOrigin(req({}))).toBe("https://a.example");
     expect(siteOrigin(req({ "x-forwarded-host": "evil.example/<script>" }))).toBeNull();
@@ -1105,9 +1105,9 @@ describe("pure helpers", () => {
     expect(siteOrigin(null)).toBeNull();
     const hostile = { get http(): never { throw new Error("boom"); } };
     expect(siteOrigin(hostile)).toBeNull();
-    process.env.VERCEL_PROJECT_PRODUCTION_URL = "dawmain.cz";
+    process.env.PUBLIC_URL = "https://dawmain.cz";
     expect(siteOrigin(req({}))).toBe("https://dawmain.cz");
-    if (prev === undefined) delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
-    else process.env.VERCEL_PROJECT_PRODUCTION_URL = prev;
+    if (prev === undefined) delete process.env.PUBLIC_URL;
+    else process.env.PUBLIC_URL = prev;
   });
 });
