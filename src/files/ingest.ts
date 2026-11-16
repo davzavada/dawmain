@@ -1,5 +1,5 @@
 import "server-only";
-import { createHash, createHmac } from "node:crypto";
+import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 import { ANALYZER_VERSION, LIBRARY_ID_RE, LIMITS, UUID_RE } from "./config";
 import { FilesUnavailableError, withScope, type Queryable } from "./db/client";
@@ -15,7 +15,7 @@ import {
   type DocumentRow,
 } from "./db/documents";
 import { forgetPages, getLibraries, releasePages, settlePages } from "./db/libraries";
-import { audit, bumpUsage, usageSum } from "./db/usage";
+import { audit, bumpUsage } from "./db/usage";
 import { splitStorageBlocks } from "./dmd/blocks";
 import { normalizeDmd } from "./dmd/normalize";
 import { parseDmd } from "./dmd/parse";
@@ -25,8 +25,7 @@ import { effectiveMode, envOnlyMode } from "./guards";
 import { buildMetaTsv, deriveIndex, metaIdentKeys, sectionRangeOf } from "./index/derive";
 import { heuristicMeta } from "./meta/heuristics";
 import { buildMetaInput } from "./meta/input";
-import { proposeMetadata } from "./meta/propose";
-import { mergeProposals, proposalToBibMeta } from "./meta/schema";
+import { proposalToBibMeta } from "./meta/schema";
 import { DOC_TYPES, type BibMeta, type DocType, type ProposedMeta } from "./types";
 
 /**
@@ -40,9 +39,10 @@ import { DOC_TYPES, type BibMeta, type DocType, type ProposedMeta } from "./type
  *   inflate    gunzip pending_gz with a byte cap, strict UTF-8, re-check
  *              the content hash the upload verified;
  *   parse      normalizeDmd → parseDmd (the same pure parser as the browser);
- *   metadata   heuristics + the AI proposal (budgeted), merged — BEFORE the
- *              index is derived, because the document type decides how it
- *              is derived (a commentary's statute quotes are weight D, its
+ *   metadata   the heuristic proposal (meta/heuristics.ts; nothing leaves
+ *              the server) — BEFORE the index is derived, because the
+ *              document type decides how it is derived (a commentary's
+ *              statute quotes are weight D, its
  *              act turns bare "§ 2913" into parz: keys);
  *   derive     storage blocks, chunks with tsvectors, identifier keys;
  *   commit     ONE transaction: writeDocumentIndex, finishIngest, settle the
@@ -92,8 +92,8 @@ class LeaseLost extends Error {
  * CPU time of the feature's own work, for usage_daily.cpu_ms (which gates
  * uploads, see UPLOAD_GUARDS). process.cpuUsage() counts the whole process:
  * measured across an await it would also book whatever ran meanwhile on the
- * same instance — MCP calls, other uploads and ingests, during the Gemini
- * or database wait — so only synchronous sections are measured (`run`),
+ * same instance — MCP calls, other uploads and ingests, during the
+ * database wait — so only synchronous sections are measured (`run`),
  * plus CPU-bound awaits without network I/O (`runAsync`, e.g. gunzip). The
  * driver's encoding of the writes is not in it: the figure is the parse,
  * derive and hash work, not the instance's Active CPU.
@@ -165,38 +165,6 @@ export function inflatePending(gz: Uint8Array, contentSha256?: string | null): s
   return text;
 }
 
-/** Opaque per-user id for the AI Gateway's usage attribution — never the Clerk id itself. */
-export function userHash(userId: string): string {
-  const key = process.env.FILES_USER_HASH_SECRET?.trim() || process.env.CLERK_SECRET_KEY?.trim() || "dawmain-files";
-  return createHmac("sha256", key).update(`files-meta:${userId}`).digest("hex").slice(0, 32);
-}
-
-/**
- * The AI budget of one proposal: the rolling 30-day spend (all libraries)
- * must stay under LIMITS.aiBudgetUsd and the library under
- * LIMITS.aiProposalsPerLibraryPerDay calls today. Each check and booking is
- * its own short system-scope transaction (usage_daily holds no content) —
- * never held open across the model call.
- */
-export function aiBudget(libraryId: string): { allow: () => Promise<boolean>; record: (usd: number) => Promise<void> } {
-  return {
-    allow: () =>
-      withScope([], async (db) => {
-        const spent = await usageSum(db, "global", "ai_microusd", 30);
-        if (spent >= LIMITS.aiBudgetUsd * 1_000_000) return false;
-        const calls = await usageSum(db, libraryId, "ai_calls", 1);
-        return calls < LIMITS.aiProposalsPerLibraryPerDay;
-      }),
-    record: (usd: number) =>
-      withScope([], async (db) => {
-        const micro = Number.isFinite(usd) && usd > 0 ? Math.max(1, Math.round(usd * 1_000_000)) : 0;
-        // Library row first, then 'global' — the order every writer of usage_daily keeps (no deadlock).
-        await bumpUsage(db, libraryId, { ai_calls: 1, ai_microusd: micro });
-        await bumpUsage(db, "global", { ai_calls: 1, ai_microusd: micro });
-      }),
-  };
-}
-
 const DOC_TYPE_SET = new Set<string>(DOC_TYPES);
 
 /** The uploader's type hint, stored by the upload as a "user" proposal. */
@@ -236,14 +204,14 @@ export function autoConfirms(settings: Record<string, unknown>): boolean {
 const REPLACED_DETAIL = "Nový převod dokumentu: metadata jsou převzata z původní verze, zkontrolujte je a potvrďte.";
 
 /** Parse the text and settle the metadata (see the header). */
-async function prepare(claim: Claimed, cpu: CpuMeter): Promise<Prepared> {
+function prepare(claim: Claimed, cpu: CpuMeter): Prepared {
   const { row, replaced, settings } = claim;
   const confirmedOld = replaced && replaced.status === "ready" && replaced.confirmed_at ? replaced : null;
-  const { text, parsed, input, heuristic } = cpu.run(() => {
+  const { text, parsed, heuristic } = cpu.run(() => {
     const text = normalizeDmd(inflatePending(claim.pendingGz, row.content_sha256)).text;
     const parsed = parseDmd(text, { anchorLabel: confirmedOld?.meta.anchor_label ?? undefined });
     const input = buildMetaInput(parsed, row.hints ?? {}, row.file_name, docTypeHint(row));
-    return { text, parsed, input, heuristic: heuristicMeta(input) };
+    return { text, parsed, heuristic: heuristicMeta(input) };
   });
 
   if (confirmedOld) {
@@ -265,16 +233,12 @@ async function prepare(claim: Claimed, cpu: CpuMeter): Promise<Prepared> {
     };
   }
 
-  const ai =
-    settings.aiProposals === false
-      ? { meta: {}, ai: "skipped" as const, detail: null }
-      : await proposeMetadata(input, { userHash: userHash(row.uploaded_by), ...aiBudget(row.library_id) });
-  const proposed = mergeProposals(heuristic, ai.meta);
+  const proposed = heuristic;
   const meta = proposalToBibMeta(proposed, row.file_name);
   if (meta.doc_type === "komentar") meta.section_range = sectionRangeOf(parsed.sections);
   if (!meta.anchor_label) meta.anchor_label = parsed.anchorLabel;
   const status = autoConfirms(settings) ? "ready" : "review";
-  return { text, parsed, meta, proposed, statusDetail: status === "review" ? ai.detail : null, status };
+  return { text, parsed, meta, proposed, statusDetail: null, status };
 }
 
 /** Write the index and finish, atomically; delete the replaced document. */
@@ -411,7 +375,7 @@ export async function ingestDocument(docId: string, libraryId: string): Promise<
       throw new IngestFailure(false, "Dokument se nepodařilo zpracovat ani na několikátý pokus. Nahrajte ho prosím znovu.");
     }
     if (claim.purging) throw new IngestFailure(false, "Knihovna je určena ke smazání.");
-    await commit(claim, await prepare(claim, cpu), cpu);
+    await commit(claim, prepare(claim, cpu), cpu);
     return "done";
   } catch (error) {
     if (error instanceof LeaseLost) return "lost";

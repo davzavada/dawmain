@@ -351,13 +351,15 @@ describe("metadata form", () => {
 
   it("proposal badges and the low-confidence highlight", () => {
     const proposed = {
-      title: { value: "X", source: "ai" as const, confidence: 0.4 },
+      title: { value: "X", source: "heuristic" as const, confidence: 0.4 },
       isbn: { value: ["1"], source: "heuristic" as const, confidence: 0.95 },
       doc_type: { value: "kniha" as const, source: "user" as const, confidence: 0.3 },
       year: { value: 2019, source: "bogus" as never, confidence: 0.9 },
     };
-    expect(proposalBadge(proposed, "title")).toEqual({ label: "návrh AI", low: true });
+    expect(proposalBadge(proposed, "title")).toEqual({ label: "z textu", low: true });
     expect(proposalBadge(proposed, "isbn")).toEqual({ label: "z textu", low: false });
+    // A proposal stored while the AI proposal still existed gets no badge.
+    expect(proposalBadge({ title: { value: "X", source: "ai" as never, confidence: 0.8 } }, "title")).toBeNull();
     expect(proposalBadge(proposed, "doc_type")).toEqual({ label: "od vás", low: false });
     expect(proposalBadge(proposed, "year")).toBeNull();
     expect(proposalBadge(null, "title")).toBeNull();

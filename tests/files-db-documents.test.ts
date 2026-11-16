@@ -179,7 +179,7 @@ async function ingested(lib: string, content: string, status: "review" | "ready"
       id: res.id,
       libraryId: lib,
       runToken: claim.runToken,
-      proposed: { title: { value: meta.title, source: "ai", confidence: 0.8 } },
+      proposed: { title: { value: meta.title, source: "heuristic", confidence: 0.8 } },
       meta,
       metaTsv: "'obcansk':1A 'zakonik':2A",
       identKeys: ["zak:89/2012"],
@@ -546,7 +546,7 @@ describe("finishIngest", () => {
       section_range: "§ 2913",
       keywords: ["náhrada škody"],
     });
-    expect(row.proposed_meta).toEqual({ title: { value: META.title, source: "ai", confidence: 0.8 } });
+    expect(row.proposed_meta).toEqual({ title: { value: META.title, source: "heuristic", confidence: 0.8 } });
     const raw = await t.owner.query<{ meta_tsv: string; ident_keys: string[] }>("SELECT meta_tsv, ident_keys FROM documents WHERE id = $1", [id]);
     expect(raw.rows[0]).toEqual({ meta_tsv: "'obcansk':1A 'zakonik':2A", ident_keys: ["zak:89/2012"] });
 

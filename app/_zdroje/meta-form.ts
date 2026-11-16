@@ -228,7 +228,6 @@ export function payloadFromForm(values: FormValues): Record<string, unknown> {
 }
 
 const SOURCE_LABELS: Record<MetaSource, string> = {
-  ai: "návrh AI",
   heuristic: "z textu",
   pdf: "z PDF",
   filename: "z názvu souboru",

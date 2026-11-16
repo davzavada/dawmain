@@ -17,8 +17,8 @@ import { closeFiles, refreshSummary, requestSignIn, showFile, useZdroje } from "
  * The Vlastní soubory modal (wireframe 04, 05), opened by ZdrojeModals
  * (./modals.tsx) from ?soubory=1. One library, the user's own: the drop
  * zone on top, the list of files under it. A new file is converted in the
- * browser and posted; the server converts it further and the AI proposes
- * its type and metadata — the row just spins ("Zpracovávám…") until the
+ * browser and posted; the server converts it further and proposes its
+ * type and metadata — the row just spins ("Zpracovávám…") until the
  * type badge appears. Clicking a row opens it in place (&dokument=<id>):
  * the type switch (Komentář / Článek / Kniha, the rest under "Jiný typ"),
  * saved at once, and a short form per type saved with Uložit; Smazat
@@ -450,7 +450,6 @@ function FileEditor({
   const settled = doc.status === "review" || doc.status === "ready";
   const editable = doc.canEdit && !readonly && settled;
   const docType = (values.doc_type as DocType) || doc.meta.doc_type;
-  const aiType = !doc.confirmedAt && doc.proposed?.doc_type?.source === "ai" && doc.proposed.doc_type.value === doc.meta.doc_type;
 
   function failed(res: { status: number; error: string; body: { fields?: Record<string, string> } | null }) {
     if (res.status === 409) setConflict(true);
@@ -587,7 +586,7 @@ function FileEditor({
             </div>
             <span className="zd-file-hint">
               <Icon name="sparkles" size={13} />
-              {aiType ? "Zařadila AI při nahrání. Změna se uloží hned." : "Změna typu se uloží hned."}
+              Změna typu se uloží hned.
             </span>
           </div>
           <div className="zd-file-grid">

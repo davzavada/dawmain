@@ -32,10 +32,10 @@ afterAll(async () => {
 describe("bumpUsage / usageSum", () => {
   it("upserts today's UTC row and adds up", async () => {
     await scoped([], (db) => bumpUsage(db, "user_a", { uploads: 1, pages: 120 }));
-    await scoped([], (db) => bumpUsage(db, "user_a", { uploads: 1, ai_microusd: 1234.6 }));
-    const today = await t.owner.query("SELECT day::text AS day, uploads, pages, ai_microusd FROM usage_daily WHERE scope = 'user_a'");
+    await scoped([], (db) => bumpUsage(db, "user_a", { uploads: 1, cpu_ms: 1234.6 }));
+    const today = await t.owner.query("SELECT day::text AS day, uploads, pages, cpu_ms FROM usage_daily WHERE scope = 'user_a'");
     expect(today.rows).toHaveLength(1);
-    expect(Number((today.rows[0] as { ai_microusd: unknown }).ai_microusd)).toBe(1235);
+    expect(Number((today.rows[0] as { cpu_ms: unknown }).cpu_ms)).toBe(1235);
     const utc = new Date().toISOString().slice(0, 10);
     expect(today.rows[0]).toMatchObject({ day: utc, uploads: 2, pages: 120 });
     expect(await scoped([], (db) => usageSum(db, "user_a", "uploads", 1))).toBe(2);

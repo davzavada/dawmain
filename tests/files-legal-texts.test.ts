@@ -25,7 +25,7 @@ const { PrivacyPage, TermsPage } = await import("@/app/_legal-pages");
 const { DEFAULT_TEXTS } = await import("@/src/content/texts");
 const { SiteNav } = await import("@/app/_nav");
 const { CONTACT, EFFECTIVE } = await import("@/app/_legal");
-const { PAGE_CHARS, metaModel } = await import("@/src/files/config");
+const { PAGE_CHARS } = await import("@/src/files/config");
 const { USAGE_KEEP_DAYS } = await import("@/src/files/db/usage");
 
 /** Rendered page as plain text, whitespace collapsed (JSX line breaks vary). */
@@ -49,26 +49,20 @@ describe("privacy policy (/soukromi)", () => {
     expect(terms).not.toContain("čl. 28 GDPR");
   });
 
-  it("names every processor and the provider of the configured metadata model", () => {
-    for (const processor of ["Clerk, Inc.", "Cloudflare, Inc.", "Vercel, Inc.", "AI Gateway", "Google"]) {
+  it("names every processor, and only those", () => {
+    for (const processor of ["Clerk, Inc.", "Cloudflare, Inc."]) {
       expect(privacy).toContain(processor);
     }
+    expect(privacy).toContain("Clerk i Cloudflare jsou americké společnosti");
     expect(privacy).toContain("tito zpracovatelé");
     expect(privacy).toContain("na mém vlastním serveru v České republice");
     // No former host is named as a processor any more.
     expect(privacy).not.toContain("Neon");
     expect(privacy).not.toContain("hosting (Frankfurt)");
-    // The page discloses Google (Gemini) behind Vercel, used only while the
-    // AI proposal is switched on (AI_GATEWAY_API_KEY). A model from another
-    // provider is a new sub-processor: update /soukromi first.
-    const saved = process.env.FILES_META_MODEL;
-    delete process.env.FILES_META_MODEL;
-    try {
-      expect(metaModel()).toMatch(/^google\/gemini-/);
-    } finally {
-      if (saved !== undefined) process.env.FILES_META_MODEL = saved;
+    // The AI metadata proposal is gone, and with it Vercel (AI Gateway) and Google (Gemini).
+    for (const page of [privacy, terms]) {
+      expect(page).not.toMatch(/Vercel|Gemini|AI Gateway|jazykov\S* model/);
     }
-    expect(privacy).toContain("Gemini");
   });
 
   it("states the retention the code applies", () => {
@@ -98,12 +92,11 @@ describe("privacy policy (/soukromi)", () => {
     expect(privacy).toContain("Nahrávání dokumentů a připojení Zotera jsou dobrovolné");
   });
 
-  it("describes what goes to Gemini: an excerpt capped like the code, not the whole text", () => {
-    expect(privacy).toContain("výňatek z dokumentu, ne celý text");
-    expect(privacy).toContain("nejvýš 16 000 znaků");
-    expect(privacy).toContain("dostane jen pseudonym");
-    expect(privacy).toContain("Když je návrh metadat jazykovým modelem zapnutý");
-    expect(privacy).toContain("text dokumentu žádnému poskytovateli AI neposílá");
+  it("says the server proposes the metadata itself and sends the text to no AI provider", () => {
+    expect(privacy).toContain("navrhne po nahrání server sám podle začátku dokumentu");
+    expect(privacy).toContain("text dokumentu přitom žádnému poskytovateli AI neposílám");
+    // …which does not cover the user's own assistant: it gets what the tools return.
+    expect(privacy).toContain("dostane poskytovatel asistenta, kterého používáte");
   });
 
   it("says the Czech case law is copied as the courts publish it", () => {
@@ -150,7 +143,8 @@ describe("terms of use (/podminky)", () => {
     expect(terms).toContain("Nahráním dokumentu potvrzujete, že pravidla v tomto oddílu dodržíte");
   });
 
-  it("says the AI metadata may be wrong and can be corrected, and that there is no backup", () => {
+  it("says the server proposes the metadata, which may be wrong and can be corrected, and that there is no backup", () => {
+    expect(terms).toContain("metadata navrhne server podle začátku dokumentu a asistent");
     expect(terms).toContain("po rozkliknutí dokumentu v seznamu souborů ho kdykoli opravíte");
     expect(terms).toContain("Záloha není");
   });

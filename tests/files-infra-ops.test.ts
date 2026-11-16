@@ -8,7 +8,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
  * Operations (migration 0003_ops.sql and its callers): the re-derivation
  * budget, the live database size, the guards on the operator's batch,
  * retention, notice-and-takedown across libraries and the nightly recount.
- * Clerk, after() and the model call are mocked; the database is PGlite with
+ * Clerk and after() are mocked; the database is PGlite with
  * the real migrations, as dawmain_app under RLS.
  */
 
@@ -16,7 +16,6 @@ const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   after: [] as Array<() => unknown>,
   revalidatePath: vi.fn(),
-  propose: vi.fn(),
   dbShare: null as number | null,
 }));
 
@@ -33,7 +32,6 @@ vi.mock("next/server", async (importOriginal) => ({
   },
 }));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
-vi.mock("@/src/files/meta/propose", () => ({ proposeMetadata: mocks.propose }));
 // The DB cannot be filled to 60 % of 400 MB here: let a test pretend it is.
 vi.mock("@/src/files/guards", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/src/files/guards")>();
@@ -110,8 +108,6 @@ beforeEach(async () => {
   mocks.auth.mockReset();
   mocks.after.length = 0;
   mocks.revalidatePath.mockReset();
-  mocks.propose.mockReset();
-  mocks.propose.mockResolvedValue({ meta: {}, ai: "skipped", detail: null });
   mocks.dbShare = null;
   for (const user of ["user_a", "user_b"]) await t.runner([], (db) => acceptTerms(db, user, TERMS_VERSION));
 });

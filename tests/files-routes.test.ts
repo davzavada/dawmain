@@ -6,7 +6,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
  * The Vlastní zdroje route handlers, called directly with Request objects:
  * POST /api/files/documents, GET /api/files/status, POST /api/webhooks/clerk
  * and GET /api/cron/files. Clerk (session auth, webhook verification,
- * owner lookups), next/server's after() and the model call are mocked; the
+ * owner lookups) and next/server's after() are mocked; the
  * database is PGlite with the real migrations, as dawmain_app under RLS.
  */
 
@@ -14,7 +14,6 @@ const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   verifyWebhook: vi.fn(),
   after: [] as Array<() => unknown>,
-  propose: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({
@@ -30,7 +29,6 @@ vi.mock("next/server", async (importOriginal) => ({
     mocks.after.push(fn);
   },
 }));
-vi.mock("@/src/files/meta/propose", () => ({ proposeMetadata: mocks.propose }));
 
 import { GET as cronGET } from "@/app/api/cron/files/route";
 import { POST as documentsPOST } from "@/app/api/files/documents/route";
@@ -111,8 +109,6 @@ beforeEach(async () => {
   mocks.auth.mockReset();
   mocks.verifyWebhook.mockReset();
   mocks.after.length = 0;
-  mocks.propose.mockReset();
-  mocks.propose.mockResolvedValue({ meta: {}, ai: "skipped", detail: null });
   for (const user of Object.keys(ACCESS)) await t.runner([], (db) => acceptTerms(db, user, TERMS_VERSION));
 });
 afterEach(async () => {

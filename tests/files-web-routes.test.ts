@@ -6,7 +6,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
  * The web API of the Vlastní soubory modal (src/files/web.ts) through its
  * route handlers: GET /api/files/summary, GET /api/files/documents,
  * GET/PATCH/DELETE /api/files/documents/[id] and POST /api/files/terms.
- * Clerk (session), after() and the model call are mocked; the database is PGlite with the real migrations, as
+ * Clerk (session) and after() are mocked; the database is PGlite with the real migrations, as
  * dawmain_app under RLS. Documents get in the way users put them there:
  * upload route + ingest.
  */
@@ -14,7 +14,6 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   after: [] as Array<() => unknown>,
-  propose: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({
@@ -29,7 +28,6 @@ vi.mock("next/server", async (importOriginal) => ({
     mocks.after.push(fn);
   },
 }));
-vi.mock("@/src/files/meta/propose", () => ({ proposeMetadata: mocks.propose }));
 
 import { GET as exportGET } from "@/app/api/files/documents/[id]/export/route";
 import { DELETE as docDELETE, GET as docGET, PATCH as docPATCH } from "@/app/api/files/documents/[id]/route";
@@ -120,8 +118,6 @@ beforeEach(async () => {
   __setAccessLoaderForTests(loadAccess);
   mocks.auth.mockReset();
   mocks.after.length = 0;
-  mocks.propose.mockReset();
-  mocks.propose.mockResolvedValue({ meta: {}, ai: "skipped", detail: null });
   for (const user of Object.keys(ACCESS)) await t.runner([], (db) => acceptTerms(db, user, TERMS_VERSION));
 });
 afterEach(async () => {
@@ -317,6 +313,12 @@ describe("GET /api/files/documents/[id]", () => {
 describe("PATCH /api/files/documents/[id]", () => {
   it("confirm: review → ready with the validated metadata, meta_version bumped", async () => {
     const id = await uploaded("user_a", "user_a", "a");
+    // The server's own proposal (heuristics, nothing sent anywhere) is there to confirm.
+    const proposal = (await (await detail("user_a", id)).json()) as DocumentDetail;
+    const sources = Object.values(proposal.proposed ?? {}).map((f) => f?.source);
+    expect(sources.length).toBeGreaterThan(0);
+    for (const source of sources) expect(["heuristic", "pdf", "filename", "user"]).toContain(source);
+    expect(proposal.meta.title).toBeTruthy();
     const before = await row(id);
     const res = await patch("user_a", id, { action: "confirm", version: before.meta_version, meta: META({ year: "2019", isbn: "978-80-7400-773-6" }) });
     expect(res.status).toBe(200);

@@ -45,7 +45,7 @@ export const TEMPLATE_KINDS = ["smlouva", "podani", "zaloba", "odvolani", "dovol
 export type TemplateKind = (typeof TEMPLATE_KINDS)[number];
 
 /**
- * Bibliographic metadata of one document — what the AI proposes and the
+ * Bibliographic metadata of one document — what the server proposes and the
  * user confirms. Every field is optional except the type, title and the
  * arrays; identifiers are stored normalized (see src/files/index/identifiers.ts).
  */
@@ -72,7 +72,7 @@ export interface BibMeta {
   /** Commentary: the act it comments — "zak:89/2012" or "eu:32016R0679". */
   commented_act?: string | null;
   commented_act_name?: string | null;
-  /** Commentary: § range covered, derived from the sections, never from AI. */
+  /** Commentary: § range covered, derived from the sections, not from the proposal. */
   section_range?: string | null;
   anchor_label?: AnchorLabel | null;
   template_kind?: TemplateKind | null;
@@ -89,7 +89,7 @@ export interface BibMeta {
 export type MetaField = keyof BibMeta;
 
 /** Where a proposed value came from — shown as a badge in the review form. */
-export type MetaSource = "ai" | "heuristic" | "pdf" | "filename" | "user";
+export type MetaSource = "heuristic" | "pdf" | "filename" | "user";
 
 export interface ProposedField<T = unknown> {
   value: T;

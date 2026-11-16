@@ -71,7 +71,6 @@ export const LIMITS = {
   maxTextBytes: 16_000_000,
   maxGzipRatio: 20,
   uploadsPerLibraryPerDay: 60,
-  aiProposalsPerLibraryPerDay: 50,
   /** files_* MCP calls per user per hour. */
   toolCallsPerHour: 60,
   /** files_get_document windows per document per user per day (anti-exfiltration). */
@@ -99,18 +98,7 @@ export const LIMITS = {
   get globalCpuMs30Days() {
     return intEnv("FILES_CPU_MS_30D", 60 * 60_000);
   },
-  /** Rolling AI budget in USD per 30 days (AI Gateway's free credit is $5). */
-  get aiBudgetUsd() {
-    return intEnv("FILES_AI_BUDGET_USD", 4);
-  },
 } as const;
-
-/** Model id for the metadata proposal, through Vercel AI Gateway (only when
- * AI_GATEWAY_API_KEY is set). Keep it in config: the free-tier model list
- * changes (Gemini 2.5 retires Oct 2026). */
-export function metaModel(): string {
-  return process.env.FILES_META_MODEL?.trim() || "google/gemini-2.5-flash-lite";
-}
 
 /** Clerk user ids allowed on the operator page. Empty entries dropped. */
 export function operatorIds(): string[] {
