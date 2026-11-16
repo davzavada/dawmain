@@ -89,18 +89,20 @@ if [ "$AFTER" = 1 ]; then
 else
   [ "$TIMER" != "enabled" ] && ok "dawmain-cron.timer vypnutý (zapíná se v přepnutí, po kontrole prvního běhu)" || bad "dawmain-cron.timer je zapnutý před přepnutím — zapíná se až v přepnutí, po kontrole prvního běhu"
 fi
-# From the switch the users' data lives only here: no off-site backup = no switch.
+# From the switch the users' data lives only here. Decided 16. 11. 2026: the switch may go
+# ahead WITHOUT an off-site backup while the home database is still empty — so a missing
+# backup is a loud warning, not a stop. Set it up before real documents accumulate.
 if [ -n "$(ct 103 'ls /etc/dawmain/backup.env')" ]; then
   ok "záloha databáze nastavená (/etc/dawmain/backup.env)"
+  [ "$(ct 103 'systemctl is-enabled dawmain-backup.timer')" = "enabled" ] && ok "dawmain-backup.timer zapnutý" || bad "dawmain-backup.timer není zapnutý (systemctl enable --now dawmain-backup.timer)"
+  case "$(ct 103 'systemctl show -p Result --value dawmain-backup.service; systemctl show -p ExecMainExitTimestampMonotonic --value dawmain-backup.service' | paste -sd' ' -)" in
+    "success 0"|"") warn "záloha ještě neproběhla — spusť ji jednou ručně: systemctl start dawmain-backup.service" ;;
+    success*)      ok "poslední záloha proběhla v pořádku" ;;
+    *)             bad "poslední záloha selhala (journalctl -u dawmain-backup)" ;;
+  esac
 else
-  bad "záloha databáze není nastavená (/etc/dawmain/backup.env) — bez zálohy mimo stroj se nepřepíná"
+  warn "ZÁLOHA MIMO STROJ NENÍ — dokumenty uživatelů budou jen na tomto serveru (vědomé rozhodnutí; doplnit)"
 fi
-[ "$(ct 103 'systemctl is-enabled dawmain-backup.timer')" = "enabled" ] && ok "dawmain-backup.timer zapnutý" || bad "dawmain-backup.timer není zapnutý (systemctl enable --now dawmain-backup.timer)"
-case "$(ct 103 'systemctl show -p Result --value dawmain-backup.service; systemctl show -p ExecMainExitTimestampMonotonic --value dawmain-backup.service' | paste -sd' ' -)" in
-  "success 0"|"") warn "záloha ještě neproběhla — spusť ji jednou ručně: systemctl start dawmain-backup.service" ;;
-  success\ *)    ok "poslední záloha doběhla bez chyby" ;;
-  *)             bad "poslední záloha selhala (journalctl -u dawmain-backup)" ;;
-esac
 warn "externí dohled (Healthchecks / UptimeRobot) ověř ručně — skript ho nevidí"
 
 if [ "$AFTER" = 1 ]; then
