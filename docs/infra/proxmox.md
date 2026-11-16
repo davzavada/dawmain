@@ -25,6 +25,7 @@ Oba Debian 13, neprivilegované, `nesting=1`, start po bootu, časová zóna
 | --- | --- | --- | --- | --- |
 | 101 | `pg` | 8 GB / 4 / 120 GB | 192.168.0.51 (jen apt) | 10.10.10.2 |
 | 102 | `app` | 4 GB / 4 / 20 GB | 192.168.0.52 (API) | 10.10.10.3 |
+| 103 | `web` | 3 GB / 4 / 12 GB | 192.168.0.53 (web, testy) | 10.10.10.4 |
 
 ```bash
 ssh pve pct exec 101 -- bash      # shell v pg
@@ -100,3 +101,37 @@ Návrat: `pct rollback 101 pre-<migrace>` (zahodí vše zapsané po snapshotu).
   `sync_run`; `mirror status` ukazuje poslední.
 - NSS se synchronizuje až po doběhnutí backfillu (sdílí s ním limit NSS).
 - Ručně: `npx tsx scripts/mirror.ts sync [--source us] [--days 7] [--no-retry]`.
+
+## Web a MCP (`web`, CT 103)
+
+Dawmain (Next.js, web i `/api/mcp`) podle
+[migrace-z-vercelu.md](migrace-z-vercelu.md). Vytvořeno 15. 11. 2026, Debian 13,
+neprivilegovaný, `nesting=1`, start po bootu, Node 22 (NodeSource),
+`postgresql-client-17` pro zálohy.
+
+- **Uživatel `dawmain`**, domovský adresář `/opt/dawmain-web`:
+  `repo/` (klon přes read-only deploy klíč `dawmain-web` v repu GitHubu,
+  klíč v `~/.ssh/id_ed25519`), `releases/<sha>/`, symlink `current`.
+  Právo restartovat službu: `/etc/sudoers.d/dawmain-deploy`
+  (`systemctl restart dawmain-web`, nic dalšího).
+- **Nastavení** `/etc/dawmain/env` (`root:dawmain`, 640): proměnné ze sekce
+  „Home server“ v `.env.example` a produkční klíče. Bez hesel v gitu.
+- **Služba** `dawmain-web` (`/etc/systemd/system/`, z `deploy/web/`), port 3000
+  na všech rozhraních CT; pevně `DAWMAIN_REQUIRE_AUTH=1`, `TRUST_FORWARDED_HOST=0`.
+  `journalctl -u dawmain-web`.
+- **Nasazení** (jako `dawmain`): `cd /opt/dawmain-web/repo && git fetch &&
+  bash deploy/web/deploy.sh origin/main`. Build do nového adresáře, kontrola
+  na portu 3100 (anonymní `/api/mcp` = 401, smoke test), pak přepnutí a restart;
+  nezvedne-li se služba, vrátí předchozí vydání. Zůstane posledních pět vydání.
+  Po změně unit souborů je zkopírovat do `/etc/systemd/system/` a
+  `systemctl daemon-reload`.
+- **Cron** `dawmain-cron.timer` (04:00, denní úklid Vlastních zdrojů): nainstalovaný,
+  **vypnutý** do přepnutí domény (do té doby ho dělá Vercel Cron).
+  Ruční spuštění: `systemctl start dawmain-cron.service`.
+- **Zrcadlo** jde z webu přes LAN: `MIRROR_API_URL=http://192.168.0.52:8080`
+  (API poslouchá jen na LAN adrese), bez Cloudflare Access.
+- **Tunel**: v `/etc/cloudflared/config.yml` na `app` míří `dawmain.davidzavada.cz`
+  a `dawmain-novy.davidzavada.cz` na `http://10.10.10.4:3000` (záloha
+  `config.yml.bak-2026-11-16`). Obě jména bez Cloudflare Access. WAF pravidlo
+  *Skip* (Super Bot Fight Mode, managed rules, Browser Integrity Check) pro
+  `/api/` a `/.well-known/`, jinak Cloudflare zastaví konektory Claude a ChatGPT.

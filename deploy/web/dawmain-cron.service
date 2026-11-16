@@ -15,7 +15,8 @@ Group=dawmain
 EnvironmentFile=/etc/dawmain/env
 # The route stops starting new work after 240 s and answers within 300 s.
 # curl reads the secret from stdin (-K -), so it never shows in `ps`.
-ExecStart=/bin/sh -c 'printf "header = \\"Authorization: Bearer %s\\"\\n" "$CRON_SECRET" | /usr/bin/curl -fsS --max-time 330 -K - http://127.0.0.1:3000/api/cron/files'
+# %%s, not %s: systemd expands single-% specifiers in ExecStart (%s = the user's shell).
+ExecStart=/bin/sh -c 'printf "header = \\"Authorization: Bearer %%s\\"\\n" "$CRON_SECRET" | /usr/bin/curl -fsS --max-time 330 -K - http://127.0.0.1:3000/api/cron/files'
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes

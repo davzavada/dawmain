@@ -5,7 +5,33 @@ Plán přesunu webu a MCP serveru Dawmain z Vercelu (Hobby) na domácí Proxmox
 **přepnutí bylo jedna změna DNS záznamu** a služba při něm nepřestala
 odpovídat.
 
-Stav plánu: návrh (14. 11. 2026), nic z něj zatím není provedeno.
+Stav plánu (16. 11. 2026): fáze 0 a 1 hotové a nasazené na CT `web`, z fáze 2
+tunel, zkušební adresa `dawmain-novy` a WAF výjimka; zbytek čeká (viz níže
+„Odchylky od plánu“ a „Co zbývá do přepnutí“). Kód běží v `main`, Vercel se
+nezměnil.
+
+### Odchylky od plánu
+
+- `pg` se **nezmenšoval**: limit paměti není rezervace a host měl volných ~10 GB
+  (s cache). Vrátit se k tomu, jen když začne docházet paměť.
+- Thin pool je na ~45 %, ne skoro plný. Roste snapshot `pre-0019-structure`
+  (120 GB, thin) — smazat, až nebude potřeba.
+- API zrcadla poslouchá jen na LAN adrese, takže web ho volá přes
+  `http://192.168.0.52:8080`, ne přes vnitřní síť; restart zrcadla odpadl.
+- Za tunelem vidí Node prostý `http`: OAuth discovery proto doma bere
+  `PUBLIC_URL` (bod 0.5).
+- `deploy.sh` zapisuje `release.env` (`GIT_SHA`), který unit načítá, aby
+  `dawmain_ping` ukazoval commit i za běhu.
+- Cron unit: v `ExecStart` musí být `%%s`, ne `%s` (systemd by ho nahradil
+  shellem uživatele) — zachytil test, opraveno.
+
+### Co zbývá do přepnutí
+
+Na uživateli: produkční proměnné z Vercelu do `/etc/dawmain/env`; zápis
+Cloudflare (WAF výjimka rozšířit na `dawmain`, v přepnutí změnit CNAME);
+záloha mimo stroj (účet R2 / disk) a dohled (Healthchecks / UptimeRobot).
+Na přípravě (jde bez dopadu na Vercel): databáze `files` v CT `pg`, zkouška
+dumpu z Neonu, generálka s Clerkem (fáze 4).
 
 ## Proč to půjde plynule
 
