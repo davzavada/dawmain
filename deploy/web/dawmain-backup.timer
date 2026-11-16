@@ -1,0 +1,12 @@
+# 02:30 local time every night, before the mirror sync (03:30) and the maintenance run
+# (04:00); a night the server was off is caught up at boot. See dawmain-backup.service.
+[Unit]
+Description=Dawmain database backup at 02:30
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+Persistent=true
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target

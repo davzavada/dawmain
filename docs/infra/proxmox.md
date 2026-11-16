@@ -151,6 +151,10 @@ neprivilegovaný, `nesting=1`, start po bootu, Node 22 (NodeSource),
 - **Cron** `dawmain-cron.timer` (04:00, denní úklid Vlastních zdrojů): nainstalovaný,
   **vypnutý** do přepnutí domény (do té doby ho dělá Vercel Cron).
   Ruční spuštění: `systemctl start dawmain-cron.service`.
+- **Záloha databáze** `dawmain-backup.timer` (02:30) → `backup-files.sh` (`pg_dump` →
+  restic mimo stroj; nastavení `/etc/dawmain/backup.env`, heslo restic
+  `/etc/dawmain/restic-password`). Nainstalovaná, **vypnutá** do fáze 6.
+- **Kontrola před přepnutím:** `deploy/web/preflight.sh` (GO / NO-GO).
 - **Zrcadlo** jde z webu přes LAN: `MIRROR_API_URL=http://192.168.0.52:8080`
   (API poslouchá jen na LAN adrese), bez Cloudflare Access.
 - **Tunel**: v `/etc/cloudflared/config.yml` na `app` míří `dawmain.davidzavada.cz`

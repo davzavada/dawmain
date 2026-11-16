@@ -255,6 +255,12 @@ Přepnutí (mimo špičku, např. večer):
 
 ### Den přepnutí — kontrolní seznam s příkazy
 
+**Rychlá cesta:** `deploy/web/preflight.sh` (z kořene repozitáře na Macu) projde
+všechny podmínky níže a vypíše GO / NO-GO se seznamem, co chybí; nic nemění a
+nevypisuje hodnoty tajemství. Po změně DNS `deploy/web/preflight.sh --after-switch`
+ověří produkční adresu (Cloudflare, `region: home`, cron zapnutý). Ruční příkazy
+níže dělají totéž po částech.
+
 Předpoklady (všechno musí platit, jinak se nepřepíná):
 
 ```bash
