@@ -64,7 +64,7 @@ function HintedAvatar() {
 
 /**
  * Whether the signed-in account is an admin named in the deployment settings (GET /api/operator), asked
- * once per page load and per account. Only shows or hides the "Provoz"
+ * once per page load and per account. Only shows or hides the "Správa"
  * link — the Správa page answers 404 to anyone else on its own.
  */
 let operatorCheck: { userId: string; result: Promise<boolean> } | null = null;

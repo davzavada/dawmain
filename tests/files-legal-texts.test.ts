@@ -169,7 +169,7 @@ describe("site navigation", () => {
   });
 
   it("has no Vlastní zdroje item any more: the home page's group opens the modal", () => {
-    for (const at of ["/", "/vlastni-zdroje/provoz", "/soukromi"]) {
+    for (const at of ["/", "/sprava", "/soukromi"]) {
       pathname = at;
       const html = renderToStaticMarkup(createElement(SiteNav, { sourceCount: 8 }));
       expect(html).not.toContain('href="/vlastni-zdroje"');

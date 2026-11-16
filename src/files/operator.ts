@@ -8,12 +8,11 @@ import { audit, blockContent, documentHash, documentsByHash, getSystemState, set
 import { effectiveMode, GUARDS_STATE_KEY, measureGuards, monthStartUtc, MODE_OVERRIDE_KEY, parseOverride, type GuardMeasurement } from "./guards";
 
 /**
- * The operator page (app/vlastni-zdroje/provoz) — who may see it, what it
- * shows, and its three writes (mode override, re-derivation batch,
- * notice-and-takedown). Operators are the Clerk user ids in
- * FILES_OPERATOR_IDS; everyone else gets a 404 from the page and a refusal
- * from every action (checked again inside each action, not only when the
- * page renders).
+ * Operator tooling for Vlastní zdroje — who counts as an operator, the
+ * snapshot of guards and libraries, and the three writes (mode override,
+ * re-derivation batch, notice-and-takedown). The web page that used to call
+ * them (/vlastni-zdroje/provoz) is gone; they stay as a library for scripts
+ * and tests. Operators are the Clerk user ids in FILES_OPERATOR_IDS.
  *
  * The page shows counters, ids and statuses only — no titles, file names
  * or text of anyone's documents.

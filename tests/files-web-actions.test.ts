@@ -3,8 +3,7 @@ import { gzipSync } from "node:zlib";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * The operator page's Server Functions (app/vlastni-zdroje/provoz/actions.ts),
- * its data (src/files/operator.ts), the re-derivation of stored documents
+ * The operator data (src/files/operator.ts), the re-derivation of stored documents
  * (src/files/reindex.ts) and the web repository functions
  * (src/files/db/documents-web.ts). Clerk, after(), next/cache and the model
  * call are mocked; the database is PGlite with the real migrations.
@@ -32,8 +31,6 @@ vi.mock("next/server", async (importOriginal) => ({
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
 vi.mock("@/src/files/meta/propose", () => ({ proposeMetadata: mocks.propose }));
 
-import { reindexBatchAction, setModeOverride } from "@/app/vlastni-zdroje/provoz/actions";
-import OperatorPage from "@/app/vlastni-zdroje/provoz/page";
 import { POST as uploadPOST } from "@/app/api/files/documents/route";
 import { __setAccessLoaderForTests, buildAccess } from "@/src/files/access";
 import { ANALYZER_VERSION, TERMS_VERSION } from "@/src/files/config";
@@ -147,67 +144,6 @@ describe("operator actions", () => {
     expect(isOperator("user_op")).toBe(false);
   });
 
-  it("setModeOverride is refused for a non-operator, signed out, or when Clerk fails", async () => {
-    for (const setup of [() => signedIn("user_a"), () => signedIn(null), () => mocks.auth.mockRejectedValue(new Error("no clerk"))]) {
-      setup();
-      await expect(setModeOverride(form({ mode: "off" }))).rejects.toThrow("Not allowed.");
-    }
-    expect(await t.runner([], (db) => getSystemState(db, MODE_OVERRIDE_KEY))).toBeNull();
-    expect(mocks.revalidatePath).not.toHaveBeenCalled();
-  });
-
-  it("the operator restricts the mode, and 'auto' lifts the override again", async () => {
-    signedIn("user_op");
-    await setModeOverride(form({ mode: "readonly" }));
-    __resetGuardsForTests();
-    expect(await effectiveMode()).toBe("readonly");
-    expect(mocks.revalidatePath).toHaveBeenCalledWith("/vlastni-zdroje/provoz");
-    await setModeOverride(form({ mode: "auto" }));
-    __resetGuardsForTests();
-    expect(await effectiveMode()).toBe("on");
-    await expect(setModeOverride(form({ mode: "maximum" }))).rejects.toThrow("Invalid mode.");
-    const logged = await t.owner.query<{ actor: string; action: string }>("SELECT actor, action FROM audit_log ORDER BY id");
-    expect(logged.rows).toEqual([
-      { actor: "user_op", action: "mode.override" },
-      { actor: "user_op", action: "mode.override" },
-    ]);
-  });
-
-  it("an override can never lift env off", async () => {
-    process.env.FILES_MODE = "off";
-    signedIn("user_op");
-    await setModeOverride(form({ mode: "on" }));
-    __resetGuardsForTests();
-    expect(await effectiveMode()).toBe("off");
-  });
-
-  it("reindexBatchAction: operator only; re-derives stale documents and records the result", async () => {
-    const id = await uploaded("user_a", "x");
-    await t.owner.query("UPDATE documents SET analyzer_version = 0 WHERE id = $1", [id]);
-    signedIn("user_a");
-    await expect(reindexBatchAction()).rejects.toThrow("Not allowed.");
-    signedIn("user_op");
-    await reindexBatchAction();
-    const doc = (await t.owner.query<{ analyzer_version: number; status: string }>("SELECT analyzer_version, status FROM documents WHERE id = $1", [id])).rows[0];
-    expect(doc).toEqual({ analyzer_version: ANALYZER_VERSION, status: "review" });
-    const last = await t.runner([], (db) => getSystemState<{ done: number; remaining: number }>(db, REINDEX_STATE_KEY));
-    expect(last).toMatchObject({ done: 1, remaining: 0 });
-  });
-});
-
-describe("operator page guard", () => {
-  it("anyone but an operator gets the same 404 as a missing page", async () => {
-    for (const setup of [() => signedIn("user_a"), () => signedIn(null), () => mocks.auth.mockRejectedValue(new Error("no clerk"))]) {
-      setup();
-      await expect(OperatorPage()).rejects.toMatchObject({ digest: expect.stringContaining("404") });
-    }
-  });
-
-  it("an operator gets the page", async () => {
-    signedIn("user_op");
-    const page = await OperatorPage();
-    expect(page).toBeTruthy();
-  });
 });
 
 describe("operatorSnapshot", () => {

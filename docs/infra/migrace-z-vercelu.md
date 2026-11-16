@@ -282,7 +282,7 @@ se doména přepne pro všechny.
 3. Projít: přihlášení a odhlášení (bez smyčky přesměrování), `/vlastni-zdroje`
    — nahrát, potvrdit metadata, hledat, exportovat, smazat zkušební dokument
    (jde do **domácí** databáze; finální `migrate-db.sh` to přepíše);
-   `/vlastni-zdroje/provoz` a `/sprava` (Server Functions); připojit a
+   `/sprava` a `/sprava/system` (Server Functions); připojit a
    odpojit Zotero; `/podminky`, `/soukromi`.
 4. OAuth konektoru z Macu (Claude Code: `claude mcp add --transport http`)
    — celé kolečko objevení → přihlášení → volání nástroje.
@@ -341,10 +341,10 @@ s `-pooler` → odmítnuto. Pomocná databáze a řádek `pg_hba` pak smazány,
 ### Přepnutí (mimo špičku, např. večer)
 
 1. **Vercel jen pro čtení:** v projektu `FILES_MODE=readonly` a *Redeploy*
-   produkce. (Rychlejší je přepínač režimu na `/vlastni-zdroje/provoz` — platí
-   do 30 s bez nasazení, ale uloží se do databáze a odcestuje s ní domů;
+   produkce. (Rychlejší je přepsání režimu v `system_state` (`mode_override`)
+   — platí do 30 s bez nasazení, ale odcestuje s databází domů;
    `migrate-db.sh` na to upozorní a doma se po přepnutí vrátí na automatický
-   režim.) Počkat, až v Provozu nic nečeká na zpracování.
+   režim.) Počkat, až nic nečeká na zpracování.
 2. **Finální kopie:**
    ```bash
    read -rs SOURCE_DATABASE_URL && export SOURCE_DATABASE_URL   # owner Neonu, bez -pooler
@@ -367,7 +367,7 @@ s `-pooler` → odmítnuto. Pomocná databáze a řádek `pg_hba` pak smazány,
    `region: home`; v Clerku *Webhooks → Send test* → 200 v `journalctl`;
    konektor v Claude i ChatGPT udělá rešerši bez nového přihlášení;
    přihlášení na webu; `files_list` / `files_search` přes MCP, nahrát a
-   smazat dokument; `/vlastni-zdroje/provoz` (počitadla, režim, pojistky);
+   smazat dokument; `/sprava/system` (server, databáze, zrcadlo, úlohy);
    externí dohled zelený.
 
 Ruční ekvivalenty kontrol `preflight.sh`:

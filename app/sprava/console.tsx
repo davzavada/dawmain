@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { dayBefore, formatDay, OPT_IN_FEATURES, type AdminFeature, type AdminUser } from "@/src/admin/model";
+import { dayBefore, formatDay, type AdminFeature, type AdminUser } from "@/src/admin/model";
 import { formatCount, initials } from "../_zdroje/format";
 import { changeUserAction } from "./actions";
 
@@ -9,12 +9,13 @@ import { changeUserAction } from "./actions";
  * The interactive part of the admin page: the account table on the left,
  * the selected account's switches and use on the right. The server renders
  * the list once; each switch calls changeUserAction and the account in the
- * list is replaced by what Clerk answered.
+ * list is replaced by what Clerk answered. Pro is the parent switch: the
+ * features under it (Vlastní soubory, Zotero, UKAŽ) work only with Pro on.
  */
 
 export interface AdminRow {
   user: AdminUser;
-  usage: { calls: number; calls7: number; lastDay: string; daily: number[]; tools: Array<{ tool: string; calls: number }> } | null;
+  usage: { calls: number; calls7: number; lastDay: string; daily: number[] } | null;
 }
 
 type Filter = "all" | "admin" | "pro";
@@ -25,6 +26,7 @@ const FILTERS: Array<{ id: Filter; label: string }> = [
   { id: "pro", label: "Pro" },
 ];
 
+/** The features under Pro: each works only while Pro is on. */
 const FEATURE_ROWS: Array<{ key: AdminFeature; title: string; hint: string }> = [
   { key: "files", title: "Vlastní soubory", hint: "Nahrávání a prohledávání vlastních dokumentů" },
   { key: "zotero", title: "Zotero", hint: "Připojení knihovny, čtení a ukládání" },
@@ -39,14 +41,12 @@ export function AdminConsole({
   today,
   windowDays,
   usageAvailable,
-  noAccount,
 }: {
   rows: AdminRow[];
   me: string;
   today: string;
   windowDays: number;
   usageAvailable: boolean;
-  noAccount: { shared: number; anon: number };
 }) {
   const [rows, setRows] = useState(initial);
   const [filter, setFilter] = useState<Filter>("all");
@@ -72,13 +72,13 @@ export function AdminConsole({
   const admins = rows.filter((r) => r.user.role === "admin").length;
   const num = (n: number) => (usageAvailable ? formatCount(n) : "—");
 
-  function change(user: AdminUser, change: Parameters<typeof changeUserAction>[1], done: string) {
+  /** A switch changes its state and says nothing; only a failure gets a line. */
+  function change(user: AdminUser, change: Parameters<typeof changeUserAction>[1]) {
     setMessage(null);
     startTransition(async () => {
       const result = await changeUserAction(user.id, change);
       if (result.ok) {
         setRows((all) => all.map((r) => (r.user.id === user.id ? { ...r, user: result.user } : r)));
-        setMessage(done);
       } else {
         setMessage(result.error);
       }
@@ -156,11 +156,6 @@ export function AdminConsole({
               </tbody>
             </table>
           </div>
-          {usageAvailable && (noAccount.shared > 0 || noAccount.anon > 0) ? (
-            <p className="adm-note">
-              Mimo účty za {windowDays} dní: {formatCount(noAccount.shared)} volání se sdíleným přístupovým kódem, {formatCount(noAccount.anon)} bez přihlášení.
-            </p>
-          ) : null}
         </section>
 
         <aside className="adm-panel adm-detail" aria-live="polite">
@@ -268,12 +263,11 @@ function Detail({
   usageAvailable: boolean;
   pending: boolean;
   message: string | null;
-  onChange: (user: AdminUser, change: Parameters<typeof changeUserAction>[1], done: string) => void;
+  onChange: (user: AdminUser, change: Parameters<typeof changeUserAction>[1]) => void;
 }) {
   const { user, usage } = row;
   const self = user.id === me;
   const roleLocked = (self && user.role === "admin") || user.envAdmin;
-  const toolsMax = Math.max(1, ...(usage?.tools.map((t) => t.calls) ?? [1]));
   return (
     <>
       <div className="adm-sec adm-detail-head">
@@ -296,22 +290,21 @@ function Detail({
             label="Správce"
             on={user.role === "admin"}
             disabled={pending || roleLocked}
-            onToggle={() => onChange(user, { kind: "role", admin: user.role !== "admin" }, user.role === "admin" ? "Role správce odebrána." : "Účet je nově správce.")}
+            onToggle={() => onChange(user, { kind: "role", admin: user.role !== "admin" })}
           />
         </div>
         <div className="adm-row">
           <div>
             <b>Pro</b>
-            <span>Základ pro Vlastní soubory a Zotero</span>
+            <span>Vlastní soubory, Zotero a doktrína (UKAŽ)</span>
           </div>
-          <Switch label="Pro" on={user.pro} disabled={pending} onToggle={() => onChange(user, { kind: "pro", on: !user.pro }, user.pro ? "Pro vypnuto." : "Pro zapnuto.")} />
+          <Switch label="Pro" on={user.pro} disabled={pending} onToggle={() => onChange(user, { kind: "pro", on: !user.pro })} />
         </div>
         {FEATURE_ROWS.map((f) => {
-          const optIn = OPT_IN_FEATURES.includes(f.key);
-          const needsPro = !optIn && !user.pro;
-          const on = optIn ? user.features[f.key] : user.pro && user.features[f.key];
+          const needsPro = !user.pro;
+          const on = user.pro && user.features[f.key];
           return (
-            <div className="adm-row" key={f.key}>
+            <div className="adm-row adm-row-sub" key={f.key}>
               <div>
                 <b>{f.title}</b>
                 <span>{needsPro ? "Nejdřív zapni Pro" : f.hint}</span>
@@ -320,13 +313,13 @@ function Detail({
                 label={f.title}
                 on={on}
                 disabled={pending || needsPro}
-                onToggle={() => onChange(user, { kind: "feature", feature: f.key, on: !user.features[f.key] }, `${f.title}: ${user.features[f.key] ? "vypnuto" : "zapnuto"}.`)}
+                onToggle={() => onChange(user, { kind: "feature", feature: f.key, on: !user.features[f.key] })}
               />
             </div>
           );
         })}
         {message ? (
-          <p className="adm-message" role="status">
+          <p className="zd-error" role="alert">
             {message}
           </p>
         ) : null}
@@ -338,26 +331,6 @@ function Detail({
           Využití <span>{usageAvailable ? `${formatCount(usage?.calls ?? 0)} volání za ${windowDays} dní` : "počítadla nejsou dostupná"}</span>
         </h3>
         {usage ? <Chart data={usage.daily} today={today} /> : <p className="adm-note">{usageAvailable ? "Zatím žádná volání." : "Počítá se jen tehdy, když jsou Vlastní zdroje zapnuté (zápis jde do jejich databáze)."}</p>}
-      </div>
-
-      <div className="adm-sec">
-        <h3>Podle nástroje</h3>
-        {usage && usage.tools.length > 0 ? (
-          <div className="adm-tools">
-            {usage.tools.map((t) => (
-              <div className="adm-tool" key={t.tool}>
-                <code>{t.tool}</code>
-                <span className="adm-bar">
-                  <i style={{ width: `${(t.calls / toolsMax) * 100}%` }} />
-                </span>
-                <span className="adm-tool-n">{formatCount(t.calls)}</span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="adm-note">Zatím žádná volání.</p>
-        )}
-        <p className="adm-note">Jen počty volání, nikdy obsah dotazů.</p>
       </div>
     </>
   );

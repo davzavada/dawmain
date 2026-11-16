@@ -30,6 +30,16 @@ export const DATABASE_GROUPS = ["Judikatura", "Předpisy"] as const;
 export type DatabaseGroup = (typeof DATABASE_GROUPS)[number] | "Pro";
 
 /**
+ * The courts the case-law mirror holds (src/sources/mirror.ts), by the
+ * source id its /v1/status reports them under. The home page lists them
+ * apart, as "Interní databáze", with how many decisions each holds.
+ */
+export type MirrorSourceId = "ns" | "nss" | "us" | "justice";
+
+/** Decisions per mirrored court (GET /api/status/mirror); a court the mirror did not report is missing. */
+export type MirrorCounts = Partial<Record<MirrorSourceId, number>>;
+
+/**
  * The databases shown on the page, each tied to the SOURCE constant its
  * client reports under and to the probe canary that can stand in for it.
  */
@@ -39,6 +49,8 @@ export const DATABASES: Array<{
   href: string;
   source: string;
   canaryId: string;
+  /** Set for a court the case-law mirror holds. */
+  mirror?: MirrorSourceId;
 }> = [
   {
     label: "Nejvyšší soud",
@@ -46,6 +58,7 @@ export const DATABASES: Array<{
     href: "https://rozhodnuti.nsoud.cz",
     source: "Nejvyšší soud",
     canaryId: "ns",
+    mirror: "ns",
   },
   {
     label: "Nejvyšší správní soud",
@@ -53,6 +66,7 @@ export const DATABASES: Array<{
     href: "https://vyhledavac.nssoud.cz",
     source: "Nejvyšší správní soud",
     canaryId: "nss",
+    mirror: "nss",
   },
   {
     label: "Ústavní soud",
@@ -60,6 +74,7 @@ export const DATABASES: Array<{
     href: "https://nalus.usoud.cz",
     source: "Ústavní soud (NALUS)",
     canaryId: "nalus",
+    mirror: "us",
   },
   {
     label: "Obecné soudy",
@@ -67,6 +82,7 @@ export const DATABASES: Array<{
     href: "https://rozhodnuti.justice.cz",
     source: "rozhodnuti.justice.cz",
     canaryId: "justice",
+    mirror: "justice",
   },
   {
     label: "Soudní dvůr EU",

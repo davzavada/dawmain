@@ -7,16 +7,17 @@
  * where the access code already reads it (src/files/access.ts):
  *
  *   role      "admin" makes the account an admin; anything else is a user;
- *   pro       true = Pro (Vlastní soubory, Zotero);
+ *   pro       true = Pro (Vlastní soubory, Zotero, UKAŽ);
  *   features  { files, zotero } switch one Pro feature off with `false`;
- *             { ukaz } switches UKAŽ (doctrine_*) on with `true`.
+ *             { ukaz } switches UKAŽ (doctrine_*) on with `true`
+ *             (and it needs Pro, like the others).
  *             (A leftover `mirror` key from the removed per-account mirror
  *             switch is ignored: every account reads the mirror now.)
  */
 
 export type AdminFeature = "files" | "zotero" | "ukaz";
 export const ADMIN_FEATURES: AdminFeature[] = ["files", "zotero", "ukaz"];
-/** Off until an admin switches them on, Pro or not (the rest are Pro features, on unless switched off). */
+/** Off until an admin switches them on (the rest are on with Pro unless switched off). All need Pro. */
 export const OPT_IN_FEATURES: readonly AdminFeature[] = ["ukaz"];
 
 export interface AdminUser {

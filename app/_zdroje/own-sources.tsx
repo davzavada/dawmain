@@ -11,7 +11,7 @@ import { DEFAULT_SOURCE_TEXTS, SourceTextsContext, useSourceTexts, type SourceTe
 import { useZoteroStatus } from "./zotero-status";
 
 /**
- * The "Pro" group at the top of the home page's source list (wireframe 01,
+ * The "Pro" group at the end of the home page's source list (wireframe 01,
  * 02): Vlastní soubory, Zotero (always listed; locked where the deployment
  * cannot connect it) and UKAŽ (switched on per account by an admin, app/_source-status.tsx).
  * Visitors see them greyed out with a lock, each with one line on what it
@@ -80,10 +80,12 @@ function Group({ signedIn, className, children }: { signedIn: boolean; className
   return (
     <div className={classes}>
       <div className="source-group-head">
-        <span className="source-group-name">Pro</span>
+        <h3 className="source-group-name">Pro</h3>
         {signedIn ? null : <ZIcon name="lock" size={13} className="zd-group-lock" />}
       </div>
-      <ul>{children}</ul>
+      <div className="source-box">
+        <ul>{children}</ul>
+      </div>
     </div>
   );
 }
@@ -225,9 +227,9 @@ function ZoteroRowView({ desc, locked = false, connected = false, onClick = open
         <span className="source-desc">{desc}</span>
       </div>
       {connected ? (
-        <div className="source-state">
-          <span className="zd-badge">Připojeno</span>
-        </div>
+        <span className="source-dot" data-state="ok" title="připojeno">
+          <span className="sr-only">připojeno</span>
+        </span>
       ) : null}
     </li>
   );

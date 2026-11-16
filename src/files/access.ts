@@ -25,7 +25,7 @@ export type { Access, LibraryAccess } from "./access-types";
  *     Pro itself decides the 90-day purge (libraryOwnerState below): a
  *     feature switched off never deletes anything. `features.ukaz` works the
  *     other way round: UKAŽ (doctrine_*) stays off until an admin sets it
- *     to `true`.
+ *     to `true`, and like the rest it needs Pro.
  *
  * There are no shared (team) libraries: Clerk organizations are ignored.
  * `libraries` holds the Pro library (search, read, upload); `all` the
@@ -186,7 +186,8 @@ export function buildAccess(user: ClerkUserLike): Access {
     quotaPages: quotaFrom(user.publicMetadata, LIMITS.personalPages),
   };
   const all = [personal];
-  return { userId, banned: false, libraries: all.filter((l) => l.pro), all, zotero, ukaz: ukazOn(user.publicMetadata) };
+  // UKAŽ hangs under Pro like the rest: switched on and Pro.
+  return { userId, banned: false, libraries: all.filter((l) => l.pro), all, zotero, ukaz: userPro && ukazOn(user.publicMetadata) };
 }
 
 async function loadFromClerk(userId: string): Promise<Access> {

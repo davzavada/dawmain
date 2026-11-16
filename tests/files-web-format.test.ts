@@ -417,7 +417,7 @@ describe("upload guards (review web:Z2)", () => {
 describe("no document-derived HTML", () => {
   it("the Vlastní zdroje UI never uses dangerouslySetInnerHTML", async () => {
     const { readdirSync, readFileSync } = await import("node:fs");
-    const dirs = ["app/_zdroje", "app/vlastni-zdroje", "app/vlastni-zdroje/provoz"];
+    const dirs = ["app/_zdroje", "app/vlastni-zdroje"];
     for (const dir of dirs) {
       for (const name of readdirSync(dir).filter((f) => /\.(tsx?|mts)$/.test(f))) {
         expect(readFileSync(`${dir}/${name}`, "utf8"), `${dir}/${name}`).not.toContain("dangerouslySetInnerHTML");

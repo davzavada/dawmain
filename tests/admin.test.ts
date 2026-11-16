@@ -162,12 +162,13 @@ describe("changes", () => {
 });
 
 describe("UKAŽ switch and gate", () => {
-  it("is off until strictly true, and off for banned accounts", () => {
+  it("is off until strictly true, only under Pro, and off for banned accounts", () => {
     expect(ukazOn({ features: { ukaz: true } })).toBe(true);
     for (const v of [{}, null, { features: { ukaz: "true" } }, { features: { ukaz: 1 } }, { features: [] }]) expect(ukazOn(v)).toBe(false);
     expect(buildAccess({ id: OTHER, publicMetadata: { pro: true } }).ukaz).toBe(false);
-    expect(buildAccess({ id: OTHER, publicMetadata: { features: { ukaz: true } } }).ukaz).toBe(true); // Pro or not
-    expect(buildAccess({ id: OTHER, banned: true, publicMetadata: { features: { ukaz: true } } }).ukaz).toBe(false);
+    expect(buildAccess({ id: OTHER, publicMetadata: { features: { ukaz: true } } }).ukaz).toBe(false); // no Pro
+    expect(buildAccess({ id: OTHER, publicMetadata: { pro: true, features: { ukaz: true } } }).ukaz).toBe(true);
+    expect(buildAccess({ id: OTHER, banned: true, publicMetadata: { pro: true, features: { ukaz: true } } }).ukaz).toBe(false);
     expect(emptyAccess(OTHER).ukaz).toBe(false);
   });
 
@@ -180,7 +181,7 @@ describe("UKAŽ switch and gate", () => {
     expect(refused?.isError).toBe(true);
     expect(refused?.structuredContent.error.kind).toBe("NOT_ENTITLED");
 
-    __setAccessLoaderForTests(async (id) => buildAccess({ id, publicMetadata: { features: { ukaz: true } } }));
+    __setAccessLoaderForTests(async (id) => buildAccess({ id, publicMetadata: { pro: true, features: { ukaz: true } } }));
     expect(await doctrineRefusal(ctxOf("user_confirmed3"))).toBeNull();
   });
 

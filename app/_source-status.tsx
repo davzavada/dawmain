@@ -6,6 +6,7 @@ import {
   DATABASES,
   formatTime,
   type DatabaseStatus,
+  type MirrorCounts,
 } from "@/src/mcp/databases";
 import { Icon, type IconName } from "./_icons";
 import { ZIcon } from "./_zdroje/icons";
@@ -115,14 +116,15 @@ type Row = Pick<DatabaseStatus, "id" | "label" | "group" | "href"> & {
   state: "ok" | "down" | "pending" | "unknown";
   badge: string;
   at?: string;
+  mirror?: (typeof DATABASES)[number]["mirror"];
 };
 
 /** A database's row: its status when the check has one, "zjišťuji…" while
  * loading, "neověřeno" when nothing is known. The names always come from
  * DATABASES — a hand-kept copy would go on promising a database the server
  * no longer queries. */
-function toRow({ canaryId: id, label, group, href }: (typeof DATABASES)[number], status: Answer): Row {
-  const base = { id, label, group, href };
+function toRow({ canaryId: id, label, group, href, mirror }: (typeof DATABASES)[number], status: Answer): Row {
+  const base = { id, label, group, href, mirror };
   if (status === undefined) return { ...base, state: "pending", badge: "zjišťuji…" };
   if (!status || status.ok === null || status.at === null) return { ...base, state: "unknown", badge: "neověřeno" };
   return {
@@ -137,28 +139,75 @@ function host(href: string): string {
   return new URL(href).host;
 }
 
+// The decision counts of the mirrored courts: one static request, like the statuses.
+let askedCounts: Promise<MirrorCounts> | undefined;
+
+function useMirrorCounts(): MirrorCounts | undefined {
+  const [counts, setCounts] = useState<MirrorCounts | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    askedCounts ??= fetch("/api/status/mirror")
+      .then((r) => (r.ok ? r.json() : {}))
+      .catch(() => ({}))
+      .then((body: unknown) => (body && typeof body === "object" && !Array.isArray(body) ? (body as MirrorCounts) : {}));
+    askedCounts.then((c) => {
+      if (live) setCounts(c);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+  return counts;
+}
+
+/**
+ * The public databases under their headings, each group in its own box. The
+ * courts the case-law mirror holds open Judikatura as "Interní databáze",
+ * with how many decisions each holds; the rest show their status light.
+ */
 export function SourceList() {
   const answers = useStatuses();
+  const counts = useMirrorCounts();
   const rows = DATABASES.map((db) => toRow(db, answers[db.canaryId]));
   return DATABASE_GROUPS.map((group) => {
     const items = rows.filter((row) => row.group === group);
+    const mirrored = items.filter((row) => row.mirror);
+    const live = items.filter((row) => !row.mirror);
     return (
       <div key={group} className="source-group">
         <div className="source-group-head">
-          <span className="source-group-name">{group}</span>
-          <span className="source-group-count">{items.length}</span>
+          <h3 className="source-group-name">{group}</h3>
         </div>
-        <ul>
-          {items.map((row) => (
-            <DatabaseRow key={row.id} row={row} />
-          ))}
-        </ul>
+        {mirrored.length > 0 ? (
+          <div className="source-box source-box-mirror">
+            <div className="source-box-head">
+              <Icon name="database" size={14} />
+              <span className="source-box-name">Interní databáze</span>
+              <span className="source-group-count">{mirrored.length}</span>
+            </div>
+            <p className="source-box-note">Rozhodnutí českých soudů hledá Dawmain ve vlastní, pravidelně aktualizované kopii. Odkaz vždy vede na originál u soudu.</p>
+            <ul>
+              {mirrored.map((row) => (
+                <DatabaseRow key={row.id} row={row} count={row.mirror ? counts?.[row.mirror] : undefined} />
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {live.length > 0 ? (
+          <div className="source-box">
+            <ul>
+              {live.map((row) => (
+                <DatabaseRow key={row.id} row={row} />
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </div>
     );
   });
 }
 
-function DatabaseRow({ row }: { row: Row }) {
+function DatabaseRow({ row, count }: { row: Row; count?: number }) {
   const look = LOOK[row.id] ?? { icon: "list", color: "var(--soft)" };
   return (
     <li className="source">
@@ -167,19 +216,22 @@ function DatabaseRow({ row }: { row: Row }) {
         <a href={row.href}>{row.label}</a>
         <span className="source-host">{host(row.href)}</span>
       </div>
-      <StateBadge row={row} />
+      {count !== undefined ? <span className="source-count">{formatDecisions(count)}</span> : <StateDot row={row} />}
     </li>
   );
 }
 
-function StateBadge({ row }: { row: Row }) {
+function formatDecisions(n: number): string {
+  return `${n.toLocaleString("cs-CZ")} rozhodnutí`;
+}
+
+/** The status as a light; the words (and the time of the check) for the tooltip and screen readers. */
+function StateDot({ row }: { row: Row }) {
+  const text = row.at ? `${row.badge} · ${row.at}` : row.badge;
   return (
-    <div className="source-state">
-      {row.at && <span className="source-at">{row.at}</span>}
-      <span className="badge" data-state={row.state}>
-        {row.badge}
-      </span>
-    </div>
+    <span className="source-dot" data-state={row.state} title={text}>
+      <span className="sr-only">{text}</span>
+    </span>
   );
 }
 
@@ -221,7 +273,7 @@ function UkazRowOn() {
   const answers = useStatuses();
   const row = toRow(UKAZ, answers[UKAZ.canaryId]);
   return (
-    <UkazRowView state={<StateBadge row={row} />}>
+    <UkazRowView state={<StateDot row={row} />}>
       <a href={UKAZ.href}>{UKAZ.label}</a>
     </UkazRowView>
   );
