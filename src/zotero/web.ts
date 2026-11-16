@@ -6,6 +6,7 @@ import { errorCode, filesError, filesJson, MESSAGES, NO_STORE_HEADERS } from "@/
 import { allowToolCall, sameOrigin } from "@/src/files/guards";
 import { clerkConfigured, tokenMatches } from "@/src/mcp/config";
 import { proRefusal } from "@/src/mcp/pro-caller";
+import { forwardedHostTrusted } from "@/src/runtime";
 import { SourceError } from "@/src/sources/shared/errors";
 import { getKeyInfo, listGroups, revokeKey } from "./client";
 import { CALLBACK_PATH, LIMITS, STATE_COOKIE, STATE_TTL_SECONDS, zoteroConfigured, type ZoteroMode } from "./config";
@@ -89,8 +90,8 @@ const LOOPBACK_HOST = /^(?:localhost|127\.0\.0\.1)(?::\d{1,5})?$/;
 
 /**
  * The origin the browser is on, for the OAuth callback: the host sameOrigin
- * checked (x-forwarded-host on Vercel, else Host) — NOT siteOrigin or
- * VERCEL_PROJECT_PRODUCTION_URL. The state cookie is set on this host; on a
+ * checked (x-forwarded-host where trusted, else Host) — NOT siteOrigin or
+ * the production URL. The state cookie is set on this host; on a
  * preview, a callback to the production domain would arrive without it.
  * https except on loopback: the callback URL carries the verifier, and the
  * Secure cookie would not come back over plain http anyway. null for
@@ -104,8 +105,9 @@ export function publicOrigin(request: Request): string | null {
   } catch {
     return null;
   }
-  const host = first("x-forwarded-host") || first("host") || url.host.toLowerCase();
-  const proto = first("x-forwarded-proto") || url.protocol.replace(/:$/, "");
+  const trusted = forwardedHostTrusted();
+  const host = (trusted && first("x-forwarded-host")) || first("host") || url.host.toLowerCase();
+  const proto = (trusted && first("x-forwarded-proto")) || url.protocol.replace(/:$/, "");
   const origin = `${proto === "http" && LOOPBACK_HOST.test(host) ? "http" : "https"}://${host}`;
   return PLAIN_ORIGIN.test(origin) ? origin : null;
 }

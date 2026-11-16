@@ -1,5 +1,5 @@
 import { withMcpAuth } from "mcp-handler";
-import { authRequired, verifyRequestAuth } from "@/src/mcp/auth";
+import { authRequired, challengeOrigin, verifyRequestAuth } from "@/src/mcp/auth";
 import { mcpHandler } from "@/src/mcp/server";
 import { runWithCallClock } from "@/src/mcp/tools";
 
@@ -16,7 +16,10 @@ export const maxDuration = 60;
  * /.well-known/oauth-protected-resource, which is what lets an MCP client
  * discover the OAuth login on its own.
  */
-const authed = withMcpAuth(mcpHandler, verifyRequestAuth, { required: authRequired() });
+const authed = withMcpAuth(mcpHandler, verifyRequestAuth, {
+  required: authRequired(),
+  resourceUrl: challengeOrigin(),
+});
 
 /** Each request runs with its arrival time on record: every tool answers in
  * text before maxDuration, counted from here (CALL_BUDGET_MS). */

@@ -1,0 +1,41 @@
+# Dawmain web + MCP (Next.js standalone) on LXC `web`, docs/infra/migrace-z-vercelu.md.
+# Install: cp deploy/web/dawmain-web.service /etc/systemd/system/ &&
+#          systemctl daemon-reload && systemctl enable --now dawmain-web
+# /etc/dawmain/env (600, root) carries every setting; see .env.example, section
+# "Home server". It must also set DAWMAIN_REQUIRE_AUTH=1 and TRUST_FORWARDED_HOST=0,
+# which this unit pins below as well, so a slip in the file cannot open the endpoint.
+[Unit]
+Description=Dawmain web and MCP server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dawmain
+Group=dawmain
+# `current` is a symlink that deploy.sh moves to the new release; systemd
+# resolves it at start, so a restart is what switches releases.
+WorkingDirectory=/opt/dawmain-web/current/.next/standalone
+EnvironmentFile=/etc/dawmain/env
+# GIT_SHA of the release, written by deploy.sh (the "-" lets a first start work without it).
+EnvironmentFile=-/opt/dawmain-web/current/release.env
+Environment=NODE_ENV=production
+Environment=HOSTNAME=0.0.0.0
+Environment=PORT=3000
+Environment=DAWMAIN_REQUIRE_AUTH=1
+Environment=TRUST_FORWARDED_HOST=0
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=5
+# Finish requests in flight on a restart (Next drains on SIGTERM).
+TimeoutStopSec=30
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+# The release is writable: a save on /sprava/texty revalidates the static
+# pages, and Next rewrites them (and its cache) inside .next/.
+ReadWritePaths=/opt/dawmain-web/releases
+
+[Install]
+WantedBy=multi-user.target

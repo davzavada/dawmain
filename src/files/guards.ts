@@ -1,4 +1,5 @@
 import "server-only";
+import { forwardedHostTrusted } from "@/src/runtime";
 import { LIMITS, envMode, type FilesMode } from "./config";
 import { withScope, type Queryable } from "./db/client";
 import { globalUsage } from "./db/libraries";
@@ -258,8 +259,8 @@ export function allowToolCall(key: string, now = Date.now(), capacity: number = 
 
 /**
  * A mutating browser request must come from this site: the Origin header is
- * required and its host must equal the request's host (x-forwarded-host on
- * Vercel), and Sec-Fetch-Site, when sent, must not say cross-site. Route
+ * required and its host must equal the request's host (x-forwarded-host
+ * where trusted — Vercel; the home server uses Host), and Sec-Fetch-Site, when sent, must not say cross-site. Route
  * Handlers get no CSRF protection of their own (Server Actions do). Pure.
  */
 export function sameOrigin(request: Request): boolean {
@@ -275,7 +276,7 @@ export function sameOrigin(request: Request): boolean {
   } catch {
     return false;
   }
-  const forwarded = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
+  const forwarded = forwardedHostTrusted() ? request.headers.get("x-forwarded-host")?.split(",")[0]?.trim() : "";
   const host = (forwarded || request.headers.get("host") || safeHost(request.url)).toLowerCase();
   return host !== "" && originHost === host;
 }

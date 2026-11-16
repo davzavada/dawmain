@@ -1,4 +1,5 @@
 import { createMcpHandler } from "mcp-handler";
+import { appEnvironment } from "@/src/runtime";
 import { zoteroConfigured } from "@/src/zotero/config";
 import { SERVER_NAME, SERVER_VERSION } from "./config";
 import { registerAllTools } from "./tools";
@@ -85,6 +86,6 @@ export const mcpHandler = createMcpHandler(
   {
     serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
     instructions: INSTRUCTIONS,
-    verboseLogs: process.env.VERCEL_ENV !== "production",
+    verboseLogs: appEnvironment() !== "production",
   },
 );

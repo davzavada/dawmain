@@ -1,0 +1,22 @@
+# Daily maintenance of Vlastní zdroje (app/api/cron/files), started by
+# dawmain-cron.timer — the replacement of the Vercel Cron in vercel.json.
+# CRON_SECRET comes from /etc/dawmain/env, the same value the route checks.
+# Do NOT enable the timer before the domain is switched (phase 5): until then
+# the Vercel Cron does this job and two runs must not overlap.
+[Unit]
+Description=Dawmain daily maintenance (Vlastní zdroje)
+After=dawmain-web.service
+Wants=dawmain-web.service
+
+[Service]
+Type=oneshot
+User=dawmain
+Group=dawmain
+EnvironmentFile=/etc/dawmain/env
+# The route stops starting new work after 240 s and answers within 300 s.
+# curl reads the secret from stdin (-K -), so it never shows in `ps`.
+ExecStart=/bin/sh -c 'printf "header = \\"Authorization: Bearer %s\\"\\n" "$CRON_SECRET" | /usr/bin/curl -fsS --max-time 330 -K - http://127.0.0.1:3000/api/cron/files'
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes

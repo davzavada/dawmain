@@ -4,6 +4,7 @@ import { SourceList } from "./_source-status";
 import { OwnSourcesGroup } from "./_zdroje/own-sources";
 import { Markdown } from "@/src/content/markdown";
 import { siteTexts } from "@/src/content/store";
+import { productionOrigin } from "@/src/runtime";
 import { zoteroConfigured } from "@/src/zotero/config";
 
 /** The author's other project, linked from the intro. */
@@ -11,13 +12,12 @@ const OWL_URL = "https://owl.davidzavada.cz/";
 
 /**
  * The MCP address the guide offers, fixed at build (the page is static): the
- * production domain Vercel names. The guide swaps in the address the browser
- * is actually on (a preview, localhost) — on production it is the same.
+ * production domain (PUBLIC_URL, else the one Vercel names). The guide swaps
+ * in the address the browser is actually on (a preview, localhost) — on
+ * production it is the same.
  */
 function endpoint(): string {
-  const production = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
-  const origin = production && /^[a-z0-9.-]+$/i.test(production) ? `https://${production}` : "https://dawmain.davidzavada.cz";
-  return `${origin}/api/mcp`;
+  return `${productionOrigin() ?? "https://dawmain.davidzavada.cz"}/api/mcp`;
 }
 
 /**
