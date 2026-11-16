@@ -1,6 +1,5 @@
 import "server-only";
 import { Pool, type PoolClient } from "pg";
-import { attachDatabasePool } from "@vercel/functions";
 import { LIBRARY_ID_RE, databaseUrl } from "../config";
 
 /**
@@ -10,8 +9,8 @@ import { LIBRARY_ID_RE, databaseUrl } from "../config";
  * server from Clerk, never taken from input). Row-level security on every
  * content table reads that setting, so a forgotten WHERE returns nothing
  * instead of another library's rows. Transaction-local (`set_config(…, true)`)
- * is what makes this safe under PgBouncer transaction pooling and under
- * Fluid compute, where one warm instance serves many users at once: a
+ * is what makes this safe under transaction pooling (PgBouncer) and on a
+ * long-running server, where one process serves many users at once: a
  * session-level SET would leak to whoever borrows the connection next.
  */
 
@@ -24,7 +23,7 @@ export interface Queryable {
 }
 
 export interface ScopeOptions {
-  /** Default 10 s (a suspended Neon compute must fail fast, not hang the MCP call). */
+  /** Default 10 s (an unreachable or stuck database must fail fast, not hang the MCP call). */
   statementTimeoutMs?: number;
 }
 
@@ -66,24 +65,26 @@ function getPool(): Pool {
     throw new FilesUnavailableError("FILES_DATABASE_URL is not set", "unconfigured");
   }
   // No statement_timeout (or `options`) here: pg sends those as startup
-  // parameters, and the Neon pooler (PgBouncer, transaction mode) refuses
-  // every connection that carries one. withScope sets it per transaction.
+  // parameters, which a transaction-mode pooler (PgBouncer, as the former
+  // hosted database had) refuses. withScope sets it per transaction.
   pool = new Pool({
     connectionString,
     max: 5,
     idleTimeoutMillis: 5_000,
     connectionTimeoutMillis: 4_000,
   });
-  // On Fluid compute, closes idle clients before the instance is suspended.
-  attachDatabasePool(pool);
+  // An idle client the server drops (restart of Postgres, network) emits
+  // `error` on the pool; without a listener that would crash the process.
+  pool.on("error", (error) => console.warn("files: idle database connection lost:", error.message));
   return pool;
 }
 
 /**
- * Refuse to run as a role that ignores RLS. On Neon every role created in
- * the Console/API (the owner included) is a member of neon_superuser and
- * bypasses row-level security; only a role created by SQL is safe. Checked
- * once per instance, on the first connection.
+ * Refuse to run as a role that ignores RLS: a superuser, BYPASSRLS, a member
+ * of pg_read_all_data — or of neon_superuser, which hosted Neon gives every
+ * role made in its console (checked only where that role exists; kept so a
+ * move back to such a host cannot silently open the libraries). Checked
+ * once per process, on the first connection.
  */
 async function verifyRole(client: PoolClient): Promise<void> {
   const { rows } = await client.query<{
@@ -106,8 +107,9 @@ async function verifyRole(client: PoolClient): Promise<void> {
 }
 
 /**
- * One row per minute in which the DB was awake: the in-app estimate of Neon
- * compute hours (the consumption API is paid-plan only). Its own autocommit
+ * One row per minute in which the DB was used: the in-app activity estimate
+ * the guards read (src/files/db/usage.ts; it was built for the former hosted
+ * database's compute-hour allowance). Its own autocommit
  * statement before BEGIN, so a transaction that rolls back (a 404, a
  * duplicate upload, a timeout) still counts the minute; the per-instance
  * mark is set only once the row is written. Bookkeeping: a failure here
