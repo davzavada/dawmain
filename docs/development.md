@@ -298,10 +298,9 @@ tis. tokenů — zhruba jedna stránka rozsudku) ve verzi, která je nasazená.
 bez jejich tří sekcí (~43 tis. znaků) s poznámkou tyto nástroje nevolat:
 celý návod mu jinak v prvním kole každé rešerše ukládal tři volání
 (`files_search`, `zotero_search`, `doctrine_search`), která mohla odpovědět
-jen „pro tento účet není“. Stažený skill (`/dawmain-reserse.md`) zůstává celý.
+jen „pro tento účet není“.
 Nic se neinstaluje a nic nezastarává; merge do main = aktualizovaný návod
-pro všechny. Soubor se do standalone buildu dostane přes `outputFileTracingIncludes`
-(route `/dawmain-reserse.md` pro stažení ho čte při buildu, nástroj za běhu).
+pro všechny. Soubor se do standalone buildu dostane přes `outputFileTracingIncludes` (nástroj ho čte za běhu; veřejné stažení z webu bylo 11/2026 zrušeno).
 
 Ruční instalace v claude.ai (Nastavení → Capabilities → Skills, nahrát
 adresář) dál funguje jako volitelný spouštěč, nic na ní ale nezávisí; kdo ji

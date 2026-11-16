@@ -8,8 +8,8 @@ import { zoteroConfigured } from "@/src/zotero/config";
 import { callerFromCtx } from "../caller";
 
 /**
- * The research manual, served by the connector itself: the same
- * skills/dawmain-reserse/SKILL.md the home page offers for download, read
+ * The research manual, served by the connector itself and nowhere else
+ * (the website's public download was removed 11/2026): skills/dawmain-reserse/SKILL.md, read
  * from the repository tree at call time (next.config.ts traces it into the
  * function; registration does no I/O). The server instructions tell the
  * model to call this once at the start of every legal research — so
@@ -34,8 +34,6 @@ import { callerFromCtx } from "../caller";
 export const SKILL_PATH = path.join("skills", "dawmain-reserse", "SKILL.md");
 /** Largest body served whole; past it the skill needs sections (a `topic` parameter), not a bigger answer. */
 export const SKILL_MAX_CHARS = 80_000;
-/** Where the same file is downloadable — the fallback named when the function cannot read it. */
-export const SKILL_URL = "https://dawmain.davidzavada.cz/dawmain-reserse.md";
 
 /** The skill's body without its YAML front matter (name and description are the installer's, not the reader's). Pure — unit-tested. */
 export function skillBody(markdown: string): string {
@@ -148,7 +146,7 @@ export function registerGuide(server: McpServer): void {
           content: [
             {
               type: "text" as const,
-              text: `The research manual could not be read on this deployment (${error instanceof Error ? error.message : String(error)}). It is the same text as ${SKILL_URL} — proceed by the server instructions and the tools' own descriptions; run dawmain_probe_sources if other tools fail too.`,
+              text: `The research manual could not be read on this deployment (${error instanceof Error ? error.message : String(error)}). Proceed by the server instructions and the tools' own descriptions; run dawmain_probe_sources if other tools fail too.`,
             },
           ],
         };
