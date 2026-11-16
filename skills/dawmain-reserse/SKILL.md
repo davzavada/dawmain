@@ -75,6 +75,11 @@ whether it carries the argument or is mentioned in passing:
    invented). Never a search URL or a database homepage: the reader must land on the
    text. For NS, `ns_get_decision` with `find` returns a link that opens scrolled to
    the found passage — cite that one for the passage you quote.
+   **The link sits on the spisová značka itself**: write `[23 Cdo 1240/2024](url)`
+   (for SDEU on the case number or ECLI) every time the decision is named — in the
+   answer up front, in the running text, in a summary line. Never a bare URL after
+   the citation, never "odkaz", "zde" or "[1]" as the link text, never a list of
+   links at the end: the reader clicks the case number and lands on the decision.
 
 A decision you could not read in full (so have no quotation from) does not go in as
 authority — at most under **Co chybí**, with its link, as unread.
