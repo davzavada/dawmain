@@ -194,3 +194,47 @@ describe("UKAŽ switch and gate", () => {
     expect(refused?.structuredContent.error.kind).toBe("UPSTREAM_UNREACHABLE");
   });
 });
+
+describe("per-account page quota (publicMetadata.filesQuota.pages)", () => {
+  it("an account without its own quota shows null; a valid one is read as the access code reads it", async () => {
+    const { toAdminUser } = await import("@/src/admin/model");
+    const { quotaFrom } = await import("@/src/files/access");
+    expect(toAdminUser({ id: "user_a" }, false).quotaPages).toBeNull();
+    expect(toAdminUser({ id: "user_a", publicMetadata: { filesQuota: { pages: 25000.7 } } }, false).quotaPages).toBe(25000);
+    for (const bad of [{ pages: "25000" }, { pages: 0 }, { pages: -5 }, { pages: Infinity }, null, 7]) {
+      expect(toAdminUser({ id: "user_a", publicMetadata: { filesQuota: bad } }, false).quotaPages).toBeNull();
+      expect(quotaFrom({ filesQuota: bad }, 10_000)).toBe(10_000);
+    }
+    expect(quotaFrom({ filesQuota: { pages: 25000.7 } }, 10_000)).toBe(25000);
+  });
+
+  it("the patch sets the quota whole, and null removes it (Clerk drops a key set to null)", async () => {
+    const { metadataPatch } = await import("@/src/admin/model");
+    expect(metadataPatch({ pro: true, filesQuota: { pages: 5 } }, { kind: "quota", pages: 40_000 })).toEqual({ filesQuota: { pages: 40_000 } });
+    expect(metadataPatch({ filesQuota: { pages: 5 } }, { kind: "quota", pages: null })).toEqual({ filesQuota: null });
+  });
+
+  it("only whole numbers from 1 to the maximum are valid", async () => {
+    const { validQuotaPages, MAX_QUOTA_PAGES } = await import("@/src/admin/model");
+    for (const ok of [1, 10_000, MAX_QUOTA_PAGES]) expect(validQuotaPages(ok)).toBe(true);
+    for (const bad of [0, -1, 1.5, MAX_QUOTA_PAGES + 1, NaN, "100", null, undefined]) expect(validQuotaPages(bad)).toBe(false);
+  });
+});
+
+describe("guard caps the own server can raise", () => {
+  it("FILES_DB_CAP_MB and FILES_COMPUTE_HOURS_PER_MONTH override the defaults; nonsense falls back", async () => {
+    const { LIMITS } = await import("@/src/files/config");
+    expect(LIMITS.dbBytesCap).toBe(400 * 1024 * 1024);
+    expect(LIMITS.computeHoursPerMonth).toBe(100);
+    vi.stubEnv("FILES_DB_CAP_MB", "10240");
+    vi.stubEnv("FILES_COMPUTE_HOURS_PER_MONTH", "100000");
+    try {
+      expect(LIMITS.dbBytesCap).toBe(10240 * 1024 * 1024);
+      expect(LIMITS.computeHoursPerMonth).toBe(100000);
+      vi.stubEnv("FILES_DB_CAP_MB", "abc");
+      expect(LIMITS.dbBytesCap).toBe(400 * 1024 * 1024);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});

@@ -34,13 +34,29 @@ export interface AdminUser {
   pro: boolean;
   /** What the account may use now: files and zotero are on unless switched off, ukaz only when switched on. */
   features: Record<AdminFeature, boolean>;
+  /**
+   * The account's own page quota for Vlastní soubory
+   * (`publicMetadata.filesQuota.pages`, read by src/files/access.ts), or null
+   * when it has none and the installation's default applies.
+   */
+  quotaPages: number | null;
   banned: boolean;
+}
+
+/** The largest per-account quota an admin can set (normostrany). */
+export const MAX_QUOTA_PAGES = 5_000_000;
+
+/** A valid per-account quota: a whole number of pages from 1 to MAX_QUOTA_PAGES. */
+export function validQuotaPages(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= MAX_QUOTA_PAGES;
 }
 
 export type AdminChange =
   | { kind: "role"; admin: boolean }
   | { kind: "pro"; on: boolean }
-  | { kind: "feature"; feature: AdminFeature; on: boolean };
+  | { kind: "feature"; feature: AdminFeature; on: boolean }
+  /** `pages: null` removes the account's own quota (back to the default). */
+  | { kind: "quota"; pages: number | null };
 
 function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -67,6 +83,12 @@ export interface ClerkAdminUserLike {
   publicMetadata?: unknown;
 }
 
+/** Same rule as quotaFrom in src/files/access.ts: a finite number ≥ 1, floored; anything else is "no own quota". */
+function ownQuota(filesQuota: unknown): number | null {
+  const pages = record(filesQuota).pages;
+  return typeof pages === "number" && Number.isFinite(pages) && pages >= 1 ? Math.floor(pages) : null;
+}
+
 export function toAdminUser(user: ClerkAdminUserLike, envAdmin: boolean): AdminUser {
   const meta = record(user.publicMetadata);
   const features = record(meta.features);
@@ -84,6 +106,7 @@ export function toAdminUser(user: ClerkAdminUserLike, envAdmin: boolean): AdminU
     envAdmin,
     pro: meta.pro === true,
     features: { files: features.files !== false, zotero: features.zotero !== false, ukaz: features.ukaz === true },
+    quotaPages: ownQuota(meta.filesQuota),
     banned: user.banned === true || user.locked === true,
   };
 }
@@ -101,6 +124,9 @@ export function metadataPatch(current: unknown, change: AdminChange): Record<str
       return { pro: change.on };
     case "feature":
       return { features: { ...record(record(current).features), [change.feature]: change.on } };
+    case "quota":
+      // Clerk merges metadata deeply and drops a key set to null.
+      return { filesQuota: change.pages === null ? null : { pages: change.pages } };
   }
 }
 
