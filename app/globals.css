@@ -2429,8 +2429,9 @@ button.zd-file-row:hover .zd-file-title {
 .adm-table tbody tr:focus-visible {
   outline-offset: -2px;
 }
+/* Numbers in the admin tables: the page's own font (not the code font), with
+   equal-width digits so right-aligned columns line up. */
 .adm-mono {
-  font-family: var(--mono);
   font-variant-numeric: tabular-nums;
 }
 .adm-dim {
