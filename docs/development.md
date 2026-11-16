@@ -145,7 +145,7 @@ src/files/text/             český stemmer (vendorovaný Snowball 3.1.1), token
                             stavba tsquery jen ze sanitizovaných slov
 src/files/index/            chunky, tsvector, identifikátory a zkratky předpisů,
                             zvýraznění
-src/files/meta/             návrh metadat: heuristiky + Gemini přes AI Gateway
+src/files/meta/             návrh metadat: heuristiky (nic neodchází mimo server)
 src/files/db/               withScope (transakce + RLS), repozitáře, migrace
                             v čistém SQL (migrations/)
 src/files/access.ts         Clerk → osobní knihovna, Pro, kvóta
@@ -212,7 +212,7 @@ Kontejnery, síť, databáze a zálohy popisuje
 [infra/proxmox.md](infra/proxmox.md), soubory nasazení jsou v `deploy/web/`;
 historii přesunu z Vercelu a Neonu (16. 11. 2026) zachycuje
 [infra/migrace-z-vercelu.md](infra/migrace-z-vercelu.md). Node ≥ 22
-(`engines` v `package.json`, vyžaduje ho `ai@7`).
+(`engines` v `package.json`).
 
 - **Nastavení** `/etc/dawmain/env` (proměnné ze sekce „Server“ v
   `.env.example` a produkční klíče). `NEXT_PUBLIC_*` se čtou při buildu,
@@ -422,8 +422,8 @@ přihlašovací okno. Diskovery kontroluje i `npm run smoke` (krok
 Uživatel s Pro si na webu nahraje vlastní dokumenty; prohlížeč je převede na
 text (DMD), server ho uloží do PostgreSQL na vlastním serveru (databáze
 `files`, [infra/proxmox.md](infra/proxmox.md)), zaindexuje (český stemmer
-běží v aplikaci), navrhne metadata (heuristiky; s `AI_GATEWAY_API_KEY` navíc
-Gemini přes AI Gateway — v produkci zatím vypnuto) a hned po zpracování v
+běží v aplikaci), navrhne metadata (heuristiky, text dokumentu neodchází k žádnému
+poskytovateli AI) a hned po zpracování v
 nich hledají nástroje `files_*` (metadata uživatel opraví v detailu
 dokumentu; krok kontroly před hledáním zapne knihovně
 `settings.autoConfirm = false`). Originály se nikam neukládají. Pojistky
@@ -486,19 +486,15 @@ až novým buildem, `deploy.sh`).
 | `FILES_MODE` | hlavní vypínač: `on`, `readonly` (hledání, čtení a mazání, bez nahrávání), `off` | `off` |
 | `FILES_DATABASE_URL` | URL role `dawmain_app`; bez ní `unconfigured` | — |
 | `DATABASE_URL_UNPOOLED` | vlastnické připojení (`files_owner`), jen pro `scripts/db-migrate.mjs` z terminálu; aplikace ho nečte | — |
-| `FILES_META_MODEL` | model pro návrh metadat přes AI Gateway | `google/gemini-2.5-flash-lite` |
-| `FILES_USER_HASH_SECRET` | klíč HMAC pro pseudonym nahrávajícího, který dostává AI Gateway k rozpočítání spotřeby (`gateway.user`, čte `src/files/ingest.ts`); dlouhý náhodný řetězec. Změna klíče = nové pseudonymy v přehledu Gateway | `CLERK_SECRET_KEY` |
 | `FILES_GLOBAL_MAX_PAGES` | strop stran pro celou instalaci | 30 000 |
 | `FILES_PERSONAL_PAGES` | kvóta osobní knihovny (stran) | 10 000 |
 | `FILES_OPERATOR_IDS` | Clerk `user_…` oddělená čárkou — provozovatelé Vlastních zdrojů (`src/files/operator.ts`) a zároveň správci na `/sprava` | — |
 | `ADMIN_USER_IDS` | Clerk `user_…` oddělená čárkou — správci na `/sprava` bez ohledu na Clerk: první správce a cesta zpět. Další správce se povyšují na stránce Správa (`publicMetadata.role = "admin"`) | — |
-| `FILES_AI_BUDGET_USD` | klouzavý 30denní rozpočet AI v celých USD; nad ním jen heuristiky | 4 |
 | `FILES_GLOBAL_UPLOADS_PER_DAY` | nahrání za den ve všech knihovnách dohromady | 200 |
 | `FILES_CPU_MS_DAY` | CPU zpracování (nahrání, zpracování, přeindexování) za den v ms | 600 000 (10 min) |
 | `FILES_CPU_MS_30D` | totéž za klouzavých 30 dní (dimenzované na bývalý Vercel Hobby) | 3 600 000 (60 min) |
 | `CLERK_WEBHOOK_SIGNING_SECRET` | podpisový klíč webhooku Clerku (`whsec_…`) | — |
 | `CRON_SECRET` | `dawmain-cron.service` ho posílá jako `Authorization: Bearer …`; bez něj cron odmítne všechno | — |
-| `AI_GATEWAY_API_KEY` | zapíná návrh metadat přes AI Gateway; bez něj jen heuristiky a text dokumentu nejde k žádnému poskytovateli AI (v produkci zatím nenastaveno) | — |
 | `ZOTERO_OAUTH_CLIENT_KEY` | Zotero: Client Key aplikace z zotero.org/oauth/apps (viz Zotero — provoz) | — (Zotero vypnuté) |
 | `ZOTERO_OAUTH_CLIENT_SECRET` | Zotero: Client Secret téže aplikace | — (Zotero vypnuté) |
 | `CREDENTIALS_SECRET` | Zotero: klíč pečetění uložených klíčů (AES-256-GCM přes HKDF), ≥ 32 znaků, `openssl rand -base64 32`; změna = všichni připojí Zotero znovu | — (Zotero vypnuté) |
@@ -572,27 +568,6 @@ přepsat v Clerku (níže).
    účtu nebo týmu označí knihovnu k výmazu za 7 dní (vymaže ji denní cron).
    Doručení Clerk nezaručuje; výpadek webhooku zachytí denní kontrola Pro
    v cronu (smazaný účet ani tým Pro nemá).
-
-### AI Gateway (návrh metadat)
-
-V produkci je **vypnutý** (`AI_GATEWAY_API_KEY` není nastavený): metadata
-navrhují jen heuristiky a žádný text dokumentu neodchází k poskytovateli AI.
-`/soukromi` to popisuje podmíněně („když je návrh … zapnutý“), takže zapnutí
-text měnit nemusí, dokud zůstane Vercel + Google. Zapnutí:
-
-1. Účet u Vercelu s *AI Gateway* a kartou — bez ní se nedostaneš k
-   bezplatnému kreditu **5 USD na 30 dní** (hodiny běží od prvního požadavku).
-2. Zkontroluj seznam modelů zdarma (`vercel.com/ai-gateway/models?freeTier=true`)
-   a nastav `FILES_META_MODEL` na Gemini Flash-Lite, který v něm je. Řada 2.5
-   končí kolem 16.–20. 10. 2026; modely Claude zdarma nejsou.
-3. **Auto-recharge vypnutý a kredit nekupovat** — první nákup ukončí
-   bezplatný kredit natrvalo.
-4. API klíč Gateway do `AI_GATEWAY_API_KEY` v `/etc/dawmain/env`, restart.
-
-Požadavky nesou `disallowPromptTraining: true` a text dokumentu jen jako data
-(bez nástrojů, `maxOutputTokens` 1000). Selhání AI nahrání neblokuje — zůstanou
-heuristiky. **Model jiného poskytovatele než Google = nový subdodavatel**:
-nejdřív uprav `/soukromi` a dej uživatelům vědět (viz Právní texty níže).
 
 ### Pojistky bezplatných limitů
 
@@ -743,10 +718,9 @@ změní, změň i text, zvedni „Účinné od“ (`legal.effective` v
 měsíc předem (podmínky to slibují). `tests/files-legal-texts.test.ts` hlídá
 ty, které jdou přečíst z kódu.
 
-- zpracovatelé: Clerk, Cloudflare, a jen se zapnutým návrhem metadat Vercel
-  (+ Google přes AI Gateway); server i databáze jsou vlastní, v Česku — jiný
-  model nebo nová služba = nový subdodavatel; Gateway dostává jen pseudonym
-  nahrávajícího (`FILES_USER_HASH_SECRET`);
+- zpracovatelé: jen Clerk a Cloudflare; server i databáze jsou vlastní, v
+  Česku — nová služba = nový subdodavatel. Metadata navrhuje server sám
+  (heuristiky) a text dokumentu neposílá žádnému poskytovateli AI;
 - výmaz knihovny 6 dní po smazání účtu nebo po odebrání Pro (+ nejvýš den do
   cronu → text říká „do týdne“; platí jen, dokud `dawmain-cron.timer` běží
   denně), žádná pravidelná záloha, jen snímek před údržbou; po výmazu
@@ -759,7 +733,7 @@ ty, které jdou přečíst z kódu.
   chyb“) — pevná lhůta by potřebovala nastavit retenci journald;
 - kopie judikatury českých soudů (zrcadlo): veřejná rozhodnutí, anonymizovaná
   soudy, kopírovaná tak, jak jsou zveřejněná;
-- rozsah textu k návrhu metadat (~16 000 znaků), cookies Clerku;
+- cookies Clerku;
 - Zotero: není zpracovatel (službu si připojuje uživatel, Dawmain na jeho
   pokyn čte), klíč jen ke čtení a zašifrovaný v `privateMetadata` Clerku,
   klíč s právem zápisu se odmítne a zruší, obsah knihovny jen v dočasné
@@ -810,8 +784,7 @@ zapiš sem.
 `npm test` pouští i testy SQL a RLS proti PGlite (`tests/helpers/pglite.ts`),
 bez sítě a bez databáze. Pro ruční zkoušení webu stačí lokální Postgres:
 migrace přes `DATABASE_URL_UNPOOLED`, heslo pro `dawmain_app`,
-`FILES_DATABASE_URL` + `FILES_MODE=on` v `.env.local`, pro návrh metadat
-`AI_GATEWAY_API_KEY`.
+`FILES_DATABASE_URL` + `FILES_MODE=on` v `.env.local`.
 Evaluace vyhledávání (výše) běží bez databáze, na PGlite.
 
 ## Zotero — provoz
