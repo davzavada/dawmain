@@ -94,9 +94,11 @@ cp -r .next/static .next/standalone/.next/static
 printf 'GIT_SHA=%s\nNEXT_DEPLOYMENT_ID=%s\n' "$SHA" "$NAME" >"$REL/release.env"
 
 log "Checking the release on port $CHECK_PORT"
+# HOSTNAME=0.0.0.0 like the live service: bound to 127.0.0.1 only, the Clerk proxy in front
+# of /api answered 500 (ECONNREFUSED on its internal hop) although the release was fine.
 (
   cd .next/standalone
-  PORT=$CHECK_PORT HOSTNAME=127.0.0.1 DAWMAIN_REQUIRE_AUTH=1 TRUST_FORWARDED_HOST=0 \
+  PORT=$CHECK_PORT HOSTNAME=0.0.0.0 DAWMAIN_REQUIRE_AUTH=1 TRUST_FORWARDED_HOST=0 \
     node server.js >"$REL/check.log" 2>&1 &
   echo $! >"$REL/check.pid"
 )
@@ -115,7 +117,7 @@ CODE="$(curl -s -o /dev/null -w '%{http_code}' -X POST \
   -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
   --data '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
   "http://127.0.0.1:$CHECK_PORT/api/mcp")"
-[ "$CODE" = "401" ] || die "anonymous /api/mcp answered $CODE, expected 401"
+[ "$CODE" = "401" ] || { tail -30 "$REL/check.log" >&2; die "anonymous /api/mcp answered $CODE, expected 401"; }
 
 if [ -n "${MCP_BEARER_TOKEN:-}" ]; then
   MCP_URL="http://127.0.0.1:$CHECK_PORT/api/mcp" node scripts/smoke.mjs \
