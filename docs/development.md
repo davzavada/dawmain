@@ -23,23 +23,23 @@ Uživatelský popis je v [README](../README.md).
 | `eurlex_get_history` | Cellar SPARQL (Publications Office) | travaux préparatoires aktu z dossieru interinstitucionálního postupu (`cdm:dossier_contains_work` — obsahuje i přijatý akt, takže kotví CELEX aktu i kteréhokoli dokumentu postupu, případně číslo postupu `2012/0011(COD)`); vrací návrh s důvodovou zprávou, impact assessmenty, stanoviska, postoje EP/Rady + číslo postupu, právní základ a stav (přijato/projednáváno/staženo) |
 | `doctrine_search` | cuni.primo.exlibrisgroup.com | doktrína: knihy, kapitoly a články z UKAŽ Univerzity Karlovy (Primo VE: katalog UK + Central Discovery Index licencovaných e-zdrojů); `query`/`queries` (≤ 3 varianty), `title`, `author`, `subject`, `language`, `year_from`/`year_to`; katalog stránkuje po 10, `limit` (≤ 20; nad 10 záznamy stručně, bez abstraktů) stáhne víc stránek v paralelní dávce a `page` kráčí dál (`total` = `total_local` + `total_central`) — vrací bibliografické záznamy s odkazem na záznam, abstraktem/obsahem a přístupovými odkazy, žádné plné texty; klient postavený na zachyceném požadavku SPA (HAR 2026-09), ověřený živě z produkce |
 | `doctrine_get_record` | cuni.primo.exlibrisgroup.com | jeden záznam v plném znění přes full-display endpoint Prima (ověřený živě): celý abstrakt, obsah (TOC), hesla, identifikátory a přístupové odkazy — hledání ukazuje jen začátek abstraktu a obsahu; text díla se nestahuje (k němu vede odkaz na záznam, licencované tituly si čtenář otevře sám přes vzdálený přístup UK) |
-| `files_search` | Vlastní zdroje (Neon) | hledání ve vlastních dokumentech uživatele s Pro (osobní knihovna): český fulltext (Snowball stemmer v aplikaci; váhy vlastní nadpis › nadřazený nadpis › tělo › poznámky pod čarou), identifikátory (sp. zn. i s krátkým rokem, §, předpisy i zkratkami „o. z.“/„OSŘ“, ISBN, DOI, ECLI) a metadata — kanály sloučené přes RRF se stropem shod na dokument už v SQL; filtry typu dokumentu, roku, předpisu, § / článku, sp. zn., jednoho dokumentu a jen poznámek (§ a sp. zn. se uplatní v SQL před stropem); hit nese cestu oddíly, pinpoint (s., § + m. č., pozn.), výřez se zvýrazněním a pro každou sp. zn. řádek „oficiální text:“ s voláním `ns_search`/`nss_search`/`us_search`/`sdeu_search` |
-| `files_get_document` | Vlastní zdroje (Neon) | čtení vlastního dokumentu: u dokumentu nad ~30 stran bez cíle osnova (`toc`), jinak `section` (§, článek, kapitola), `mn` (marginální číslo, i rozsah), `at` (tištěná strana), `footnote`, `find`; okna ≤ 45 000 znaků zarovnaná na celé strany, hlavička „VLASTNÍ DOKUMENT“ s citací ČSN ISO 690, pokračování omezené na zvolený úsek, denní limit čtení na dokument (proti vysávání celých knih) |
-| `files_list` | Vlastní zdroje (Neon) | knihovny uživatele a jejich dokumenty (stav, typ, strany, co čeká na potvrzení metadat) a odkaz na nahrávání |
+| `files_search` | Vlastní zdroje (Postgres) | hledání ve vlastních dokumentech uživatele s Pro (osobní knihovna): český fulltext (Snowball stemmer v aplikaci; váhy vlastní nadpis › nadřazený nadpis › tělo › poznámky pod čarou), identifikátory (sp. zn. i s krátkým rokem, §, předpisy i zkratkami „o. z.“/„OSŘ“, ISBN, DOI, ECLI) a metadata — kanály sloučené přes RRF se stropem shod na dokument už v SQL; filtry typu dokumentu, roku, předpisu, § / článku, sp. zn., jednoho dokumentu a jen poznámek (§ a sp. zn. se uplatní v SQL před stropem); hit nese cestu oddíly, pinpoint (s., § + m. č., pozn.), výřez se zvýrazněním a pro každou sp. zn. řádek „oficiální text:“ s voláním `ns_search`/`nss_search`/`us_search`/`sdeu_search` |
+| `files_get_document` | Vlastní zdroje (Postgres) | čtení vlastního dokumentu: u dokumentu nad ~30 stran bez cíle osnova (`toc`), jinak `section` (§, článek, kapitola), `mn` (marginální číslo, i rozsah), `at` (tištěná strana), `footnote`, `find`; okna ≤ 45 000 znaků zarovnaná na celé strany, hlavička „VLASTNÍ DOKUMENT“ s citací ČSN ISO 690, pokračování omezené na zvolený úsek, denní limit čtení na dokument (proti vysávání celých knih) |
+| `files_list` | Vlastní zdroje (Postgres) | knihovny uživatele a jejich dokumenty (stav, typ, strany, co čeká na potvrzení metadat) a odkaz na nahrávání |
 | `zotero_search` | Zotero (api.zotero.org, klíč uživatele) | hledání v připojené knihovně Zotero, jen ke čtení: `mode` `title` (názvy, autoři, roky) / `everything` (všechna pole, poznámky, full-text index příloh), prázdné `title` se samo zopakuje v `everything`; `query`/`queries` (≤ 3 varianty round-robin), `library` (výchozí osobní + skupiny, nejvýš 6), `collection`, `tags` (všechny), `item_type`, `sort`, `limit` (≤ 50 na knihovnu), `page`; shody v přílohách, poznámkách a anotacích seskupené pod dílo; sp. zn. v dotazu navíc projde nejnovější položky `case` (Zotero `q` do `docketNumber` nevidí) a řekne, kolik jich prošla; řazení není podle relevance |
 | `zotero_get_item` | Zotero | jedna položka celá: pole po oddílech, abstrakt, extra, štítky, kolekce, poznámky jako text, přílohy (každá s voláním `zotero_get_text`) a anotace prvních PDF; u rozhodnutí řádek „oficiální text:“ |
 | `zotero_get_text` | Zotero | text přílohy: full-text index Zotera, když pokrývá celý soubor; jinak PDF ze Zotero Storage přes převodník Vlastních zdrojů (jen v paměti, 10 min); jinak částečný index s varováním nebo důvod, proč text není (neindexováno, WebDAV, odkazovaný soubor, sken, heslo) a co s tím; stránky ~45k znaků, `find` |
 | `zotero_list` | Zotero | knihovny (osobní + skupiny klíče), kolekce a štítky; `query`, `limit` (≤ 100), `page` |
 | `dawmain_ping` | — | které nasazení odpovědělo |
-| `dawmain_probe_sources` | — | diagnostika všech upstreamů z nasazené funkce; `include_raw` pro záchyt fixtures, `discover` pro hledání neověřených endpointů |
-| `dawmain_guide` | — | rešeršní návod (`skills/dawmain-reserse/SKILL.md` bez front matter) v jedné odpovědi, přizpůsobený volajícímu (`tailorManual`: sekce zdrojů, které účet nemá — Vlastní soubory, Zotero, UKAŽ — se vynechají a poznámka pod nadpisem říká jejich nástroje nevolat; pravidla jsou táž jako v branách nástrojů, při výpadku Clerku se nevynechá nic), čtený ze stromu repa za běhu (`outputFileTracingIncludes` v `next.config.ts` ho přibalí do funkce); instrukce serveru říkají modelu zavolat ho jednou na začátku každé rešerše — skill v claude.ai tak nikdo instalovat nemusí a každá konverzace čte nasazenou verzi; test hlídá velikost pod `SKILL_MAX_CHARS` |
+| `dawmain_probe_sources` | — | diagnostika všech upstreamů z nasazeného serveru; `include_raw` pro záchyt fixtures, `discover` pro hledání neověřených endpointů |
+| `dawmain_guide` | — | rešeršní návod (`skills/dawmain-reserse/SKILL.md` bez front matter) v jedné odpovědi, přizpůsobený volajícímu (`tailorManual`: sekce zdrojů, které účet nemá — Vlastní soubory, Zotero, UKAŽ — se vynechají a poznámka pod nadpisem říká jejich nástroje nevolat; pravidla jsou táž jako v branách nástrojů, při výpadku Clerku se nevynechá nic), čtený ze stromu repa za běhu (`outputFileTracingIncludes` v `next.config.ts` ho přibalí do standalone buildu); instrukce serveru říkají modelu zavolat ho jednou na začátku každé rešerše — skill v claude.ai tak nikdo instalovat nemusí a každá konverzace čte nasazenou verzi; test hlídá velikost pod `SKILL_MAX_CHARS` |
 
 Nástroje `files_*` sáhnou do databáze až po třech kontrolách, které se jí
 nedotknou, v tomto pořadí: režim z env (`FILES_MODE`) → přihlášení OAuth
 (sdílený kód ani anonym nemají uživatele) → knihovna s Pro u Clerku. Kdo
 neprojde, dostane jednu chybovou odpověď s pokynem `files_*` v konverzaci
-znovu nevolat — Neon se tak neprobouzí kvůli volajícím, kteří Vlastní zdroje
-nemají. Veškerý text z dokumentů (i názvy, nadpisy a autoři) jde do plotu
+znovu nevolat — databáze se tak nezatěžuje kvůli volajícím, kteří Vlastní
+zdroje nemají. Veškerý text z dokumentů (i názvy, nadpisy a autoři) jde do plotu
 `⟦DOC nonce⟧ … ⟦/DOC nonce⟧` s náhodným nonce na každou odpověď — pro model
 data, ne instrukce; nápovědy nástroje jsou až za plotem. Limit 60 volání za
 hodinu na uživatele.
@@ -48,7 +48,7 @@ Nástroje `zotero_*` pošlou první požadavek na Zotero až po pěti krocích b
 (`zoteroGate` v `src/mcp/tools/zotero.ts`): nasazení má OAuth aplikaci,
 `CREDENTIALS_SECRET` i Clerk (`zoteroConfigured`) → osobní přihlášení OAuth
 s Pro (`personalProCaller`, stejný nárok jako `files_*`, ale **bez** vypínačů
-`FILES_MODE` — Zotero Neon nepotřebuje) → vlastní hodinový limit
+`FILES_MODE` — Zotero databázi nepotřebuje) → vlastní hodinový limit
 `zotero:<userId>` (`LIMITS.toolCallsPerHour` = 120) → pojistka neplatných
 klíčů v instanci → uložené připojení z Clerku (žádné / zneplatněné /
 nečitelné = připojit znovu na `/?zotero=1`). Odmítnutí kromě limitu a
@@ -157,7 +157,7 @@ app/vlastni-zdroje/         vstup do Vlastních zdrojů na webu (modální okno 
                             stránkou, /?zdroje=moje); provoz/ = stránka provozovatele
 app/api/files/…             nahrání, stav zpracování, souhrn, dokumenty
 app/api/webhooks/clerk/     smazání účtu (i dřívějšího týmu) → výmaz knihovny po 7 dnech
-app/api/cron/files/         denní úklid a pojistky (vercel.json, 03:00 UTC)
+app/api/cron/files/         denní úklid a pojistky (dawmain-cron.timer, 04:00)
 scripts/db-migrate.mjs      migrace — ručně, vlastnickým připojením
 ```
 
@@ -191,69 +191,66 @@ npm run smoke        # po drátě proti běžícímu serveru (bez upstreamů)
 ```
 
 Pozor: soudní weby nejsou dostupné z každé sítě (CI, sandboxy). Integrační
-ověření se dělá **proti nasazení**:
+ověření se dělá **proti běžící instanci**. Produkce přijímá jen přihlášení
+účtem (OAuth přes Clerk), takže smoke s přístupovým kódem jde jen proti
+instanci, která `MCP_BEARER_TOKEN` zná — lokálně, nebo proti kandidátovi
+vydání, kterého `deploy.sh` pouští na vedlejším portu:
 
 ```bash
-MCP_URL=https://<deployment>.vercel.app/api/mcp MCP_BEARER_TOKEN=… npm run smoke
+MCP_URL=http://127.0.0.1:3000/api/mcp MCP_BEARER_TOKEN=… npm run smoke
 MCP_URL=… MCP_BEARER_TOKEN=… SMOKE_LIVE=1 npm run smoke   # + reálné dotazy do zdrojů
 ```
 
-## Nasazení na Vercel
+Bez `MCP_BEARER_TOKEN` smoke ověří aspoň to, že anonymní požadavek dostane
+401, a OAuth discovery.
 
-Repo je propojené přes Git integraci — push nasadí preview, merge do `main`
-produkci. Next.js si Vercel detekuje sám; `vercel.json` nese jen denní cron
-Vlastních zdrojů. Node ≥ 22 (`engines` v `package.json`, vyžaduje ho `ai@7`).
-Vlastní zdroje se zapínají zvlášť — viz [Vlastní zdroje — provoz](#vlastní-zdroje--provoz).
+## Nasazení
 
-**Po prvním nasazení:**
+Produkce běží jen na vlastním serveru (Proxmox, LXC `web`, služba systemd,
+standalone build Next.js) za Cloudflare (DNS proxy + Cloudflare Tunnel).
+Kontejnery, síť, databáze a zálohy popisuje
+[infra/proxmox.md](infra/proxmox.md), soubory nasazení jsou v `deploy/web/`;
+historii přesunu z Vercelu a Neonu (16. 11. 2026) zachycuje
+[infra/migrace-z-vercelu.md](infra/migrace-z-vercelu.md). Node ≥ 22
+(`engines` v `package.json`, vyžaduje ho `ai@7`).
 
-1. *Project Settings → Environment Variables*: `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
-   + `CLERK_SECRET_KEY` a/nebo `MCP_BEARER_TOKEN`, `ESBIRKA_API_KEY` (viz
-   `.env.example`); *Functions → Region*: `fra1`. Po změně env je potřeba
-   Redeploy.
-2. *Project Settings → Functions → Fluid compute*: musí být **zapnuté** (u
-   projektů založených od roku 2025 výchozí; `vercel.json` ho navíc žádá
-   pro každé nasazení přes `"fluid": true`, ale ověř to). Pět cest Vlastních
-   zdrojů má `maxDuration = 300` (`/api/files/documents`,
-   `/api/files/documents/[id]`, `/api/files/status`, `/api/cron/files`);
-   bez Fluid dovolí Hobby nejvýš 60 s — nasazení
-   takovou hodnotu odmítne, nebo zpracování dlouhého dokumentu uřízne. Na Fluid
-   počítá i `attachDatabasePool` v `src/files/db/client.ts` (zavře nečinná
-   spojení do Neonu, než se instance uspí).
-3. Spusť smoke proti nasazení (viz výše), pak `SMOKE_LIVE=1`.
-4. Zavolej `dawmain_probe_sources` — ověří všechny upstreamy z nasazení.
-5. `dawmain_probe_sources {discover: true}` vypíše skutečná pole formuláře
+- **Nastavení** `/etc/dawmain/env` (proměnné ze sekce „Server“ v
+  `.env.example` a produkční klíče). `NEXT_PUBLIC_*` se čtou při buildu,
+  ostatní při startu služby.
+- **Proměnné běhu** (`src/runtime.ts`): `PUBLIC_URL` (adresa na úvodní
+  stránce, v odkazu na nahrávání a v OAuth discovery), `APP_ENV`,
+  `APP_REGION`, `GIT_SHA` (ukazuje `dawmain_ping`; `region: home`).
+- `DAWMAIN_REQUIRE_AUTH=1` — endpoint odmítne anonymní požadavky i bez tokenu
+  a bez Clerku. Fail-closed: vypíná jen `0` / `false` / `off` / `no`; když
+  chybí, vyžaduje přihlášení každý produkční server (`NODE_ENV=production`),
+  `npm run dev` zůstává anonymní.
+- `TRUST_FORWARDED_HOST` — výchozí stav je **nevěřit** `X-Forwarded-Host` a
+  `-Proto`, které může poslat kdokoli (Cloudflare Tunnel předává veřejný
+  `Host` sám); OAuth discovery nabízí `PUBLIC_URL`. Unit pevně nastavuje `0`;
+  `1` jen za proxy, která ty hlavičky přepisuje.
+- **Nasazení** (`deploy/web/deploy.sh`, jako `dawmain`): `NEXT_OUTPUT=standalone`
+  (samostatný `server.js`), `NEXT_DEPLOYMENT_ID` (verze vydání); sestaví
+  vydání, na vedlejším portu ověří 401 bez tokenu a smoke test a teprve pak
+  přepne `current`; když se služba po restartu nezvedne, vrátí předchozí
+  vydání. Uživatel `dawmain` k tomu potřebuje jediné právo:
+  `dawmain ALL=(root) NOPASSWD: /bin/systemctl restart dawmain-web`
+  (soubor v `/etc/sudoers.d/`). Po změně unit souborů je zkopírovat do
+  `/etc/systemd/system/` a `systemctl daemon-reload`.
+- **Denní údržba** Vlastních zdrojů: `deploy/web/dawmain-cron.timer` volá
+  `/api/cron/files` s `CRON_SECRET`.
+- **Záloha databáze**: `deploy/web/backup-files.sh` + `dawmain-backup.timer`
+  jsou připravené, ale zatím vypnuté — záloha mimo stroj neběží.
+- `deploy/web/migrace/` jsou jednorázové nástroje přesunu (už se nespouštějí).
+
+Po nasazení:
+
+1. `dawmain_ping` (region, commit, `auth: oauth`).
+2. Zavolej `dawmain_probe_sources` — ověří všechny upstreamy ze serveru.
+3. `dawmain_probe_sources {discover: true}` vypíše skutečná pole formuláře
    NSS — slouží k doladění mapování v `src/sources/nss.ts`.
-6. `dawmain_probe_sources {include_raw: true, sources: ["ns"]}` zachytí syrové
+4. `dawmain_probe_sources {include_raw: true, sources: ["ns"]}` zachytí syrové
    tělo odpovědi jako podklad pro fixture (po jednom zdroji — všechny naráz se
    nevejdou do rozpočtu odpovědi).
-
-## Nasazení doma (Proxmox)
-
-Tentýž commit běží i na domácím serveru v LXC `web`; postup stěhování,
-fáze a návrat jsou v [infra/migrace-z-vercelu.md](infra/migrace-z-vercelu.md).
-Co se oproti Vercelu liší v kódu (vše v `src/runtime.ts`, každá proměnná má
-Vercelí náhradu, takže na Vercelu se nic nemění):
-
-- `PUBLIC_URL`, `APP_ENV`, `APP_REGION`, `GIT_SHA` nahrazují `VERCEL_*`
-  (adresa na úvodní stránce a v odkazu na nahrávání, `dawmain_ping`).
-  `dawmain_ping` ukazuje `region: home`, takže se pozná, které nasazení
-  odpovědělo.
-- `DAWMAIN_REQUIRE_AUTH=1` — endpoint odmítne anonymní požadavky i bez tokenu
-  a bez Clerku (na Vercelu to dělá `VERCEL`). Fail-closed: vypíná jen
-  `0` / `false` / `off` / `no`.
-- `TRUST_FORWARDED_HOST=0` — adresa webu se neodvozuje z `X-Forwarded-Host`
-  a `-Proto`, které může poslat kdokoli; OAuth discovery nabízí `PUBLIC_URL`.
-- Build: `NEXT_OUTPUT=standalone` (samostatný `server.js`),
-  `NEXT_DEPLOYMENT_ID` (verze vydání). `deploy/web/deploy.sh` je nastaví,
-  sestaví vydání, na vedlejším portu ověří 401 bez tokenu a smoke test a
-  teprve pak přepne `current`; když se služba po restartu nezvedne, vrátí
-  předchozí vydání. Uživatel `dawmain` k tomu potřebuje jediné právo:
-  `dawmain ALL=(root) NOPASSWD: /bin/systemctl restart dawmain-web`
-  (soubor v `/etc/sudoers.d/`).
-- Denní úklid Vlastních zdrojů místo Vercel Cronu: `deploy/web/dawmain-cron.timer`
-  volá `/api/cron/files` s `CRON_SECRET`. Povolit až při přepnutí domény.
-- AI Gateway: místo OIDC `AI_GATEWAY_API_KEY`.
 
 ## Připojení klienta
 
@@ -261,13 +258,14 @@ S OAuth (Clerk) stačí URL — klient si při prvním použití řekne o přihl
 (`/mcp` → authenticate v Claude Code, v claude.ai se okno otevře samo):
 
 ```bash
-claude mcp add --transport http dawmain https://<deployment>.vercel.app/api/mcp
+claude mcp add --transport http dawmain https://dawmain.davidzavada.cz/api/mcp
 ```
 
-S přístupovým kódem (hodí se pro CI a skripty):
+S přístupovým kódem — jen proti instanci, která `MCP_BEARER_TOKEN` zná
+(lokální vývoj, smoke testy); produkce ho nepřijímá:
 
 ```bash
-claude mcp add --transport http dawmain https://<deployment>.vercel.app/api/mcp --header "Authorization: Bearer <token>"
+claude mcp add --transport http dawmain http://127.0.0.1:3000/api/mcp --header "Authorization: Bearer <token>"
 ```
 
 ```json
@@ -275,7 +273,7 @@ claude mcp add --transport http dawmain https://<deployment>.vercel.app/api/mcp 
   "mcpServers": {
     "dawmain": {
       "type": "http",
-      "url": "https://<deployment>.vercel.app/api/mcp",
+      "url": "http://127.0.0.1:3000/api/mcp",
       "headers": { "Authorization": "Bearer <token>" }
     }
   }
@@ -302,7 +300,7 @@ celý návod mu jinak v prvním kole každé rešerše ukládal tři volání
 (`files_search`, `zotero_search`, `doctrine_search`), která mohla odpovědět
 jen „pro tento účet není“. Stažený skill (`/dawmain-reserse.md`) zůstává celý.
 Nic se neinstaluje a nic nezastarává; merge do main = aktualizovaný návod
-pro všechny. Soubor se do funkce dostane přes `outputFileTracingIncludes`
+pro všechny. Soubor se do standalone buildu dostane přes `outputFileTracingIncludes`
 (route `/dawmain-reserse.md` pro stažení ho čte při buildu, nástroj za běhu).
 
 Ruční instalace v claude.ai (Nastavení → Capabilities → Skills, nahrát
@@ -348,17 +346,19 @@ má, nese si vlastní kopii, kterou musí sám obnovovat.
 - Timeouty: výchozí 15 s/request; odchylky: NSS POST 25 s, psp.cz soubor 25 s, Cellar retrieval 25 s,
   Cellar SPARQL 30 s, justice.cz hledání 45 s, e-Sbírka SPARQL 20 s, katalogy
   doktríny 20 s.
-- Délka invokace: `/api/mcp` má `maxDuration = 60`. Hobby s Fluid compute by
-  dovolil až 300 s, ale odpověď nástroje má přijít dřív, než to klient vzdá, a
-  delší běh jen ukrajuje z měsíčního rozpočtu Hobby (Active CPU, paměť), jehož
-  překročení pozastaví celý tým. Pomalé zdroje proto mají timeouty pod touto
-  hranicí. Celé volání nástroje hlídá `CALL_BUDGET_MS` = 54 s od příchodu
-  requestu (hodiny `runWithCallClock` v route, `src/sources/shared/clock.ts`):
-  po něm registr odpoví textovou chybou místo useknutého streamu. Rozpočty
-  jednotlivých zdrojů (NS/NALUS náhledy, Cellar) se počítají přes
+- Délka volání: každé volání nástroje má strop 60 s (pro něj byly nástroje
+  postavené na Vercelu a zůstává; Cloudflare před serverem ukončí každý
+  požadavek po 100 s). Odpověď nástroje má přijít dřív, než to klient vzdá,
+  pomalé zdroje proto mají timeouty pod touto hranicí. Celé volání nástroje
+  hlídá `CALL_BUDGET_MS` = 54 s od příchodu requestu (hodiny
+  `runWithCallClock` v route, `src/sources/shared/clock.ts`): po něm registr
+  odpoví textovou chybou místo useknutého streamu. Rozpočty jednotlivých
+  zdrojů (NS/NALUS náhledy, Cellar) se počítají přes
   `callDeadline` a končí nejpozději 3 s před touto hranicí, aby jejich
-  částečné výsledky a nápovědy stihly odejít. Až 300 s běží jen nahrání a
-  zpracování dokumentu Vlastních zdrojů.
+  částečné výsledky a nápovědy stihly odejít. Nahrání a zpracování dokumentu
+  Vlastních zdrojů běží v `after()` po odpovědi a žádný strop serveru nemá.
+  (Exporty `maxDuration` z rout zmizely: byly to nastavení Vercelu,
+  standalone server je nečte.)
 
 ## Autentizace
 
@@ -384,14 +384,15 @@ Endpoint přijímá dvě credentials naráz (stačí kterákoli); logika žije v
    transport platil u každého HTTP požadavku (initialize, tools/list, každé
    tools/call). Odvolaný nebo propadlý token tak platí nejvýš o minutu déle
    — stejnou minutu, po kterou se cachuje přístup účtu.
-2. **Sdílený přístupový kód** (`MCP_BEARER_TOKEN`) — původní schéma,
-   ponechané pro existující klienty; token se přijímá z `Authorization`,
-   `X-API-Key` i `cf-aig-authorization` (stačí, když sedí kterákoli).
+2. **Sdílený přístupový kód** (`MCP_BEARER_TOKEN`) — původní schéma. Produkce
+   ho nenastavuje (přihlášení jen účtem); zůstává pro lokální vývoj a smoke
+   testy. Token se přijímá z `Authorization`, `X-API-Key` i
+   `cf-aig-authorization` (stačí, když sedí kterákoli).
 
-**Bez těchto proměnných se na Vercelu odmítne všechno** — prázdná nebo chybějící
-konfigurace by jinak tiše zveřejnila celý server, a to i na preview adresách;
-proto proměnné zaškrtni pro Production i Preview. Anonymní provoz je možný jen
-lokálně. Aktuální stav hlásí `dawmain_ping` polem `auth`
+**Produkční server bez těchto proměnných odmítne všechno**
+(`DAWMAIN_REQUIRE_AUTH`, a i bez něj `NODE_ENV=production`) — prázdná nebo
+chybějící konfigurace by jinak tiše zveřejnila celý server. Anonymní provoz
+je možný jen v `npm run dev`. Aktuální stav hlásí `dawmain_ping` polem `auth`
 (`oauth+token` / `oauth` / `token` / `open`).
 
 ### Nastavení Clerku (jednorázově, dashboard.clerk.com)
@@ -403,7 +404,8 @@ lokálně. Aktuální stav hlásí `dawmain_ping` polem `auth`
 2. **Dynamic Client Registration** (nutné pro MCP klienty typu claude.ai):
    *Configure → OAuth applications → povolit Dynamic Client Registration*.
 3. **API klíče**: *Configure → API keys* → `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
-   a `CLERK_SECRET_KEY` vlož na Vercelu (Production i Preview) a Redeploy.
+   a `CLERK_SECRET_KEY` vlož do `/etc/dawmain/env` a nasaď znovu
+   (`deploy.sh`; publishable key se čte při buildu).
 4. **Kdo se smí registrovat**: veřejná registrace pustí dovnitř kohokoli.
    Adresné rozdávání přístupu = *Configure → Restrictions* (allowlist /
    vypnout sign-up) a uživatele zvát z dashboardu (*Users → Invite*).
@@ -418,42 +420,26 @@ přihlašovací okno. Diskovery kontroluje i `npm run smoke` (krok
 ## Vlastní zdroje — provoz
 
 Uživatel s Pro si na webu nahraje vlastní dokumenty; prohlížeč je převede na
-text (DMD), server ho uloží do Neon Postgresu ve Frankfurtu, zaindexuje
-(český stemmer běží v aplikaci), navrhne metadata (heuristiky + Gemini přes
-AI Gateway) a hned po zpracování v nich hledají nástroje `files_*` (metadata
-uživatel opraví v detailu dokumentu; krok kontroly před hledáním zapne knihovně
-`settings.autoConfirm = false`). Originály se
-nikam neukládají. Všechno běží zdarma: Vercel Hobby, Clerk, Neon Free a
-měsíční kredit AI Gateway. **Překročení limitů Hobby pozastaví celý tým
-včetně `/api/mcp`**, Neon při vyčerpání zablokuje zápisy nebo uspí databázi do
-konce měsíce — proto pojistky níže. Bez nastavení je funkce vypnutá
-(`FILES_MODE` chybí → `off`, chybí `FILES_DATABASE_URL` → `unconfigured`).
-
-**Před spuštěním** si přečti *Vercel → Usage* za posledních 30 dní (Active
-CPU 4 h, paměť 360 GB-h, 1M invokací, Fast Origin Transfer 10 GB) a nech
-Vlastním zdrojům nejvýš čtvrtinu zbývající rezervy.
-
-### Neon (Vercel Marketplace)
-
-1. *Vercel → Storage → Neon*: region **Frankfurt** (`aws-eu-central-1`),
-   plán **Free**. Compute pevně **0,25 CU** (autoscaling nahoru nepouštěj:
-   2 CU spálí 100 CU-h osmkrát rychleji); scale-to-zero po 5 min zůstává.
-2. **Preview branching vypnout.** Větve se počítají do 0,5 GB i do stejných
-   CU-h. Preview proto Vlastní zdroje nemá vůbec (`FILES_MODE=off`, žádné
-   další `FILES_*`) — jinak by psalo do produkčních dat.
-3. Integrace vloží do projektu `DATABASE_URL`, `DATABASE_URL_UNPOOLED` a
-   `PG*` s vlastnickou rolí. Aplikace je nečte (vlastník obchází RLS a
-   fallback na něj záměrně neexistuje) — nech je jen v Production, nebo je
-   z projektu odeber.
+text (DMD), server ho uloží do PostgreSQL na vlastním serveru (databáze
+`files`, [infra/proxmox.md](infra/proxmox.md)), zaindexuje (český stemmer
+běží v aplikaci), navrhne metadata (heuristiky; s `AI_GATEWAY_API_KEY` navíc
+Gemini přes AI Gateway — v produkci zatím vypnuto) a hned po zpracování v
+nich hledají nástroje `files_*` (metadata uživatel opraví v detailu
+dokumentu; krok kontroly před hledáním zapne knihovně
+`settings.autoConfirm = false`). Originály se nikam neukládají. Pojistky
+níže vznikly pro bezplatné plány Vercelu a Neonu (jejich překročení
+pozastavilo celý tým, resp. zablokovalo zápisy) a zatím platí beze změny.
+Bez nastavení je funkce vypnutá (`FILES_MODE` chybí → `off`, chybí
+`FILES_DATABASE_URL` → `unconfigured`).
 
 ### Migrace a role aplikace
 
 Migrace (`src/files/db/migrations/*.sql`) se pouštějí ručně z terminálu,
-vlastnickým přímým připojením (host bez `-pooler`), **před** nasazením, které
-je potřebuje — nikdy při buildu:
+vlastnickým připojením (`files_owner`, heslo v `/root/files-db-urls.env` v CT
+`web`), **před** nasazením, které je potřebuje — nikdy při buildu:
 
 ```bash
-DATABASE_URL_UNPOOLED='postgresql://neondb_owner:…@ep-….eu-central-1.aws.neon.tech/neondb?sslmode=require' \
+DATABASE_URL_UNPOOLED='postgresql://files_owner:…@10.10.10.2:5432/files' \
   node scripts/db-migrate.mjs
 ```
 
@@ -475,31 +461,31 @@ migraci, a teprve potom nasazuj. `0003`–`0005` přidávají jen sloupce `IF NO
 EXISTS`, indexy a funkce; `0006` jen zapne vypnuté dokumenty. Po nasazení je navíc potřeba přeindexovat starší
 dokumenty (`ANALYZER_VERSION` 2, viz Kapacita).
 
-Migrace `0002` založí roli `dawmain_app` SQL příkazem — jen taková role na
-Neonu nepatří do `neon_superuser` a neobchází RLS (roli proto nezakládej ani
-neupravuj v konzoli Neonu). Heslo jí dej jednou v SQL editoru Neonu jako
-vlastník; do gitu nepatří:
+Role `dawmain_app` nesmí obcházet RLS (`NOBYPASSRLS`, ne superuživatel). Na
+serveru ji založil ručně superuživatel a migrace `0002` ji jen zdědí (postup
+v [infra/proxmox.md](infra/proxmox.md), „Databáze `files`“); lokálně ji
+`0002` založí sama. Heslo jí dej jednou jako vlastník; do gitu nepatří:
 
 ```sql
 ALTER ROLE dawmain_app WITH LOGIN PASSWORD '<dlouhé náhodné heslo>';
 ```
 
-`FILES_DATABASE_URL` pak míří na **pooler** s touto rolí:
-`postgresql://dawmain_app:<heslo>@ep-…-pooler.eu-central-1.aws.neon.tech/neondb?sslmode=require`.
-Klient při prvním připojení ověří, že role nemá `rolbypassrls`, jinak odmítne
-běžet; `withScope` nastavuje knihovny jen transakčně, takže pooler v režimu
-transakcí je bezpečný.
+`FILES_DATABASE_URL` pak míří na databázi s touto rolí:
+`postgresql://dawmain_app:<heslo>@10.10.10.2:5432/files`.
+Klient při prvním připojení ověří, že role nemá `rolbypassrls` (ani
+`pg_read_all_data`), jinak odmítne běžet; `withScope` nastavuje knihovny jen
+transakčně, takže by byl bezpečný i pooler v režimu transakcí.
 
 ### Proměnné prostředí
 
-Vše **jen pro Production**; pro Preview nastav `FILES_MODE=off` (a nic
-dalšího kromě tří proměnných Zotera na konci tabulky). Po změně Redeploy.
+Na serveru v `/etc/dawmain/env`; po změně restart služby (`NEXT_PUBLIC_*`
+až novým buildem, `deploy.sh`).
 
 | Proměnná | Význam | Výchozí |
 | --- | --- | --- |
 | `FILES_MODE` | hlavní vypínač: `on`, `readonly` (hledání, čtení a mazání, bez nahrávání), `off` | `off` |
-| `FILES_DATABASE_URL` | pooled URL role `dawmain_app`; bez ní `unconfigured` | — |
-| `DATABASE_URL_UNPOOLED` | vlastnické přímé připojení, jen pro `scripts/db-migrate.mjs` z terminálu; aplikace ho nečte | — |
+| `FILES_DATABASE_URL` | URL role `dawmain_app`; bez ní `unconfigured` | — |
+| `DATABASE_URL_UNPOOLED` | vlastnické připojení (`files_owner`), jen pro `scripts/db-migrate.mjs` z terminálu; aplikace ho nečte | — |
 | `FILES_META_MODEL` | model pro návrh metadat přes AI Gateway | `google/gemini-2.5-flash-lite` |
 | `FILES_USER_HASH_SECRET` | klíč HMAC pro pseudonym nahrávajícího, který dostává AI Gateway k rozpočítání spotřeby (`gateway.user`, čte `src/files/ingest.ts`); dlouhý náhodný řetězec. Změna klíče = nové pseudonymy v přehledu Gateway | `CLERK_SECRET_KEY` |
 | `FILES_GLOBAL_MAX_PAGES` | strop stran pro celou instalaci | 30 000 |
@@ -509,11 +495,11 @@ dalšího kromě tří proměnných Zotera na konci tabulky). Po změně Redeplo
 | `FILES_AI_BUDGET_USD` | klouzavý 30denní rozpočet AI v celých USD; nad ním jen heuristiky | 4 |
 | `FILES_GLOBAL_UPLOADS_PER_DAY` | nahrání za den ve všech knihovnách dohromady | 200 |
 | `FILES_CPU_MS_DAY` | CPU zpracování (nahrání, zpracování, přeindexování) za den v ms | 600 000 (10 min) |
-| `FILES_CPU_MS_30D` | totéž za klouzavých 30 dní — čtvrtina 4 h Active CPU Hobby | 3 600 000 (60 min) |
+| `FILES_CPU_MS_30D` | totéž za klouzavých 30 dní (dimenzované na bývalý Vercel Hobby) | 3 600 000 (60 min) |
 | `CLERK_WEBHOOK_SIGNING_SECRET` | podpisový klíč webhooku Clerku (`whsec_…`) | — |
-| `CRON_SECRET` | Vercel ho posílá cronu jako `Authorization: Bearer …`; bez něj cron odmítne všechno | — |
-| `AI_GATEWAY_API_KEY` | jen lokálně (`.env.local`); na Vercelu se Gateway ověřuje přes OIDC a klíč by ho přebil | — |
-| `ZOTERO_OAUTH_CLIENT_KEY` | Zotero: Client Key aplikace z zotero.org/oauth/apps; nastavuje se **i pro Preview** (viz Zotero — provoz) | — (Zotero vypnuté) |
+| `CRON_SECRET` | `dawmain-cron.service` ho posílá jako `Authorization: Bearer …`; bez něj cron odmítne všechno | — |
+| `AI_GATEWAY_API_KEY` | zapíná návrh metadat přes AI Gateway; bez něj jen heuristiky a text dokumentu nejde k žádnému poskytovateli AI (v produkci zatím nenastaveno) | — |
+| `ZOTERO_OAUTH_CLIENT_KEY` | Zotero: Client Key aplikace z zotero.org/oauth/apps (viz Zotero — provoz) | — (Zotero vypnuté) |
 | `ZOTERO_OAUTH_CLIENT_SECRET` | Zotero: Client Secret téže aplikace | — (Zotero vypnuté) |
 | `CREDENTIALS_SECRET` | Zotero: klíč pečetění uložených klíčů (AES-256-GCM přes HKDF), ≥ 32 znaků, `openssl rand -base64 32`; změna = všichni připojí Zotero znovu | — (Zotero vypnuté) |
 
@@ -582,22 +568,26 @@ přepsat v Clerku (níže).
 6. **Webhook**: *Configure → Webhooks → Add endpoint*
    `https://<doména>/api/webhooks/clerk`, události `user.deleted`,
    `organization.deleted`, `organizationMembership.deleted`; *Signing
-   secret* → `CLERK_WEBHOOK_SIGNING_SECRET` (Production) → Redeploy. Smazání
+   secret* → `CLERK_WEBHOOK_SIGNING_SECRET` → restart služby. Smazání
    účtu nebo týmu označí knihovnu k výmazu za 7 dní (vymaže ji denní cron).
    Doručení Clerk nezaručuje; výpadek webhooku zachytí denní kontrola Pro
    v cronu (smazaný účet ani tým Pro nemá).
 
 ### AI Gateway (návrh metadat)
 
-1. *Vercel → AI Gateway*: přidej kartu — bez ní se Hobby nedostane k
+V produkci je **vypnutý** (`AI_GATEWAY_API_KEY` není nastavený): metadata
+navrhují jen heuristiky a žádný text dokumentu neodchází k poskytovateli AI.
+`/soukromi` to popisuje podmíněně („když je návrh … zapnutý“), takže zapnutí
+text měnit nemusí, dokud zůstane Vercel + Google. Zapnutí:
+
+1. Účet u Vercelu s *AI Gateway* a kartou — bez ní se nedostaneš k
    bezplatnému kreditu **5 USD na 30 dní** (hodiny běží od prvního požadavku).
 2. Zkontroluj seznam modelů zdarma (`vercel.com/ai-gateway/models?freeTier=true`)
    a nastav `FILES_META_MODEL` na Gemini Flash-Lite, který v něm je. Řada 2.5
    končí kolem 16.–20. 10. 2026; modely Claude zdarma nejsou.
 3. **Auto-recharge vypnutý a kredit nekupovat** — první nákup ukončí
    bezplatný kredit natrvalo.
-4. Na Vercelu se Gateway ověřuje sama přes OIDC. `AI_GATEWAY_API_KEY` patří
-   jen do lokálního `.env.local`; na Vercelu by OIDC přebil.
+4. API klíč Gateway do `AI_GATEWAY_API_KEY` v `/etc/dawmain/env`, restart.
 
 Požadavky nesou `disallowPromptTraining: true` a text dokumentu jen jako data
 (bez nástrojů, `maxOutputTokens` 1000). Selhání AI nahrání neblokuje — zůstanou
@@ -615,43 +605,42 @@ nejdřív uprav `/soukromi` a dej uživatelům vědět (viz Právní texty níž
   nechávají smazané řádky — z katalogových statistik). Smazání dokumentů
   proto režim jen pro čtení zruší, jakmile doběhne autovacuum. Soubory samy se
   mazáním nezmenší: fyzická velikost ≥ 400 MiB (strop vlastníka, 100 %)
-  vypne nahrávání vždy — Neon počítá všechny databáze projektu a pojistka se
-  měří jen po 30 s.
+  vypne nahrávání vždy — pojistka se měří jen po 30 s.
 - **Zmenšení souborů** (`VACUUM FULL`): stránka provozu ukáže plán, jakmile
   jde uvolnit aspoň 20 % stropu — pořadí tabulek, které se vejdou, a ty, které
   se nevejdou, dokud z nich nesmažeš dokumenty. Pouštěj jako vlastník, v
   klidném okně, **tabulky po jedné** (každá je po dobu přepisu zamčená).
   Přepis zapíše novou kopii tabulky i indexů, než smaže starou — potřebuje
-  volné místo pod 0,5 GB Neonu zhruba ve velikosti živých dat té tabulky.
+  volné místo pod stropem 0,5 GB zhruba ve velikosti živých dat té tabulky.
 - **CPU zpracování**: nahrání, zpracování a přeindexování si zapisují vlastní
   čas CPU (`usage_daily.cpu_ms`, jen synchronní práce — ne čekání na síť ani
   cizí požadavky na téže instanci). Nad 10 min za den nebo 60 min za 30 dní
-  (čtvrtina 4 h Active CPU Hobby; `FILES_CPU_MS_DAY`, `FILES_CPU_MS_30D`)
+  (čtvrtina 4 h Active CPU bývalého Vercel Hobby; `FILES_CPU_MS_DAY`, `FILES_CPU_MS_30D`)
   se nové nahrání odmítne (429) a přeindexování počká; nad 200 nahrání za den
-  ve všech knihovnách také (`FILES_GLOBAL_UPLOADS_PER_DAY`). Číslo je spodní
-  odhad účtovaného Active CPU — porovnej ho se stránkou Usage na Vercelu.
-- **Odhad CU-h**: Neon Free nemá API spotřeby, aplikace si proto zapisuje
+  ve všech knihovnách také (`FILES_GLOBAL_UPLOADS_PER_DAY`).
+- **Odhad CU-h** (zbytek z Neon Free, který neměl API spotřeby; na vlastním
+  serveru nic neúčtuje, ale pojistka dál platí): aplikace si zapisuje
   každou minutu, kdy sáhla do DB (`db_activity`), a počítá sjednocení
   intervalů [minuta, minuta + 5 min] × 0,25 CU. Každé probuzení stojí aspoň
   5 minut — i proto nástroje nesahají do DB kvůli volajícím bez Pro.
 - **Vypínač**: přepínač režimu na stránce provozu (`system_state`, bez
-  redeploye, projeví se do 30 s), nebo `FILES_MODE=off` + Redeploy. Když
+  restartu, projeví se do 30 s), nebo `FILES_MODE=off` + restart služby. Když
   pojistky vypnou funkci kvůli CU-h (90 %), každá instance si to pamatuje do
   začátku dalšího měsíce UTC a DB kvůli tomu nebudí; přepínač „off“ se ale
-  čte každých 30 s. **Probouzení DB úplně zastaví jen `FILES_MODE=off` +
-  Redeploy.**
-- Pool nenastavuje žádné startovní parametry (pooler Neonu
-  `statement_timeout` při startu spojení odmítne); `withScope` nastavuje
+  čte každých 30 s. **Dotazy do DB úplně zastaví jen `FILES_MODE=off` +
+  restart služby.**
+- Pool nenastavuje žádné startovní parametry (pooler v režimu transakcí by
+  `statement_timeout` při startu spojení odmítl); `withScope` nastavuje
   `statement_timeout` pro každou transakci (`set_config(…, true)`): 10 s,
   60 s pro zpracování, přeindexování a výmaz. `connectionTimeoutMillis` 4 s —
-  uspaný Neon dá rychlou odpověď „dočasně nedostupné“, ne 60 s čekání.
+  nedostupná databáze dá rychlou odpověď „dočasně nedostupné“, ne 60 s čekání.
 - **Přeindexování po uložení metadat** (změna typu dokumentu nebo
   komentovaného předpisu): nejvýš 20 za den na knihovnu; žádné, dokud je
   vyčerpaná společná rezerva CPU (výše). Opakované uložení během běžícího
   přeindexování se k němu připojí. Odmítnuté zůstanou označené a dožene je
   denní cron.
-- Denní cron (`/api/cron/files`, 03:00 UTC; Hobby smí jednou denně s
-  přesností na hodinu): pojistky a velikost DB; výmaz knihoven po lhůtě
+- Denní cron (`/api/cron/files`, `dawmain-cron.timer` ve 04:00 místního
+  času): pojistky a velikost DB; výmaz knihoven po lhůtě
   (knihovnu, kterou mezitím nahrání oživilo, nechá být); kontrola Pro (≤ 50
   dotazů do Clerku; obnovené Pro u knihovny označené k výmazu po 6 dnech
   označení zruší; u smazaného účtu, který minul webhook, zahodí i souhlas s
@@ -668,8 +657,8 @@ nejdřív uprav `/soukromi` a dej uživatelům vědět (viz Právní texty níž
 Odhad je 9–12 KB databáze na stranu (text uložený jednou a komprimovaný,
 chunky s tsvectorem, GIN, strany, oddíly, poznámky), tedy **zhruba 30 000
 stran** v 0,5 GB — horní odhad; do změření drž `FILES_GLOBAL_MAX_PAGES` raději
-na 20 000. **Po prvních 3 skutečných knihách změř** (SQL editor Neonu jako
-vlastník — roli aplikace RLS nic neukáže):
+na 20 000. **Po prvních 3 skutečných knihách změř** (`psql` jako vlastník
+`files_owner` — roli aplikace RLS nic neukáže):
 
 ```sql
 SELECT relname, pg_size_pretty(pg_total_relation_size(oid))
@@ -694,15 +683,16 @@ režim „on“ a nad 60 % DB má dávka nejvýš 10 dokumentů.
 filtr `act` u předpisu EU pak vrací i pasáže, které ho citují, nejen
 komentáře k němu. Dokumenty nahrané dřív to umí až po přeindexování.
 
-**Zálohy nejsou.** Neon Free drží 6 h historie změn a nabízí jeden ruční
-snapshot — **snapshot nedělej a obsah nedumpuj**: smazané dokumenty by
-přežily déle, než slibuje `/soukromi` (nejvýš 6 hodin). Originály mají
-uživatelé u sebe a podmínky výslovně říkají, že záloha není.
+**Zálohy zatím nejsou.** `backup-files.sh` a `dawmain-backup.timer` jsou
+připravené, ale vypnuté. `/soukromi` dnes říká, že databázi pravidelně
+nezálohuješ a smazaný dokument může zůstat nejvýš ve snímku CT `pg`
+pořízeném před údržbou databáze, dokud ho nesmažeš — snímky proto po
+údržbě mazat. **Než zálohu zapneš, uprav `/soukromi`** (jak dlouho smazané
+dokumenty v záloze přežijí) a podmínky („Záloha není“). Originály mají
+uživatelé u sebe.
 
-**Další placený krok**: Neon Launch (platí se podle spotřeby, při tomhle
-objemu řádově 5–15 USD měsíčně). Pak zvedni `LIMITS.dbBytesCap`
-(`src/files/config.ts`) a stropy stran; delší historie obnovy (Launch až
-7 dní) znamená upravit dobu v `/soukromi`.
+Strop databáze (`LIMITS.dbBytesCap` 400 MB pod 0,5 GB) je zbytek z Neon Free;
+na vlastním serveru ho jde zvednout spolu se stropy stran (`src/files/config.ts`).
 
 ### Provoz a stav systému
 
@@ -748,32 +738,38 @@ přepočet v cronu.
 ### Právní texty
 
 Sliby v `/soukromi` a `/podminky` visí na konkrétních hodnotách — když se
-změní, změň i text, zvedni `EFFECTIVE` v `app/_legal.tsx` a napiš uživatelům
+změní, změň i text, zvedni „Účinné od“ (`legal.effective` v
+`src/content/texts.ts`) a napiš uživatelům
 měsíc předem (podmínky to slibují). `tests/files-legal-texts.test.ts` hlídá
 ty, které jdou přečíst z kódu.
 
-- zpracovatelé: Clerk, Vercel (+ Google přes AI Gateway), Neon — jiný model
-  nebo nová služba = nový subdodavatel; Gateway dostává jen pseudonym
+- zpracovatelé: Clerk, Cloudflare, a jen se zapnutým návrhem metadat Vercel
+  (+ Google přes AI Gateway); server i databáze jsou vlastní, v Česku — jiný
+  model nebo nová služba = nový subdodavatel; Gateway dostává jen pseudonym
   nahrávajícího (`FILES_USER_HASH_SECRET`);
-- výmaz knihovny 6 dní po smazání účtu/týmu nebo po odebrání Pro (+ nejvýš
-  den do cronu → text říká „do týdne“), 6 h historie Neonu; po výmazu
+- výmaz knihovny 6 dní po smazání účtu nebo po odebrání Pro (+ nejvýš den do
+  cronu → text říká „do týdne“; platí jen, dokud `dawmain-cron.timer` běží
+  denně), žádná pravidelná záloha, jen snímek před údržbou; po výmazu
   zůstane řádek knihovny bez jména a auditní záznam `library.purged`;
 - retence v cronu: text neúspěšného nahrání 7 dní, počítadla čtení a stažení
   2 dny, ostatní počítadla 12 měsíců, audit do výmazu knihovny;
 - export textu („Exportovat text“) — i po odebrání Pro;
 - kontaktní místo DSA (čl. 11 a 12): `CONTACT`, česky a anglicky;
-- region Frankfurt u Vercelu i Neonu, rozsah textu k návrhu metadat
-  (~16 000 znaků), cookies Clerku;
+- provozní záznamy serveru bez pevné lhůty („jen po dobu potřebnou k řešení
+  chyb“) — pevná lhůta by potřebovala nastavit retenci journald;
+- kopie judikatury českých soudů (zrcadlo): veřejná rozhodnutí, anonymizovaná
+  soudy, kopírovaná tak, jak jsou zveřejněná;
+- rozsah textu k návrhu metadat (~16 000 znaků), cookies Clerku;
 - Zotero: není zpracovatel (službu si připojuje uživatel, Dawmain na jeho
   pokyn čte), klíč jen ke čtení a zašifrovaný v `privateMetadata` Clerku,
   klíč s právem zápisu se odmítne a zruší, obsah knihovny jen v dočasné
   paměti (≤ 10 min), stažené PDF se neukládá, cookie `dz_zotero_oauth`
   (≤ 10 min) při připojování; po smazání účtu klíč zůstane na zotero.org.
 
-Znění s Vlastními zdroji má `EFFECTIVE` 1. 11. 2026 a na `main` ještě není
-(tam platí 1. 9. 2026). Dokud se nenasadí, dá se upravovat bez posunu data.
-E-mail uživatelům ale musí odejít nejpozději měsíc před účinností, tedy do
-1. 10. 2026 — když se to nestihne, posuň `EFFECTIVE` tak, aby měsíc zbyl.
+Výchozí znění má „Účinné od“ 16. 11. 2026 (odchod z Vercelu a Neonu: jiní
+zpracovatelé, místo uložení, žádná historie změn databáze). Texty uložené ve
+Správě (`/sprava/texty`) mají přednost před výchozím zněním z repa — změna
+výchozího textu se na web dostane, jen pokud dané pole uložené není.
 
 ### Evaluace vyhledávání
 
@@ -793,7 +789,7 @@ Bez `--db` si skript založí PGlite s produkčními migracemi a zaindexuje
 `corpus` ze sady (DMD, vložené nebo v souborech vedle JSON; metadata z
 heuristik, přepsaná polem `meta`). S `--db` hledá v dokumentech, které už v
 databázi jsou (role `dawmain_app`, RLS), jen v knihovnách z `--library` —
-raději lokální Postgres s kopií textů než Neon, každý běh ho probudí.
+raději lokální Postgres s kopií textů než produkční databázi.
 
 Sada je JSON `{ corpus: […], queries: […] }`. Dotaz bere `query` (nebo až 3
 `queries`) a volitelně `act`, `doc_type`, `case_number`, `in_footnotes`,
@@ -812,10 +808,10 @@ zapiš sem.
 ### Lokální vývoj
 
 `npm test` pouští i testy SQL a RLS proti PGlite (`tests/helpers/pglite.ts`),
-bez sítě a bez Neonu. Pro ruční zkoušení webu stačí lokální Postgres:
+bez sítě a bez databáze. Pro ruční zkoušení webu stačí lokální Postgres:
 migrace přes `DATABASE_URL_UNPOOLED`, heslo pro `dawmain_app`,
 `FILES_DATABASE_URL` + `FILES_MODE=on` v `.env.local`, pro návrh metadat
-`AI_GATEWAY_API_KEY`. Neon dev větev nepoužívej — bere stejné CU-h i místo.
+`AI_GATEWAY_API_KEY`.
 Evaluace vyhledávání (výše) běží bez databáze, na PGlite.
 
 ## Zotero — provoz
@@ -848,23 +844,22 @@ objeví samo.
 1. Na <https://www.zotero.org/oauth/apps> zaregistrovat aplikaci „Dawmain“
    s callbackem `https://<host>/api/zotero/callback` (`CALLBACK_PATH`).
    **Neověřeno**, zda Zotero registrovaný callback vynucuje (posíláme ho v
-   `oauth_callback` při každém požadavku): pokud ano, potřebuje Preview
-   vlastní aplikaci nebo stabilní alias (ne adresu jednoho deploye).
+   `oauth_callback` při každém požadavku): pokud ano, potřebuje jiná adresa
+   (lokální nebo zkušební instance) vlastní aplikaci.
 2. Client Key a Client Secret do `ZOTERO_OAUTH_CLIENT_KEY` a
    `ZOTERO_OAUTH_CLIENT_SECRET`.
 3. `CREDENTIALS_SECRET` — aspoň 32 znaků (`openssl rand -base64 32`);
    `src/secrets/seal.ts` z něj HKDF odvozuje klíč AES-256-GCM.
 
 Bez kterékoli z nich (nebo bez Clerku) je Zotero vypnuté: nástroje odpoví
-„není na tomto nasazení“, modál „nedostupné“. Na rozdíl od Vlastních zdrojů se
-nastavuje **i na Preview** (tam běží živý checklist níže). Po změně Redeploy.
+„není na tomto nasazení“, modál „nedostupné“. Po změně restart služby.
 
 ### Kde leží klíč
 
 V Clerku, `privateMetadata.zotero` (`src/zotero/store.ts`): `{v: 1, userID,
 username, sealed, fp, notes, groups, connectedAt, revokedAt}`. Klíč je
 zapečetěný (AES-256-GCM, AAD `zotero:<userId>` — zkopírovaný blob nejde
-otevřít pod jiným účtem), `fp` je krátký otisk klíče. Neon se nepoužívá, data
+otevřít pod jiným účtem), `fp` je krátký otisk klíče. Databáze se nepoužívá, data
 zmizí se smazáním účtu v Clerku. `updateUserMetadata` slučuje do hloubky a
 **`null` maže** klíč, kam se zapíše — `zotero: null` odpojí, `null` pole
 záznamu se čtou jako chybějící. Proto se záznam vždy zapisuje celý a čte
@@ -904,7 +899,7 @@ Hledání se necachuje; seznam skupin a kolekcí, text příloh a sken spisovýc
 značek 10 min (klíč cache vždy s userId).
 
 **Zotero blokuje celou IP** (429 pro všechny) po více než 5 neplatných
-klíčích z ní za 300 s — a IP Vercelu sdílí všichni uživatelé. Proto:
+klíčích z ní za 300 s — a IP serveru sdílí všichni uživatelé. Proto:
 odmítnutý klíč („Invalid key“ → `ZoteroKeyInvalidError`) si instance pamatuje
 podle otisku a znovu ho nepošle; nástroj ho hned `markRevoked` označí v
 Clerku (podle `fp`, takže nezruší novější klíč připojený mezitím) a další
@@ -935,9 +930,9 @@ ale **zůstanou platné na zotero.org** (bez otevřeného klíče je Dawmain
 nezruší) — uživatelé si je smažou na zotero.org/settings/keys. Proto
 rotovat jen při úniku.
 
-### Živý checklist na Preview
+### Živý checklist
 
-Nasadit s proměnnými výše, `MCP_URL=… npm run smoke` a `SMOKE_LIVE=1`
+Na instanci s proměnnými výše, `MCP_URL=… npm run smoke` a `SMOKE_LIVE=1`
 (kanárek `zotero` projde). Pak se skutečným účtem Zotero (osobní knihovna +
 skupina):
 
@@ -954,20 +949,20 @@ skupina):
 5. `zotero_get_text`: indexované PDF stránkuje a `find` funguje; PDF nahrané
    jen přes web (neindexované) → text vytažený z PDF; PDF nad 100 stran →
    dočte i strany za limitem indexu; WebDAV nebo odkazovaný soubor →
-   vysvětlení; ve Vercel logu čas a paměť převodu.
+   vysvětlení; v logu služby (`journalctl -u dawmain-web`) čas a paměť převodu.
 6. Smazat klíč na zotero.org: přijde právě jedna 403, připojení se označí,
    další volání skončí na bráně bez požadavku a modál hlásí „Klíč přestal
    platit“.
 7. „Odpojit“: klíč zmizí na zotero.org a v Clerku je `null`.
-8. Sdílený kód i účet bez Pro dostanou odmítnutí.
-9. Ve Vercel logu nejsou klíče, tokeny ani verifier.
+8. Sdílený kód (kde je nastavený) i účet bez Pro dostanou odmítnutí.
+9. V logu služby nejsou klíče, tokeny ani verifier.
 
 Zároveň ověřit, zda Zotero vynucuje registrovaný callback (výše).
 
 ### Fixtures k nahrazení
 
 `tests/fixtures/zotero/*.json` jsou **ručně sestavené z dokumentace** (z
-vývojového kontejneru nebyl api.zotero.org dostupný). Na Preview je nahradit
+vývojového kontejneru nebyl api.zotero.org dostupný). Na živé instanci je nahradit
 živými záchyty (klíče a tokeny vymazat): `keys-current*.json` (přesný tvar
 `access.groups`), `items-search.json`, `collections.json`, `groups.json`,
 `fulltext-*.json` (oddělovače stran, `indexedPages`/`totalPages`), a zapsat
@@ -1028,7 +1023,7 @@ se přidá tam a na místě, kde se má zobrazit.
   němu dostane i pozdější změna výchozího textu v kódu.
 - **Stránky zůstávají statické.** Texty čtou při buildu a po uložení
   (`saveTextAction` volá `revalidatePath` pro `/`, `/podminky` a `/soukromi`),
-  nikdy při návštěvě — návštěva nesmí budit Neon. Když databáze není
+  nikdy při návštěvě — návštěva nesmí sahat do databáze. Když databáze není
   nastavená nebo neodpoví, stránka ukáže výchozí znění z repa a editor hlásí,
   že uložit nejde. Pozor: když čtení selže při buildu, zůstane na webu výchozí
   znění, dokud se některé pole znovu neuloží nebo neproběhne další nasazení.

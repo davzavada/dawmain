@@ -1,6 +1,6 @@
 # 04:00 local time (the container runs Europe/Prague), after the mirror sync
 # at 03:30 on the other container; a night the server was off is caught up
-# at boot (Persistent). See dawmain-cron.service: enable only at the switch.
+# at boot (Persistent).
 [Unit]
 Description=Dawmain daily maintenance at 04:00
 

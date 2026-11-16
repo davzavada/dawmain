@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
+# ONE-OFF tool of the move from Vercel/Neon to the home server (done 16. 11. 2026),
+# kept for the record only — do not run it again (docs/infra/migrace-z-vercelu.md).
 # GO / NO-GO before (and after) switching dawmain.davidzavada.cz from Vercel to
 # the home server. Read-only: it changes nothing, prints no secret values.
 #
-#   deploy/web/preflight.sh                 before the switch
-#   deploy/web/preflight.sh --after-switch  right after the DNS record was changed
+#   deploy/web/migrace/preflight.sh                 before the switch
+#   deploy/web/migrace/preflight.sh --after-switch  right after the DNS record was changed
 #
 # Run from a checkout of the repository on the Mac (needs `ssh pve`, curl, node).
 # Exit 0 = GO, 1 = NO-GO. Every line says what it checked; WARN does not block,
@@ -56,7 +58,7 @@ for key in CLERK_WEBHOOK_SIGNING_SECRET ESBIRKA_API_KEY AI_GATEWAY_API_KEY ZOTER
   has "$key" && ok "$key" || warn "$key chybí (na Vercelu to bylo nastavené?)"
 done
 if has FILES_DATABASE_URL; then
-  # Since the switch moves the data home (deploy/web/migrate-db.sh), the app must use the home database.
+  # Since the switch moves the data home (deploy/web/migrace/migrate-db.sh), the app must use the home database.
   case "$(ct 103 "grep '^FILES_DATABASE_URL=' /etc/dawmain/env | sed 's#.*@\\([^/:]*\\).*#\\1#'")" in
     10.10.10.2) ok "FILES_DATABASE_URL míří na domácí databázi (10.10.10.2)" ;;
     *neon.tech*) bad "FILES_DATABASE_URL míří na Neon — doma se používá domácí databáze (import-env.sh ji bere z /root/files-db-urls.env)" ;;

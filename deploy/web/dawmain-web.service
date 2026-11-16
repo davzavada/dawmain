@@ -1,9 +1,10 @@
-# Dawmain web + MCP (Next.js standalone) on LXC `web`, docs/infra/migrace-z-vercelu.md.
+# Dawmain web + MCP (Next.js standalone) on LXC `web`, docs/infra/proxmox.md.
 # Install: cp deploy/web/dawmain-web.service /etc/systemd/system/ &&
 #          systemctl daemon-reload && systemctl enable --now dawmain-web
 # /etc/dawmain/env (600, root) carries every setting; see .env.example, section
 # "Home server". It must also set DAWMAIN_REQUIRE_AUTH=1 and TRUST_FORWARDED_HOST=0,
-# which this unit pins below as well, so a slip in the file cannot open the endpoint.
+# which this unit pins below as well, so a slip in the file cannot open the endpoint
+# (and NODE_ENV=production requires auth even without the flag, src/runtime.ts).
 [Unit]
 Description=Dawmain web and MCP server
 After=network-online.target
