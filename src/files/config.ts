@@ -55,8 +55,14 @@ export const LIMITS = {
   get globalPages() {
     return intEnv("FILES_GLOBAL_MAX_PAGES", 30_000);
   },
-  /** Database cap (set under the former Neon Free's 0.5 GB, still enforced). Read-only well before. */
-  dbBytesCap: 400 * 1024 * 1024,
+  /**
+   * Database cap; the feature turns read-only well before. Default 400 MB
+   * (set under the former Neon Free's 0.5 GB); the own server raises it
+   * with FILES_DB_CAP_MB to what its disk allows.
+   */
+  get dbBytesCap() {
+    return intEnv("FILES_DB_CAP_MB", 400) * 1024 * 1024;
+  },
   /** Share of any guard at which the feature turns read-only. */
   readonlyAt: 0.8,
   /** Upload request body (gzip text + JSON) — sized for the former host's 4.5 MB request limit, still enforced. */
@@ -71,7 +77,11 @@ export const LIMITS = {
   /** files_get_document windows per document per user per day (anti-exfiltration). */
   readsPerDocPerDay: 40,
   /** Estimated database compute hours per month (the former Neon Free's 100 CU-h at 0.25 CU, still enforced). */
-  computeHoursPerMonth: 100,
+  get computeHoursPerMonth() {
+    // FILES_COMPUTE_HOURS_PER_MONTH: on the own server the database is always
+    // on and costs nothing per hour, so it sets a number that never trips.
+    return intEnv("FILES_COMPUTE_HOURS_PER_MONTH", 100);
+  },
   computeUnits: 0.25,
   /**
    * Global daily volume of uploads and the CPU allowance uploads, ingests

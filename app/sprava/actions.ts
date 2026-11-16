@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { applyChange, requireAdmin, type ChangeResult } from "@/src/admin/server";
-import { ADMIN_FEATURES, type AdminChange } from "@/src/admin/model";
+import { ADMIN_FEATURES, validQuotaPages, type AdminChange } from "@/src/admin/model";
 
 /**
  * Server Function of the admin page: one change to one account. It
@@ -17,6 +17,7 @@ function validChange(change: unknown): change is AdminChange {
   if (c.kind === "role") return typeof c.admin === "boolean";
   if (c.kind === "pro") return typeof c.on === "boolean";
   if (c.kind === "feature") return typeof c.on === "boolean" && ADMIN_FEATURES.includes(c.feature as never);
+  if (c.kind === "quota") return c.pages === null || validQuotaPages(c.pages);
   return false;
 }
 
@@ -26,7 +27,13 @@ export async function changeUserAction(targetId: string, change: AdminChange): P
   if (typeof targetId !== "string" || !validChange(change)) return { ok: false, error: "Neplatná změna." };
   // Rebuild the change from its checked fields: nothing extra the client sent goes further.
   const clean: AdminChange =
-    change.kind === "role" ? { kind: "role", admin: change.admin } : change.kind === "pro" ? { kind: "pro", on: change.on } : { kind: "feature", feature: change.feature, on: change.on };
+    change.kind === "role"
+      ? { kind: "role", admin: change.admin }
+      : change.kind === "pro"
+        ? { kind: "pro", on: change.on }
+        : change.kind === "quota"
+          ? { kind: "quota", pages: change.pages }
+          : { kind: "feature", feature: change.feature, on: change.on };
   const result = await applyChange(actor, targetId, clean);
   if (result.ok) revalidatePath("/sprava");
   return result;

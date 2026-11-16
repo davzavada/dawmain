@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { dayBefore, formatDay, type AdminFeature, type AdminUser } from "@/src/admin/model";
+import { dayBefore, formatDay, MAX_QUOTA_PAGES, validQuotaPages, type AdminFeature, type AdminUser } from "@/src/admin/model";
 import { formatCount, initials } from "../_zdroje/format";
 import { changeUserAction } from "./actions";
 
@@ -41,12 +41,15 @@ export function AdminConsole({
   today,
   windowDays,
   usageAvailable,
+  defaultQuotaPages,
 }: {
   rows: AdminRow[];
   me: string;
   today: string;
   windowDays: number;
   usageAvailable: boolean;
+  /** The installation's page quota for an account without its own (LIMITS.personalPages). */
+  defaultQuotaPages: number;
 }) {
   const [rows, setRows] = useState(initial);
   const [filter, setFilter] = useState<Filter>("all");
@@ -160,7 +163,7 @@ export function AdminConsole({
 
         <aside className="adm-panel adm-detail" aria-live="polite">
           {current ? (
-            <Detail row={current} me={me} today={today} windowDays={windowDays} usageAvailable={usageAvailable} pending={pending} message={message} onChange={change} />
+            <Detail row={current} me={me} today={today} windowDays={windowDays} usageAvailable={usageAvailable} defaultQuotaPages={defaultQuotaPages} pending={pending} message={message} onChange={change} />
           ) : (
             <p className="adm-empty">Vyber účet v tabulce.</p>
           )}
@@ -242,6 +245,64 @@ function Chart({ data, today }: { data: number[]; today: string }) {
   );
 }
 
+/**
+ * The account's page quota for Vlastní soubory: its own number, or the
+ * installation's default. One page = a normostrana (3 600 characters).
+ */
+function Quota({
+  user,
+  defaultPages,
+  pending,
+  onChange,
+}: {
+  user: AdminUser;
+  defaultPages: number;
+  pending: boolean;
+  onChange: (user: AdminUser, change: Parameters<typeof changeUserAction>[1]) => void;
+}) {
+  const current = user.quotaPages ?? defaultPages;
+  const [text, setText] = useState(String(current));
+  const pages = /^\d{1,7}$/.test(text.trim()) ? Number(text.trim()) : NaN;
+  const valid = validQuotaPages(pages);
+  const changed = valid && pages !== current;
+  return (
+    <div className="adm-row adm-row-sub adm-quota">
+      <div>
+        <b>Kvóta stran</b>
+        <span>
+          {user.quotaPages === null ? `Výchozí: ${formatCount(defaultPages)} normostran` : `Vlastní kvóta (výchozí je ${formatCount(defaultPages)})`}
+          {text.trim() !== "" && !valid ? ` · zadej celé číslo 1 až ${formatCount(MAX_QUOTA_PAGES)}` : ""}
+        </span>
+      </div>
+      <form
+        className="adm-quota-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (changed) onChange(user, { kind: "quota", pages });
+        }}
+      >
+        <input
+          className="adm-quota-input"
+          inputMode="numeric"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          aria-label={`Kvóta stran pro ${user.name}`}
+          aria-invalid={text.trim() !== "" && !valid}
+          disabled={pending}
+        />
+        <button type="submit" className="zd-btn" disabled={pending || !changed}>
+          Uložit
+        </button>
+        {user.quotaPages !== null ? (
+          <button type="button" className="zd-btn" disabled={pending} onClick={() => onChange(user, { kind: "quota", pages: null })}>
+            Výchozí
+          </button>
+        ) : null}
+      </form>
+    </div>
+  );
+}
+
 function Switch({ label, on, disabled, onToggle }: { label: string; on: boolean; disabled?: boolean; onToggle: () => void }) {
   return <button type="button" role="switch" aria-checked={on} aria-label={label} className="adm-switch" disabled={disabled} onClick={onToggle} />;
 }
@@ -252,6 +313,7 @@ function Detail({
   today,
   windowDays,
   usageAvailable,
+  defaultQuotaPages,
   pending,
   message,
   onChange,
@@ -261,6 +323,7 @@ function Detail({
   today: string;
   windowDays: number;
   usageAvailable: boolean;
+  defaultQuotaPages: number;
   pending: boolean;
   message: string | null;
   onChange: (user: AdminUser, change: Parameters<typeof changeUserAction>[1]) => void;
@@ -318,6 +381,9 @@ function Detail({
             </div>
           );
         })}
+        {user.pro && user.features.files ? (
+          <Quota key={`${user.id}:${user.quotaPages ?? "default"}`} user={user} defaultPages={defaultQuotaPages} pending={pending} onChange={onChange} />
+        ) : null}
         {message ? (
           <p className="zd-error" role="alert">
             {message}

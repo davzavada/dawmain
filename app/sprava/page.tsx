@@ -6,6 +6,7 @@ import type { AdminUser } from "@/src/admin/model";
 import { withScope } from "@/src/files/db/client";
 import { callUsage, type CallerUsage } from "@/src/files/db/usage";
 import { effectiveMode } from "@/src/files/guards";
+import { LIMITS } from "@/src/files/config";
 import { AdminConsole, type AdminRow } from "./console";
 import { AdminTabs } from "./_tabs";
 
@@ -71,6 +72,7 @@ export default async function AdminPage() {
           today={new Date().toISOString().slice(0, 10)}
           windowDays={WINDOW_DAYS}
           usageAvailable={usage !== null}
+          defaultQuotaPages={LIMITS.personalPages}
         />
       )}
       <p className="muted small adm-foot">
