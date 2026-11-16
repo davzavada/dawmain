@@ -122,10 +122,10 @@ kill "$CHECK_PID" 2>/dev/null || true; wait "$CHECK_PID" 2>/dev/null || true
 CHECK_PID=""
 
 log "Switching to $SHORT"
-ln -sfn "$REL" "$BASE/current.new"
-mv -T "$BASE/current.new" "$BASE/current"
-sudo -n /bin/systemctl restart dawmain-web
-
+switch_to() {
+  ln -sfn "$1" "$BASE/current.new"
+  mv -T "$BASE/current.new" "$BASE/current"
+}
 healthy() {
   for _ in $(seq 1 30); do
     curl -fsS -o /dev/null "http://127.0.0.1:$LIVE_PORT/api/status" && return 0
@@ -133,13 +133,22 @@ healthy() {
   done
   return 1
 }
-if ! healthy; then
+# A failed restart (the unit refuses to start) must reach the rollback below,
+# not end the script: set -e would otherwise leave the broken release live.
+restart_and_check() {
+  sudo -n /bin/systemctl restart dawmain-web || return 1
+  healthy
+}
+
+switch_to "$REL"
+if ! restart_and_check; then
   echo "The service did not come up on $SHORT." >&2
   if [ -n "$PREVIOUS" ] && [ -d "$PREVIOUS" ]; then
-    ln -sfn "$PREVIOUS" "$BASE/current.new"
-    mv -T "$BASE/current.new" "$BASE/current"
-    sudo -n /bin/systemctl restart dawmain-web
-    healthy && die "rolled back to $(basename "$PREVIOUS")" || die "rollback failed too: look at journalctl -u dawmain-web"
+    switch_to "$PREVIOUS"
+    if restart_and_check; then
+      die "rolled back to $(basename "$PREVIOUS")"
+    fi
+    die "rollback failed too: look at journalctl -u dawmain-web"
   fi
   die "no previous release to return to"
 fi
