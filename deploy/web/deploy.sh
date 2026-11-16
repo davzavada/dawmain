@@ -31,11 +31,16 @@ log "Fetching $REF"
 git fetch --quiet origin
 SHA="$(git rev-parse --verify "$REF^{commit}")"
 SHORT="${SHA:0:7}"
-REL="$BASE/releases/$SHORT"
+# FORCE=1 rebuilds the commit that is already live into a NEW directory (a
+# changed /etc/dawmain/env, e.g. NEXT_PUBLIC_* values that are inlined at build);
+# without it an already-live commit is left alone.
+NAME="$SHORT"
+[ "${FORCE:-0}" = 1 ] && NAME="$SHORT-$(date +%Y%m%d%H%M%S)"
+REL="$BASE/releases/$NAME"
 PREVIOUS="$(readlink -f "$BASE/current" 2>/dev/null || true)"
 
-if [ -d "$REL" ] && [ "$(readlink -f "$BASE/current")" = "$REL" ]; then
-  echo "Release $SHORT is already live."
+if [ "${FORCE:-0}" != 1 ] && [ -d "$REL" ] && [ "$(readlink -f "$BASE/current")" = "$REL" ]; then
+  echo "Release $SHORT is already live (FORCE=1 rebuilds it)."
   exit 0
 fi
 
@@ -63,7 +68,7 @@ set -a
 # shellcheck disable=SC1090
 . "$ENV_FILE"
 set +a
-export GIT_SHA="$SHA" NEXT_DEPLOYMENT_ID="$SHORT" NEXT_OUTPUT=standalone
+export GIT_SHA="$SHA" NEXT_DEPLOYMENT_ID="$NAME" NEXT_OUTPUT=standalone
 export NEXT_TELEMETRY_DISABLED=1 NODE_ENV=production
 # `next build` peaks above 2 GB; cap the heap so a small container swaps
 # less and fails with a clear message rather than being OOM-killed.
@@ -86,7 +91,7 @@ cp -r .next/static .next/standalone/.next/static
 
 # What identifies this release at RUN time (the service does not inherit the
 # build shell's exports): dawmain-web.service reads it, dawmain_ping shows it.
-printf 'GIT_SHA=%s\nNEXT_DEPLOYMENT_ID=%s\n' "$SHA" "$SHORT" >"$REL/release.env"
+printf 'GIT_SHA=%s\nNEXT_DEPLOYMENT_ID=%s\n' "$SHA" "$NAME" >"$REL/release.env"
 
 log "Checking the release on port $CHECK_PORT"
 (
