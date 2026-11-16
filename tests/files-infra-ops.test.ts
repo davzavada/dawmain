@@ -49,14 +49,12 @@ vi.mock("@/src/files/guards", async (importOriginal) => {
 import { GET as cronGET } from "@/app/api/cron/files/route";
 import { POST as uploadPOST } from "@/app/api/files/documents/route";
 import { renderToStaticMarkup } from "react-dom/server";
-import { takedownAction } from "@/app/vlastni-zdroje/provoz/actions";
-import OperatorPage from "@/app/vlastni-zdroje/provoz/page";
 import { __setAccessLoaderForTests, __setOwnerLookupForTests, buildAccess } from "@/src/files/access";
 import { ANALYZER_VERSION, LIMITS, TERMS_VERSION } from "@/src/files/config";
 import { setScopeRunner } from "@/src/files/db/client";
 import { acceptTerms, audit, dbUsage, pruneUsage, tableUsage } from "@/src/files/db/usage";
 import { __resetGuardsForTests, measureGuards, NEON_STORAGE_BYTES } from "@/src/files/guards";
-import { VACUUM_TABLE_MIN_BYTES, vacuumPlan } from "@/src/files/operator";
+import { takedownContent, VACUUM_TABLE_MIN_BYTES, vacuumPlan } from "@/src/files/operator";
 import { UPLOAD_GUARDS } from "@/src/files/upload";
 import { batchAllowance, REINDEX_BATCH_TIGHT, reindexBatch, reindexDocument, REINDEXES_PER_LIBRARY_DAY } from "@/src/files/reindex";
 import type { ConversionQuality, UploadMeta } from "@/src/files/types";
@@ -408,21 +406,6 @@ describe("operator batch and the shared CPU allowance", () => {
   });
 });
 
-describe("operator page", () => {
-  it("shows the physical and the live size, why the batch is disabled, and the takedown form", async () => {
-    process.env.FILES_MODE = "readonly";
-    signedIn("user_op");
-    const html = renderToStaticMarkup(await OperatorPage());
-    expect(html).toContain("živá data odhadem");
-    expect(html).toContain("přeindexování počká");
-    expect(html).toMatch(/<button[^>]*disabled[^>]*>Přeindexovat dávku/);
-    expect(html).toContain("Zablokovat a smazat kopie");
-    // No MIRROR_API_URL here: the mirror section says so.
-    expect(html).toContain("Zrcadlo judikatury");
-    expect(html).toContain("chybí MIRROR_API_URL");
-  });
-});
-
 describe("retention (/soukromi)", () => {
   it("usage after 12 months, read counters after 2 days (today and yesterday), activity after 62 days", async () => {
     await t.owner.query(
@@ -504,11 +487,7 @@ describe("notice-and-takedown", () => {
     await t.owner.query("UPDATE libraries SET pages_reserved = 2 WHERE id = 'org_c'");
     const before = await t.owner.query<{ id: string; page_count: number; doc_count: number }>("SELECT id, page_count, doc_count FROM libraries ORDER BY id");
 
-    signedIn("user_a");
-    await expect(takedownAction(form({ target: a, reason: "DSA-2026-1", confirm: "yes" }))).rejects.toThrow("Not allowed.");
-    signedIn("user_op");
-    await expect(takedownAction(form({ target: a, reason: "DSA-2026-1" }))).rejects.toThrow("Not confirmed.");
-    await takedownAction(form({ target: a, reason: "DSA-2026-1", confirm: "yes" }));
+    await takedownContent("user_op", a, "DSA-2026-1");
 
     const docs = await t.owner.query<{ id: string }>("SELECT id FROM documents");
     expect(docs.rows.map((r) => r.id)).toEqual([keep]);
@@ -535,7 +514,6 @@ describe("notice-and-takedown", () => {
     signedIn("user_b");
     const again = await uploadPOST(uploadRequest("user_b", dmd("same")));
     expect(again.status).not.toBe(201);
-    expect(mocks.revalidatePath).toHaveBeenCalledWith("/vlastni-zdroje/provoz");
   });
 
   it("the nightly recount repairs drifted counters", async () => {

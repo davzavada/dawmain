@@ -145,14 +145,15 @@ describe("the Zotero row on the home page", () => {
     expect(new URLSearchParams(window.location.search).get("zotero")).toBe("1");
   });
 
-  it("shows the connected account once, with the badge, not greyed out", async () => {
+  it("shows the connected account once, with the green light, not greyed out", async () => {
     status = { code: 200, body: CONNECTED };
     await render();
     const g = group()!;
     expect(g.locked).toBe(false);
     expect(g.textContent).toContain("Účet jnovakova");
-    expect(g.textContent!.match(/Připojeno/g)).toHaveLength(1);
-    expect(g.querySelector(".zd-badge")?.textContent).toBe("Připojeno");
+    expect(g.textContent!.match(/připojeno/g)).toHaveLength(1);
+    const dot = g.querySelector('.source-dot[data-state="ok"]');
+    expect(dot?.getAttribute("title")).toBe("připojeno");
   });
 
   it("asks for the status once, however the Vlastní soubory summary settles", async () => {

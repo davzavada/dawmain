@@ -30,8 +30,7 @@ export const config = {
     // /api/status: public, static and served by the CDN, which a proxy in front
     // would turn into a function call per request (app/api/status/route.ts).
     "/((?!api/status(?:/|$))(?:api|trpc).*)",
-    // The operator page and the admin page with their Server Functions (auth() on the server); :path* includes the page itself.
-    "/vlastni-zdroje/provoz/:path*",
+    // The admin pages with their Server Functions (auth() on the server); :path* includes the page itself.
     "/sprava/:path*",
     // Clerk's own auto-proxy path.
     "/__clerk/:path*",

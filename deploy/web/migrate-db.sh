@@ -221,11 +221,11 @@ SELECT count(*) FROM documents; COMMIT;")"
   echo "with one library in scope dawmain_app sees exactly its ${LIB#*|} documents"
 fi
 
-# A mode set on the operator page (Provoz) lives in system_state: it came along and applies at home too.
+# A mode override (system_state key mode_override) came along and applies at home too.
 OVERRIDE="$(q home <<<"SELECT value->>'mode' FROM system_state WHERE key = 'mode_override'")"
 if [ -n "$OVERRIDE" ]; then
   echo "NOTE: the copied operator override sets Vlastní zdroje to '$OVERRIDE' at home as well."
-  echo "      Clear it after the switch (/vlastni-zdroje/provoz) unless that is what you want."
+  echo "      Clear it after the switch (DELETE FROM system_state WHERE key = 'mode_override') unless that is what you want."
 fi
 # Texts edited in Správa live there too, but the public pages read them only at build.
 if [ "$(q home <<<"SELECT count(*) FROM system_state WHERE key = 'site_texts'")" != 0 ]; then

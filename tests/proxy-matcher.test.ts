@@ -17,14 +17,15 @@ describe("proxy matcher", () => {
     expect(runs("/api/status/")).toBe(false);
   });
 
-  it("still covers every other API route and the operator page", () => {
+  it("still covers every other API route and the admin pages", () => {
     for (const url of [
       "/api/mcp",
       "/api/files/summary",
       "/api/zotero/status",
       "/api/statusx",
       "/api/cron/files",
-      "/vlastni-zdroje/provoz",
+      "/sprava",
+      "/sprava/system",
       "/__clerk/v1/client",
     ]) {
       expect(runs(url), url).toBe(true);

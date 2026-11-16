@@ -215,8 +215,8 @@ Vlastní zdroje se zapínají zvlášť — viz [Vlastní zdroje — provoz](#vl
    projektů založených od roku 2025 výchozí; `vercel.json` ho navíc žádá
    pro každé nasazení přes `"fluid": true`, ale ověř to). Pět cest Vlastních
    zdrojů má `maxDuration = 300` (`/api/files/documents`,
-   `/api/files/documents/[id]`, `/api/files/status`, `/api/cron/files`,
-   `/vlastni-zdroje/provoz`); bez Fluid dovolí Hobby nejvýš 60 s — nasazení
+   `/api/files/documents/[id]`, `/api/files/status`, `/api/cron/files`);
+   bez Fluid dovolí Hobby nejvýš 60 s — nasazení
    takovou hodnotu odmítne, nebo zpracování dlouhého dokumentu uřízne. Na Fluid
    počítá i `attachDatabasePool` v `src/files/db/client.ts` (zavře nečinná
    spojení do Neonu, než se instance uspí).
@@ -504,7 +504,7 @@ dalšího kromě tří proměnných Zotera na konci tabulky). Po změně Redeplo
 | `FILES_USER_HASH_SECRET` | klíč HMAC pro pseudonym nahrávajícího, který dostává AI Gateway k rozpočítání spotřeby (`gateway.user`, čte `src/files/ingest.ts`); dlouhý náhodný řetězec. Změna klíče = nové pseudonymy v přehledu Gateway | `CLERK_SECRET_KEY` |
 | `FILES_GLOBAL_MAX_PAGES` | strop stran pro celou instalaci | 30 000 |
 | `FILES_PERSONAL_PAGES` | kvóta osobní knihovny (stran) | 10 000 |
-| `FILES_OPERATOR_IDS` | Clerk `user_…` oddělená čárkou — přístup na `/vlastni-zdroje/provoz` (a zároveň správce na `/sprava`) | — |
+| `FILES_OPERATOR_IDS` | Clerk `user_…` oddělená čárkou — provozovatelé Vlastních zdrojů (`src/files/operator.ts`) a zároveň správci na `/sprava` | — |
 | `ADMIN_USER_IDS` | Clerk `user_…` oddělená čárkou — správci na `/sprava` bez ohledu na Clerk: první správce a cesta zpět. Další správce se povyšují na stránce Správa (`publicMetadata.role = "admin"`) | — |
 | `FILES_AI_BUDGET_USD` | klouzavý 30denní rozpočet AI v celých USD; nad ním jen heuristiky | 4 |
 | `FILES_GLOBAL_UPLOADS_PER_DAY` | nahrání za den ve všech knihovnách dohromady | 200 |
@@ -704,14 +704,14 @@ objemu řádově 5–15 USD měsíčně). Pak zvedni `LIMITS.dbBytesCap`
 (`src/files/config.ts`) a stropy stran; delší historie obnovy (Launch až
 7 dní) znamená upravit dobu v `/soukromi`.
 
-### Stránka provozu
+### Provoz a stav systému
 
-`/vlastni-zdroje/provoz` (jen `FILES_OPERATOR_IDS`): pojistky proti limitům
-(živá data i fyzická velikost DB, strany, odhad CU-h, rozpočet AI, CPU
-zpracování za den a 30 dní, nahrání za měsíc), plán `VACUUM FULL`, knihovny,
-zaseknuté dokumenty, přepínač režimu, „Přeindexovat dávku“ (≤ 200 dokumentů
-z uloženého textu na kliknutí; mimo režim „on“ odmítnuto, nad 60 % DB nejvýš
-10) a oznámení a odstranění obsahu (níže).
+Stránka `/vlastni-zdroje/provoz` je pryč. Stav serveru, velikosti databází,
+zrcadlo judikatury a poslední běhy úloh ukazuje `/sprava/system` (záložka
+Systém ve Správě, `src/admin/system.ts`). Přepnutí režimu, přeindexování
+a odstranění obsahu zůstaly jako funkce v `src/files/operator.ts`
+(`writeModeOverride`, `recordReindex` s `reindexBatch`, `takedownContent`)
+bez webového rozhraní; volají se ze skriptu nebo přímo v databázi.
 
 ### Export textu
 
@@ -735,11 +735,12 @@ osobně. Když se adresa změní, změní se v obou textech najednou.
 
 Podmínky slibují postup pro oznámení (DSA čl. 16): ověř oznámení, obsah
 odstraň a zablokuj, aby nešel nahrát znovu, a nahrávajícímu pošli odůvodnění
-(DSA čl. 17). Na stránce provozu v oddílu **„Oznámení a odstranění obsahu“**
-zadej ID dokumentu nebo SHA-256 jeho textu a odkaz na oznámení a potvrď.
+(DSA čl. 17). Webové rozhraní pro to už není (stránka provozu je pryč):
+zavolej `takedownContent(actor, cíl, důvod)` ze `src/files/operator.ts`,
+kde cíl je ID dokumentu nebo SHA-256 jeho textu a důvod odkaz na oznámení.
 Hash se zablokuje, smažou se všechny kopie ve všech knihovnách (se správně
 vrácenými stranami) a zapíšou se auditní záznamy (`content.takedown`,
-`document.takedown`); výsledek zůstane na stránce. Blokace platí jen pro
+`document.takedown`). Blokace platí jen pro
 přesně tentýž převedený text (normalizovaný) — jiný převod téhož díla má jiný
 hash. Počítadla stran knihoven ručně neupravuj: odchylky opraví noční
 přepočet v cronu.

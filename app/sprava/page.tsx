@@ -18,7 +18,7 @@ const WINDOW_DAYS = 30;
 
 /**
  * The admin page: every account with its role, Pro and feature switches and
- * the use of the MCP tools (counts per day and tool, never the content of a
+ * the use of the MCP tools (counts per day, never the content of a
  * call). Admins only — anyone else, signed in or not, gets the same 404 as a
  * page that does not exist. Every change goes through changeUserAction.
  */
@@ -49,12 +49,8 @@ export default async function AdminPage() {
   const byWho = new Map((usage ?? []).map((u) => [u.who, u]));
   const rows: AdminRow[] = users.map((user) => {
     const u = byWho.get(user.id);
-    return { user, usage: u ? { calls: u.calls, calls7: u.calls7, lastDay: u.lastDay, daily: u.daily, tools: u.tools } : null };
+    return { user, usage: u ? { calls: u.calls, calls7: u.calls7, lastDay: u.lastDay, daily: u.daily } : null };
   });
-  const noAccount = {
-    shared: byWho.get("shared")?.calls ?? 0,
-    anon: byWho.get("anon")?.calls ?? 0,
-  };
 
   return (
     <div className="adm">
@@ -75,12 +71,11 @@ export default async function AdminPage() {
           today={new Date().toISOString().slice(0, 10)}
           windowDays={WINDOW_DAYS}
           usageAvailable={usage !== null}
-          noAccount={noAccount}
         />
       )}
       <p className="muted small adm-foot">
         První správce se zapíše do proměnné <code>ADMIN_USER_IDS</code> ve Vercelu (Clerk id, <code>user_…</code>). Ten pak další správce povyšuje tady a
-        proměnná zůstává jako cesta zpět. K Vlastním zdrojům a pojistkám limitů: <Link href="/vlastni-zdroje/provoz">Provoz</Link>.
+        proměnná zůstává jako cesta zpět.
       </p>
     </div>
   );
