@@ -60,7 +60,7 @@ export const TEXT_FIELDS = [
     kind: "block",
     maxChars: 3000,
     default:
-      "Právní rešerše s AI jsou super. Přístup k judikatuře a právním předpisům s AI by ale podle mě neměl vést jen přes komerční nástroje. Data jsou dnes dobře dostupná a provoz je v zásadě zdarma. Proto jsem vytvořil nekomerční alternativu. Budu rád, když ji vyzkoušíte :)\n\nV oficiálních databázích server hledá živě – funguje jako nachytřený Google a nic si z nich nekopíruje. Kdo má režim Pro, může připojit svou knihovnu Zotero a nahrát vlastní soubory.",
+      "Právní rešerše s AI jsou super. Přístup k judikatuře a právním předpisům s AI by ale podle mě neměl vést jen přes komerční nástroje. Data jsou dnes dobře dostupná a provoz zvládne i server doma. Proto jsem vytvořil nekomerční alternativu. Budu rád, když ji vyzkoušíte :)\n\nV oficiálních databázích server hledá živě – funguje jako nachytřený Google. Jen judikaturu českých soudů si pravidelně kopíruje do vlastní databáze, aby v ní hledal rychleji; odkazy ale vždy vedou na originál u soudu. Kdo má režim Pro, může připojit svou knihovnu Zotero a nahrát vlastní soubory.",
   },
   {
     key: "home.owl",
@@ -105,7 +105,7 @@ export const TEXT_FIELDS = [
     hint: "Datum pod nadpisem obou právních stránek. Při změně jejich textu ho změň taky.",
     kind: "plain",
     maxChars: 40,
-    default: "6. 10. 2026",
+    default: "16. 11. 2026",
   },
   {
     key: "legal.terms",
@@ -130,11 +130,11 @@ V režimu Pro si na webu nahrajete vlastní dokumenty a váš asistent v nich pa
 
 Nahráním dokumentu potvrzujete, že pravidla v tomto oddílu dodržíte - web na ně upozorňuje přímo u nahrávání.
 
-**Kvóty.** Místo se počítá ve stranách: jedna strana je 3 600 znaků převedeného textu včetně poznámek pod čarou. Kolik stran dokument zabere a kolik vám zbývá, uvidíte před nahráním. Kvóty můžu podle kapacity měnit, už nahrané dokumenty kvůli tomu ale nemažu. Když se blíží limity bezplatných služeb, na kterých Vlastní soubory běží, přepnou se samy do režimu jen pro čtení (hledat, číst a mazat jde, nahrávat ne), případně se na čas vypnou.
+**Kvóty.** Místo se počítá ve stranách: jedna strana je 3 600 znaků převedeného textu včetně poznámek pod čarou. Kolik stran dokument zabere a kolik vám zbývá, uvidíte před nahráním. Kvóty můžu podle kapacity měnit, už nahrané dokumenty kvůli tomu ale nemažu. Když se blíží technické limity, které pro ně mám nastavené, přepnou se samy do režimu jen pro čtení (hledat, číst a mazat jde, nahrávat ne), případně se na čas vypnou.
 
-**AI a citace.** Typ dokumentu (komentář, článek, kniha…), název, autory a další metadata navrhne jazykový model podle začátku dokumentu a asistent v dokumentu hledá hned po zpracování. Návrh se může splést: po rozkliknutí dokumentu v seznamu souborů ho kdykoli opravíte.
+**AI a citace.** Typ dokumentu (komentář, článek, kniha…), název, autory a další metadata navrhne server podle začátku dokumentu, případně s pomocí jazykového modelu (viz [Zásady ochrany osobních údajů](/soukromi)), a asistent v dokumentu hledá hned po zpracování. Návrh se může splést: po rozkliknutí dokumentu v seznamu souborů ho kdykoli opravíte.
 
-**Záloha není.** Originály si nechte u sebe: server je nikdy nedostane, takže vám je ani nemůže vrátit. Uložený text a metadata mimo krátkou historii změn databáze nezálohuji a za jejich ztrátu, třeba při výpadku nebo ukončení služby, neručím. Text svých dokumentů si ale můžete stáhnout odkazem „Stáhnout text“ u dokumentu v seznamu souborů (s denním limitem).
+**Záloha není.** Originály si nechte u sebe: server je nikdy nedostane, takže vám je ani nemůže vrátit. Uložený text a metadata nezálohuji a za jejich ztrátu, třeba při výpadku nebo ukončení služby, neručím. Text svých dokumentů si ale můžete stáhnout odkazem „Stáhnout text“ u dokumentu v seznamu souborů (s denním limitem).
 
 **Osobní údaje.** Jak s nimi zacházím, popisují [Zásady ochrany osobních údajů](/soukromi). Požádá-li mě někdo o výmaz údajů o sobě z nahraného dokumentu, dokument smažu a dám vám vědět.
 
@@ -177,6 +177,8 @@ E-mail: ${MAIL}
 
 Údaje o účtu jsou pro poskytování služby nezbytné; bez nich účet nelze vytvořit. Provozní záznamy vznikají automaticky při každém použití služby. Nahrávání dokumentů a připojení Zotera jsou dobrovolné. Obsah rešerší si neukládám a s vaším účtem ho nespojuji.
 
+**Judikatura.** Rozhodnutí českých soudů (Nejvyššího soudu, Nejvyššího správního soudu, Ústavního soudu a obecných soudů) si server pravidelně kopíruje do vlastní databáze, aby v nich mohl hledat. Jde o veřejná rozhodnutí, která soudy zveřejňují už anonymizovaná; kopíruji je tak, jak jsou zveřejněná, a odkazy vedou vždy na originál u soudu.
+
 ## 3. Účel a právní základ
 
 - **plnění smlouvy** (čl. 6 odst. 1 písm. b) GDPR): vedení účtu, přihlášení, Vlastní soubory včetně návrhu metadat (bod 5) a připojení Zotera;
@@ -185,25 +187,25 @@ E-mail: ${MAIL}
 ## 4. Doba uchování
 
 - Údaje o účtu - dokud účet trvá; o jeho smazání můžete kdykoli požádat e-mailem.
-- Provozní záznamy hostingu (včetně IP adresy) - nejdéle 30 dní; počty volání u účtu nejdéle 12 měsíců.
-- Vlastní soubory a záznamy o práci s nimi - dokud dokument nesmažete, nejdéle však do zrušení účtu nebo odebrání Pro. Pak knihovnu do týdne smažu (do té doby si po odebrání Pro můžete stáhnout text svých dokumentů). Smazaný dokument zůstane nejdéle 6 hodin v historii změn databáze pro obnovu po havárii. Po výmazu knihovny si ponechám jen záznam o výmazu (identifikátor knihovny, datum a počet smazaných dokumentů), dokud může být potřeba výmaz doložit.
+- Provozní záznamy serveru - jen po dobu potřebnou k řešení chyb a ochraně služby; počty volání u účtu nejdéle 12 měsíců.
+- Vlastní soubory a záznamy o práci s nimi - dokud dokument nesmažete, nejdéle však do zrušení účtu nebo odebrání Pro. Pak knihovnu do týdne smažu (do té doby si po odebrání Pro můžete stáhnout text svých dokumentů). Databázi zatím pravidelně nezálohuji; smazaný dokument může zůstat nejvýš v dočasném snímku serveru, který pořizuji před údržbou databáze, a to dokud ten snímek nesmažu. Po výmazu knihovny si ponechám jen záznam o výmazu (identifikátor knihovny, datum a počet smazaných dokumentů), dokud může být potřeba výmaz doložit.
 - Klíč k Zoteru, uživatelské jméno a identifikátor - dokud Zotero neodpojíte nebo nezrušíte účet. Přestane-li klíč platit, smažu ho a do opětovného připojení, odpojení nebo zrušení účtu si ponechám jen uživatelské jméno a čas, kdy klíč přestal platit.
 
 ## 5. Komu údaje předávám
 
-Na provozu se podílejí tři zpracovatelé:
+Dawmain i databáze Vlastních souborů běží na mém vlastním serveru v České republice. Na provozu se podílejí tito zpracovatelé:
 
 - **Clerk, Inc.** - přihlašování a správa účtů,
-- **Vercel, Inc.** - hosting (Frankfurt) a služba AI Gateway, přes kterou využívám jazykový model Gemini od Google (viz níže),
-- **Neon, Inc.** - databáze Vlastních souborů (Frankfurt).
+- **Cloudflare, Inc.** - síť, přes kterou vede veškerá komunikace s webem a serverem (ochrana před útoky a šifrované spojení k serveru); požadavky včetně IP adresy proto zpracovává při přenosu,
+- **Vercel, Inc.** - jen když je zapnutý návrh metadat jazykovým modelem: služba AI Gateway, přes kterou využívám model Gemini od Google (viz níže).
 
-**Návrh metadat přes Gemini.** Po nahrání dokumentu pošlu přes AI Gateway modelu Gemini (Google, dodavatel Vercelu) výňatek z dokumentu, ne celý text: úvodní strany, tiráž, seznam autorů, osnovu nadpisů a záhlaví stran (dohromady nejvýš 16 000 znaků), název souboru a u PDF údaje z jeho vlastností. Účelem je jen navrhnout typ dokumentu, název, autory, rok a podobné údaje, které pak můžete opravit. Právní základ je stejný jako u Vlastních souborů (bod 3). Výňatek může obsahovat osobní údaje lidí uvedených v dokumentu, typicky jména autorů. Vaše jméno ani e-mail s ním neposílám; AI Gateway dostane jen pseudonym kvůli rozpočtu spotřeby. Text se nepoužije k trénování modelů a Vercel ho po vyřízení požadavku smaže.
+**Návrh metadat přes Gemini.** Když je návrh metadat jazykovým modelem zapnutý, pošlu po nahrání dokumentu přes AI Gateway modelu Gemini (Google, dodavatel Vercelu) výňatek z dokumentu, ne celý text: úvodní strany, tiráž, seznam autorů, osnovu nadpisů a záhlaví stran (dohromady nejvýš 16 000 znaků), název souboru a u PDF údaje z jeho vlastností. Účelem je jen navrhnout typ dokumentu, název, autory, rok a podobné údaje, které pak můžete opravit. Právní základ je stejný jako u Vlastních souborů (bod 3). Výňatek může obsahovat osobní údaje lidí uvedených v dokumentu, typicky jména autorů. Vaše jméno ani e-mail s ním neposílám; AI Gateway dostane jen pseudonym kvůli rozpočtu spotřeby. Text se nepoužije k trénování modelů a Vercel ho po vyřízení požadavku smaže. Když návrh jazykovým modelem zapnutý není, navrhne metadata server sám a text dokumentu žádnému poskytovateli AI neposílá.
 
 Jde o americké společnosti; předávání do USA se opírá o EU-US Data Privacy Framework. Jinak údaje předám jen orgánům veřejné moci, ukládá-li mi to zákon. Přihlášení účtem Google se řídí [zásadami ochrany soukromí Google](https://policies.google.com/privacy).
 
 ## 6. Zabezpečení
 
-Komunikace probíhá výhradně přes HTTPS. Knihovny Vlastních souborů jsou v databázi od sebe oddělené a klíč k Zoteru je šifrovaný. Používám jen cookies nezbytné pro přihlášení, žádné analytické ani reklamní.
+Komunikace s webem probíhá výhradně přes HTTPS a od Cloudflare k mému serveru vede šifrovaný tunel. Knihovny Vlastních souborů jsou v databázi od sebe oddělené a klíč k Zoteru je šifrovaný. Používám jen cookies nezbytné pro přihlášení, žádné analytické ani reklamní.
 
 ## 7. Vaše práva
 

@@ -50,11 +50,16 @@ describe("privacy policy (/soukromi)", () => {
   });
 
   it("names every processor and the provider of the configured metadata model", () => {
-    for (const processor of ["Clerk, Inc.", "Vercel, Inc.", "Neon, Inc.", "AI Gateway", "Google"]) {
+    for (const processor of ["Clerk, Inc.", "Cloudflare, Inc.", "Vercel, Inc.", "AI Gateway", "Google"]) {
       expect(privacy).toContain(processor);
     }
-    expect(privacy).toContain("tři zpracovatelé");
-    // The page discloses Google (Gemini) behind Vercel. A model from another
+    expect(privacy).toContain("tito zpracovatelé");
+    expect(privacy).toContain("na mém vlastním serveru v České republice");
+    // No former host is named as a processor any more.
+    expect(privacy).not.toContain("Neon");
+    expect(privacy).not.toContain("hosting (Frankfurt)");
+    // The page discloses Google (Gemini) behind Vercel, used only while the
+    // AI proposal is switched on (AI_GATEWAY_API_KEY). A model from another
     // provider is a new sub-processor: update /soukromi first.
     const saved = process.env.FILES_META_MODEL;
     delete process.env.FILES_META_MODEL;
@@ -71,7 +76,8 @@ describe("privacy policy (/soukromi)", () => {
     expect(privacy).toContain("počty volání u účtu nejdéle 12 měsíců");
     // Webhook / cron mark a library for purge 6 days out; the daily run adds at most a day.
     expect(privacy).toContain("nejdéle však do zrušení účtu nebo odebrání Pro. Pak knihovnu do týdne smažu");
-    expect(privacy).toContain("nejdéle 6 hodin");
+    expect(privacy).not.toContain("nejdéle 6 hodin");
+    expect(privacy).toContain("Databázi zatím pravidelně nezálohuji");
     expect(privacy).not.toContain("90 dní");
     expect(terms).not.toContain("90 dní");
     expect(privacy).toContain("dokud Zotero neodpojíte nebo nezrušíte účet");
@@ -96,6 +102,13 @@ describe("privacy policy (/soukromi)", () => {
     expect(privacy).toContain("výňatek z dokumentu, ne celý text");
     expect(privacy).toContain("nejvýš 16 000 znaků");
     expect(privacy).toContain("dostane jen pseudonym");
+    expect(privacy).toContain("Když je návrh metadat jazykovým modelem zapnutý");
+    expect(privacy).toContain("text dokumentu žádnému poskytovateli AI neposílá");
+  });
+
+  it("says the Czech case law is copied as the courts publish it", () => {
+    expect(privacy).toContain("kopíruji je tak, jak jsou zveřejněná");
+    expect(privacy).toContain("anonymizovaná");
   });
 
   it("has no DPO section", () => {
