@@ -138,28 +138,38 @@ describe("breaker", () => {
   });
 });
 
-describe("per-account switch (Správa: features.mirror)", () => {
-  it("only an account with features.mirror === true reads the mirror; banned, others and Clerk failures stay live", async () => {
-    const { __setAccessLoaderForTests, buildAccess } = await import("@/src/files/access");
-    const { caselawBackend } = await import("@/src/mcp/backend");
-    const meta: Record<string, unknown> = {
-      user_on: { features: { mirror: true } },
-      user_str: { features: { mirror: "true" } },
-      user_off: {},
-    };
-    __setAccessLoaderForTests(async (id) => {
-      if (id === "user_down") throw new Error("clerk down");
-      return buildAccess({ id, banned: id === "user_banned", publicMetadata: meta[id] ?? { features: { mirror: true } } });
+describe("every caller reads the mirror (no per-account switch)", () => {
+  async function nsSearch(): Promise<(args: unknown, ctx?: unknown) => Promise<{ content: Array<{ text: string }> }>> {
+    const { registerAllTools } = await import("@/src/mcp/tools");
+    let handler: ((args: unknown, ctx?: unknown) => Promise<{ content: Array<{ text: string }> }>) | undefined;
+    registerAllTools(
+      {
+        registerTool(name: string, _config: unknown, h: typeof handler) {
+          if (name === "ns_search") handler = h;
+        },
+      } as never,
+      { zotero: false },
+    );
+    return handler!;
+  }
+
+  it("a call with no signed-in user at all is answered from the mirror, not the court", async () => {
+    fetchMock.mockImplementation(async (url: unknown) => {
+      expect(String(url)).toContain("mirror.test");
+      return json({ total: 1, hits: [HIT] });
     });
-    try {
-      expect(await caselawBackend("user_on")).toBe("mirror");
-      expect(await caselawBackend("user_str")).toBe("live");
-      expect(await caselawBackend("user_off")).toBe("live");
-      expect(await caselawBackend("user_banned")).toBe("live");
-      expect(await caselawBackend("user_down")).toBe("live");
-      expect(await caselawBackend(null)).toBe("live");
-    } finally {
-      __setAccessLoaderForTests(null);
-    }
+    const result = await (await nsSearch())({ query: "náhrada újmy" }, {});
+    const text = result.content.map((c) => c.text).join("\n");
+    expect(text).toContain("Dawmain case-law mirror");
+    expect(text).toContain("7 Tdo 1517/2017");
+    expect(fetchMock.mock.calls.every(([url]) => String(url).includes("mirror.test"))).toBe(true);
+  });
+
+  it("without MIRROR_API_URL the live tool answers and the mirror is never asked", async () => {
+    vi.stubEnv("MIRROR_API_URL", "");
+    fetchMock.mockImplementation(async () => new Response("<html></html>", { status: 200 }));
+    await (await nsSearch())({ query: "náhrada újmy" }, {});
+    expect(fetchMock).toHaveBeenCalled();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("mirror.test"))).toBe(false);
   });
 });

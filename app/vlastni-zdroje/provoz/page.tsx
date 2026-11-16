@@ -105,10 +105,9 @@ export default async function OperatorPage() {
 const MIRROR_LABELS: Record<string, string> = { ns: "NS", nss: "NSS", us: "ÚS", justice: "Obecné soudy", sdeu: "SDEU" };
 
 /**
- * "Zrcadlo judikatury": whether Vercel reaches the home mirror and what it
- * holds — its /v1/status through the tunnel, which doubles as the check of
- * the Access token. Accounts are switched to it on the Správa page
- * (src/mcp/backend.ts).
+ * "Zrcadlo judikatury": whether this deployment reaches the home mirror and
+ * what it holds (its /v1/status). Every account's case-law tools read it
+ * (src/mcp/tools/index.ts, routed) — there is no switch.
  */
 interface CaselawSourceData {
   configured: boolean;
@@ -143,8 +142,9 @@ function CaselawSource({ configured, status, problem }: CaselawSourceData) {
         </p>
       ) : null}
       <p className="zd-muted zd-small">
-        {configured ? "Účtům ho zapíná správce ve " : "Bez nastavení se zrcadlo nepoužije, ani když ho správce účtu zapne ve "}
-        <Link href="/sprava">Správě</Link> (Judikatura ze zrcadla). Nástroje NS, NSS, ÚS a obecných soudů pak čtou ze zrcadla; co neumí
+        {configured
+          ? "Nástroje NS, NSS, ÚS a obecných soudů čtou ze zrcadla pro všechny účty; co neumí"
+          : "Bez nastavení se zrcadlo nepoužije a nástroje čtou živě ze soudů. Jinak čtou ze zrcadla pro všechny účty; co neumí"}{" "}
         (SDEU, další stránky výsledků, filtry jako soudce či předpis) nebo když neodpovídá, odpoví živý zdroj s poznámkou. Po výpadku se zrcadlo
         minutu přeskakuje.
       </p>

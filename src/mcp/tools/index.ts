@@ -19,7 +19,6 @@ import { zoteroConfigured } from "@/src/zotero/config";
 import { withGuideHint } from "../guide-hint";
 import { trackToolCall } from "../usage";
 import { mirrorConfigured } from "@/src/sources/mirror";
-import { caselawBackend } from "../backend";
 import { callerFromCtx } from "../caller";
 import { MIRROR_TOOLS, type MirrorAnswer } from "./mirror-route";
 
@@ -123,17 +122,17 @@ async function withinBudget(name: string, run: () => Promise<ToolResult>): Promi
  * bounded by the call's budget here (CALL_BUDGET_MS).
  */
 /**
- * The case-law tools (MIRROR_TOOLS) for an operator who switched "Zdroj
- * judikatury" to the mirror (src/mcp/backend.ts): answered from the home
- * mirror, or — when the mirror cannot answer this call — by the live tool,
- * with the reason in front. Everyone else, and every other tool, goes
- * straight to the live handler; the preference is read only for operators.
+ * The case-law tools (MIRROR_TOOLS) read the home mirror for EVERY caller
+ * wherever the deployment has one configured (MIRROR_API_URL + token):
+ * answered from the mirror, or — when the mirror cannot answer this call
+ * (a filter it does not index, a later page, a decision it does not hold,
+ * an outage) — by the live tool, with the reason in front. There is no
+ * per-account switch any more (removed 11/2026). Every other tool, and a
+ * deployment without the mirror, goes straight to the live handler.
  */
 async function routed(name: string, handler: ToolHandler, args: unknown[]): Promise<ToolResult> {
   const viaMirror = MIRROR_TOOLS[name];
   if (!viaMirror || !mirrorConfigured()) return handler(...args);
-  const caller = callerFromCtx(args[1]);
-  if (caller.kind !== "user" || (await caselawBackend(caller.userId)) !== "mirror") return handler(...args);
   let answer: MirrorAnswer;
   try {
     answer = await viaMirror((args[0] ?? {}) as Record<string, unknown>);
