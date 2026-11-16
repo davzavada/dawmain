@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Nightly backup of the Vlastní zdroje database to a restic repository OFF this
-# machine (Cloudflare R2, or a disk on another computer). Needed from phase 6,
-# when the data moves from Neon home; set up and test the restore beforehand.
+# machine (Cloudflare R2, or a disk on another computer). Required before the switch
+# (phase 5), when the data moves from Neon home; set up and test the restore beforehand.
 #
 # Needs: postgresql-client-17, restic, and in /etc/dawmain/backup.env (600):
 #   BACKUP_DATABASE_URL   the OWNER (files_owner) of the `files` database: the tables are under
