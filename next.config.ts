@@ -19,9 +19,9 @@ const privateArea = [
 ];
 
 const nextConfig: NextConfig = {
-  // The home server (deploy/web/deploy.sh) builds with NEXT_OUTPUT=standalone
-  // to get a self-contained .next/standalone/server.js. Vercel builds leave
-  // it unset and are unchanged. A per-release deploymentId comes from
+  // The server (deploy/web/deploy.sh) builds with NEXT_OUTPUT=standalone to
+  // get a self-contained .next/standalone/server.js; a plain `npm run build`
+  // for `next start` leaves it unset. A per-release deploymentId comes from
   // NEXT_DEPLOYMENT_ID, which Next reads itself.
   output: process.env.NEXT_OUTPUT === "standalone" ? "standalone" : undefined,
   // The MCP route is pure server code — nothing to prerender.

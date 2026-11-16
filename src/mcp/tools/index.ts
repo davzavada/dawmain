@@ -59,13 +59,14 @@ type ToolResult = Record<string, unknown> & { structuredContent?: unknown };
 type ToolHandler = (...args: unknown[]) => Promise<ToolResult>;
 
 /**
- * The whole invocation's budget. app/api/mcp/route.ts runs with maxDuration
- * = 60 s, and every upstream timeout is set per request: chains of them add
- * up past it (measured with every fetch hanging until its own timeout:
- * eurlex_search 61.5 s — a 30 s SPARQL POST retried at full length;
- * nss_search past page 1 ~71 s). Vercel then kills the function mid-stream —
- * the legacy transport has already answered 200 text/event-stream — and the
- * client gets a transport error with no text, no hint and none of the parts
+ * The whole invocation's budget. A call has a 60 s ceiling (the tools were
+ * built for it on the former host and it stays; Cloudflare in front cuts any
+ * request off at 100 s), and every upstream timeout is set per request:
+ * chains of them add up past it (measured with every fetch hanging until its
+ * own timeout: eurlex_search 61.5 s — a 30 s SPARQL POST retried at full
+ * length; nss_search past page 1 ~71 s). A request cut off mid-stream — the
+ * legacy transport has already answered 200 text/event-stream — leaves the
+ * client a transport error with no text, no hint and none of the parts
  * that did finish. Answering at 54 s leaves the response time to be written
  * and flushed. Counted from the HTTP request's arrival (runWithCallClock in
  * the route), so the auth round trip counts too; outside it (tests,
@@ -174,7 +175,7 @@ type Registration = [name: string, config: Record<string, unknown>, handler: Too
  * initialize, notifications/initialized, tools/list and each tools/call —
  * and re-running every register* function rebuilt all tools' zod input and
  * output schemas each time: ~20 ms of CPU per request (measured, 29 tools),
- * on an event loop Fluid compute shares between concurrent requests, against
+ * on an event loop the server shares between concurrent requests, against
  * ~2.5 ms for replaying the recorded ones. Safe because the register
  * functions do nothing but call registerTool with constant configs (env is
  * read only inside handlers), and the SDK never mutates the config or schema

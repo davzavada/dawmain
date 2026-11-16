@@ -66,7 +66,7 @@ export const CALLBACK_PATH = "/api/zotero/callback";
 export const LIMITS = Object.freeze({
   /** Per request to api.zotero.org. */
   requestTimeoutMs: 15_000,
-  /** Whole tool call (the MCP route has maxDuration 60 s). */
+  /** Whole tool call (an MCP call has a 60 s ceiling, src/mcp/tools/index.ts). */
   toolBudgetMs: 45_000,
   /** Concurrent requests per Zotero user per instance (Zotero allows 5, shared with desktop sync). */
   concurrencyPerUser: 3,

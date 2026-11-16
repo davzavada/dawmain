@@ -19,7 +19,7 @@ export type UsageField = "uploads" | "pages" | "ai_calls" | "ai_microusd" | "too
 export const USAGE_FIELDS: readonly UsageField[] = ["uploads", "pages", "ai_calls", "ai_microusd", "tool_calls", "reads", "cpu_ms", "reindexes"];
 const FIELD_SET = new Set<string>(USAGE_FIELDS);
 
-/** Neon suspends an idle compute after 5 minutes: each active minute costs at least that tail. */
+/** The former Neon host suspended an idle compute after 5 minutes: the estimate still counts that tail per active minute. */
 const ACTIVITY_TAIL = "5 minutes";
 
 /** Today's UTC date as Postgres sees it. */

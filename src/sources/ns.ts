@@ -588,11 +588,11 @@ const NS_REQUEST_TIMEOUT_MS = 15_000;
 /** With less time than this left in the call, a request is not worth sending. */
 const NS_MIN_ATTEMPT_MS = 3_000;
 /**
- * Deadline of a call that names none. Every caller runs inside the MCP
- * route's 60 s maxDuration; without a deadline, three variants queued behind
- * two slow 500s (attempt, back-off, retry) finished at ~60 s — measured with
- * fake timers — and the platform killed the call together with the variants
- * that had answered.
+ * Deadline of a call that names none. Every caller runs inside the 60 s
+ * call ceiling (src/mcp/tools/index.ts); without a deadline, three variants
+ * queued behind two slow 500s (attempt, back-off, retry) finished at ~60 s —
+ * measured with fake timers — and the call was lost together with the
+ * variants that had answered.
  */
 export const NS_DEFAULT_BUDGET_MS = 45_000;
 

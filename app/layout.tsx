@@ -19,7 +19,7 @@ const geistMono = Geist_Mono({ subsets: ["latin", "latin-ext"], variable: "--fon
 
 export const metadata: Metadata = {
   title: "Dawmain - MCP server",
-  description: "MCP server pro české a unijní právní rešerše - živé dotazy do oficiálních databází.",
+  description: "MCP server pro české a unijní právní rešerše v oficiálních databázích.",
 };
 
 /** Matches the top of the logo's dawn sky - tints mobile browser chrome. */
@@ -33,7 +33,7 @@ export const viewport: Viewport = { themeColor: "#0E1938" };
  * without keys ClerkProvider would throw (or start keyless mode), so the
  * site then renders without it and the account control stays hidden.
  *
- * Every page is static: built once, served from the CDN, nothing on the
+ * Every page is static: built once, served from Next's cache, nothing on the
  * server runs for a visit (the source checks, the summary and the Zotero
  * status are fetched by the browser afterwards). What differs for a
  * signed-in user is applied before the first paint by the sign-in hint's

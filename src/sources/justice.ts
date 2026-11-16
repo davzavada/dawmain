@@ -20,8 +20,8 @@ const SOURCE = "rozhodnuti.justice.cz";
 const BASE = "https://rozhodnuti.justice.cz/api";
 /**
  * Full-text over the whole archive is slow; the default 15 s times out. One
- * attempt only, and short of the route's 60 s maxDuration: 30 s plus a retry
- * after a timeout used to run ~61 s, so the platform killed the call and the
+ * attempt only, and short of the 60 s call ceiling: 30 s plus a retry
+ * after a timeout used to run ~61 s, so the call was cut off and the
  * client saw a bare "server isn't responding" instead of the hint below.
  */
 const SEARCH_TIMEOUT_MS = 45_000;

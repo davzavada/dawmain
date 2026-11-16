@@ -63,7 +63,7 @@ const BATCH_BUDGET_MS = 240_000;
 
 /**
  * Whether the CPU allowance uploads and ingests share (UPLOAD_GUARDS: the
- * feature's quarter of the Hobby Active CPU) has room today and over 30
+ * feature's CPU allowance, sized for the former Vercel Hobby plan) has room today and over 30
  * days. A re-derivation books its CPU there too; when it is spent, saves
  * are deferred and the cron waits, as uploads are refused.
  */
@@ -234,7 +234,7 @@ export async function reindexBatch(limit = REINDEX_BATCH_MAX, now: () => number 
   for (const c of candidates) {
     if (now() - started > BATCH_BUDGET_MS) break;
     // The shared CPU allowance binds the operator too: a corpus-wide batch
-    // must not spend what uploads and the Hobby team need.
+    // must not spend what uploads need.
     if (!(await withScope([], (db) => cpuAllowanceLeft(db)))) {
       report.limited = "Denní nebo 30denní rozpočet CPU pro zpracování je vyčerpaný — zbytek přeindexování počká.";
       break;

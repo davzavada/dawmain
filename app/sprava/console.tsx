@@ -284,7 +284,7 @@ function Detail({
         <div className="adm-row">
           <div>
             <b>Správce</b>
-            <span>{user.envAdmin ? "Správce z nastavení nasazení (Vercel)" : self && user.role === "admin" ? "Vlastní roli si tady odebrat nejde" : "Vidí Správu a spravuje účty"}</span>
+            <span>{user.envAdmin ? "Správce z nastavení serveru" : self && user.role === "admin" ? "Vlastní roli si tady odebrat nejde" : "Vidí Správu a spravuje účty"}</span>
           </div>
           <Switch
             label="Správce"

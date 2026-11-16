@@ -43,7 +43,11 @@ function intEnv(name: string, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
 }
 
-/** Quotas and guard thresholds (see the plan's free-tier table). */
+/**
+ * Quotas and guard thresholds. The guards were sized for the free plans of
+ * the former host (Vercel Hobby, Neon Free; the plan's free-tier table) and
+ * are kept as they are until they are reviewed for the own server.
+ */
 export const LIMITS = {
   get personalPages() {
     return intEnv("FILES_PERSONAL_PAGES", 10_000);
@@ -51,11 +55,11 @@ export const LIMITS = {
   get globalPages() {
     return intEnv("FILES_GLOBAL_MAX_PAGES", 30_000);
   },
-  /** Neon Free is 0.5 GB; writes fail beyond it. Read-only well before. */
+  /** Database cap (set under the former Neon Free's 0.5 GB, still enforced). Read-only well before. */
   dbBytesCap: 400 * 1024 * 1024,
   /** Share of any guard at which the feature turns read-only. */
   readonlyAt: 0.8,
-  /** Upload request body (gzip text + JSON) — Vercel functions accept ≤ 4.5 MB. */
+  /** Upload request body (gzip text + JSON) — sized for the former host's 4.5 MB request limit, still enforced. */
   maxUploadBytes: 4_400_000,
   /** Decompressed text cap and max decompression ratio (zip-bomb guard). */
   maxTextBytes: 16_000_000,
@@ -66,15 +70,15 @@ export const LIMITS = {
   toolCallsPerHour: 60,
   /** files_get_document windows per document per user per day (anti-exfiltration). */
   readsPerDocPerDay: 40,
-  /** Estimated Neon compute hours per month (Free: 100 CU-h at 0.25 CU). */
+  /** Estimated database compute hours per month (the former Neon Free's 100 CU-h at 0.25 CU, still enforced). */
   computeHoursPerMonth: 100,
   computeUnits: 0.25,
   /**
    * Global daily volume of uploads and the CPU allowance uploads, ingests
    * and re-derivations share (usage_daily.cpu_ms; see UPLOAD_GUARDS in
    * upload.ts): 200 uploads a day, 10 min of CPU a day and 60 min per
-   * 30 days (a quarter of Hobby's 4 h of Active CPU, plan §8). Tunable
-   * after comparing cpu_ms with the Vercel usage page.
+   * 30 days (a quarter of the former Vercel Hobby's 4 h of Active CPU,
+   * plan §8). Tunable through the env overrides.
    */
   get globalUploadsPerDay() {
     return intEnv("FILES_GLOBAL_UPLOADS_PER_DAY", 200);
@@ -85,14 +89,15 @@ export const LIMITS = {
   get globalCpuMs30Days() {
     return intEnv("FILES_CPU_MS_30D", 60 * 60_000);
   },
-  /** Rolling AI budget in USD per 30 days (Gateway free credit is $5). */
+  /** Rolling AI budget in USD per 30 days (AI Gateway's free credit is $5). */
   get aiBudgetUsd() {
     return intEnv("FILES_AI_BUDGET_USD", 4);
   },
 } as const;
 
-/** Model id for the metadata proposal, through Vercel AI Gateway. Keep it in
- * config: the free-tier model list changes (Gemini 2.5 retires Oct 2026). */
+/** Model id for the metadata proposal, through Vercel AI Gateway (only when
+ * AI_GATEWAY_API_KEY is set). Keep it in config: the free-tier model list
+ * changes (Gemini 2.5 retires Oct 2026). */
 export function metaModel(): string {
   return process.env.FILES_META_MODEL?.trim() || "google/gemini-2.5-flash-lite";
 }

@@ -3,8 +3,6 @@ import { envRefusal, errorResponse, exportFor, fetchSiteRefusal, sessionUser } f
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// The text streams in batches after the response starts; a long book needs a little time.
-export const maxDuration = 60;
 
 type Ctx = { params: Promise<{ id: string }> };
 

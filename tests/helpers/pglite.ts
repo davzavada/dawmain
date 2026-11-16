@@ -6,7 +6,7 @@ import type { Queryable, ScopeRunner } from "@/src/files/db/client";
 /**
  * A real Postgres (PGlite, WASM) with the production migrations applied, and
  * a ScopeRunner that behaves like withScope: one transaction, SET LOCAL ROLE
- * dawmain_app (so RLS applies exactly as on Neon), transaction-local
+ * dawmain_app (so RLS applies exactly as on the server), transaction-local
  * app.library_ids. PGlite is a single connection, so transactions are
  * serialized through a promise chain.
  */

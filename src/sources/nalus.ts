@@ -253,8 +253,8 @@ const RETRY_PAUSE_MS = 2_000;
 /**
  * fetchUpstream bounded by the caller's deadline. Unbounded, a search's three
  * steps (form GET with its retry, POST, results GET with its retry) reached
- * ~78 s — past the route's 60 s maxDuration, where Vercel kills the call and
- * the model gets a transport failure instead of an error it can act on. Each
+ * ~78 s — past the 60 s call ceiling, where the call is lost and the model
+ * gets a transport failure instead of an error it can act on. Each
  * request gets at most the time left, and a GET retries only when the whole
  * retry (attempt, back-off, attempt) still fits.
  */
