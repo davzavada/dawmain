@@ -14,6 +14,12 @@ import type { DecisionRecord, MirrorSource } from "../types";
  * would otherwise fill the queue with healthy documents: after
  * COOL_DOWN_AFTER failures in a row every worker pauses COOL_DOWN_MS, then
  * carries on.
+ *
+ * A source that stays down is not waited for all night (NSS, 16. 11. 2026:
+ * 64 pauses, 321 queue rows charged a failed attempt, the other sources
+ * held back six hours): when GIVE_UP_AFTER_COOL_DOWNS pauses in a row
+ * brought no stored decision, the run ends with SourceUnreachable. What was
+ * not asked stays where it was — the queue or the next sync has it.
  */
 
 export interface CrawlContext {
@@ -30,6 +36,15 @@ export interface CrawlContext {
 
 export const COOL_DOWN_AFTER = 5;
 export const COOL_DOWN_MS = 5 * 60_000;
+export const GIVE_UP_AFTER_COOL_DOWNS = 3;
+
+/** The source kept failing through every pause: the run ends, the next one tries again. */
+export class SourceUnreachable extends Error {
+  constructor(lastError: string) {
+    super(`zdroj neodpovídá ani po ${GIVE_UP_AFTER_COOL_DOWNS} pauzách (${lastError}) — konec běhu, zbytek příště`);
+    this.name = "SourceUnreachable";
+  }
+}
 
 export interface FetchJob<T> {
   source: MirrorSource;
@@ -48,12 +63,14 @@ export async function fetchAndStore<T>(ctx: CrawlContext, job: FetchJob<T>, coun
   const sleep = ctx.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   let next = 0;
   let stopped: SourceStopped | null = null;
+  let unreachable: SourceUnreachable | null = null;
   let failedInRow = 0;
+  let coolDownsInRow = 0; // pauses since the last stored decision
   let coolingUntil = 0;
 
   const worker = async () => {
     let cooled = 0; // the cool-down this worker already slept through
-    while (stopped === null && next < todo.length && !ctx.shouldStop?.()) {
+    while (stopped === null && unreachable === null && next < todo.length && !ctx.shouldStop?.()) {
       if (coolingUntil > cooled && Date.now() < coolingUntil) {
         cooled = coolingUntil;
         await sleep(coolingUntil - Date.now());
@@ -64,6 +81,7 @@ export async function fetchAndStore<T>(ctx: CrawlContext, job: FetchJob<T>, coun
         const record = await job.fetch(item);
         const saved = await saveDecision(ctx.db, record);
         failedInRow = 0;
+        coolDownsInRow = 0;
         counts.fetched++;
         if (saved.inserted || saved.textChanged) counts.changed++;
         if (record.text || record.textAbsent) {
@@ -84,6 +102,11 @@ export async function fetchAndStore<T>(ctx: CrawlContext, job: FetchJob<T>, coun
         ctx.log(`${job.source}: ${id}: ${message}`);
         await enqueue(ctx.db, job.source, id, "decision", message);
         if (++failedInRow >= COOL_DOWN_AFTER && Date.now() >= coolingUntil) {
+          if (coolDownsInRow >= GIVE_UP_AFTER_COOL_DOWNS) {
+            unreachable = new SourceUnreachable(message);
+            return;
+          }
+          coolDownsInRow++;
           coolingUntil = Date.now() + COOL_DOWN_MS;
           failedInRow = 0;
           ctx.log(`${job.source}: ${COOL_DOWN_AFTER} chyb za sebou — pauza ${COOL_DOWN_MS / 60_000} min`);
@@ -94,6 +117,7 @@ export async function fetchAndStore<T>(ctx: CrawlContext, job: FetchJob<T>, coun
   };
   await Promise.all(Array.from({ length: Math.max(1, job.concurrency) }, worker));
   if (stopped) throw stopped;
+  if (unreachable) throw unreachable;
 }
 
 /** Every k-th item so a sample spans the whole list. */
