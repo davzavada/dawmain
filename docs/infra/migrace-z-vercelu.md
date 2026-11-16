@@ -30,8 +30,9 @@ nezměnil.
 Na uživateli: produkční proměnné z Vercelu do `/etc/dawmain/env`; zápis
 Cloudflare (WAF výjimka rozšířit na `dawmain`, v přepnutí změnit CNAME);
 záloha mimo stroj (účet R2 / disk) a dohled (Healthchecks / UptimeRobot).
-Na přípravě (jde bez dopadu na Vercel): databáze `files` v CT `pg`, zkouška
-dumpu z Neonu, generálka s Clerkem (fáze 4).
+Na přípravě (jde bez dopadu na Vercel): zkouška dumpu z Neonu do databáze
+`files` (ta je v CT `pg` připravená a zmigrovaná, viz `proxmox.md`) a
+generálka s Clerkem (fáze 4).
 
 ## Proč to půjde plynule
 

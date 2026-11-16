@@ -102,6 +102,29 @@ Návrat: `pct rollback 101 pre-<migrace>` (zahodí vše zapsané po snapshotu).
 - NSS se synchronizuje až po doběhnutí backfillu (sdílí s ním limit NSS).
 - Ručně: `npx tsx scripts/mirror.ts sync [--source us] [--days 7] [--no-retry]`.
 
+### Databáze `files` (Vlastní zdroje, příprava)
+
+Připraveno 16. 11. 2026 pro přesun z Neonu (fáze 6 v
+[migrace-z-vercelu.md](migrace-z-vercelu.md)); **zatím se nepoužívá**, aplikace
+dál čte Neon.
+
+- Databáze `files` (UTF8, `C.UTF-8`, `CONNECT` jen pro `files_owner` a
+  `dawmain_app`), vlastník `files_owner`. `pg_hba`: `host files
+  files_owner,dawmain_app 10.10.10.4/32 scram-sha-256` (jen z `web`).
+- `files_owner` — vlastník, **s `BYPASSRLS`** (skript `db-migrate.mjs` to
+  vyžaduje, v Neonu to má `neondb_owner`), bez `CREATEROLE`: roli
+  `dawmain_app` proto vytvořil ručně superuživatel (`NOLOGIN NOBYPASSRLS`),
+  migrace `0002` ji jen zdědí. Heslo nastavené dodatečně
+  `ALTER ROLE dawmain_app LOGIN PASSWORD …` + `GRANT CONNECT ON DATABASE
+  files TO dawmain_app` (migrace `CONNECT` nedává).
+- Hesla: `/root/files-db-urls.env` v CT `web` (600) — `DATABASE_URL_UNPOOLED`
+  (owner, jen migrace) a `FILES_DATABASE_URL` (app). Do `/etc/dawmain/env`
+  přijde jen `FILES_DATABASE_URL`, a to až při přepnutí.
+- Migrace `0001`–`0006` aplikovány na PostgreSQL 17.11 bez chyby
+  (`node scripts/db-migrate.mjs`, `nothing pending`). Databáze je **prázdná**:
+  při přesunu se zahodí a vytvoří znovu se stejným nastavením, pak se obnoví
+  dump z Neonu (viz fáze 6).
+
 ## Web a MCP (`web`, CT 103)
 
 Dawmain (Next.js, web i `/api/mcp`) podle
