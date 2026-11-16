@@ -71,6 +71,10 @@ cp -r .next/static .next/standalone/.next/static
 [ -f .next/standalone/skills/dawmain-reserse/SKILL.md ] \
   || die "the research manual is not in the standalone output (outputFileTracingIncludes)"
 
+# What identifies this release at RUN time (the service does not inherit the
+# build shell's exports): dawmain-web.service reads it, dawmain_ping shows it.
+printf 'GIT_SHA=%s\nNEXT_DEPLOYMENT_ID=%s\n' "$SHA" "$SHORT" >"$REL/release.env"
+
 log "Checking the release on port $CHECK_PORT"
 (
   cd .next/standalone

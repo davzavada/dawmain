@@ -17,6 +17,8 @@ Group=dawmain
 # resolves it at start, so a restart is what switches releases.
 WorkingDirectory=/opt/dawmain-web/current/.next/standalone
 EnvironmentFile=/etc/dawmain/env
+# GIT_SHA of the release, written by deploy.sh (the "-" lets a first start work without it).
+EnvironmentFile=-/opt/dawmain-web/current/release.env
 Environment=NODE_ENV=production
 Environment=HOSTNAME=0.0.0.0
 Environment=PORT=3000
