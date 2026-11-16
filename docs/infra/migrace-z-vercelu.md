@@ -187,7 +187,10 @@ vázaná na `dawmain.davidzavada.cz`). To je záměr; Clerk ověří generálka.
    `curl -fsS -H "Authorization: Bearer $CRON_SECRET" http://127.0.0.1:3000/api/cron/files`.
    Nainstalovaný, ale **vypnutý až do přepnutí** — do té doby běží cron na
    Vercelu a dva souběžné úklidy nechceme.
-2. **Záloha Vlastních zdrojů** (začne platit ve fázi 6, připravit teď):
+2. **Záloha Vlastních zdrojů** (začne platit ve fázi 6, připravit teď; skript
+   `deploy/web/backup-files.sh` je vyzkoušený s lokálním restic repem včetně obnovy
+   do pomocné databáze, chybí jen vzdálené úložiště a přihlašovací údaje; běží pod
+   `files_owner`, protože tabulky jsou pod RLS):
    noční `pg_dump -Fc files` → šifrovaně (restic) mimo stroj — Cloudflare R2
    nebo disk na Macu; držet 7 denních + 4 týdenní. Jednou ročně zkouška
    obnovy. Neon měl obnovu k bodu v čase; doma ji nahrazuje tohle, a je to

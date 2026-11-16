@@ -4,13 +4,17 @@
 # when the data moves from Neon home; set up and test the restore beforehand.
 #
 # Needs: postgresql-client-17, restic, and in /etc/dawmain/backup.env (600):
-#   BACKUP_DATABASE_URL   owner or read-only role of the `files` database
+#   BACKUP_DATABASE_URL   the OWNER (files_owner) of the `files` database: the tables are under
+#                         row-level security, so a role without BYPASSRLS makes pg_dump fail
 #   RESTIC_REPOSITORY     e.g. s3:https://<account>.r2.cloudflarestorage.com/dawmain-backup
 #   RESTIC_PASSWORD_FILE  /etc/dawmain/restic-password (600) — keep a copy elsewhere:
 #                         without it the backups cannot be read
 #   AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY   for an S3/R2 repository
 #   HEALTHCHECK_URL       (optional) Healthchecks.io ping URL; silence = alarm
 #
+# Tested 16. 11. 2026 against a local restic repository: backup, forget, check and a
+# restore into a scratch database gave the same tables, migrations and functions
+# (schema only at the time; the database was still empty).
 # Restore (try it once a year, into a scratch database):
 #   restic dump latest files.dump > /tmp/files.dump
 #   createdb files_restore && pg_restore --no-owner --no-acl -d files_restore /tmp/files.dump
