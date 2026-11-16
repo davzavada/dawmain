@@ -27,8 +27,10 @@ Environment=TRUST_FORWARDED_HOST=0
 ExecStart=/usr/bin/node server.js
 Restart=on-failure
 RestartSec=5
-# Finish requests in flight on a restart (Next drains on SIGTERM).
-TimeoutStopSec=30
+# Finish requests in flight on a restart (Next drains on SIGTERM) — but not for long:
+# cloudflared keeps idle connections open, the server then never exits by itself and
+# every deploy cost 30 s of downtime before systemd killed it.
+TimeoutStopSec=8
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
