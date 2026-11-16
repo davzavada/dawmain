@@ -74,7 +74,7 @@ export default async function AdminPage() {
         />
       )}
       <p className="muted small adm-foot">
-        První správce se zapíše do proměnné <code>ADMIN_USER_IDS</code> ve Vercelu (Clerk id, <code>user_…</code>). Ten pak další správce povyšuje tady a
+        První správce se zapíše do proměnné <code>ADMIN_USER_IDS</code> v nastavení serveru (Clerk id, <code>user_…</code>). Ten pak další správce povyšuje tady a
         proměnná zůstává jako cesta zpět.
       </p>
     </div>

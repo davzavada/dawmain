@@ -2,15 +2,15 @@ import { SourceError } from "./shared/errors";
 import { fetchUpstream } from "./shared/http";
 
 /**
- * Client of the home mirror's API v1 (src/mirror/api/server.ts) as Vercel
- * reaches it: through the Cloudflare Tunnel `dawmain-databaze`
- * (docs/infra/proxmox.md), behind Cloudflare Access (service token) and the
- * API's own bearer token. Locally the LAN address works too
- * (MIRROR_API_URL=http://192.168.0.52:8080, no Access headers).
+ * Client of the home mirror's API v1 (src/mirror/api/server.ts). The web
+ * server reaches it over the LAN (MIRROR_API_URL=http://192.168.0.52:8080,
+ * no Access headers, docs/infra/proxmox.md); from outside the LAN through
+ * the Cloudflare Tunnel `dawmain-databaze`, behind Cloudflare Access
+ * (service token) — both with the API's own bearer token.
  *
- *   MIRROR_API_URL                   https://dawmain-databaze.davidzavada.cz
+ *   MIRROR_API_URL                   http://192.168.0.52:8080 (else https://dawmain-databaze.davidzavada.cz)
  *   MIRROR_API_TOKEN                 the API's bearer token (/etc/mirror/env on `app`)
- *   MIRROR_CF_ACCESS_CLIENT_ID       Access service token `dawmain-vercel`
+ *   MIRROR_CF_ACCESS_CLIENT_ID       Access service token (only through the tunnel)
  *   MIRROR_CF_ACCESS_CLIENT_SECRET
  *
  * The mirror's ids are the courts' own (NS UNID, NSS numeric id, ÚS sz,

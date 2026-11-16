@@ -224,8 +224,8 @@ beforeEach(() => {
     savedEnv[name] = process.env[name];
     process.env[name] = value;
   }
-  savedEnv.VERCEL_PROJECT_PRODUCTION_URL = process.env.VERCEL_PROJECT_PRODUCTION_URL;
-  delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  savedEnv.PUBLIC_URL = process.env.PUBLIC_URL;
+  delete process.env.PUBLIC_URL;
   vi.clearAllMocks();
   __resetGuardsForTests();
   __resetZoteroToolsForTests();

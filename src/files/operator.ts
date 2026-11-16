@@ -121,7 +121,7 @@ export interface VacuumStep {
 
 /**
  * The order in which VACUUM FULL can shrink the files without hitting
- * `limitBytes` (Neon Free's 0.5 GB): the rewrite of a table writes a new
+ * `limitBytes` (the 0.5 GB size ceiling): the rewrite of a table writes a new
  * copy of its live rows and indexes before dropping the old files, so each
  * step needs about its live size free. Greedy — of the tables that fit the
  * current room, the one freeing most first; its space then counts as room

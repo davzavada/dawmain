@@ -12,11 +12,7 @@ import { sameOrigin } from "@/src/files/guards";
 import { publicOrigin } from "@/src/zotero/web";
 
 const KEYS = [
-  "VERCEL",
-  "VERCEL_ENV",
-  "VERCEL_REGION",
-  "VERCEL_GIT_COMMIT_SHA",
-  "VERCEL_PROJECT_PRODUCTION_URL",
+  "NODE_ENV",
   "PUBLIC_URL",
   "APP_ENV",
   "APP_REGION",
@@ -43,15 +39,29 @@ describe("authForced / authRequired (the endpoint must fail closed)", () => {
     expect(authRequired()).toBe(false);
   });
 
-  it("is on on Vercel, whatever else is (not) configured", () => {
-    cleanEnv({ VERCEL: "1" });
+  it("is on when DAWMAIN_REQUIRE_AUTH is set, with no token and no Clerk", () => {
+    cleanEnv({ DAWMAIN_REQUIRE_AUTH: "1" });
+    expect(authRequired()).toBe(true);
+  });
+
+  it("is on in a production server without the flag (a lost line in the unit must not open the endpoint)", () => {
+    cleanEnv({ NODE_ENV: "production" });
     expect(authForced()).toBe(true);
     expect(authRequired()).toBe(true);
   });
 
-  it("is on at home when DAWMAIN_REQUIRE_AUTH is set, with no token and no Clerk", () => {
-    cleanEnv({ DAWMAIN_REQUIRE_AUTH: "1" });
-    expect(authRequired()).toBe(true);
+  it("stays off in development and tests without the flag", () => {
+    for (const mode of ["development", "test"]) {
+      cleanEnv({ NODE_ENV: mode });
+      expect(authForced()).toBe(false);
+    }
+  });
+
+  it("a production build opts out only with an explicit DAWMAIN_REQUIRE_AUTH=0", () => {
+    cleanEnv({ NODE_ENV: "production", DAWMAIN_REQUIRE_AUTH: "0" });
+    expect(authForced()).toBe(false);
+    cleanEnv({ NODE_ENV: "production", DAWMAIN_REQUIRE_AUTH: "ture" });
+    expect(authForced()).toBe(true);
   });
 
   it.each(["true", "yes", "TRUE", "ture", "enabled"])("treats %s as on (a misspelling must not open the endpoint)", (value) => {
@@ -71,25 +81,14 @@ describe("authForced / authRequired (the endpoint must fail closed)", () => {
 });
 
 describe("identity of the deployment", () => {
-  it("prefers our own variables over Vercel's", () => {
-    cleanEnv({
-      APP_ENV: "production",
-      VERCEL_ENV: "preview",
-      APP_REGION: "home",
-      VERCEL_REGION: "fra1",
-      GIT_SHA: "abcdef0123456789",
-      VERCEL_GIT_COMMIT_SHA: "1111111222222",
-    });
+  it("reads APP_ENV, APP_REGION and GIT_SHA", () => {
+    cleanEnv({ APP_ENV: "production", APP_REGION: "home", GIT_SHA: "abcdef0123456789" });
     expect(appEnvironment()).toBe("production");
     expect(appRegion()).toBe("home");
     expect(gitCommit()).toBe("abcdef0");
   });
 
-  it("falls back to Vercel's, then to local / null", () => {
-    cleanEnv({ VERCEL_ENV: "preview", VERCEL_REGION: "fra1", VERCEL_GIT_COMMIT_SHA: "1111111222222" });
-    expect(appEnvironment()).toBe("preview");
-    expect(appRegion()).toBe("fra1");
-    expect(gitCommit()).toBe("1111111");
+  it("falls back to local / null", () => {
     cleanEnv();
     expect(appEnvironment()).toBe("local");
     expect(appRegion()).toBeNull();
@@ -101,16 +100,6 @@ describe("productionOrigin", () => {
   it("takes PUBLIC_URL, trailing slash trimmed", () => {
     cleanEnv({ PUBLIC_URL: "https://dawmain.davidzavada.cz/" });
     expect(productionOrigin()).toBe("https://dawmain.davidzavada.cz");
-  });
-
-  it("falls back to the host Vercel names", () => {
-    cleanEnv({ VERCEL_PROJECT_PRODUCTION_URL: "dawmain.davidzavada.cz" });
-    expect(productionOrigin()).toBe("https://dawmain.davidzavada.cz");
-  });
-
-  it("prefers PUBLIC_URL over Vercel's host", () => {
-    cleanEnv({ PUBLIC_URL: "https://dawmain.example", VERCEL_PROJECT_PRODUCTION_URL: "other.example" });
-    expect(productionOrigin()).toBe("https://dawmain.example");
   });
 
   it.each(["javascript:alert(1)", "https://evil.example/<script>", "https://a.example/path", "dawmain.example", "ftp://x.example"])(
@@ -139,21 +128,25 @@ describe("forwardedHostTrusted and what depends on it", () => {
       },
     });
 
-  it("is on by default and off for 0 / false / off / no", () => {
+  it("is off by default and for 0 / false / off / no, on only when set otherwise", () => {
     cleanEnv();
-    expect(forwardedHostTrusted()).toBe(true);
+    expect(forwardedHostTrusted()).toBe(false);
     for (const value of ["0", "false", "off", "no"]) {
       cleanEnv({ TRUST_FORWARDED_HOST: value });
       expect(forwardedHostTrusted()).toBe(false);
     }
+    cleanEnv({ TRUST_FORWARDED_HOST: "1" });
+    expect(forwardedHostTrusted()).toBe(true);
   });
 
-  it("sameOrigin follows x-forwarded-host while trusted (Vercel)", () => {
-    cleanEnv();
+  it("sameOrigin follows x-forwarded-host only where explicitly trusted", () => {
+    cleanEnv({ TRUST_FORWARDED_HOST: "1" });
     expect(sameOrigin(forged())).toBe(true);
   });
 
-  it("sameOrigin ignores a client-sent x-forwarded-host at home", () => {
+  it("sameOrigin ignores a client-sent x-forwarded-host by default and with TRUST_FORWARDED_HOST=0", () => {
+    cleanEnv();
+    expect(sameOrigin(forged())).toBe(false);
     cleanEnv({ TRUST_FORWARDED_HOST: "0" });
     expect(sameOrigin(forged())).toBe(false);
     const own = new Request("http://dawmain.davidzavada.cz/api/files/documents", {
@@ -168,8 +161,10 @@ describe("forwardedHostTrusted and what depends on it", () => {
       new Request("http://127.0.0.1:3000/api/zotero/connect", {
         headers: { host: "dawmain.davidzavada.cz", "x-forwarded-host": "evil.example", "x-forwarded-proto": "https" },
       });
-    cleanEnv();
+    cleanEnv({ TRUST_FORWARDED_HOST: "1" });
     expect(publicOrigin(request())).toBe("https://evil.example");
+    cleanEnv();
+    expect(publicOrigin(request())).toBe("https://dawmain.davidzavada.cz");
     cleanEnv({ TRUST_FORWARDED_HOST: "0" });
     expect(publicOrigin(request())).toBe("https://dawmain.davidzavada.cz");
   });
@@ -184,12 +179,21 @@ describe("forwardedHostTrusted and what depends on it", () => {
     expect(challengeOrigin()).toBe("https://dawmain.davidzavada.cz");
   });
 
-  it("on Vercel the advertised origin still comes from the request (previews keep their own)", () => {
-    cleanEnv({ VERCEL: "1", VERCEL_PROJECT_PRODUCTION_URL: "dawmain.davidzavada.cz" });
-    const preview = new Request("http://internal/.well-known/oauth-protected-resource", {
-      headers: { "x-forwarded-host": "dawmain-git-x.vercel.app", "x-forwarded-proto": "https" },
+  it("without PUBLIC_URL (npm run dev) the advertised origin is the request's own", () => {
+    cleanEnv();
+    const local = new Request("http://localhost:3000/.well-known/oauth-protected-resource", {
+      headers: { host: "localhost:3000", "x-forwarded-host": "evil.example", "x-forwarded-proto": "https" },
     });
-    expect(requestOrigin(preview)).toBe("https://dawmain-git-x.vercel.app");
+    expect(requestOrigin(local)).toBe("http://localhost:3000");
+    expect(challengeOrigin()).toBeUndefined();
+  });
+
+  it("behind a trusted proxy the advertised origin comes from its X-Forwarded-* headers", () => {
+    cleanEnv({ TRUST_FORWARDED_HOST: "1", PUBLIC_URL: "https://dawmain.davidzavada.cz" });
+    const proxied = new Request("http://internal/.well-known/oauth-protected-resource", {
+      headers: { "x-forwarded-host": "staging.example", "x-forwarded-proto": "https" },
+    });
+    expect(requestOrigin(proxied)).toBe("https://staging.example");
     expect(challengeOrigin()).toBeUndefined();
   });
 });

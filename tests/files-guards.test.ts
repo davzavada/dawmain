@@ -296,9 +296,16 @@ describe("sameOrigin", () => {
   const req = (headers: Record<string, string>, url = "https://dawmain.cz/api/files/documents") =>
     new Request(url, { method: "POST", headers });
 
-  it("accepts the site's own origin (host or x-forwarded-host)", () => {
+  it("accepts the site's own origin (host, or x-forwarded-host behind a trusted proxy)", () => {
     expect(sameOrigin(req({ origin: "https://dawmain.cz", host: "dawmain.cz" }))).toBe(true);
-    expect(sameOrigin(req({ origin: "https://dawmain.cz", host: "internal:3000", "x-forwarded-host": "dawmain.cz" }))).toBe(true);
+    // x-forwarded-host counts only where TRUST_FORWARDED_HOST says so (src/runtime.ts).
+    expect(sameOrigin(req({ origin: "https://dawmain.cz", host: "internal:3000", "x-forwarded-host": "dawmain.cz" }))).toBe(false);
+    vi.stubEnv("TRUST_FORWARDED_HOST", "1");
+    try {
+      expect(sameOrigin(req({ origin: "https://dawmain.cz", host: "internal:3000", "x-forwarded-host": "dawmain.cz" }))).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+    }
     expect(sameOrigin(req({ origin: "http://localhost:3000", host: "localhost:3000", "sec-fetch-site": "same-origin" }))).toBe(true);
     expect(sameOrigin(req({ origin: "https://dawmain.cz" }))).toBe(true); // host from the URL
   });

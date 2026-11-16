@@ -78,16 +78,17 @@ const SCAN_MIN_CHARS = 40;
 const HEX64 = /^[0-9a-f]{64}$/i;
 
 /**
- * Global daily volume. Overusing a Vercel Hobby allowance pauses the whole
- * team, the public MCP endpoint included, and the feature may take at most
- * a quarter of it (plan §8): of the 4 h of Active CPU a month that is 1 h
+ * Global daily volume, sized for the former host: overusing a Vercel Hobby
+ * allowance paused the whole team, the public MCP endpoint included, and
+ * the feature could take at most a quarter of it (plan §8): of the 4 h of
+ * Active CPU a month that is 1 h
  * per 30 days for uploads and ingests together (usage_daily.cpu_ms,
  * measured by both), with a day allowed up to 10 minutes of it; and at most
  * 200 uploads a day in all (each up to 4.4 MB of request body). cpu_ms is
  * the feature's own parse/derive/hash work (CpuMeter, synchronous sections
  * only — never another request's CPU on the same instance), so it
  * understates the Active CPU billed by the request overhead (Clerk, the
- * database driver, TLS); compare it with the Vercel usage page. The caps
+ * database driver, TLS). Still enforced on the own server. The caps
  * live in LIMITS with env overrides (FILES_GLOBAL_UPLOADS_PER_DAY,
  * FILES_CPU_MS_DAY, FILES_CPU_MS_30D), read at call time.
  */

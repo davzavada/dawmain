@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
+# ONE-OFF tool of the move from Vercel/Neon to the home server (done 16. 11. 2026),
+# kept for the record only — do not run it again (docs/infra/migrace-z-vercelu.md).
 # Copy the Vlastní zdroje data from a source Postgres (Neon) into the home database `files`.
 #
 #   read -rs SOURCE_DATABASE_URL && export SOURCE_DATABASE_URL     # Neon OWNER, direct (no -pooler)
-#   deploy/web/migrate-db.sh --check      # compare versions, migrations, schema and row counts; change nothing
-#   deploy/web/migrate-db.sh              # copy (refuses when the home database already has rows)
-#   deploy/web/migrate-db.sh --replace    # copy over the rows already at home (trial data)
+#   deploy/web/migrace/migrate-db.sh --check      # compare versions, migrations, schema and row counts; change nothing
+#   deploy/web/migrace/migrate-db.sh              # copy (refuses when the home database already has rows)
+#   deploy/web/migrace/migrate-db.sh --replace    # copy over the rows already at home (trial data)
 #   unset SOURCE_DATABASE_URL
 #
 # Without SOURCE_DATABASE_URL the URL is read from stdin (a prompt on a terminal).

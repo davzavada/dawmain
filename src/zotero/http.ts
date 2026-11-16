@@ -32,7 +32,7 @@ import type { ZoteroCreds } from "./types";
  *   for a slot, a retry and later calls fail here without a request, so a
  *   revoked key costs at most the requests already in flight.
  * - Invalid keys trip an instance-wide breaker: Zotero blocks the WHOLE IP
- *   (Vercel's, shared with every other user) after more than 5 invalid keys
+ *   (the server's, shared with every other user) after more than 5 invalid keys
  *   in 300 s, so after LIMITS.breakerInvalidKeys DISTINCT rejected keys this
  *   instance stops calling Zotero for LIMITS.breakerMs. Counting keys, not
  *   responses, keeps one user's revoked key from pausing Zotero for all.

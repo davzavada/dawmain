@@ -9,7 +9,7 @@ import { countDocuments, countPages } from "./format";
  * then confirms it (or, when the session ended meanwhile, the page falls
  * back to signed out and the cookie is dropped).
  *
- * The pages are static (served from the CDN, nobody reads the cookie on the
+ * The pages are static (served from Next's cache, nobody reads the cookie on the
  * server), so the hint is applied in the browser before the first paint:
  * the root layout inlines HINT_SCRIPT into <head>, which marks <html> and
  * hands the texts to CSS (globals.css, "The sign-in hint"); until Clerk

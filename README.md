@@ -6,13 +6,15 @@
 
 Přístup k judikatuře a právním předpisům s AI by podle mě neměl být možný jen
 přes komerční nástroje, ale v době, kdy jsou ta data dobře přístupná a provoz
-je v zásadě zdarma, mi přišlo, že by měla existovat nekomerční alternativa.
+zvládne i server doma, mi přišlo, že by měla existovat nekomerční alternativa.
 Budu rád, pokud nástroj vyzkoušíte :)
 
 ## Jak to funguje?
 
-V oficiálních databázích server hledá živě - funguje jako nachytřený Google a
-nic si z nich nekopíruje. Kdo má režim Pro, může připojit svou knihovnu Zotero
+V oficiálních databázích server hledá živě - funguje jako nachytřený Google.
+Jen judikaturu českých soudů si pravidelně kopíruje do vlastní databáze, aby v
+ní hledal rychleji; odkazy vždy vedou na originál u soudu a když kopie
+neodpoví, ptá se soudu živě. Kdo má režim Pro, může připojit svou knihovnu Zotero
 a nahrát vlastní soubory. Režim Pro je taky zdarma, jen je v testovacím
 provozu - napište mi případně e-mail o přístup (kontakt je na
 [webu](https://dawmain.davidzavada.cz)).
@@ -41,11 +43,10 @@ zda je dílo k věci. Text díla se nestahuje; k němu vede odkaz na záznam
 byla vyřazena: její WorldCat Discovery blokuje adresy serverů.)
 
 **Vlastní zdroje (Pro).** Kdo má režim Pro (je zdarma, v testovacím provozu ho přiděluji ručně), si
-na webu nahraje vlastní knihy, články, komentáře a vzory - pro sebe, nebo pro
-celý tým. Dokument se převede na text přímo v prohlížeči, takže originál
+na webu nahraje vlastní knihy, články, komentáře a vzory. Dokument se převede na text přímo v prohlížeči, takže originál
 počítač neopustí; na server jde jen text. Asistent v dokumentech pak hledá a
-čte vedle oficiálních databází. Funguje to jen s přihlášením vlastním účtem,
-ne se starším přístupovým kódem. Záloha to není, text svých dokumentů si ale
+čte vedle oficiálních databází. Funguje to jen s přihlášením vlastním účtem.
+Záloha to není, text svých dokumentů si ale
 můžete stáhnout. Pravidla jsou v
 [podmínkách užití](https://dawmain.davidzavada.cz/podminky), o datech v
 [zásadách ochrany osobních údajů](https://dawmain.davidzavada.cz/soukromi).
@@ -83,4 +84,6 @@ Kdo chce, může si ho nahrát i jako skill (odkaz ke stažení je na webu).
 
 ---
 
-Technická dokumentace: [docs/development.md](docs/development.md)
+Server i databáze běží u mě doma v Česku, před nimi je Cloudflare.
+Technická dokumentace: [docs/development.md](docs/development.md), provoz
+serveru: [docs/infra/proxmox.md](docs/infra/proxmox.md).

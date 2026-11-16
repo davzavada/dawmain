@@ -72,7 +72,7 @@ OUTPUT
 /**
  * Decided once, at module load: the instructions are fixed server options,
  * while the tools are registered per request — one flag keeps the two from
- * ever disagreeing (the env is fixed per deployment on Vercel anyway).
+ * ever disagreeing (the env is fixed per process anyway).
  */
 const ZOTERO = zoteroConfigured();
 

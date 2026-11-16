@@ -11,7 +11,7 @@
 #
 # Nothing live changes until the new release has built and passed the checks
 # below on a side port; if the restarted service does not come up healthy, the
-# previous release is put back. docs/infra/migrace-z-vercelu.md, phase 1.
+# previous release is put back. docs/infra/proxmox.md, "Web a MCP".
 set -euo pipefail
 
 BASE=/opt/dawmain-web

@@ -19,8 +19,8 @@ import { failureLines, runVariants, variantFailureSchema, variantTotalsSchema } 
 const fail = toolFailure("Nejvyšší soud");
 
 /**
- * The MCP route dies at 60 s (maxDuration) and takes the whole answer —
- * the variants that did answer included — with it. The searches get 45 s
+ * A call past the 60 s ceiling (src/mcp/tools/index.ts) loses the whole
+ * answer — the variants that did answer included. The searches get 45 s
  * from the call's start: a single search's worst case (attempt, back-off,
  * retry ≈ 32.5 s) plus queueing at the NS gate. A variant still unanswered
  * then is reported as failed. read_top previews must be done by 51 s — the

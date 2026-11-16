@@ -16,7 +16,7 @@ import { useSourceTexts } from "./_zdroje/texts";
 /**
  * The source checks in the browser: the summary in the header and the
  * badges on the home page. Both read GET /api/status once the page is up -
- * a static answer the CDN serves at once, regenerated at most hourly
+ * a static answer the server serves from its cache at once, regenerated at most hourly
  * (app/api/status/route.ts) - so no page waits on it.
  */
 

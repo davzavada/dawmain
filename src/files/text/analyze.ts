@@ -5,7 +5,8 @@
  * all go through here, so what is indexed, what is queried and what gets
  * highlighted can never drift apart.
  *
- * Postgres has no Czech stemmer and Neon allows no custom dictionaries, so
+ * Postgres has no Czech stemmer (and the former hosted database allowed no
+ * custom dictionaries), so
  * stemming runs in the app and Postgres only sees 'simple' lexemes:
  *
  * - INDEX side (indexTerm): the vendored Snowball 3.1.1 Czech stemmer on the

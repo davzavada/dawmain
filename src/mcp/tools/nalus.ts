@@ -32,8 +32,8 @@ import { failureLines, runVariants, variantFailureSchema, variantTotalsSchema } 
 const fail = toolFailure("Ústavní soud (NALUS)");
 
 /**
- * The MCP route dies at 60 s (maxDuration) and takes the whole answer with
- * it. Unbounded, a search's three steps reached ~78 s (form GET + retry,
+ * A call past the 60 s ceiling (src/mcp/tools/index.ts) loses the whole
+ * answer. Unbounded, a search's three steps reached ~78 s (form GET + retry,
  * POST, results GET + retry, each up to 15 s), plus 15 s of previews. The
  * searches get 45 s from the call's start — every three-step search that
  * succeeds today without a retry fits — and each request is cut to what is

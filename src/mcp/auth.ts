@@ -15,7 +15,8 @@ import { clerkConfigured, getBearerToken, getClerkPublishableKey, tokenMatches }
  * Endpoint auth: two credentials are accepted, checked in this order.
  *
  * 1. The shared secret (`MCP_BEARER_TOKEN`) — the original access-code scheme,
- *    kept so existing connector configs survive the OAuth rollout.
+ *    kept for local development and smoke tests; production does not set
+ *    it, so there only signed-in accounts get in.
  * 2. An OAuth 2.1 access token issued by Clerk — verified through Clerk's
  *    backend (which is why `CLERK_SECRET_KEY` must be set alongside the
  *    publishable key). Clerk handles the whole authorization-server side
@@ -45,12 +46,11 @@ function extractTokens(request: Request): string[] {
 }
 
 /**
- * Whether unauthenticated requests must be rejected. On Vercel always — a
- * blank, misspelled or environment-scoped variable would otherwise silently
- * publish the whole tool surface, on production and on every preview URL
- * alike, with nothing to notice it by. The home server says the same with
- * DAWMAIN_REQUIRE_AUTH (src/runtime.ts). Locally only once an auth method
- * is actually configured, so `npm run dev` stays anonymous.
+ * Whether unauthenticated requests must be rejected. Always on a production
+ * server (DAWMAIN_REQUIRE_AUTH, else NODE_ENV=production — src/runtime.ts):
+ * a blank or misspelled variable would otherwise silently publish the whole
+ * tool surface, with nothing to notice it by. Locally only once an auth
+ * method is actually configured, so `npm run dev` stays anonymous.
  */
 export function authRequired(): boolean {
   return authForced() || Boolean(getBearerToken() || clerkConfigured());
@@ -160,19 +160,20 @@ function notConfigured(): Response {
 }
 
 /**
- * The origin clients should use to reach this deployment. Where
- * X-Forwarded-* is trusted (Vercel) mcp-handler reads it from the request,
- * so a preview advertises its own address. At home (TRUST_FORWARDED_HOST=0)
- * the server itself listens on plain http behind the tunnel, so the request
- * URL would say http:// and the OAuth discovery would hand clients an
- * address they cannot use: the fixed PUBLIC_URL is advertised instead.
+ * The origin clients should use to reach this deployment. The server
+ * listens on plain http behind the Cloudflare tunnel, so the request URL
+ * would say http:// and the OAuth discovery would hand clients an address
+ * they cannot use: the fixed PUBLIC_URL is advertised instead. Without
+ * PUBLIC_URL (`npm run dev`) the request's own origin. Only where
+ * X-Forwarded-* is explicitly trusted (TRUST_FORWARDED_HOST, behind a proxy
+ * that sets it) does mcp-handler read the origin from those headers.
  */
 export function requestOrigin(request: Request): string {
   if (forwardedHostTrusted()) return getPublicOrigin(request);
   return productionOrigin() ?? new URL(request.url).origin;
 }
 
-/** For withMcpAuth's `resourceUrl` (the 401 challenge): fixed at home, per request on Vercel. */
+/** For withMcpAuth's `resourceUrl` (the 401 challenge): the fixed PUBLIC_URL, or per request where X-Forwarded-* is trusted. */
 export function challengeOrigin(): string | undefined {
   return forwardedHostTrusted() ? undefined : (productionOrigin() ?? undefined);
 }

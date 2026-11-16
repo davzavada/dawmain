@@ -30,7 +30,6 @@ import { tokenMatches } from "@/src/mcp/config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
 
 /** Libraries purged per run (each deletes in batches; a big one takes a while). */
 const PURGE_PER_RUN = 5;
@@ -49,12 +48,13 @@ const SWEEP_PER_RUN = 200;
 const INGESTS_PER_RUN = 3;
 /** Deferred re-derivations (metadata saves over a library's daily budget) this run may catch up on. */
 const REINDEXES_PER_RUN = 30;
-/** Stop starting new work after this long, to finish inside maxDuration. */
+/** Stop starting new work after this long, to answer within 300 s (dawmain-cron.service gives curl 330 s). */
 const SOFT_DEADLINE_MS = 240_000;
 const DAY_MS = 86_400_000;
 
 /**
- * GET /api/cron/files — the daily maintenance run (vercel.json, 03:00 UTC).
+ * GET /api/cron/files — the daily maintenance run (dawmain-cron.timer on the
+ * server, deploy/web/).
  * `Authorization: Bearer ${CRON_SECRET}`, compared in constant time; fails
  * closed when the secret is unset. Tasks, each capped and isolated (one
  * failing does not stop the rest):

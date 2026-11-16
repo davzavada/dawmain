@@ -3,8 +3,6 @@ import { deleteFor, detailFor, envRefusal, errorResponse, originRefusal, patchFo
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// A metadata change that alters the document type re-derives the index in after().
-export const maxDuration = 300;
 
 type Ctx = { params: Promise<{ id: string }> };
 

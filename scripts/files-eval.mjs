@@ -24,8 +24,8 @@
  *   No network, nothing leaves the machine.
  * - `--db`: the documents already in a real database (FILES_DATABASE_URL,
  *   the dawmain_app role — RLS applies), limited to `--library` (comma-
- *   separated ids). Prefer a local Postgres with a copy of the texts: every
- *   run against Neon wakes it and costs compute hours of the free plan.
+ *   separated ids). Prefer a local Postgres with a copy of the texts over
+ *   the production database.
  *
  * Each query runs the way files_search runs it (src/mcp/tools/files.ts:
  * planVariant — the very function the tool uses — then the channels, RRF

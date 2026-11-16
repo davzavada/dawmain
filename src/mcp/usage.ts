@@ -1,4 +1,3 @@
-import { waitUntil } from "@vercel/functions";
 import { withScope } from "@/src/files/db/client";
 import { recordToolCall, type CallerKey } from "@/src/files/db/usage";
 import { effectiveMode } from "@/src/files/guards";
@@ -10,8 +9,9 @@ import { callerFromCtx } from "./caller";
  * operator page sums them. Counts only — never the arguments of a call.
  *
  * Bookkeeping, never in the way of the answer: written after the handler
- * returns, kept alive past the response with waitUntil, and every failure
- * is swallowed. It lives in the files database, so it follows that
+ * returns, left running past the response (a long-running Node server keeps
+ * it alive; nothing needs to hold the request open), and every failure is
+ * swallowed. It lives in the files database, so it follows that
  * database's switches: nothing is written where it is unconfigured, where
  * FILES_MODE=off, or once the guards turned the feature off (the compute
  * hours of the month are spent — each write would wake the database).
@@ -33,13 +33,11 @@ async function write(who: CallerKey, tool: string): Promise<void> {
   }
 }
 
-/** Count one call of `tool` in the background. Returns the pending write (tests await it). */
+/**
+ * Count one call of `tool` in the background: callers fire and forget
+ * (`void trackToolCall(…)`). Never rejects, so an unawaited write can not
+ * surface as an unhandled rejection. Returns the pending write (tests await it).
+ */
 export function trackToolCall(tool: string, ctx: unknown): Promise<void> {
-  const pending = write(callerKey(ctx), tool);
-  try {
-    waitUntil(pending);
-  } catch {
-    // Outside a Vercel request the promise simply runs on.
-  }
-  return pending;
+  return write(callerKey(ctx), tool).catch(() => undefined);
 }

@@ -7,8 +7,8 @@ import { metadataPatch, roleFrom, toAdminUser, type AdminChange, type AdminUser 
 /**
  * Server side of the admin page: who is an admin, the account list, one change.
  *
- * An admin is an account in ADMIN_USER_IDS / FILES_OPERATOR_IDS (Vercel: the
- * first admin and the way back), or one whose `publicMetadata.role` is
+ * An admin is an account in ADMIN_USER_IDS / FILES_OPERATOR_IDS (the server's
+ * env file: the first admin and the way back), or one whose `publicMetadata.role` is
  * "admin" and that is not banned. Every page load and every action asks
  * again; a Server Function is a public endpoint.
  */
@@ -62,7 +62,7 @@ export async function applyChange(actor: string, targetId: string, change: Admin
     return { ok: false, error: "Vlastní roli správce si tady odebrat nejde. Udělá to jiný správce." };
   }
   if (change.kind === "role" && !change.admin && isEnvAdmin(targetId)) {
-    return { ok: false, error: "Tento účet je správce z nastavení nasazení (Vercel), roli tady odebrat nejde." };
+    return { ok: false, error: "Tento účet je správce z nastavení serveru, roli tady odebrat nejde." };
   }
   try {
     const client = await clerkClient();

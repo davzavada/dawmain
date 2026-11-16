@@ -85,8 +85,8 @@ const OLD_KEY = "Q8MjGpzKfYa3cYOwwvRQEXte";
 const ZOTERO_USER = 475425;
 const SECRETS = [CLIENT_SECRET, REQUEST_SECRET, VERIFIER, API_KEY, OLD_KEY];
 
-/** A preview deployment: the request's own host, not the production domain. */
-const PREVIEW_HOST = "dawmain-git-zotero-cloud-dz.vercel.app";
+/** A deployment on another host (a test instance): the request's own host, not the production domain. */
+const PREVIEW_HOST = "dawmain-test.example";
 const ORIGIN = `https://${PREVIEW_HOST}`;
 const PRODUCTION_HOST = "dawmain.davidzavada.cz";
 
@@ -101,7 +101,7 @@ const ENV: Record<string, string> = {
   CREDENTIALS_SECRET: "a-test-secret-of-sufficient-length",
   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_Y2xlcmsuZXhhbXBsZS5jb20k",
   CLERK_SECRET_KEY: "sk_test_routes",
-  VERCEL_PROJECT_PRODUCTION_URL: PRODUCTION_HOST,
+  PUBLIC_URL: `https://${PRODUCTION_HOST}`,
 };
 
 const ACCESS: Record<string, Access> = {
@@ -397,14 +397,19 @@ describe("POST /api/zotero/connect", () => {
     expect(request.headers.get("authorization")).not.toContain(PRODUCTION_HOST);
   });
 
-  it("takes the public host from x-forwarded-host, and never an http callback for a public host", async () => {
+  it("behind a trusted proxy takes the public host from x-forwarded-host, and never an http callback for a public host", async () => {
     const headers = {
       origin: "https://dawmain.example",
-      host: "internal.lambda",
+      host: "internal.proxy",
       "x-forwarded-host": "dawmain.example",
       "x-forwarded-proto": "http",
     };
-    await connectPOST(connectRequest(headers));
+    process.env.TRUST_FORWARDED_HOST = "1";
+    try {
+      await connectPOST(connectRequest(headers));
+    } finally {
+      delete process.env.TRUST_FORWARDED_HOST;
+    }
     expect(oauthFields(callsTo(OAUTH_REQUEST_URL)[0].headers.get("authorization")).oauth_callback).toBe("https://dawmain.example/api/zotero/callback");
   });
 

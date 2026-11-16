@@ -220,8 +220,8 @@ beforeEach(() => {
     savedEnv[name] = process.env[name];
     process.env[name] = value;
   }
-  savedEnv.VERCEL_PROJECT_PRODUCTION_URL = process.env.VERCEL_PROJECT_PRODUCTION_URL;
-  delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  savedEnv.PUBLIC_URL = process.env.PUBLIC_URL;
+  delete process.env.PUBLIC_URL;
   vi.clearAllMocks();
   __resetGuardsForTests();
   __resetZoteroToolsForTests();
@@ -425,7 +425,7 @@ describe("gating — no Zotero request before the connection is known", () => {
   });
 
   it("the connect link follows the production origin", async () => {
-    process.env.VERCEL_PROJECT_PRODUCTION_URL = "dawmain.cz";
+    process.env.PUBLIC_URL = "https://dawmain.cz";
     vi.mocked(loadConnection).mockResolvedValue({ state: "none" });
     const r = await call("zotero_list", { list: "libraries" });
     expect(r.text).toContain("https://dawmain.cz/?zotero=1");

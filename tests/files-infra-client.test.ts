@@ -18,6 +18,9 @@ vi.mock("pg", () => {
     constructor(config: Record<string, unknown>) {
       pg.configs.push(config);
     }
+    on() {
+      return this;
+    }
     async connect() {
       return {
         query: async (text: string, params?: unknown[]) => {
@@ -35,7 +38,6 @@ vi.mock("pg", () => {
   }
   return { Pool };
 });
-vi.mock("@vercel/functions", () => ({ attachDatabasePool: () => undefined }));
 
 import { __resetForTests, withScope } from "@/src/files/db/client";
 
@@ -47,7 +49,7 @@ beforeEach(() => {
   pg.queries.length = 0;
   pg.params.length = 0;
   pg.failOn = null;
-  process.env.FILES_DATABASE_URL = "postgres://dawmain_app:x@ep-test-pooler.eu-central-1.aws.neon.tech/neondb";
+  process.env.FILES_DATABASE_URL = "postgres://dawmain_app:x@db.example:5432/files";
 });
 afterEach(() => {
   process.env = { ...ENV };
@@ -56,7 +58,7 @@ afterEach(() => {
 const ACTIVITY = /INSERT INTO db_activity/;
 
 describe("withScope on the pooled connection", () => {
-  it("sends no startup parameter the Neon pooler refuses; statement_timeout is transaction-local", async () => {
+  it("sends no startup parameter a transaction-mode pooler refuses; statement_timeout is transaction-local", async () => {
     await withScope(["user_a"], async () => "ok");
     expect(pg.configs).toHaveLength(1);
     const config = pg.configs[0];

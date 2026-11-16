@@ -11,8 +11,6 @@ import { ownedScope } from "@/src/files/scope";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// The kick in after() may run a couple of ingests.
-export const maxDuration = 300;
 
 /** Documents one poll may ask about. */
 const MAX_IDS = 100;

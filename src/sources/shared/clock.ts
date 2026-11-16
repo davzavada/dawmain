@@ -1,8 +1,8 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
 /**
- * One clock for the whole MCP call. app/api/mcp/route.ts runs with
- * maxDuration = 60 s, and the registration boundary (src/mcp/tools/index.ts)
+ * One clock for the whole MCP call. A call has a 60 s ceiling, and the
+ * registration boundary (src/mcp/tools/index.ts)
  * answers with a generic over-budget error at CALL_BUDGET_MS from the HTTP
  * request's arrival. The per-source budgets (ns_search's previews, NALUS,
  * Cellar) must end BEFORE that boundary — otherwise the wrapper answers first

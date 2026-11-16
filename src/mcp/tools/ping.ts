@@ -13,8 +13,8 @@ const outputSchema = z.object({
   serverTime: z.string().describe("Current server time, ISO 8601 (UTC)."),
   environment: z
     .string()
-    .describe("Vercel environment: production, preview, development, or local."),
-  region: z.string().nullable().describe("Vercel region the function ran in."),
+    .describe("Deployment environment (APP_ENV): production, preview, or local."),
+  region: z.string().nullable().describe("Where the instance runs (APP_REGION, e.g. home), or null."),
   commit: z.string().nullable().describe("Short git SHA of the deployment."),
   auth: z
     .enum(["oauth+token", "oauth", "token", "open"])
@@ -44,7 +44,7 @@ export function registerPing(server: McpServer): void {
     {
       title: "Ping",
       description:
-        "Check that the MCP server is reachable and report which deployment answered: server name and version, current server time, Vercel environment, region and git commit, the accepted auth and whether Vlastní zdroje (files_*) and the optional integrations are enabled. Takes no arguments.",
+        "Check that the MCP server is reachable and report which deployment answered: server name and version, current server time, deployment environment, region and git commit, the accepted auth and whether Vlastní zdroje (files_*) and the optional integrations are enabled. Takes no arguments.",
       inputSchema: z.object({}),
       outputSchema,
       annotations: {
@@ -61,7 +61,7 @@ export function registerPing(server: McpServer): void {
         version: SERVER_VERSION,
         serverTime: new Date().toISOString(),
         environment: appEnvironment(),
-        // Which deployment answered: "home" on the Proxmox server, else Vercel's region.
+        // Which deployment answered: "home" on the Proxmox server.
         region: appRegion(),
         commit: gitCommit(),
         // Surfaces a misconfigured token: without this, an accidentally

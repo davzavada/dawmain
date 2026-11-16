@@ -1,5 +1,12 @@
 # Migrace z Vercelu na Proxmox
 
+> **16. 11. 2026: hotovo, kód uklizený.** Produkce běží jen na domácím serveru
+> ([proxmox.md](proxmox.md)); z kódu zmizelo všechno, co sloužilo jen Vercelu a
+> Neonu (`vercel.json`, `neon.ts`, `@vercel/functions`, `@neon/*`, větve
+> `VERCEL_*`). Jednorázové skripty `migrate-db.sh` a `preflight.sh` jsou teď v
+> `deploy/web/migrace/`, `import-env.sh` a `rehearsal.sh` jsou smazané (v historii
+> gitu). Zbytek dokumentu je záznam plánu a průběhu, jak byl.
+
 Plán přesunu webu a MCP serveru Dawmain z Vercelu (Hobby) na domácí Proxmox
 ([proxmox.md](proxmox.md)). Cíl: všechno připravit a ověřit předem, aby
 **přepnutí bylo jedna změna DNS záznamu** a služba při něm nepřestala

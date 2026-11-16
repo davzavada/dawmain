@@ -91,8 +91,9 @@ const LOOPBACK_HOST = /^(?:localhost|127\.0\.0\.1)(?::\d{1,5})?$/;
 /**
  * The origin the browser is on, for the OAuth callback: the host sameOrigin
  * checked (x-forwarded-host where trusted, else Host) — NOT siteOrigin or
- * the production URL. The state cookie is set on this host; on a
- * preview, a callback to the production domain would arrive without it.
+ * the production URL. The state cookie is set on this host; on another
+ * host (a test instance, localhost), a callback to the production domain
+ * would arrive without it.
  * https except on loopback: the callback URL carries the verifier, and the
  * Secure cookie would not come back over plain http anyway. null for
  * anything but a plain scheme://host[:port]. Pure.

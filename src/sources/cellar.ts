@@ -111,8 +111,8 @@ export function normalizeEcli(input: string): string {
 // ---------- the call's time budget ----------
 
 /**
- * The MCP route runs under maxDuration = 60 s, and past it the platform kills
- * the function: the client sees a bare timeout instead of the tool's error
+ * An MCP call has a 60 s ceiling (src/mcp/tools/index.ts), and past it the
+ * call is lost: the client sees a bare timeout instead of the tool's error
  * and hint. Before this budget one step could take 51.5 s alone (a 25 s GET,
  * a retry, 25 s again) and the SPARQL POST 61.5 s (30 + retry + 30), and the
  * text chain runs several steps in sequence (listing, parts, English

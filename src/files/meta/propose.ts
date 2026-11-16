@@ -1,6 +1,7 @@
 /**
  * The AI half of the metadata proposal: one structured-output call through
- * Vercel AI Gateway (plan §7), then the verbatim checks of
+ * Vercel AI Gateway (plan §7; only when AI_GATEWAY_API_KEY is set — without
+ * it nothing is sent anywhere), then the verbatim checks of
  * validateAiProposal. Heuristics do not run here — ingest merges the two
  * (mergeProposals), so the AI being down, over budget or wrong only costs
  * the user some typing.

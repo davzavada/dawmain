@@ -1,7 +1,6 @@
 # Nightly backup of the Vlastní zdroje database (deploy/web/backup-files.sh), started by
-# dawmain-backup.timer. Enable as soon as /etc/dawmain/backup.env exists — preflight.sh
-# requires it before the switch: until then it backs up the home instance's trial data,
-# from the switch (phase 5, the database moves home) the users' data.
+# dawmain-backup.timer. Enable as soon as /etc/dawmain/backup.env exists (and the
+# restore has been tested); until then there is no off-site backup.
 [Unit]
 Description=Dawmain database backup (Vlastní zdroje)
 After=network-online.target

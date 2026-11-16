@@ -7,7 +7,7 @@ import { mirrorApiStatus, mirrorConfigured } from "@/src/sources/mirror";
  * `{}` where the deployment has no mirror or it does not answer.
  *
  * Static like /api/status: regenerated in the background at most once an
- * hour, so the CDN answers every visitor and no function runs for them; also
+ * hour, so the cached answer serves every visitor and no check runs for them; also
  * outside proxy.ts's matcher (public, the same for everyone).
  */
 export const revalidate = 3600;

@@ -14,8 +14,8 @@ export {
  *
  * One canary per database, all at once, behind GET /api/status - a static
  * Route Handler that Next regenerates in the background at most once an hour
- * (app/api/status/route.ts). The CDN serves the last answer to every
- * visitor without running a function, and outside Clerk's proxy, so no
+ * (app/api/status/route.ts). Next serves the last answer from its cache to
+ * every visitor without running a check, and outside Clerk's proxy, so no
  * visitor ever waits on a canary, and no cron is needed: the first request
  * after the hour is up gets the old answer and triggers the next check.
  *

@@ -628,8 +628,8 @@ export function __resetZoteroClientForTests(): void {
 
 /**
  * One load on behalf of every concurrent call that wants the same thing.
- * Claude often fires several zotero_search calls at once and on Fluid they
- * land on one instance: each would otherwise list the groups and scan the
+ * Claude often fires several zotero_search calls at once and they land on
+ * one server process: each would otherwise list the groups and scan the
  * case items on its own (3 parallel docket searches: 15 scan pages where 5
  * do), all queued behind the same 3 slots of the user. The load runs under
  * its own signal, aborted only when EVERY joined caller has given up — no

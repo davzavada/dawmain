@@ -8,8 +8,6 @@ import { envRefusal, errorResponse, listFor, sessionUser } from "@/src/files/web
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// Ingest runs in after() on this same invocation: a long book needs the time.
-export const maxDuration = 300;
 
 /**
  * POST /api/files/documents — upload one converted document (multipart:
