@@ -31,10 +31,13 @@ export class SourceError extends Error {
 export function asSourceError(source: string, error: unknown): SourceError {
   if (error instanceof SourceError) return error;
   const message = error instanceof Error ? error.message : String(error);
+  // undici says only "fetch failed"; which failure (ENOTFOUND, ETIMEDOUT, ECONNRESET…) is the cause's code.
+  const code = error instanceof Error ? (error.cause as { code?: unknown } | undefined)?.code : undefined;
+  const detail = typeof code === "string" && /^[A-Z][A-Z0-9_]*$/.test(code) ? ` (${code})` : "";
   return new SourceError(
     source,
     "UPSTREAM_UNREACHABLE",
-    `${source}: ${message}`,
+    `${source}: ${message}${detail}`,
     "The upstream service did not respond. Try again in a minute; if it keeps failing, run dawmain_probe_sources to check the source's status.",
   );
 }

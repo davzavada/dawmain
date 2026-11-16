@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
 import type { Db } from "@/src/mirror/db/client";
-import { COOL_DOWN_AFTER, COOL_DOWN_MS, fetchAndStore } from "@/src/mirror/crawl/workers";
+import { COOL_DOWN_AFTER, COOL_DOWN_MS, GIVE_UP_AFTER_COOL_DOWNS, SourceUnreachable, fetchAndStore } from "@/src/mirror/crawl/workers";
 import { Pacer, SourceStopped } from "@/src/mirror/http";
 import type { DecisionRecord } from "@/src/mirror/types";
 import { createMirrorTestDb } from "./helpers/mirror-db";
@@ -44,7 +44,23 @@ function ctx(sleeps: number[]) {
   };
 }
 
+/** A context whose pauses pass at once: only the clock moves (the workers compare Date.now() with the pause's end). */
+function ctxWithClock(sleeps: number[]) {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  return {
+    ...ctx(sleeps),
+    sleep: async (ms: number) => {
+      sleeps.push(ms);
+      vi.setSystemTime(Date.now() + ms);
+    },
+  };
+}
+
 describe("fetchAndStore", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("queues failures and pauses after a run of them instead of queueing everything", async () => {
     const sleeps: number[] = [];
     const items = Array.from({ length: COOL_DOWN_AFTER + 3 }, (_, i) => `F${i}`);
@@ -71,6 +87,61 @@ describe("fetchAndStore", () => {
     expect(sleeps[0]).toBeGreaterThan(COOL_DOWN_MS - 1000);
     const queued = await pg.query<{ n: number }>("SELECT count(*)::int AS n FROM mirror.fetch_queue WHERE source = 'ns'");
     expect(queued.rows[0].n).toBe(COOL_DOWN_AFTER);
+  });
+
+  it("gives up on a source that stays down through every pause, leaving the rest unasked", async () => {
+    const sleeps: number[] = [];
+    const asked = COOL_DOWN_AFTER * (GIVE_UP_AFTER_COOL_DOWNS + 1);
+    const items = Array.from({ length: asked + 40 }, (_, i) => `D${i}`);
+    const counts = { fetched: 0, changed: 0, failed: 0 };
+    let calls = 0;
+    const run = fetchAndStore(
+      ctxWithClock(sleeps),
+      {
+        source: "ns",
+        parserVersion: 1,
+        items,
+        id: (x) => x,
+        fetch: async () => {
+          calls++;
+          throw new Error("fetch failed");
+        },
+        concurrency: 1,
+      },
+      counts,
+    );
+    await expect(run).rejects.toBeInstanceOf(SourceUnreachable);
+    expect(sleeps).toHaveLength(GIVE_UP_AFTER_COOL_DOWNS);
+    expect(calls).toBe(asked);
+    expect(counts).toEqual({ fetched: 0, changed: 0, failed: asked });
+    const queued = await pg.query<{ n: number }>("SELECT count(*)::int AS n FROM mirror.fetch_queue WHERE source = 'ns' AND source_id LIKE 'D%'");
+    expect(queued.rows[0].n).toBe(asked); // the 40 never asked were not charged a failed attempt
+  });
+
+  it("a stored decision between pauses starts the count again", async () => {
+    const sleeps: number[] = [];
+    const rounds = GIVE_UP_AFTER_COOL_DOWNS + 2;
+    // Each round: COOL_DOWN_AFTER failures (a pause), then one decision that comes through.
+    const items = Array.from({ length: rounds * (COOL_DOWN_AFTER + 1) }, (_, i) => `R${i}`);
+    const counts = { fetched: 0, changed: 0, failed: 0 };
+    let calls = 0;
+    await fetchAndStore(
+      ctxWithClock(sleeps),
+      {
+        source: "ns",
+        parserVersion: 1,
+        items,
+        id: (x) => x,
+        fetch: async (x) => {
+          if (++calls % (COOL_DOWN_AFTER + 1) !== 0) throw new Error("HTTP 500");
+          return record(x);
+        },
+        concurrency: 1,
+      },
+      counts,
+    );
+    expect(counts.fetched).toBe(rounds);
+    expect(sleeps).toHaveLength(rounds);
   });
 
   it("stores a record without text as not done and queues it", async () => {
