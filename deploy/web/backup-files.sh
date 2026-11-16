@@ -7,7 +7,7 @@
 #   BACKUP_DATABASE_URL   the OWNER (files_owner) of the `files` database: the tables are under
 #                         row-level security, so a role without BYPASSRLS makes pg_dump fail
 #   RESTIC_REPOSITORY     e.g. s3:https://<account>.r2.cloudflarestorage.com/dawmain-backup
-#   RESTIC_PASSWORD_FILE  /etc/dawmain/restic-password (600) — keep a copy elsewhere:
+#   RESTIC_PASSWORD_FILE  /etc/dawmain/restic-password (600; not under /root: the unit hides it) — keep a copy elsewhere:
 #                         without it the backups cannot be read
 #   AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY   for an S3/R2 repository
 #   HEALTHCHECK_URL       (optional) Healthchecks.io ping URL; silence = alarm

@@ -1,0 +1,25 @@
+# Nightly backup of the Vlastní zdroje database (deploy/web/backup-files.sh), started by
+# dawmain-backup.timer. Install + enable only when the database lives here (phase 6) and
+# /etc/dawmain/backup.env exists; until then the data is in Neon and this would back up an
+# empty database.
+[Unit]
+Description=Dawmain database backup (Vlastní zdroje)
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/dawmain/backup.env
+
+[Service]
+Type=oneshot
+# Runs as root: backup.env (owner URL, restic keys) is root-only.
+ExecStart=/opt/dawmain-web/repo/deploy/web/backup-files.sh
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+# ProtectHome hides /root, so restic's cache lives in /var/cache/dawmain-backup
+# (CacheDirectory creates it); the repository itself is remote.
+CacheDirectory=dawmain-backup
+# A repository on a locally mounted disk (instead of R2) lives under /backup or /var/backups;
+# the password file belongs in /etc/dawmain/ (ProtectHome hides /root).
+ReadWritePaths=-/backup -/var/backups
+Environment=RESTIC_CACHE_DIR=/var/cache/dawmain-backup
