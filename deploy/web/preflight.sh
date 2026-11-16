@@ -8,7 +8,7 @@
 # Run from a checkout of the repository on the Mac (needs `ssh pve`, curl, node).
 # Exit 0 = GO, 1 = NO-GO. Every line says what it checked; WARN does not block,
 # it names something to decide on. Checklist and rollback:
-# docs/infra/migrace-z-vercelu.md, phase 5.
+# docs/infra/migrace-z-vercelu.md, phase 5 (database and domain in one sequence).
 set -uo pipefail
 
 PVE="${PVE:-pve}"
@@ -51,15 +51,16 @@ for key in NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY CLERK_SECRET_KEY CRON_SECRET \
            FILES_MODE FILES_DATABASE_URL FILES_OPERATOR_IDS CREDENTIALS_SECRET PUBLIC_URL; do
   has "$key" && ok "$key" || bad "$key chybí"
 done
-for key in CLERK_WEBHOOK_SIGNING_SECRET ESBIRKA_API_KEY AI_GATEWAY_API_KEY MCP_BEARER_TOKEN ZOTERO_OAUTH_CLIENT_KEY ZOTERO_OAUTH_CLIENT_SECRET \
+for key in CLERK_WEBHOOK_SIGNING_SECRET ESBIRKA_API_KEY AI_GATEWAY_API_KEY ZOTERO_OAUTH_CLIENT_KEY ZOTERO_OAUTH_CLIENT_SECRET \
            FILES_USER_HASH_SECRET MIRROR_API_URL MIRROR_API_TOKEN; do
   has "$key" && ok "$key" || warn "$key chybí (na Vercelu to bylo nastavené?)"
 done
 if has FILES_DATABASE_URL; then
+  # Since the switch moves the data home (deploy/web/migrate-db.sh), the app must use the home database.
   case "$(ct 103 "grep '^FILES_DATABASE_URL=' /etc/dawmain/env | sed 's#.*@\\([^/:]*\\).*#\\1#'")" in
-    *neon.tech*) ok "FILES_DATABASE_URL míří na Neon (přesun databáze je až fáze 6)" ;;
-    10.10.10.2) ok "FILES_DATABASE_URL míří na domácí databázi" ;;
-    *) warn "FILES_DATABASE_URL míří jinam, než na Neon nebo 10.10.10.2" ;;
+    10.10.10.2) ok "FILES_DATABASE_URL míří na domácí databázi (10.10.10.2)" ;;
+    *neon.tech*) bad "FILES_DATABASE_URL míří na Neon — doma se používá domácí databáze (import-env.sh ji bere z /root/files-db-urls.env)" ;;
+    *) bad "FILES_DATABASE_URL míří jinam než na 10.10.10.2" ;;
   esac
 fi
 
@@ -78,21 +79,28 @@ if [ -n "$TOKEN" ] && [ -f scripts/smoke.mjs ]; then
     bad "smoke test selhal (/tmp/preflight-smoke.log)"
   fi
 else
-  warn "smoke test přeskočen (chybí MCP_BEARER_TOKEN v env nebo scripts/smoke.mjs; spusť z kořene repozitáře)"
+  ok "smoke test s tokenem se nedělá (sdílený přístupový kód doma není — nástroje ověř přihlášeným konektorem)"
 fi
 
 head_ "Cron a záloha"
 TIMER="$(ct 103 'systemctl is-enabled dawmain-cron.timer')"
 if [ "$AFTER" = 1 ]; then
-  [ "$TIMER" = "enabled" ] && ok "dawmain-cron.timer zapnutý" || bad "dawmain-cron.timer není zapnutý (po přepnutí musí být; na Vercelu vypnout cron)"
+  [ "$TIMER" = "enabled" ] && ok "dawmain-cron.timer zapnutý" || bad "dawmain-cron.timer není zapnutý (po přepnutí a kontrole prvního běhu musí být)"
 else
-  [ "$TIMER" != "enabled" ] && ok "dawmain-cron.timer vypnutý (do přepnutí cron dělá Vercel)" || bad "dawmain-cron.timer je zapnutý před přepnutím — poběží dva úklidy"
+  [ "$TIMER" != "enabled" ] && ok "dawmain-cron.timer vypnutý (zapíná se v přepnutí, po kontrole prvního běhu)" || bad "dawmain-cron.timer je zapnutý před přepnutím — zapíná se až v přepnutí, po kontrole prvního běhu"
 fi
+# From the switch the users' data lives only here: no off-site backup = no switch.
 if [ -n "$(ct 103 'ls /etc/dawmain/backup.env')" ]; then
-  [ "$(ct 103 'systemctl is-enabled dawmain-backup.timer')" = "enabled" ] && ok "záloha databáze nastavená a zapnutá" || warn "záloha nastavená, ale dawmain-backup.timer není zapnutý"
+  ok "záloha databáze nastavená (/etc/dawmain/backup.env)"
 else
-  warn "záloha databáze není nastavená (/etc/dawmain/backup.env) — povinné nejpozději před fází 6 (přesun databáze)"
+  bad "záloha databáze není nastavená (/etc/dawmain/backup.env) — bez zálohy mimo stroj se nepřepíná"
 fi
+[ "$(ct 103 'systemctl is-enabled dawmain-backup.timer')" = "enabled" ] && ok "dawmain-backup.timer zapnutý" || bad "dawmain-backup.timer není zapnutý (systemctl enable --now dawmain-backup.timer)"
+case "$(ct 103 'systemctl show -p Result --value dawmain-backup.service; systemctl show -p ExecMainExitTimestampMonotonic --value dawmain-backup.service' | paste -sd' ' -)" in
+  "success 0"|"") warn "záloha ještě neproběhla — spusť ji jednou ručně: systemctl start dawmain-backup.service" ;;
+  success\ *)    ok "poslední záloha doběhla bez chyby" ;;
+  *)             bad "poslední záloha selhala (journalctl -u dawmain-backup)" ;;
+esac
 warn "externí dohled (Healthchecks / UptimeRobot) ověř ručně — skript ho nevidí"
 
 if [ "$AFTER" = 1 ]; then

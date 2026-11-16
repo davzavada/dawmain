@@ -6,11 +6,44 @@ Plán přesunu webu a MCP serveru Dawmain z Vercelu (Hobby) na domácí Proxmox
 odpovídat.
 
 Stav plánu (16. 11. 2026): fáze 0 a 1 hotové a nasazené na CT `web`, z fáze 2
-tunel, zkušební adresa `dawmain-novy` a WAF výjimka; zbytek čeká (viz níže
-„Odchylky od plánu“ a „Co zbývá do přepnutí“). Kód běží v `main`, Vercel se
-nezměnil.
+tunel, zkušební adresa `dawmain-novy` a WAF výjimka; skripty pro přesun
+databáze (`migrate-db.sh`) a generálku (`rehearsal.sh`) vyzkoušené; zbytek
+čeká (viz níže „Odchylky od plánu“ a „Co zbývá do přepnutí“). Kód běží v
+`main`, Vercel se nezměnil.
+
+### Změna pořadí: databáze se stěhuje při přepnutí
+
+Původně měl domácí server po přepnutí domény ještě týden číst Neon. Nově se
+**databáze stěhuje domů v rámci přepnutí** (jedna sekvence, fáze 5) a domácí
+instance už teď používá domácí databázi `files` (do přepnutí jen zkušební
+data). Důvod — nález při importu proměnných:
+
+- **`vercel env pull` vrací u proměnných označených jako *sensitive*
+  doslova `[SENSITIVE]`** a hodnotu z Vercelu nejde získat zpět. Týká se to
+  URL role `dawmain_app` v Neonu i dalších tajemství. Souběh nad Neonem by
+  proto vyžadoval nové heslo v Neonu (zásah do produkce). Na jednorázovou
+  kopii dat stačí **connection string vlastníka** z konzole Neonu.
+- Tajemství, která chybí, se berou ze serveru (`CRON_SECRET`,
+  `AI_GATEWAY_API_KEY`, `MIRROR_API_TOKEN`);
+  `FILES_DATABASE_URL` vždy z `/root/files-db-urls.env` (domácí databáze);
+  `CREDENTIALS_SECRET` z Vercelu nejde získat → `import-env.sh
+  --new-credentials-secret` vytvoří nový: kdo měl připojené Zotero, připojí
+  ho jednou znovu. `CLERK_WEBHOOK_SIGNING_SECRET` jde znovu zobrazit v Clerku
+  (*Webhooks → endpoint → Signing Secret*) a doplnit ručně.
+- **Produkce na Vercelu nemá `CRON_SECRET` ani
+  `CLERK_WEBHOOK_SIGNING_SECRET`.** Endpoint cronu i webhooku pak vrací 503,
+  takže denní údržba tam nejspíš **nikdy neběžela** a smazání účtu v Clerku
+  se do Vlastních zdrojů nepropsalo. První běh cronu doma proto udělá všechny
+  odložené úklidy najednou — viz „První běh cronu doma“ ve fázi 5.
 
 ### Odchylky od plánu
+
+- **Rozhodnutí 16. 11.:** sdílený přístupový kód (`MCP_BEARER_TOKEN`) se domů
+  nepřenáší — po přepnutí platí jen přihlášení přes Clerk; konektory nastavené
+  na starý kód se přihlásí účtem. Zotero se doma nastaví znovu později (bez
+  `ZOTERO_OAUTH_*` je vypnuté) a `CREDENTIALS_SECRET` je nový. Data z Neonu se
+  nepřenášejí, pokud se neukáže, že tam něco je (`migrate-db.sh` je připravený;
+  Neon zůstává 14 dní nedotčený).
 
 - `pg` se **nezmenšoval**: limit paměti není rezervace a host měl volných ~10 GB
   (s cache). Vrátit se k tomu, jen když začne docházet paměť.
@@ -27,28 +60,30 @@ nezměnil.
 
 ### Co zbývá do přepnutí
 
-Na uživateli: produkční proměnné z Vercelu do `/etc/dawmain/env` — jedním
-příkazem z kořene repozitáře na Macu:
+Na uživateli, z kořene repozitáře na Macu:
 
 ```bash
-npx vercel env pull --environment=production .env.prod   # po přihlášení do Vercelu
-deploy/web/import-env.sh .env.prod --dry-run             # co se stane (jen názvy klíčů)
-deploy/web/import-env.sh .env.prod                       # instalace, přebuild, při chybě návrat
+# 1. produkční proměnné (sensitive doplnit ručně do souboru, viz výše)
+npx vercel env pull --environment=production .env.prod
+deploy/web/import-env.sh .env.prod --dry-run [--new-credentials-secret]   # jen názvy klíčů
+deploy/web/import-env.sh .env.prod [--new-credentials-secret]             # instalace, přebuild, při chybě návrat
 rm .env.prod
-deploy/web/preflight.sh                                  # musí říct GO
+# 2. zkouška přesunu dat z Neonu (owner, přímé spojení bez -pooler; nic se nevypisuje)
+read -rs SOURCE_DATABASE_URL && export SOURCE_DATABASE_URL
+deploy/web/migrate-db.sh --check          # verze, migrace, schéma, počty řádků — nic nemění
+deploy/web/migrate-db.sh --replace        # zkušební kopie; změřit čas
+unset SOURCE_DATABASE_URL
+# 3. generálka (fáze 4), záloha mimo stroj (fáze 3), pak
+deploy/web/preflight.sh                   # musí říct GO
 ```
 
-Proměnné, které Vercel vede jako *sensitive*, `env pull` nevrátí — dry-run je
-vypíše jako chybějící a je třeba je do souboru doplnit ručně. Skript byl
-vyzkoušen s vymyšlenými klíči: neplatný Clerk shodí kontrolu nového vydání
-(500 místo 401), nic se nepřepne a původní nastavení se vrátí.
+`import-env.sh` byl vyzkoušen s vymyšleným souborem: rozbitý soubor shodí
+přebuild, nic se nepřepne a původní `/etc/dawmain/env` se vrátí bajt po bajtu.
+`migrate-db.sh` byl vyzkoušen proti pomocné databázi v CT `pg` (viz fáze 5).
 
-Dál na uživateli: zápis
-Cloudflare (WAF výjimka rozšířit na `dawmain`, v přepnutí změnit CNAME);
-záloha mimo stroj (účet R2 / disk) a dohled (Healthchecks / UptimeRobot).
-Na přípravě (jde bez dopadu na Vercel): zkouška dumpu z Neonu do databáze
-`files` (ta je v CT `pg` připravená a zmigrovaná, viz `proxmox.md`) a
-generálka s Clerkem (fáze 4).
+Dál na uživateli: zápis Cloudflare (WAF výjimka rozšířit na `dawmain`, v
+přepnutí změnit CNAME); záloha mimo stroj (účet R2 / disk) a dohled
+(Healthchecks / UptimeRobot).
 
 ## Proč to půjde plynule
 
@@ -56,18 +91,18 @@ Tři vlastnosti dnešního Dawmainu, o které se plán opírá:
 
 1. **MCP je bezstavové** (`src/mcp/server.ts`): žádné relace v paměti. Je
    jedno, které nasazení na který požadavek odpoví.
-2. **Všechen stav je mimo hosting**: účty a OAuth v Clerku, Vlastní zdroje
-   a počitadla v Neonu, klíče Zotera v metadatech Clerku. Vercel i domácí
-   server mohou běžet **současně nad stejnými daty**.
+2. **Stav je mimo hosting**: účty a OAuth v Clerku, klíče Zotera v
+   metadatech Clerku; Vlastní zdroje a počitadla v jedné databázi, kterou
+   jde zkopírovat skriptem (`migrate-db.sh`) za pár minut.
 3. **Doména se nemění** a její DNS je už na Cloudflare. Konektory uživatelů,
    Clerk (produkční instance, OAuth, webhook) ani callback Zotera se
    nepřenastavují; vydané tokeny platí dál.
 
-Z toho plyne pořadí: domácí nasazení nejdřív běží **souběžně** s Vercelem
-nad Neonem, pak se přepne doména, a teprve potom — samostatně a bez vlivu na
-doménu — se stěhuje databáze z Neonu domů. Databázi nejde přestěhovat před
-přepnutím (Vercel by na domácí Postgres nedosáhl) a stěhovat ji ve stejné
-chvíli jako doménu by zbytečně spojilo dvě rizika do jednoho okna.
+Z toho plyne pořadí: domácí nasazení běží nejdřív **souběžně** s Vercelem
+nad vlastní (zkušební) databází, při přepnutí se Vercel přepne jen na čtení,
+data se zkopírují z Neonu domů a hned nato se změní DNS. Souběh nad Neonem
+(původní plán) padl na tom, že URL aplikační role z Vercelu nejde získat
+(viz „Změna pořadí“).
 
 Clerk zůstává beze změny po celou dobu i potom.
 
@@ -103,7 +138,7 @@ Internet → Cloudflare (DNS + proxy) → Tunnel dawmain-databaze (jen odchozí)
    ├─ dawmain.davidzavada.cz          → CT 103 web  :3000  (Next.js, systemd)
    └─ dawmain-databaze.davidzavada.cz → CT 102 app  :8080  (API zrcadla, beze změny)
 
-CT 103 web ── vmbr1 ──► CT 101 pg   databáze `files` (po fázi 6; do té doby Neon)
+CT 103 web ── vmbr1 ──► CT 101 pg   databáze `files` (data od přepnutí; do té doby zkušební)
 CT 103 web ── vmbr1 ──► CT 102 app  API zrcadla po vnitřní síti (bez Cloudflare Access)
 ```
 
@@ -130,7 +165,7 @@ dál ho hlídat (viz monitoring ve fázi 3).
 | 0.4 | `next.config.ts` | `output: "standalone"` jen při `NEXT_OUTPUT=standalone` (nastaví `deploy.sh`), takže build na Vercelu zůstává stejný. Verzi vydání nese `NEXT_DEPLOYMENT_ID`, který Next čte sám. `SKILL.md` se do standalone výstupu přibalí (ověřeno). |
 | 0.5 | `src/zotero/web.ts`, `src/files/guards.ts`, `src/mcp/auth.ts` | Čtou `x-forwarded-host` (a `mcp-handler` i `x-forwarded-proto`). Vercel ho přepisuje, Cloudflare Tunnel ho od klienta propustí. Nové `TRUST_FORWARDED_HOST=0` (doma; výchozí zůstává „důvěřovat“, aby se na Vercelu nic nezměnilo) bere jen `Host`. **Nález při ověřování:** za tunelem vidí Node prostý `http` a žádný `x-forwarded-host`, takže by OAuth discovery MCP klientům nabídl `http://…`. Doma proto adresu pro OAuth (metadata i `WWW-Authenticate`) určuje pevné `PUBLIC_URL`. |
 | 0.6 | `src/sources/mirror.ts` | Beze změny kódu — Access hlavičky jsou už volitelné; doma se nastaví `MIRROR_API_URL=http://10.10.10.3:8080`. API zrcadla musí poslouchat i na `10.10.10.3` (`MIRROR_API_HOST`), ověřit. |
-| 0.7 | `src/mcp/usage.ts`, `src/files/db/client.ts` | `waitUntil` a `attachDatabasePool` mimo Vercel nic nedělají a kód s tím počítá. Zůstávají do úklidu (fáze 7); jen ověřit testem, že bez Vercelu nepadají. |
+| 0.7 | `src/mcp/usage.ts`, `src/files/db/client.ts` | `waitUntil` a `attachDatabasePool` mimo Vercel nic nedělají a kód s tím počítá. Zůstávají do úklidu (fáze 6); jen ověřit testem, že bez Vercelu nepadají. |
 | 0.8 | `deploy/web/` | Nové soubory: `dawmain-web.service`, `dawmain-cron.service` + `.timer`, `deploy.sh`, `backup-files.sh` (viz fáze 1–3). |
 | 0.9 | `.env.example`, `docs/development.md` | Nové proměnné a oddíl „Nasazení doma“. |
 
@@ -153,8 +188,8 @@ Vercel preview z větve se chová jako dřív a `npm run start` lokálně se
    (`vercel env pull` na Macu, přenést ručně, nikdy necommitovat) plus
    `PUBLIC_URL`, `APP_ENV=production`, `APP_REGION=home`,
    `DAWMAIN_REQUIRE_AUTH=1`, `AI_GATEWAY_API_KEY`, `MIRROR_API_URL` na
-   vnitřní adresu; **bez** `MIRROR_CF_ACCESS_*`. Zatím
-   `FILES_DATABASE_URL` = Neon (stejná hodnota jako na Vercelu).
+   vnitřní adresu; **bez** `MIRROR_CF_ACCESS_*`. `FILES_DATABASE_URL` =
+   domácí databáze `files` (`import-env.sh` ji bere z `/root/files-db-urls.env`).
    `NEXT_PUBLIC_*` musí být přítomné už při buildu.
 5. `deploy.sh <ref>`: `git fetch`, checkout do nového adresáře vydání,
    `npm ci`, `GIT_SHA=… npm run build`, zkopírovat `public` a
@@ -201,9 +236,11 @@ vázaná na `dawmain.davidzavada.cz`). To je záměr; Clerk ověří generálka.
 
 1. **Cron**: `dawmain-cron.timer` denně 04:00 Europe/Prague →
    `curl -fsS -H "Authorization: Bearer $CRON_SECRET" http://127.0.0.1:3000/api/cron/files`.
-   Nainstalovaný, ale **vypnutý až do přepnutí** — do té doby běží cron na
-   Vercelu a dva souběžné úklidy nechceme.
-2. **Záloha Vlastních zdrojů** (začne platit ve fázi 6, připravit teď; skript
+   Nainstalovaný, ale **vypnutý až do přepnutí** a do kontroly prvního běhu
+   (fáze 5). Na Vercelu cron fakticky neběží (chybí `CRON_SECRET`) a tak to
+   zůstane.
+2. **Záloha Vlastních zdrojů** (povinná před přepnutím — `preflight.sh` bez ní
+   řekne NO-GO; timer zapnout hned, zálohuje zatím zkušební data; skript
    `deploy/web/backup-files.sh` je vyzkoušený s lokálním restic repem včetně obnovy
    do pomocné databáze, chybí jen vzdálené úložiště a přihlašovací údaje; běží pod
    `files_owner`, protože tabulky jsou pod RLS):
@@ -226,139 +263,183 @@ vázaná na `dawmain.davidzavada.cz`). To je záměr; Clerk ověří generálka.
 Účel: ověřit Clerk, nahrávání a Zotero na `dawmain.davidzavada.cz` dřív, než
 se doména přepne pro všechny.
 
-1. V CT `web` dočasně Caddy na 443 s certifikátem pro
-   `dawmain.davidzavada.cz` (DNS-01 přes Cloudflare API token) →
-   `127.0.0.1:3000`.
-2. Na Macu v `/etc/hosts`: `192.168.0.53 dawmain.davidzavada.cz`. Prohlížeč
-   i `curl` na Macu teď mluví s domácím serverem pod pravým jménem; zbytek
-   světa dál s Vercelem.
+1. `deploy/web/rehearsal.sh start` — v CT `web` Caddy na `192.168.0.53:443`
+   pro `dawmain.davidzavada.cz` s vlastní CA (`tls internal`, žádný token
+   Cloudflare ani DNS) → `127.0.0.1:3000`, hlavička `Host` zůstává. Skript
+   ověří `/api/status` 200 a anonymní `/api/mcp` 401 a uloží certifikát CA do
+   `$TMPDIR` na Macu.
+2. Na Macu do `/etc/hosts` (ručně, sudo): `192.168.0.53 dawmain.davidzavada.cz`.
+   Prohlížeč i `curl` na Macu teď mluví s domácím serverem pod pravým jménem;
+   zbytek světa dál s Vercelem. Produkce posílá HSTS, takže prohlížeč
+   self-signed certifikát bez obejití nepřijme: CA z bodu 1 dočasně přidat do
+   Klíčenky (*Always Trust*), nebo jen `curl -k`.
 3. Projít: přihlášení a odhlášení (bez smyčky přesměrování), `/vlastni-zdroje`
-   — nahrát, potvrdit metadata, hledat, exportovat, smazat zkušební dokument;
+   — nahrát, potvrdit metadata, hledat, exportovat, smazat zkušební dokument
+   (jde do **domácí** databáze; finální `migrate-db.sh` to přepíše);
    `/vlastni-zdroje/provoz` a `/sprava` (Server Functions); připojit a
    odpojit Zotero; `/podminky`, `/soukromi`.
 4. OAuth konektoru z Macu (Claude Code: `claude mcp add --transport http`)
    — celé kolečko objevení → přihlášení → volání nástroje.
-5. Smazat řádek z `/etc/hosts`, Caddy vypnout a odinstalovat.
+5. `deploy/web/rehearsal.sh stop` (odinstaluje Caddy i jeho CA), smazat řádek
+   z `/etc/hosts` a CA z Klíčenky.
+
+Vyzkoušeno 16. 11.: `start` → přes `curl -k --resolve` `/api/status` 200,
+anonymní `/api/mcp` 401; `stop` → v CT nezůstal balíček, uživatel, soubor ani
+port 443.
 
 Co generálka neověří: webhook Clerku (chodí z internetu; má vlastní test po
 přepnutí) a konektory hostované u Anthropic / OpenAI (ty ověří fáze 2 přes
 bearer token a první minuty po přepnutí).
 
 Po dobu souběhu (fáze 1–5) **neupravovat texty ve Správě**: uložení
-přegeneruje statické stránky jen na tom nasazení, kde se ukládalo.
+přegeneruje statické stránky jen na tom nasazení, kde se ukládalo (a doma
+se navíc přepíše finální kopií databáze).
 
-## Fáze 5 — přepnutí domény
+## Fáze 5 — přepnutí (databáze i doména v jedné sekvenci)
 
-Den předem: TTL záznamu `dawmain` je už krátké (77 s, ověřeno 14. 11.);
-domácí nasazení je na stejném commitu jako produkce na Vercelu; záloha
-proměnných z Vercelu uložená; oznámení není potřeba.
+Uživatel pozná jen pár minut, kdy nejde nahrávat (hledání a čtení běží dál).
 
-Přepnutí (mimo špičku, např. večer):
+`deploy/web/migrate-db.sh` (z Macu) zkopíruje **jen data**: schéma doma zůstává
+z migrací (práva, RLS, funkce `SECURITY DEFINER`, role `dawmain_app`). Odmítne,
+když se liší `schema_migrations` (název + sha256) nebo tabulky a sloupce;
+pak v CT `web` `pg_dump --data-only -Fc` schématu `public` ze zdroje → přes
+hostitele do CT `pg` → jako `postgres` v **jedné transakci** `TRUNCATE` všech
+tabulek + data (triggery vypnuté). Při chybě zůstane domácí databáze, jak byla.
+Nakonec porovná počty řádků po tabulkách a ověří, že se `dawmain_app` přihlásí,
+nemá `BYPASSRLS`, bez scope nevidí nic a se scope jedné knihovny vidí právě ji.
+URL zdroje bere z `SOURCE_DATABASE_URL` nebo ze stdin, nikdy z argumentů; do CT
+`web` jde po stdin a žije tam jen po dobu běhu (soubor služby libpq, 600).
+Bez `--replace` odmítne přepsat neprázdnou domácí databázi — **po přepnutí ho
+už nikdy nespouštět**, smazal by, co uživatelé doma nahráli.
 
-1. Naposledy: smoke přes `dawmain-novy`, `systemctl status dawmain-web cloudflared`.
-2. Cloudflare DNS: záznam `dawmain` změnit z CNAME na Vercel (DNS only) na
-   CNAME `<id tunelu>.cfargotunnel.com`, **proxied**. To je celé přepnutí.
-3. Během pár minut, než doběhnou cache DNS, odpovídají obě nasazení — nad
-   stejnou databází, se stejným Clerkem, bezstavově. Nikdo nedostane chybu.
-4. Hned potom: zapnout `dawmain-cron.timer`; na Vercelu vypnout cron
-   (nasadit s prázdným `crons`, nebo `CRON_SECRET` jen doma).
-5. Kontroly: `dawmain_ping` přes produkční adresu → `region: home`;
-   `curl -sI https://dawmain.davidzavada.cz` → `server: cloudflare`;
-   v Clerku *Webhooks → Send test* → 200 v `journalctl`; vlastní konektor
-   v Claude i ChatGPT udělá rešerši bez nového přihlášení; přihlášení na
-   webu; externí dohled zelený.
-6. V Cloudflare Access smazat servisní token `dawmain-vercel` až ve fázi 7.
+Vyzkoušeno 16. 11. proti pomocné databázi `files_src_test` v CT `pg` (migrace
+0001–0006, řádky ve všech 13 tabulkách): počty i otisky obsahu (md5 řádků,
+sekvence `audit_log`, generovaný sloupec `kind`) shodné; druhý běh bez
+`--replace` odmítnut; zámek na tabulce doma → `lock timeout` → návrat, domácí
+data beze změny; ručně změněný sloupec nebo sha migrace → odmítnuto; URL
+s `-pooler` → odmítnuto. Pomocná databáze a řádek `pg_hba` pak smazány,
+`files` znovu prázdná.
 
-### Den přepnutí — kontrolní seznam s příkazy
+### Den předem
 
-**Rychlá cesta:** `deploy/web/preflight.sh` (z kořene repozitáře na Macu) projde
-všechny podmínky níže a vypíše GO / NO-GO se seznamem, co chybí; nic nemění a
-nevypisuje hodnoty tajemství. Po změně DNS `deploy/web/preflight.sh --after-switch`
-ověří produkční adresu (Cloudflare, `region: home`, cron zapnutý). Ruční příkazy
-níže dělají totéž po částech.
+- Zkušební kopie z Neonu (`migrate-db.sh --check`, pak `--replace`) prošla,
+  čas změřený; na ní se podívat, co udělá první běh cronu (níže).
+- `deploy/web/preflight.sh` → GO: domácí vydání = `origin/main` = produkce,
+  `FILES_DATABASE_URL` míří na `10.10.10.2`, záloha nastavená a
+  `dawmain-backup.timer` zapnutý, cron vypnutý.
+- `CLERK_WEBHOOK_SIGNING_SECRET` doplněný z Clerku (jinak webhook doma vrací 503).
+- TTL záznamu `dawmain` je krátké (77 s, ověřeno 14. 11.); původní CNAME
+  zapsaný (`dig +short CNAME dawmain.davidzavada.cz`; 14. 11.
+  `79e0689ac82ac3bb.vercel-dns-017.com`, DNS only).
 
-Předpoklady (všechno musí platit, jinak se nepřepíná):
+### Přepnutí (mimo špičku, např. večer)
+
+1. **Vercel jen pro čtení:** v projektu `FILES_MODE=readonly` a *Redeploy*
+   produkce. (Rychlejší je přepínač režimu na `/vlastni-zdroje/provoz` — platí
+   do 30 s bez nasazení, ale uloží se do databáze a odcestuje s ní domů;
+   `migrate-db.sh` na to upozorní a doma se po přepnutí vrátí na automatický
+   režim.) Počkat, až v Provozu nic nečeká na zpracování.
+2. **Finální kopie:**
+   ```bash
+   read -rs SOURCE_DATABASE_URL && export SOURCE_DATABASE_URL   # owner Neonu, bez -pooler
+   deploy/web/migrate-db.sh --replace     # počty musí sedět (počitadla se smí lišit)
+   unset SOURCE_DATABASE_URL
+   ```
+   Když skript hlásí texty ze Správy, přebuildit (`FORCE=1 deploy.sh`, příkaz
+   vypíše) — statické stránky je čtou jen při buildu.
+3. **První záloha hned:** `ssh pve "pct exec 103 -- systemctl start dawmain-backup.service"`.
+4. **DNS:** Cloudflare → záznam `dawmain`: z CNAME na Vercel na CNAME
+   `15254ebe-679c-44bb-b460-43b938865323.cfargotunnel.com`, **Proxied**; WAF
+   pravidlo *Skip* rozšířit na `http.host in {"dawmain-novy.davidzavada.cz"
+   "dawmain.davidzavada.cz"}`. Než doběhnou cache DNS, část lidí ještě vidí
+   Vercel — jen pro čtení, se stavem z okamžiku kopie; nikdo nedostane chybu.
+5. **Cron:** zkontrolovat první běh (níže), pak
+   `ssh pve "pct exec 103 -- systemctl enable --now dawmain-cron.timer"`.
+   Na Vercelu nic: cron tam bez `CRON_SECRET` neběží a `CRON_SECRET` se tam
+   nepřidává.
+6. **Kontroly:** `deploy/web/preflight.sh --after-switch`; `dawmain_ping` →
+   `region: home`; v Clerku *Webhooks → Send test* → 200 v `journalctl`;
+   konektor v Claude i ChatGPT udělá rešerši bez nového přihlášení;
+   přihlášení na webu; `files_list` / `files_search` přes MCP, nahrát a
+   smazat dokument; `/vlastni-zdroje/provoz` (počitadla, režim, pojistky);
+   externí dohled zelený.
+
+Ruční ekvivalenty kontrol `preflight.sh`:
 
 ```bash
-# 1. domácí vydání je stejný commit jako produkce na Vercelu a odpovídá
 git -C ~/dawmain fetch -q && git rev-parse --short origin/main
-T=$(ssh pve "pct exec 103 -- sh -c \"grep '^MCP_BEARER_TOKEN=' /etc/dawmain/env | cut -d= -f2-\"")
-MCP_URL=https://dawmain-novy.davidzavada.cz/api/mcp MCP_BEARER_TOKEN=$T npm run smoke   # musí hlásit stejný commit v dawmain_ping
-# 2. /etc/dawmain/env obsahuje produkční klíče (Clerk, CRON_SECRET, Zotero, …), ne zkušební
-ssh pve "pct exec 103 -- sh -c \"sed 's/=.*/=…/' /etc/dawmain/env\""
-# 3. cron je vypnutý do přepnutí
-ssh pve "pct exec 103 -- systemctl is-enabled dawmain-cron.timer"     # disabled
-# 4. mirror a tunel běží, volné místo na poolu < 80 %
+curl -s -o /dev/null -w "%{http_code}\n" https://dawmain-novy.davidzavada.cz/api/status   # 200; nástroje ověř přihlášeným konektorem
+ssh pve "pct exec 103 -- sh -c \"sed 's/=.*/=…/' /etc/dawmain/env\""                    # jen názvy klíčů
+ssh pve "pct exec 103 -- systemctl is-enabled dawmain-cron.timer dawmain-backup.timer"    # disabled, enabled
 ssh pve "pct exec 102 -- systemctl is-active cloudflared mirror-api; lvs --noheadings -o lv_name,data_percent pve/data"
 ```
 
-Přepnutí: Cloudflare → DNS → záznam `dawmain`: změnit z CNAME na Vercel na
-CNAME `15254ebe-679c-44bb-b460-43b938865323.cfargotunnel.com`, **Proxied**. WAF
-pravidlo *Skip* rozšířit na hostname `dawmain.davidzavada.cz` (výraz
-`http.host in {"dawmain-novy.davidzavada.cz" "dawmain.davidzavada.cz"}`).
-Hned potom:
+**Návrat** (kdykoli v prvních 14 dnech): v Cloudflare vrátit záznam `dawmain`
+na původní CNAME Vercelu (DNS only), na Vercelu `FILES_MODE=on` + *Redeploy*
+(příp. zrušit přepínač v Provozu), doma
+`systemctl disable --now dawmain-cron.timer`. **Ztratí se všechno, co
+uživatelé doma nahráli nebo změnili po přepnutí** — Neon drží stav z okamžiku
+kopie. Proto: Neon i projekt na Vercelu (s doménou) nechat **14 dní
+nedotčené**, pak Neon smazat a aktualizovat `/soukromi` (data už nejsou ve
+Frankfurtu u Neonu, ale na vlastním serveru v ČR; Vercel a Neon vypadnou ze
+seznamu zpracovatelů, Cloudflare v něm přibude).
 
-```bash
-ssh pve "pct exec 103 -- systemctl enable --now dawmain-cron.timer"
-# na Vercelu vypnout cron (prázdné "crons" ve vercel.json, nebo odebrat CRON_SECRET)
-curl -sI https://dawmain.davidzavada.cz | grep -i '^server'            # server: cloudflare
-# dawmain_ping přes produkční adresu musí hlásit region: home
+Sledovat 7 dní: chyby v `journalctl`, odezvu, 403/429 od soudů, paměť CT,
+výsledek nočních záloh.
+
+Pojistky bezplatných tarifů (`FILES_CPU_MS_*`, hlídání 0,5 GB Neonu,
+odhad hodin výpočtu z `db_activity`, „neprobouzet databázi“) platí doma dál,
+včetně počitadel převzatých z Neonu — upravit v úklidu podle skutečné
+kapacity disku.
+
+### První běh cronu doma
+
+Na Vercelu údržba nejspíš nikdy neběžela (chybí `CRON_SECRET`, endpoint vrací
+503) a webhook Clerku taky ne (chybí `CLERK_WEBHOOK_SIGNING_SECRET`). První
+běh doma (`app/api/cron/files/route.ts`) proto dožene všechno najednou:
+
+| Úkol | Co první běh udělá |
+| --- | --- |
+| purge | Knihovny s prošlým `purge_after` (max. 5 za běh): smaže všechny jejich dokumenty (s texty, stránkami, oddíly, poznámkami, chunky), jejich počitadla a audit kromě záznamu o smazání. Bez webhooku je jich nejspíš 0. |
+| owners | Až 50 knihoven za běh se ověří v Clerku. **Vlastník smazaný** → smaže hned jeho souhlas s podmínkami a počitadla čtení a volání, knihovnu smaže za 6 dní. **Vlastník bez `publicMetadata.pro === true` nebo zablokovaný** → `pro_revoked_at`; po 6 dnech označení a další den smazání. **Každá týmová knihovna `org_…`** (pozůstatek zrušených týmů) je vždy „bez Pro“ → za ~7 dní smazána. Pro vrácené dřív, než se smaže, knihovnu zachrání. |
+| ingest | Dokumenty ve frontě s vyčerpanými 3 pokusy → chyba, uvolní rezervované stránky; v režimu `on` zpracuje až 3 čekající. |
+| pending | Nahrávky v chybě starší 7 dní ztratí uložený text (`pending_gz`) — ruční „znovu zpracovat“ pak nejde. |
+| recount | Přepočítá počitadla stránek a dokumentů knihoven (nic nemaže). |
+| retention | Smaže `usage_daily` starší 365 dní, počitadla čtení `read:…` starší 1 dne, `db_activity` starší 62 dní a audit smazaných knihoven. |
+
+Podívat se předem — na zkušební kopii po `migrate-db.sh --replace` (jen čtení,
+v CT `pg` jako `postgres`: `ssh pve "pct exec 101 -- runuser -u postgres -- psql -d files"`):
+
+```sql
+-- purge hned
+SELECT id, doc_count, purge_after FROM libraries WHERE purged_at IS NULL AND purge_after <= now();
+-- owners: každý řádek ověřit v Clerku (účet existuje, publicMetadata.pro = true); org_… půjdou pryč
+SELECT id, kind, doc_count, page_count, pro_revoked_at FROM libraries
+ WHERE purged_at IS NULL AND (purge_after IS NULL OR pro_revoked_at IS NOT NULL) ORDER BY kind, id;
+-- ingest: dokumenty, které skončí jako chybné
+SELECT count(*) FROM documents WHERE status IN ('queued','processing') AND attempts >= 3
+   AND (lease_until IS NULL OR lease_until < now());
+-- pending: nahrávky, kterým se smaže uložený text
+SELECT count(*) FROM documents WHERE status = 'error' AND pending_gz IS NOT NULL
+   AND updated_at < now() - interval '7 days';
+-- retention
+SELECT count(*) FILTER (WHERE day < current_date - 365) AS starsi_nez_rok,
+       count(*) FILTER (WHERE scope LIKE 'read:%' AND day < current_date - 1) AS cteni
+  FROM usage_daily;
+SELECT count(*) FROM db_activity WHERE minute < now() - interval '62 days';
 ```
 
-Návrat (kdykoli v prvním týdnu): v Cloudflare vrátit záznam `dawmain` na
-původní CNAME Vercelu, zapnout cron na Vercelu a
-`ssh pve "pct exec 103 -- systemctl disable --now dawmain-cron.timer"`.
-Hodnotu původního CNAME si před změnou **zapsat** (`dig +short CNAME
-dawmain.davidzavada.cz`; 14. 11. byla `79e0689ac82ac3bb.vercel-dns-017.com`,
-DNS only).
+Co nemá zmizet, opravit předem v Clerku (Pro u uživatele). Před prvním během
+po přepnutí `ssh pve pct snapshot 101 pre-first-cron`, pak jednou ručně
+`systemctl start dawmain-cron.service` a souhrn (jen počty) v
+`journalctl -u dawmain-cron -n 5`; teprve potom zapnout timer. Smazání
+knihoven přijde až za 6–7 dní — do té doby je čas `pro_revoked_at` /
+`purge_after` zkontrolovat a Pro případně vrátit.
 
-**Návrat**: vrátit DNS záznam na původní CNAME Vercelu
-(`79e0689ac82ac3bb.vercel-dns-017.com`, DNS only), zapnout cron na Vercelu,
-vypnout domácí timer. Do dvou minut zpět, bez ztráty dat — obě strany pořád
-píšou do Neonu. Projekt na Vercelu proto zůstává nasazený a doména v něm
-přiřazená, dokud neskončí fáze 6; Vercel mezitím nic nespotřebovává.
+## Fáze 6 — úklid
 
-Sledovat 7 dní: chyby v `journalctl`, odezvu, 403/429 od soudů, paměť CT.
-
-## Fáze 6 — databáze z Neonu domů (samostatně, nejdřív týden po fázi 5)
-
-S doménou nesouvisí; uživatel pozná jen pár minut vypnutého nahrávání.
-
-Příprava (bez dopadu):
-1. V CT `pg`: databáze `files`, vlastník `files_owner`, role `dawmain_app`
-   bez `BYPASSRLS` a bez členství v nadřízených rolích (aplikace takovou
-   roli jinak odmítne); `pg_hba`: jen `10.10.10.4`. Stejná verze rozšíření
-   jako v Neonu (zkontrolovat `\dx`).
-2. Zkouška nanečisto: `pg_dump` z Neonu (`DATABASE_URL_UNPOOLED`) →
-   `pg_restore --no-owner --no-acl` → `scripts/db-migrate.mjs` (má být bez
-   práce) → práva pro `dawmain_app` → porovnat počty řádků a
-   `npm run files-eval` proti domácí databázi. Změřit, jak dlouho to trvá.
-3. Záloha z fáze 3 běží a zkušební obnova prošla.
-
-Přepnutí:
-1. `FILES_MODE=readonly` doma, restart (hledání a čtení fungují, nahrávání
-   vrací srozumitelnou hlášku). Počkat, až doběhnou rozpracované ingesty.
-2. Smazat zkušební data, ostrý dump → restore → kontrola počtů.
-3. `/etc/dawmain/env`: `FILES_DATABASE_URL` na `10.10.10.2` (bez pooleru,
-   TLS podle `pg_hba`), `FILES_MODE=on`, restart.
-4. Kontroly: `files_list` / `files_search` přes MCP, nahrát a smazat
-   dokument, `/vlastni-zdroje/provoz` (počitadla, pojistky), ruční spuštění
-   cronu, texty ve Správě.
-
-Návrat: vrátit `FILES_DATABASE_URL` na Neon — beze ztráty jen do prvního
-nového zápisu doma; Neon proto nechat 14 dní nedotčený a pak smazat
-(a aktualizovat `/soukromi`: data už nejsou ve Frankfurtu u Neonu, ale na
-vlastním serveru v ČR; Vercel a Neon vypadnou ze seznamu zpracovatelů,
-Cloudflare v něm přibude).
-
-Po přesunu ztrácí smysl pojistky bezplatných tarifů (`FILES_CPU_MS_*`,
-hlídání 0,5 GB Neonu, „neprobouzet databázi“) — upravit až v úklidu, podle
-skutečné kapacity disku.
-
-## Fáze 7 — úklid
-
-- Vercel: odebrat doménu z projektu, projekt smazat nebo nechat bez domény;
-  odpojit Git integraci. Neon: smazat projekt.
+- Po 14 dnech: Vercel — odebrat doménu z projektu, projekt smazat nebo nechat
+  bez domény, odpojit Git integraci; Neon — smazat projekt.
 - Kód: odstranit `@vercel/functions`, `vercel.json`, `neon.ts`, `@neon/*`,
   větve `process.env.VERCEL*`; `maxDuration` nechat jako dokumentaci nebo
   nahradit vlastním časovým rozpočtem (pozor: Cloudflare ukončí požadavek po
@@ -374,11 +455,12 @@ skutečné kapacity disku.
 
 | Riziko | Dopad | Opatření |
 | --- | --- | --- |
-| **Domácí IP vůči soudům.** Živé dotazy všech uživatelů půjdou ze stejné adresy jako crawler zrcadla; NSS ji už při backfillu blokoval (403). | Živé hledání v NSS (případně jinde) nefunguje pro všechny. | Před fází 5 nechat doběhnout backfill NSS nebo mu snížit tempo; sledovat 403/429; přepínač Živě / Zrcadlo jako záloha; krajní možnost je odchozí provoz ke zdrojům přes levný VPS. |
+| **Domácí IP vůči soudům.** Živé dotazy všech uživatelů půjdou ze stejné adresy jako crawler zrcadla; NSS ji už při backfillu blokoval (403). | Živé hledání v NSS (případně jinde) nefunguje pro všechny. | Před přepnutím nechat doběhnout backfill NSS nebo mu snížit tempo; sledovat 403/429; přepínač Živě / Zrcadlo jako záloha; krajní možnost je odchozí provoz ke zdrojům přes levný VPS. |
 | Endpoint bez přihlášení po chybě v konfiguraci. | Veřejně otevřené nástroje. | 0.1 + smoke v `deploy.sh` kontroluje 401 bez tokenu. |
 | Cloudflare zastaví MCP klienty jako boty. | Konektory nefungují, web ano. | Fáze 2 bod 3; ověřeno skutečným konektorem před přepnutím. |
-| Výpadek proudu, internetu nebo notebooku. | Celá služba dole (na Vercelu se nestávalo). | Fáze 3 bod 5, externí dohled; Vercel jako studená záloha do konce fáze 6. Přijaté riziko nekomerční služby. |
-| Ztráta dat uživatelů po poruše disku. | Nevratná. | Záloha mimo stroj a zkouška obnovy jsou podmínkou fáze 6. |
+| Výpadek proudu, internetu nebo notebooku. | Celá služba dole (na Vercelu se nestávalo). | Fáze 3 bod 5, externí dohled; Vercel jako studená záloha 14 dní po přepnutí (návrat ztratí data nahraná doma). Přijaté riziko nekomerční služby. |
+| Ztráta dat uživatelů po poruše disku. | Nevratná. | Záloha mimo stroj a zkouška obnovy jsou podmínkou přepnutí (`preflight.sh`). |
+| První běh cronu smaže, co nemá (údržba na Vercelu nikdy neběžela). | Ztráta knihoven uživatelů bez Pro v Clerku. | Fáze 5 „První běh cronu doma“: kontrola na zkušební kopii, snapshot, ruční první běh. |
 | Zaplnění thin poolu. | Poškození dat všech CT. | Dohled `lvs`, malý disk CT `web`, rotace vydání. |
 | Build vyčerpá paměť. | Nasazení selže, běžící verze zůstane. | `deploy.sh` přepíná až po úspěšném buildu a smoke. |
 | Veřejná služba v domácí síti. | Po kompromitaci aplikace přístup do LAN. | Neprivilegovaný CT, zpevněný unit; do budoucna oddělit CT `web` od LAN (jen `vmbr1` + odchozí NAT). |
@@ -392,6 +474,5 @@ skutečné kapacity disku.
 | 2 tunel | 1–2 h | žádný |
 | 3 provoz | 1 večer | žádný |
 | 4 generálka | 1–2 h | žádný |
-| 5 přepnutí | 15 min + týden sledování | žádný |
-| 6 databáze | 1 večer přípravy + ~15 min okno | nahrávání na pár minut vypnuté |
-| 7 úklid | 1 večer | žádný |
+| 5 přepnutí | zkušební kopie předem + ~30 min okno + týden sledování | nahrávání na pár minut vypnuté |
+| 6 úklid | 1 večer | žádný |

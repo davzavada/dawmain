@@ -1,8 +1,9 @@
 # Daily maintenance of Vlastní zdroje (app/api/cron/files), started by
 # dawmain-cron.timer — the replacement of the Vercel Cron in vercel.json.
 # CRON_SECRET comes from /etc/dawmain/env, the same value the route checks.
-# Do NOT enable the timer before the domain is switched (phase 5): until then
-# the Vercel Cron does this job and two runs must not overlap.
+# Do NOT enable the timer before the switch (phase 5), and review what the first run
+# will do first (docs/infra/migrace-z-vercelu.md, "První běh cronu doma"): the Vercel
+# Cron never ran (no CRON_SECRET there), so the first run catches up on every clean-up.
 [Unit]
 Description=Dawmain daily maintenance (Vlastní zdroje)
 After=dawmain-web.service

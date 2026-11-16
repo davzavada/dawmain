@@ -104,9 +104,10 @@ Návrat: `pct rollback 101 pre-<migrace>` (zahodí vše zapsané po snapshotu).
 
 ### Databáze `files` (Vlastní zdroje, příprava)
 
-Připraveno 16. 11. 2026 pro přesun z Neonu (fáze 6 v
-[migrace-z-vercelu.md](migrace-z-vercelu.md)); **zatím se nepoužívá**, aplikace
-dál čte Neon.
+Připraveno 16. 11. 2026 pro přesun z Neonu. Data se sem zkopírují při
+přepnutí domény (fáze 5 v [migrace-z-vercelu.md](migrace-z-vercelu.md),
+`deploy/web/migrate-db.sh`); do té doby ji domácí instance používá se
+zkušebními daty.
 
 - Databáze `files` (UTF8, `C.UTF-8`, `CONNECT` jen pro `files_owner` a
   `dawmain_app`), vlastník `files_owner`. `pg_hba`: `host files
@@ -119,11 +120,16 @@ dál čte Neon.
   files TO dawmain_app` (migrace `CONNECT` nedává).
 - Hesla: `/root/files-db-urls.env` v CT `web` (600) — `DATABASE_URL_UNPOOLED`
   (owner, jen migrace) a `FILES_DATABASE_URL` (app). Do `/etc/dawmain/env`
-  přijde jen `FILES_DATABASE_URL`, a to až při přepnutí.
+  přijde jen `FILES_DATABASE_URL` (`import-env.sh` ho bere odsud, nikdy
+  z Vercelu).
 - Migrace `0001`–`0006` aplikovány na PostgreSQL 17.11 bez chyby
-  (`node scripts/db-migrate.mjs`, `nothing pending`). Databáze je **prázdná**:
-  při přesunu se zahodí a vytvoří znovu se stejným nastavením, pak se obnoví
-  dump z Neonu (viz fáze 6).
+  (`node scripts/db-migrate.mjs`, `nothing pending`). Databáze je **prázdná**.
+- Přesun dat: `deploy/web/migrate-db.sh` (z Macu) kopíruje **jen data** —
+  schéma, práva a RLS zůstávají z migrací; obnova běží v CT `pg` jako
+  `postgres` (peer, bez hesla) v jedné transakci s `TRUNCATE`; dump jde z CT
+  `web` přes hostitele, dočasně v `/var/lib/postgresql/migrate-db` (smaže se).
+  Zkouška 16. 11. s pomocnou databází `files_src_test` (dočasný řádek
+  `pg_hba`, obojí pak smazáno).
 
 ## Web a MCP (`web`, CT 103)
 
@@ -149,12 +155,18 @@ neprivilegovaný, `nesting=1`, start po bootu, Node 22 (NodeSource),
   Po změně unit souborů je zkopírovat do `/etc/systemd/system/` a
   `systemctl daemon-reload`.
 - **Cron** `dawmain-cron.timer` (04:00, denní úklid Vlastních zdrojů): nainstalovaný,
-  **vypnutý** do přepnutí domény (do té doby ho dělá Vercel Cron).
-  Ruční spuštění: `systemctl start dawmain-cron.service`.
+  **vypnutý** do přepnutí a do kontroly prvního běhu (na Vercelu údržba bez
+  `CRON_SECRET` nikdy neběžela, první běh dožene všechny úklidy — viz
+  migrace, fáze 5). Ruční spuštění: `systemctl start dawmain-cron.service`.
 - **Záloha databáze** `dawmain-backup.timer` (02:30) → `backup-files.sh` (`pg_dump` →
   restic mimo stroj; nastavení `/etc/dawmain/backup.env`, heslo restic
-  `/etc/dawmain/restic-password`). Nainstalovaná, **vypnutá** do fáze 6.
+  `/etc/dawmain/restic-password`). Nainstalovaná, zatím **vypnutá** a bez
+  `backup.env`; zapnout před přepnutím (`preflight.sh` bez ní hlásí NO-GO).
 - **Kontrola před přepnutím:** `deploy/web/preflight.sh` (GO / NO-GO).
+- **Generálka:** `deploy/web/rehearsal.sh start|stop` — dočasně Caddy na
+  `192.168.0.53:443` pro `dawmain.davidzavada.cz` (`tls internal`); `stop`
+  odstraní balíčky, které `start` přidal, konfiguraci i CA. Mimo generálku
+  v CT Caddy není.
 - **Zrcadlo** jde z webu přes LAN: `MIRROR_API_URL=http://192.168.0.52:8080`
   (API poslouchá jen na LAN adrese), bez Cloudflare Access.
 - **Tunel**: v `/etc/cloudflared/config.yml` na `app` míří `dawmain.davidzavada.cz`
