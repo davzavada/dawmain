@@ -27,7 +27,23 @@ nezměnil.
 
 ### Co zbývá do přepnutí
 
-Na uživateli: produkční proměnné z Vercelu do `/etc/dawmain/env`; zápis
+Na uživateli: produkční proměnné z Vercelu do `/etc/dawmain/env` — jedním
+příkazem z kořene repozitáře na Macu:
+
+```bash
+npx vercel env pull --environment=production .env.prod   # po přihlášení do Vercelu
+deploy/web/import-env.sh .env.prod --dry-run             # co se stane (jen názvy klíčů)
+deploy/web/import-env.sh .env.prod                       # instalace, přebuild, při chybě návrat
+rm .env.prod
+deploy/web/preflight.sh                                  # musí říct GO
+```
+
+Proměnné, které Vercel vede jako *sensitive*, `env pull` nevrátí — dry-run je
+vypíše jako chybějící a je třeba je do souboru doplnit ručně. Skript byl
+vyzkoušen s vymyšlenými klíči: neplatný Clerk shodí kontrolu nového vydání
+(500 místo 401), nic se nepřepne a původní nastavení se vrátí.
+
+Dál na uživateli: zápis
 Cloudflare (WAF výjimka rozšířit na `dawmain`, v přepnutí změnit CNAME);
 záloha mimo stroj (účet R2 / disk) a dohled (Healthchecks / UptimeRobot).
 Na přípravě (jde bez dopadu na Vercel): zkouška dumpu z Neonu do databáze
