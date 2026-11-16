@@ -250,6 +250,43 @@ Přepnutí (mimo špičku, např. večer):
    webu; externí dohled zelený.
 6. V Cloudflare Access smazat servisní token `dawmain-vercel` až ve fázi 7.
 
+### Den přepnutí — kontrolní seznam s příkazy
+
+Předpoklady (všechno musí platit, jinak se nepřepíná):
+
+```bash
+# 1. domácí vydání je stejný commit jako produkce na Vercelu a odpovídá
+git -C ~/dawmain fetch -q && git rev-parse --short origin/main
+T=$(ssh pve "pct exec 103 -- sh -c \"grep '^MCP_BEARER_TOKEN=' /etc/dawmain/env | cut -d= -f2-\"")
+MCP_URL=https://dawmain-novy.davidzavada.cz/api/mcp MCP_BEARER_TOKEN=$T npm run smoke   # musí hlásit stejný commit v dawmain_ping
+# 2. /etc/dawmain/env obsahuje produkční klíče (Clerk, CRON_SECRET, Zotero, …), ne zkušební
+ssh pve "pct exec 103 -- sh -c \"sed 's/=.*/=…/' /etc/dawmain/env\""
+# 3. cron je vypnutý do přepnutí
+ssh pve "pct exec 103 -- systemctl is-enabled dawmain-cron.timer"     # disabled
+# 4. mirror a tunel běží, volné místo na poolu < 80 %
+ssh pve "pct exec 102 -- systemctl is-active cloudflared mirror-api; lvs --noheadings -o lv_name,data_percent pve/data"
+```
+
+Přepnutí: Cloudflare → DNS → záznam `dawmain`: změnit z CNAME na Vercel na
+CNAME `15254ebe-679c-44bb-b460-43b938865323.cfargotunnel.com`, **Proxied**. WAF
+pravidlo *Skip* rozšířit na hostname `dawmain.davidzavada.cz` (výraz
+`http.host in {"dawmain-novy.davidzavada.cz" "dawmain.davidzavada.cz"}`).
+Hned potom:
+
+```bash
+ssh pve "pct exec 103 -- systemctl enable --now dawmain-cron.timer"
+# na Vercelu vypnout cron (prázdné "crons" ve vercel.json, nebo odebrat CRON_SECRET)
+curl -sI https://dawmain.davidzavada.cz | grep -i '^server'            # server: cloudflare
+# dawmain_ping přes produkční adresu musí hlásit region: home
+```
+
+Návrat (kdykoli v prvním týdnu): v Cloudflare vrátit záznam `dawmain` na
+původní CNAME Vercelu, zapnout cron na Vercelu a
+`ssh pve "pct exec 103 -- systemctl disable --now dawmain-cron.timer"`.
+Hodnotu původního CNAME si před změnou **zapsat** (`dig +short CNAME
+dawmain.davidzavada.cz`; 14. 11. byla `79e0689ac82ac3bb.vercel-dns-017.com`,
+DNS only).
+
 **Návrat**: vrátit DNS záznam na původní CNAME Vercelu
 (`79e0689ac82ac3bb.vercel-dns-017.com`, DNS only), zapnout cron na Vercelu,
 vypnout domácí timer. Do dvou minut zpět, bez ztráty dat — obě strany pořád
