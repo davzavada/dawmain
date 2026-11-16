@@ -38,6 +38,12 @@ data). Důvod — nález při importu proměnných:
 
 ### Odchylky od plánu
 
+- **Rozhodnutí 16. 11. (2):** přepíná se **bez zálohy mimo stroj a bez externího
+  dohledu** — databáze je prázdná; obojí doplnit, než se nahromadí dokumenty
+  uživatelů (`backup-files.sh` a timer jsou připravené, chybí jen úložiště).
+  Generálka přihlášení v prohlížeči se nepovedla (prohlížeč obcházel `/etc/hosts`)
+  a byla vynechána: ověřeno jen, že Clerk klíč platí a OAuth discovery odpovídá;
+  přihlášení se poprvé vyzkouší hned po přepnutí.
 - **Rozhodnutí 16. 11.:** sdílený přístupový kód (`MCP_BEARER_TOKEN`) se domů
   nepřenáší — po přepnutí platí jen přihlášení přes Clerk; konektory nastavené
   na starý kód se přihlásí účtem. Zotero se doma nastaví znovu později (bez
