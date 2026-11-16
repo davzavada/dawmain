@@ -80,6 +80,7 @@ Po přidání konektoru se otevře přihlášení - stačí registrace e-mailem.
 Rešeršní návod (jak se ptát soudů, které filtry zužují hledání, jak číst a
 citovat) si asistent vyžádá od konektoru sám (`dawmain_guide`) na začátku
 každé rešerše, vždy v aktuální verzi - nic dalšího není třeba instalovat.
+Kdo chce, může si ho nahrát i jako skill (odkaz ke stažení je na webu).
 
 ---
 

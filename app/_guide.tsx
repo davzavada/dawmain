@@ -25,6 +25,12 @@ interface Platform {
 const SAMPLE_QUESTION =
   "Najdi judikaturu Nejvyššího soudu k odpovědnosti provozovatele za škodu způsobenou psem.";
 
+const skillDownload = (
+  <a className="button" href="/dawmain-reserse.md" download>
+    Stáhnout skill (SKILL.md)
+  </a>
+);
+
 const loginStep: Step = {
   title: "Přihlaste se",
   body: (
@@ -104,6 +110,23 @@ const PLATFORMS: Platform[] = [
         ),
       },
       loginStep,
+      {
+        title: "Nahrajte skill",
+        body: (
+          <>
+            <p>
+              Rešeršní návod – jak s databázemi pracovat a jak citovat – nabízí konektor i sám
+              (nástroj <em>dawmain_guide</em>); ChatGPT se ale instrukcemi konektoru neřídí tak
+              spolehlivě jako Claude, proto doporučujeme nahrát ho i jako skill. Stáhněte si ho:
+            </p>
+            {skillDownload}
+            <p>
+              Pak v postranním panelu otevřete <strong>Skills</strong>, zvolte{" "}
+              <strong>Vytvořit → Nahrát z počítače</strong> a vyberte stažený soubor.
+            </p>
+          </>
+        ),
+      },
       {
         ...firstQuestion(
           <>
