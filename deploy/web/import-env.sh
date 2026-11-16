@@ -72,7 +72,7 @@ DROPPED="$(cut -d= -f1 <<<"$ALL" | sort | awk -v re="$DROP" '$0 ~ re')"
 from_server() {  # <ct> <file> <key>: the KEY=VALUE line, or nothing
   ssh -o BatchMode=yes "$PVE" "pct exec $1 -- sh -s" <<<"grep '^$3=' $2 | tail -1" 2>/dev/null || true
 }
-for spec in "103 /etc/dawmain/env CRON_SECRET" "103 /etc/dawmain/env AI_GATEWAY_API_KEY" \
+for spec in "103 /etc/dawmain/env CRON_SECRET" "103 /etc/dawmain/env NEXT_SERVER_ACTIONS_ENCRYPTION_KEY" "103 /etc/dawmain/env AI_GATEWAY_API_KEY" \
             "103 /etc/dawmain/env CREDENTIALS_SECRET" \
             "103 /etc/dawmain/env MIRROR_API_TOKEN" "102 /etc/mirror/env MIRROR_API_TOKEN"; do
   set -- $spec
