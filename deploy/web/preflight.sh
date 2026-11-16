@@ -45,13 +45,13 @@ MAIN="$(git ls-remote origin refs/heads/main 2>/dev/null | cut -c1-7)"
 if [ -n "$LIVE" ] && [ "$LIVE" = "$MAIN" ]; then ok "doma běží origin/main ($LIVE)"; else bad "doma běží '${LIVE:-?}', origin/main je '${MAIN:-?}' — spusť deploy.sh"; fi
 
 head_ "Nastavení /etc/dawmain/env (jen přítomnost, ne hodnoty)"
-SET="$(ct 103 "awk -F= '/^[A-Z_0-9]+=./ {print \$1}' /etc/dawmain/env")"
+SET="$(ct 103 "grep -v SENSITIVE /etc/dawmain/env | awk -F= '/^[A-Z_0-9]+=./ {print \$1}'")"
 has() { grep -qx "$1" <<<"$SET"; }
-for key in NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY CLERK_SECRET_KEY CLERK_WEBHOOK_SIGNING_SECRET CRON_SECRET \
+for key in NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY CLERK_SECRET_KEY CRON_SECRET \
            FILES_MODE FILES_DATABASE_URL FILES_OPERATOR_IDS CREDENTIALS_SECRET PUBLIC_URL; do
   has "$key" && ok "$key" || bad "$key chybí"
 done
-for key in ESBIRKA_API_KEY AI_GATEWAY_API_KEY MCP_BEARER_TOKEN ZOTERO_OAUTH_CLIENT_KEY ZOTERO_OAUTH_CLIENT_SECRET \
+for key in CLERK_WEBHOOK_SIGNING_SECRET ESBIRKA_API_KEY AI_GATEWAY_API_KEY MCP_BEARER_TOKEN ZOTERO_OAUTH_CLIENT_KEY ZOTERO_OAUTH_CLIENT_SECRET \
            FILES_USER_HASH_SECRET MIRROR_API_URL MIRROR_API_TOKEN; do
   has "$key" && ok "$key" || warn "$key chybí (na Vercelu to bylo nastavené?)"
 done

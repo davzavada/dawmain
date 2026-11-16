@@ -27,7 +27,7 @@ DRY=0
 
 # Key NAMES that must not be carried over from Vercel (whole-name match).
 DROP='^(VERCEL.*|NX_.*|TURBO_.*|DATABASE_URL.*|PG[A-Z]*|POSTGRES_.*|NEON_.*|MIRROR_CF_ACCESS_.*|PUBLIC_URL|APP_ENV|APP_REGION|MIRROR_API_URL|DAWMAIN_REQUIRE_AUTH|TRUST_FORWARDED_HOST|NEXT_OUTPUT|NEXT_DEPLOYMENT_ID|GIT_SHA)$'
-REQUIRED="NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY CLERK_SECRET_KEY CLERK_WEBHOOK_SIGNING_SECRET FILES_MODE FILES_DATABASE_URL FILES_OPERATOR_IDS CREDENTIALS_SECRET"
+REQUIRED="NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY CLERK_SECRET_KEY FILES_MODE FILES_DATABASE_URL FILES_OPERATOR_IDS CREDENTIALS_SECRET"
 
 TMP="$(mktemp)"
 trap 'rm -f "$TMP"' EXIT
@@ -35,15 +35,27 @@ chmod 600 "$TMP"
 
 # KEY=VALUE lines only (comments and blanks are dropped), minus the dropped keys.
 ALL="$(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$INPUT" || true)"
+# `vercel env pull` writes "[SENSITIVE]" for values Vercel never gives back: such a key is
+# MISSING, not set — its value has to come from where it was created (see the dry run).
+SENSITIVE="$(grep -E '^[A-Za-z_][A-Za-z0-9_]*=.*\[SENSITIVE\]' <<<"$ALL" | cut -d= -f1 | sort || true)"
+ALL="$(grep -v '\[SENSITIVE\]' <<<"$ALL" || true)"
 awk -F= -v re="$DROP" '$1 !~ re' <<<"$ALL" > "$TMP"
 KEPT="$(cut -d= -f1 "$TMP" | sort)"
 DROPPED="$(cut -d= -f1 <<<"$ALL" | sort | awk -v re="$DROP" '$0 ~ re')"
 
-# Carry over the CRON_SECRET already on the server when production has none.
-if ! grep -q '^CRON_SECRET=' "$TMP"; then
-  EXISTING="$(ssh -o BatchMode=yes "$PVE" "pct exec 103 -- sh -s" <<<"grep '^CRON_SECRET=' /etc/dawmain/env" 2>/dev/null || true)"
-  [ -n "$EXISTING" ] && { echo "$EXISTING" >> "$TMP"; echo "CRON_SECRET: production has none, the one on the server stays."; }
-fi
+# Values that live on the home servers already: kept when the file has none.
+#   CRON_SECRET, AI_GATEWAY_API_KEY  from the current /etc/dawmain/env (CT web)
+#   MIRROR_API_TOKEN                 from /etc/mirror/env (CT app, the mirror API itself)
+from_server() {  # <ct> <file> <key>: the KEY=VALUE line, or nothing
+  ssh -o BatchMode=yes "$PVE" "pct exec $1 -- sh -s" <<<"grep '^$3=' $2 | tail -1" 2>/dev/null || true
+}
+for spec in "103 /etc/dawmain/env CRON_SECRET" "103 /etc/dawmain/env AI_GATEWAY_API_KEY" \
+            "103 /etc/dawmain/env MIRROR_API_TOKEN" "102 /etc/mirror/env MIRROR_API_TOKEN"; do
+  set -- $spec
+  grep -q "^$3=" "$TMP" && continue
+  LINE="$(from_server "$1" "$2" "$3")"
+  [ -n "$LINE" ] && { echo "$LINE" >> "$TMP"; echo "$3: taken from the server (CT $1)."; }
+done
 
 # The home values, always last so they win.
 cat >> "$TMP" <<'EOF'
@@ -55,6 +67,7 @@ EOF
 
 echo "Kept from the file ($(wc -l <<<"$KEPT" | tr -d ' ')):";  sed 's/^/  /' <<<"$KEPT"
 echo "Dropped (Vercel / Neon / home overrides):";              sed 's/^/  /' <<<"${DROPPED:-(none)}"
+[ -n "$SENSITIVE" ] && { echo "Hidden by Vercel ([SENSITIVE], treated as missing):"; sed 's/^/  /' <<<"$SENSITIVE"; }
 echo "Forced for the home server: PUBLIC_URL APP_ENV APP_REGION MIRROR_API_URL"
 MISSING=""
 for key in $REQUIRED; do grep -q "^$key=" "$TMP" || MISSING="$MISSING $key"; done
