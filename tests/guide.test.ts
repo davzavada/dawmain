@@ -6,7 +6,6 @@ import {
   GATED_SECTIONS,
   SKILL_MAX_CHARS,
   SKILL_PATH,
-  SKILL_URL,
   loadSkill,
   registerGuide,
   resetSkillCache,
@@ -89,7 +88,6 @@ describe("dawmain_guide", () => {
     // A failed read is not cached: the next call reads again.
     resetSkillCache();
     expect(await loadSkill(ROOT)).toBe(skillBody(SKILL));
-    expect(SKILL_URL).toBe("https://dawmain.davidzavada.cz/dawmain-reserse.md");
   });
 
   it("is the first call of a research by the server instructions and its own description", () => {
