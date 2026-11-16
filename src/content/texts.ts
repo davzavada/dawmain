@@ -132,7 +132,7 @@ Nahráním dokumentu potvrzujete, že pravidla v tomto oddílu dodržíte - web 
 
 **Kvóty.** Místo se počítá ve stranách: jedna strana je 3 600 znaků převedeného textu včetně poznámek pod čarou. Kolik stran dokument zabere a kolik vám zbývá, uvidíte před nahráním. Kvóty můžu podle kapacity měnit, už nahrané dokumenty kvůli tomu ale nemažu. Když se blíží technické limity, které pro ně mám nastavené, přepnou se samy do režimu jen pro čtení (hledat, číst a mazat jde, nahrávat ne), případně se na čas vypnou.
 
-**AI a citace.** Typ dokumentu (komentář, článek, kniha…), název, autory a další metadata navrhne server podle začátku dokumentu, případně s pomocí jazykového modelu (viz [Zásady ochrany osobních údajů](/soukromi)), a asistent v dokumentu hledá hned po zpracování. Návrh se může splést: po rozkliknutí dokumentu v seznamu souborů ho kdykoli opravíte.
+**AI a citace.** Typ dokumentu (komentář, článek, kniha…), název, autory a další metadata navrhne server podle začátku dokumentu a asistent v dokumentu hledá hned po zpracování. Návrh se může splést: po rozkliknutí dokumentu v seznamu souborů ho kdykoli opravíte.
 
 **Záloha není.** Originály si nechte u sebe: server je nikdy nedostane, takže vám je ani nemůže vrátit. Uložený text a metadata nezálohuji a za jejich ztrátu, třeba při výpadku nebo ukončení služby, neručím. Text svých dokumentů si ale můžete stáhnout odkazem „Stáhnout text“ u dokumentu v seznamu souborů (s denním limitem).
 
@@ -196,12 +196,11 @@ E-mail: ${MAIL}
 Dawmain i databáze Vlastních souborů běží na mém vlastním serveru v České republice. Na provozu se podílejí tito zpracovatelé:
 
 - **Clerk, Inc.** - přihlašování a správa účtů,
-- **Cloudflare, Inc.** - síť, přes kterou vede veškerá komunikace s webem a serverem (ochrana před útoky a šifrované spojení k serveru); požadavky včetně IP adresy proto zpracovává při přenosu,
-- **Vercel, Inc.** - jen když je zapnutý návrh metadat jazykovým modelem: služba AI Gateway, přes kterou využívám model Gemini od Google (viz níže).
+- **Cloudflare, Inc.** - síť, přes kterou vede veškerá komunikace s webem a serverem (ochrana před útoky a šifrované spojení k serveru); požadavky včetně IP adresy proto zpracovává při přenosu.
 
-**Návrh metadat přes Gemini.** Když je návrh metadat jazykovým modelem zapnutý, pošlu po nahrání dokumentu přes AI Gateway modelu Gemini (Google, dodavatel Vercelu) výňatek z dokumentu, ne celý text: úvodní strany, tiráž, seznam autorů, osnovu nadpisů a záhlaví stran (dohromady nejvýš 16 000 znaků), název souboru a u PDF údaje z jeho vlastností. Účelem je jen navrhnout typ dokumentu, název, autory, rok a podobné údaje, které pak můžete opravit. Právní základ je stejný jako u Vlastních souborů (bod 3). Výňatek může obsahovat osobní údaje lidí uvedených v dokumentu, typicky jména autorů. Vaše jméno ani e-mail s ním neposílám; AI Gateway dostane jen pseudonym kvůli rozpočtu spotřeby. Text se nepoužije k trénování modelů a Vercel ho po vyřízení požadavku smaže. Když návrh jazykovým modelem zapnutý není, navrhne metadata server sám a text dokumentu žádnému poskytovateli AI neposílá.
+**Návrh metadat.** Typ dokumentu, název, autory a další metadata navrhne po nahrání server sám podle začátku dokumentu; text dokumentu přitom žádnému poskytovateli AI neposílám. Co z dokumentu přečte přes nástroje Dawmainu váš asistent, dostane poskytovatel asistenta, kterého používáte.
 
-Jde o americké společnosti; předávání do USA se opírá o EU-US Data Privacy Framework. Jinak údaje předám jen orgánům veřejné moci, ukládá-li mi to zákon. Přihlášení účtem Google se řídí [zásadami ochrany soukromí Google](https://policies.google.com/privacy).
+Clerk i Cloudflare jsou americké společnosti; předávání do USA se opírá o EU-US Data Privacy Framework. Jinak údaje předám jen orgánům veřejné moci, ukládá-li mi to zákon. Přihlášení účtem Google se řídí [zásadami ochrany soukromí Google](https://policies.google.com/privacy).
 
 ## 6. Zabezpečení
 
