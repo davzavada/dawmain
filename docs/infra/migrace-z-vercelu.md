@@ -5,7 +5,34 @@ Plán přesunu webu a MCP serveru Dawmain z Vercelu (Hobby) na domácí Proxmox
 **přepnutí bylo jedna změna DNS záznamu** a služba při něm nepřestala
 odpovídat.
 
-Stav plánu: návrh (14. 11. 2026), nic z něj zatím není provedeno.
+Stav plánu (16. 11. 2026): fáze 0 a 1 hotové a nasazené na CT `web`, z fáze 2
+tunel, zkušební adresa `dawmain-novy` a WAF výjimka; zbytek čeká (viz níže
+„Odchylky od plánu“ a „Co zbývá do přepnutí“). Kód běží v `main`, Vercel se
+nezměnil.
+
+### Odchylky od plánu
+
+- `pg` se **nezmenšoval**: limit paměti není rezervace a host měl volných ~10 GB
+  (s cache). Vrátit se k tomu, jen když začne docházet paměť.
+- Thin pool je na ~45 %, ne skoro plný. Roste snapshot `pre-0019-structure`
+  (120 GB, thin) — smazat, až nebude potřeba.
+- API zrcadla poslouchá jen na LAN adrese, takže web ho volá přes
+  `http://192.168.0.52:8080`, ne přes vnitřní síť; restart zrcadla odpadl.
+- Za tunelem vidí Node prostý `http`: OAuth discovery proto doma bere
+  `PUBLIC_URL` (bod 0.5).
+- `deploy.sh` zapisuje `release.env` (`GIT_SHA`), který unit načítá, aby
+  `dawmain_ping` ukazoval commit i za běhu.
+- Cron unit: v `ExecStart` musí být `%%s`, ne `%s` (systemd by ho nahradil
+  shellem uživatele) — zachytil test, opraveno.
+
+### Co zbývá do přepnutí
+
+Na uživateli: produkční proměnné z Vercelu do `/etc/dawmain/env`; zápis
+Cloudflare (WAF výjimka rozšířit na `dawmain`, v přepnutí změnit CNAME);
+záloha mimo stroj (účet R2 / disk) a dohled (Healthchecks / UptimeRobot).
+Na přípravě (jde bez dopadu na Vercel): zkouška dumpu z Neonu do databáze
+`files` (ta je v CT `pg` připravená a zmigrovaná, viz `proxmox.md`) a
+generálka s Clerkem (fáze 4).
 
 ## Proč to půjde plynule
 
@@ -222,6 +249,43 @@ Přepnutí (mimo špičku, např. večer):
    v Claude i ChatGPT udělá rešerši bez nového přihlášení; přihlášení na
    webu; externí dohled zelený.
 6. V Cloudflare Access smazat servisní token `dawmain-vercel` až ve fázi 7.
+
+### Den přepnutí — kontrolní seznam s příkazy
+
+Předpoklady (všechno musí platit, jinak se nepřepíná):
+
+```bash
+# 1. domácí vydání je stejný commit jako produkce na Vercelu a odpovídá
+git -C ~/dawmain fetch -q && git rev-parse --short origin/main
+T=$(ssh pve "pct exec 103 -- sh -c \"grep '^MCP_BEARER_TOKEN=' /etc/dawmain/env | cut -d= -f2-\"")
+MCP_URL=https://dawmain-novy.davidzavada.cz/api/mcp MCP_BEARER_TOKEN=$T npm run smoke   # musí hlásit stejný commit v dawmain_ping
+# 2. /etc/dawmain/env obsahuje produkční klíče (Clerk, CRON_SECRET, Zotero, …), ne zkušební
+ssh pve "pct exec 103 -- sh -c \"sed 's/=.*/=…/' /etc/dawmain/env\""
+# 3. cron je vypnutý do přepnutí
+ssh pve "pct exec 103 -- systemctl is-enabled dawmain-cron.timer"     # disabled
+# 4. mirror a tunel běží, volné místo na poolu < 80 %
+ssh pve "pct exec 102 -- systemctl is-active cloudflared mirror-api; lvs --noheadings -o lv_name,data_percent pve/data"
+```
+
+Přepnutí: Cloudflare → DNS → záznam `dawmain`: změnit z CNAME na Vercel na
+CNAME `15254ebe-679c-44bb-b460-43b938865323.cfargotunnel.com`, **Proxied**. WAF
+pravidlo *Skip* rozšířit na hostname `dawmain.davidzavada.cz` (výraz
+`http.host in {"dawmain-novy.davidzavada.cz" "dawmain.davidzavada.cz"}`).
+Hned potom:
+
+```bash
+ssh pve "pct exec 103 -- systemctl enable --now dawmain-cron.timer"
+# na Vercelu vypnout cron (prázdné "crons" ve vercel.json, nebo odebrat CRON_SECRET)
+curl -sI https://dawmain.davidzavada.cz | grep -i '^server'            # server: cloudflare
+# dawmain_ping přes produkční adresu musí hlásit region: home
+```
+
+Návrat (kdykoli v prvním týdnu): v Cloudflare vrátit záznam `dawmain` na
+původní CNAME Vercelu, zapnout cron na Vercelu a
+`ssh pve "pct exec 103 -- systemctl disable --now dawmain-cron.timer"`.
+Hodnotu původního CNAME si před změnou **zapsat** (`dig +short CNAME
+dawmain.davidzavada.cz`; 14. 11. byla `79e0689ac82ac3bb.vercel-dns-017.com`,
+DNS only).
 
 **Návrat**: vrátit DNS záznam na původní CNAME Vercelu
 (`79e0689ac82ac3bb.vercel-dns-017.com`, DNS only), zapnout cron na Vercelu,
