@@ -12,8 +12,8 @@ import { continuationHint, dateRangeError } from "./shared";
 
 /**
  * The case-law tools answered from the home mirror instead of the courts —
- * for an operator who switched "Zdroj judikatury" to Zrcadlo
- * (src/mcp/backend.ts). Same tool names, same parameters: a handler here
+ * for every caller, wherever the mirror is configured (./index.ts, routed).
+ * Same tool names, same parameters: a handler here
  * either answers the call or returns `{ fallback }` with the reason, and the
  * registration wrapper (./index.ts) then runs the live tool, telling the
  * model why. Falls back on what the mirror cannot do: filters it does not

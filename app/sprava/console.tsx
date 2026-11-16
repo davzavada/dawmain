@@ -29,7 +29,6 @@ const FEATURE_ROWS: Array<{ key: AdminFeature; title: string; hint: string }> = 
   { key: "files", title: "Vlastní soubory", hint: "Nahrávání a prohledávání vlastních dokumentů" },
   { key: "zotero", title: "Zotero", hint: "Připojení knihovny, čtení a ukládání" },
   { key: "ukaz", title: "Doktrína (UKAŽ)", hint: "Katalog literatury UK, zapíná se po potvrzení" },
-  { key: "mirror", title: "Judikatura ze zrcadla", hint: "NS, NSS, ÚS a obecné soudy z domácího zrcadla místo živých databází soudů" },
 ];
 
 const sum = (a: number[]) => a.reduce((x, y) => x + y, 0);
