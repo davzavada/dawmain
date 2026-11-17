@@ -64,7 +64,7 @@ export function registerSkPredpisy(server: McpServer): void {
     {
       title: "Slov-Lex: search Slovak legislation",
       description:
-        "Search the Zbierka zákonov SR (Slovak Collection of Laws, slov-lex.sk) by full text, title, number, year or type. Finds ACTS, not sections — to read a provision use sk_predpis_get_text. Use Slovak terms ('nájom bytu', 'Zákonník práce'). For a known number/year go straight to sk_predpis_get_act or sk_predpis_get_text. Each hit names the wording it points at (in force today, or on in_force_on).",
+        "Search the Zbierka zákonov SR (Slovak Collection of Laws, slov-lex.sk) by full text, title, number, year or type. Finds ACTS, not sections — to read a provision use sk_predpis_get_text. Use Slovak terms ('nájom bytu', 'Zákonník práce'). For a known number/year go straight to sk_predpis_get_act or sk_predpis_get_text. Each hit names the wording it points at (in force today, or on in_force_on). To find which acts transpose an EU directive, put its number in quotes: query '\"2004/48/ES\"' (unquoted it matches thousands).",
       inputSchema: z.object({
         query: z.string().optional().describe("Slovak full-text query, e.g. 'nájom bytu'."),
         title: z.string().optional().describe("Words of the act's title, e.g. 'Občiansky zákonník'."),
