@@ -13,11 +13,7 @@ import { isUuid } from "./documents";
  * library id, 'user:<id>').
  */
 
-/**
- * The counters the server still keeps. usage_daily also has ai_calls and
- * ai_microusd (migration 0001), left from the removed AI metadata proposal:
- * nothing reads or writes them any more.
- */
+/** The counters usage_daily keeps (the AI ones were dropped in migration 0007). */
 export type UsageField = "uploads" | "pages" | "tool_calls" | "reads" | "cpu_ms" | "reindexes";
 
 /** Whitelist — the only strings ever interpolated as column names. */

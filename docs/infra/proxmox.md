@@ -120,7 +120,7 @@ jednorázový skript `deploy/web/migrace/migrate-db.sh`).
 - Hesla: `/root/files-db-urls.env` v CT `web` (600) — `DATABASE_URL_UNPOOLED`
   (owner, jen migrace) a `FILES_DATABASE_URL` (app). Do `/etc/dawmain/env`
   přijde jen `FILES_DATABASE_URL`.
-- Migrace `0001`–`0006` aplikovány na PostgreSQL 17.11 bez chyby
+- Migrace `0001`–`0007` aplikovány na PostgreSQL 17.11 bez chyby
   (`node scripts/db-migrate.mjs`, `nothing pending`).
 - Přesun dat (jednorázově při přepnutí): `deploy/web/migrace/migrate-db.sh` (z Macu) kopíroval **jen data** —
   schéma, práva a RLS zůstávají z migrací; obnova běží v CT `pg` jako
