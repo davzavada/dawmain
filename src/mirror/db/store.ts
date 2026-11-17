@@ -218,8 +218,7 @@ export async function writeChunks(tx: Queryable, record: DecisionRecord, id: num
 /**
  * Source ids (of `ids`) that are done: stored by parser `parserVersion` or
  * newer and not waiting in fetch_queue — with text, or without it when that
- * is the source's state (textAbsent: SDEU without a Czech version is never
- * queued). A resumed backfill skips them; an older parser's rows and queued
+ * is the source's state (textAbsent: never queued). A resumed backfill skips them; an older parser's rows and queued
  * ones (failed, or no text yet) it fetches again.
  */
 export async function idsWithText(db: Queryable, source: MirrorSource, ids: string[], parserVersion: number): Promise<Set<string>> {

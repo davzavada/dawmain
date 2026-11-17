@@ -4,9 +4,8 @@
  *
  *   npx tsx scripts/mirror.ts migrate [--dry-run]   apply src/mirror/db/migrations as mirror_owner
  *   npx tsx scripts/mirror.ts raw --source us|ns|nss|justice [--limit N]   the source's own document for decisions stored without it
- *   npx tsx scripts/mirror.ts backfill --source us|ns|nss|justice|sdeu [--limit N]
+ *   npx tsx scripts/mirror.ts backfill --source us|ns|nss|justice [--limit N]
  *                       [--quarters 2004Q2 (us)] [--months 2024-03 (nss)] [--days 2025-03-12 (justice)]
- *                       [--years 2019 (sdeu)]
  *                                                   without --quarters: from the cursor to today
  *   npx tsx scripts/mirror.ts reindex --source us   rebuild chunks and dissents from the stored text (no network)
  *   npx tsx scripts/mirror.ts citations [--source us]  own keys and cited decisions from the stored chunks (no network)
@@ -45,7 +44,6 @@ import { fetchRawMissing } from "../src/mirror/raw";
 import { backfillNs, fillNsCategories } from "../src/mirror/crawl/ns";
 import { backfillNss } from "../src/mirror/crawl/nss";
 import { backfillJustice } from "../src/mirror/crawl/justice";
-import { backfillSdeu } from "../src/mirror/crawl/sdeu";
 import { newPacer } from "../src/mirror/crawl/workers";
 import { SourceStopped, pacedFetch } from "../src/mirror/http";
 import { formatStatus, mirrorStatus } from "../src/mirror/status";
@@ -95,7 +93,7 @@ async function runMigrate(args: string[]): Promise<void> {
  * Rate of a source: MIRROR_<SOURCE>_RPS and MIRROR_<SOURCE>_CONCURRENCY in
  * /etc/mirror/env, else the plan's defaults (1 req/s; NS at most 2 at once).
  */
-function rate(source: "us" | "ns" | "nss" | "justice" | "sdeu", log: (line: string) => void): { rps: number; concurrency: number } {
+function rate(source: MirrorSource, log: (line: string) => void): { rps: number; concurrency: number } {
   const key = source.toUpperCase();
   const rps = Number(process.env[`MIRROR_${key}_RPS`] ?? "1");
   const concurrency = Number(process.env[`MIRROR_${key}_CONCURRENCY`] ?? (source === "ns" ? "2" : "1"));
@@ -106,8 +104,8 @@ function rate(source: "us" | "ns" | "nss" | "justice" | "sdeu", log: (line: stri
 
 async function runBackfill(args: string[]): Promise<number> {
   const source = option(args, "--source");
-  if (source !== "us" && source !== "ns" && source !== "nss" && source !== "justice" && source !== "sdeu") {
-    console.error(`mirror backfill: neznámý zdroj ${source ?? "(chybí --source)"} (us, ns, nss, justice, sdeu)`);
+  if (source !== "us" && source !== "ns" && source !== "nss" && source !== "justice") {
+    console.error(`mirror backfill: neznámý zdroj ${source ?? "(chybí --source)"} (us, ns, nss, justice)`);
     return 2;
   }
   const limitArg = option(args, "--limit");
@@ -119,16 +117,13 @@ async function runBackfill(args: string[]): Promise<number> {
   if (months && source !== "nss") throw new Error("--months is for nss only");
   const days = option(args, "--days")?.split(",").map((d) => d.trim());
   if (days && source !== "justice") throw new Error("--days is for justice only");
-  const years = option(args, "--years")?.split(",").map((y) => Number(y.trim()));
-  if (years && (source !== "sdeu" || years.some((y) => !Number.isInteger(y)))) throw new Error("--years is for sdeu only (e.g. 1998,2019)");
 
   return runTracked(source, "backfill", async (ctx, counts) => {
     const { rps, concurrency } = rate(source, ctx.log);
     if (source === "us") await backfillUs({ ...ctx, pacer: newUsPacer(rps) }, { limit, quarters, concurrency }, counts);
     else if (source === "ns") await backfillNs({ ...ctx, pacer: newPacer(rps) }, { limit, concurrency }, counts);
     else if (source === "nss") await backfillNss({ ...ctx, pacer: newPacer(rps) }, { limit, months, concurrency }, counts);
-    else if (source === "justice") await backfillJustice({ ...ctx, pacer: newPacer(rps) }, { limit, days, concurrency }, counts);
-    else await backfillSdeu({ ...ctx, pacer: newPacer(rps) }, { limit, years, concurrency }, counts);
+    else await backfillJustice({ ...ctx, pacer: newPacer(rps) }, { limit, days, concurrency }, counts);
   });
 }
 
@@ -155,11 +150,8 @@ async function runRaw(args: string[]): Promise<number> {
  * its own sync_run row; one source failing or stopped does not hold the
  * others back. Exit status: the worst of the runs (3 = a source stopped).
  */
-/**
- * What the nightly sync keeps current. SDEU is not mirrored any more (removed
- * 26. 10.: its case law is read live through Cellar); `--source sdeu` still works.
- */
-const SYNCED_SOURCES: readonly MirrorSource[] = ["us", "ns", "nss", "justice"];
+/** What the nightly sync keeps current: every mirrored court. */
+const SYNCED_SOURCES: readonly MirrorSource[] = MIRROR_SOURCES;
 
 async function runSync(args: string[]): Promise<number> {
   const only = option(args, "--source");
@@ -255,7 +247,7 @@ async function runActsImport(args: string[]): Promise<number> {
 async function runReindex(args: string[]): Promise<number> {
   const source = option(args, "--source");
   if (!source || !(MIRROR_SOURCES as readonly string[]).includes(source)) {
-    console.error("mirror reindex: --source us | ns | nss | justice | sdeu");
+    console.error("mirror reindex: --source us | ns | nss | justice");
     return 2;
   }
   return runTracked(source as MirrorSource, "reindex", (ctx, counts) => reindexSource(ctx, source as MirrorSource, counts));
@@ -392,7 +384,7 @@ async function main(argv: string[]): Promise<number> {
   } finally {
     await closeMirrorPools();
   }
-  console.error("usage: mirror migrate [--dry-run] | backfill --source us|ns|nss|justice|sdeu [--limit N] [--quarters …|--months …|--days …|--years …] | reindex --source … | citations [--source …] | structure [--source …] | raw --source us|ns|nss|justice [--limit N] | sync [--source …] [--days N] | acts import | status | api");
+  console.error("usage: mirror migrate [--dry-run] | backfill --source us|ns|nss|justice [--limit N] [--quarters …|--months …|--days …] | reindex --source … | citations [--source …] | structure [--source …] | raw --source us|ns|nss|justice [--limit N] | sync [--source …] [--days N] | acts import | status | api");
   return 2;
 }
 

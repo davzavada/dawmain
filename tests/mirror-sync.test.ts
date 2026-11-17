@@ -7,7 +7,6 @@ import { readCursor, writeCursor } from "@/src/mirror/db/store";
 import { backfillNss } from "@/src/mirror/crawl/nss";
 import { Pacer } from "@/src/mirror/http";
 import { daysAgo, nssBackfillDone, SYNC_DAYS } from "@/src/mirror/sync";
-import { sdeuCelexQuery, sdeuRecentQuery } from "@/src/mirror/crawl/sdeu";
 import { mapUs, usTextExtras } from "@/src/mirror/map/us";
 import { parseNalusDecision } from "@/src/sources/nalus";
 import { createMirrorTestDb } from "./helpers/mirror-db";
@@ -27,7 +26,7 @@ describe("sync windows", () => {
   it("counts days back from now; justice looks twice as far (v1-plan: 14 days)", () => {
     expect(daysAgo(7, new Date("2026-10-26T03:30:00Z"))).toBe("2026-10-19");
     expect(daysAgo(1, new Date("2026-03-01T01:00:00Z"))).toBe("2026-02-28");
-    expect(SYNC_DAYS).toEqual({ us: 7, ns: 7, nss: 7, justice: 14, sdeu: 7 });
+    expect(SYNC_DAYS).toEqual({ us: 7, ns: 7, nss: 7, justice: 14 });
   });
 
   it("syncs NSS only once its backfill has finished, also in the months after", async () => {
@@ -41,22 +40,6 @@ describe("sync windows", () => {
     expect(await nssBackfillDone(ctx)).toBe(true);
     expect(await readCursor(db, "nss")).toEqual({ next: "2099-01", done: true });
     await pg.query("DELETE FROM mirror.sync_cursor WHERE source = 'nss'");
-  });
-});
-
-describe("SDEU sync and retry queries", () => {
-  it("asks for case law received since a date", () => {
-    const q = sdeuRecentQuery("2026-10-19");
-    expect(q).toContain('?w cdm:work_datetime_transmission ?since');
-    expect(q).toContain('FILTER(?since >= "2026-10-19T00:00:00"^^<http://www.w3.org/2001/XMLSchema#dateTime>)');
-    expect(() => sdeuRecentQuery("2026-10-19'); DROP")).toThrow();
-  });
-
-  it("asks for given CELEX numbers only, and only valid ones", () => {
-    const q = sdeuCelexQuery(["62019CJ0311", "nonsense\" }", "62010TJ0063"]);
-    expect(q).toContain('VALUES ?celex { "62019CJ0311"^^<http://www.w3.org/2001/XMLSchema#string> "62010TJ0063"^^<http://www.w3.org/2001/XMLSchema#string> }');
-    expect(q).not.toContain("nonsense");
-    expect(() => sdeuCelexQuery(["x"])).toThrow();
   });
 });
 

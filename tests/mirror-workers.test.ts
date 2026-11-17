@@ -156,7 +156,7 @@ describe("fetchAndStore", () => {
     expect(q.rows).toEqual([{ kind: "text" }]);
   });
 
-  it("does not queue a record whose text the source does not have (SDEU without Czech)", async () => {
+  it("does not queue a record whose text the source does not have (textAbsent)", async () => {
     const counts = { fetched: 0, changed: 0, failed: 0 };
     await fetchAndStore(
       ctx([]),
