@@ -1,6 +1,7 @@
 import { SourceError } from "./shared/errors";
 import { fetchUpstream } from "./shared/http";
-import { decodeHtmlBody, htmlToText, loadHtml, looksLikeHtml } from "./shared/html";
+import { decodeHtmlBody, htmlToText, loadHtml } from "./shared/html";
+import { PDF_PAGES_PER_CALL, extractDocument, sniffDocument, type DocumentConverters, type ExtractedDocument } from "./shared/documents";
 import { DOCUMENT_TTL_MS, SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
 import { foldText } from "./shared/text";
 import { callDeadline } from "./shared/clock";
@@ -734,64 +735,17 @@ export async function getPspTiskText(period: number, number: number, part: numbe
   return { url, ...parsed };
 }
 
+
 // ---------- attached documents (orig2.sqw): PDF, DOCX, HTML ----------
+// The conversion machinery lives in ./shared/documents (Slov-Lex reads files too); re-exported for existing imports.
 
-export type DocumentFormat = "pdf" | "docx" | "doc" | "rtf" | "html" | "unknown";
-
-/** What a downloaded file is, from its first bytes — never from the header. Pure — unit-tested. */
-export function sniffDocument(bytes: Uint8Array): DocumentFormat {
-  const head = Array.from(bytes.slice(0, 8));
-  const ascii = String.fromCharCode(...head);
-  if (ascii.startsWith("%PDF")) return "pdf";
-  if (ascii.startsWith("PK\u0003\u0004")) return "docx";
-  if (head[0] === 0xd0 && head[1] === 0xcf && head[2] === 0x11 && head[3] === 0xe0) return "doc";
-  if (ascii.startsWith("{\\rtf")) return "rtf";
-  const text = new TextDecoder("latin1").decode(bytes.slice(0, 4096));
-  if (looksLikeHtml(text)) return "html";
-  return "unknown";
-}
-
-export interface PdfRange {
-  text: string;
-  pages: number;
-  range: [number, number];
-  warnings: string[];
-}
-
-export type PdfOutcome = PdfRange | { unavailable: "encrypted" | "scan" | "broken" | "too-many-pages" | "timeout" };
-
-/** The converters, injectable for tests; the defaults load lazily (pdf.js and mammoth are heavy). */
-export interface DocumentConverters {
-  pdf: (bytes: ArrayBuffer, range: [number, number]) => Promise<PdfOutcome>;
-  docx: (bytes: ArrayBuffer) => Promise<string>;
-}
-
-/** A sněmovní tisk runs to thousands of pages (the občanský zákoník bill with its důvodová zpráva); the per-call window stays PDF_PAGES_PER_CALL. */
-export const PDF_MAX_TOTAL_PAGES = 5_000;
-
-const defaultConverters: DocumentConverters = {
-  pdf: async (bytes, range) => {
-    const result = await (await import("@/src/zotero/pdf-text")).pdfText(bytes, { pageRange: range, maxTotalPages: PDF_MAX_TOTAL_PAGES });
-    return "unavailable" in result ? result : { text: result.text, pages: result.pages, range: result.pageRange, warnings: result.warnings };
-  },
-  docx: async (bytes) => {
-    const mod = (await import("mammoth")) as typeof import("mammoth") & { default?: typeof import("mammoth") };
-    const mammoth = mod.default ?? mod;
-    const result = await mammoth.extractRawText({ buffer: Buffer.from(bytes) });
-    return result.value;
-  },
-};
-
-export interface ExtractedDocument {
-  url: string;
-  format: DocumentFormat;
-  text: string;
-  /** PDF only: the whole file's pages, the pages this text covers, converter warnings. */
-  pdf?: { pages: number; range: [number, number]; warnings: string[] };
-}
-
-/** PDF pages one call converts at most (a rozdílová tabulka runs to hundreds). */
-export const PDF_PAGES_PER_CALL = 60;
+export {
+  PDF_MAX_TOTAL_PAGES,
+  PDF_PAGES_PER_CALL,
+  setDocumentConverters,
+  sniffDocument,
+} from "./shared/documents";
+export type { DocumentConverters, DocumentFormat, ExtractedDocument, PdfOutcome, PdfRange } from "./shared/documents";
 
 async function fetchFile(url: string): Promise<{ bytes: ArrayBuffer; url: string }> {
   const response = await fetchUpstream(SOURCE, url, { headers: { accept: "*/*" }, timeoutMs: 25_000 });
@@ -810,17 +764,10 @@ async function fetchFile(url: string): Promise<{ bytes: ArrayBuffer; url: string
  * legacy .doc is asked for again as psp.cz's PDF rendition (&pdf=1); when
  * that is not a PDF either, the caller is told to open the file itself.
  */
-let activeConverters: DocumentConverters = defaultConverters;
-
-/** Tests swap the converters (pdf.js and mammoth are not exercised there); undefined restores the defaults. */
-export function setDocumentConverters(converters?: DocumentConverters): void {
-  activeConverters = converters ?? defaultConverters;
-}
-
 export async function getPspDocument(
   id: number,
   pdfRange: [number, number] = [1, PDF_PAGES_PER_CALL],
-  converters: DocumentConverters = activeConverters,
+  converters?: DocumentConverters,
 ): Promise<ExtractedDocument> {
   const key = memoKey("psp-doc", { id, pdfRange });
   return fileCache.through(key, async () => {
@@ -834,32 +781,14 @@ export async function getPspDocument(
         format = renditionFormat;
       }
     }
-    switch (format) {
-      case "pdf": {
-        const outcome = await converters.pdf(file.bytes, pdfRange);
-        if ("unavailable" in outcome) {
-          const why: Record<string, string> = {
-            encrypted: "the PDF is encrypted",
-            scan: "the PDF is a scan without a text layer",
-            broken: "the PDF could not be parsed",
-            "too-many-pages": "the PDF has more pages than this server converts",
-            timeout: "converting the PDF took too long",
-          };
-          throw new SourceError(SOURCE, "UPSTREAM_ERROR", `Document ${id}: ${why[outcome.unavailable]}.`, `Open it yourself: ${file.url}`);
-        }
-        return { url: file.url, format, text: outcome.text, pdf: { pages: outcome.pages, range: outcome.range, warnings: outcome.warnings } };
-      }
-      case "docx":
-        return { url: file.url, format, text: (await converters.docx(file.bytes)).trim() };
-      case "html":
-        return { url: file.url, format, text: htmlToText(new TextDecoder("utf-8").decode(file.bytes)) };
-      default:
-        throw new SourceError(
-          SOURCE,
-          "UPSTREAM_ERROR",
-          `Document ${id} is a ${format === "doc" ? "legacy Word (.doc)" : format === "rtf" ? "RTF" : "binary"} file and psp.cz offered no PDF rendition of it.`,
-          `This server reads PDF, DOCX and HTML. Open the file yourself: ${documentUrl(id)} — or look for the same document in another format in psp_get_tisk's list.`,
-        );
+    if (format === "doc" || format === "rtf" || format === "unknown") {
+      throw new SourceError(
+        SOURCE,
+        "UPSTREAM_ERROR",
+        `Document ${id} is a ${format === "doc" ? "legacy Word (.doc)" : format === "rtf" ? "RTF" : "binary"} file and psp.cz offered no PDF rendition of it.`,
+        `This server reads PDF, DOCX and HTML. Open the file yourself: ${documentUrl(id)} — or look for the same document in another format in psp_get_tisk's list.`,
+      );
     }
+    return extractDocument(SOURCE, file, pdfRange, { label: String(id), converters });
   });
 }
