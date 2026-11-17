@@ -17,7 +17,7 @@ import type { MirrorSource } from "./types";
  * run. A 429 / 403 stops the source (SourceStopped), as in a backfill.
  */
 
-export type RawSource = Exclude<MirrorSource, "sdeu">;
+export type RawSource = MirrorSource;
 
 export const RAW_SOURCES: Record<RawSource, { label: string; url: (sourceId: string) => string; accept?: string }> = {
   ns: { label: "Nejvyšší soud – mirror", url: nsRawUrl },

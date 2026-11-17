@@ -3,9 +3,10 @@
  * Only these fields are stored; everything else is derived from `text`.
  */
 
-export type MirrorSource = "ns" | "nss" | "us" | "justice" | "sdeu";
+/** The mirrored courts. The CJEU (SDEU) is not mirrored: it is read live through Cellar (removed in migration 0020). */
+export type MirrorSource = "ns" | "nss" | "us" | "justice";
 
-export const MIRROR_SOURCES: readonly MirrorSource[] = ["us", "ns", "nss", "justice", "sdeu"];
+export const MIRROR_SOURCES: readonly MirrorSource[] = ["us", "ns", "nss", "justice"];
 
 /** One vocabulary for the form of a decision across sources. */
 export type DecisionType = "rozsudek" | "usneseni" | "nalez" | "stanovisko" | "jine";
@@ -55,8 +56,8 @@ export interface DecisionRecord {
   /** The full text and the path that produced it; null = not obtained (goes to fetch_queue). */
   text: { body: string; source: string } | null;
   /**
-   * Why `text` is null when that is the source's state, not a failure (SDEU:
-   * no Czech version exists) — stored without text and NOT queued for retry.
+   * Why `text` is null when that is the source's state, not a failure (the
+   * source holds no text) — stored without text and NOT queued for retry.
    */
   textAbsent?: string;
   /** Pictures of the decision; undefined = not read (a reindex from stored text leaves stored ones alone). */

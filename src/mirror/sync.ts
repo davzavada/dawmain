@@ -9,8 +9,6 @@ import { fetchNsDecision, type NsEntry } from "./crawl/ns";
 import { NS_PARSER_VERSION } from "./map/ns";
 import { discoverUs, fetchUsDecision } from "./crawl/us";
 import { US_PARSER_VERSION, type UsHit } from "./map/us";
-import { fetchSdeuDecision, listSdeu, sdeuCelexQuery, sdeuRecentQuery } from "./crawl/sdeu";
-import { SDEU_PARSER_VERSION, type SdeuListItem } from "./map/sdeu";
 import { fetchAndStore, type CrawlContext } from "./crawl/workers";
 import type { MirrorSource } from "./types";
 
@@ -19,7 +17,7 @@ import type { MirrorSource } from "./types";
  * mirror-sync.timer at 03:30.
  *
  * sync: what each source PUBLISHED in the last days (ÚS, NS, NSS 7 days,
- * justice 14, SDEU 7 — received by the Publications Office), every item
+ * justice 14), every item
  * fetched again (refresh), so a decision the source corrected is rewritten
  * and last_changed_at moves (saveDecision keeps it when nothing changed).
  *
@@ -28,7 +26,7 @@ import type { MirrorSource } from "./types";
  * again; success dequeues, failure backs off (enqueue: 1 h · 2^n, ≤ 7 days).
  */
 
-export const SYNC_DAYS: Record<MirrorSource, number> = { us: 7, ns: 7, nss: 7, justice: 14, sdeu: 7 };
+export const SYNC_DAYS: Record<MirrorSource, number> = { us: 7, ns: 7, nss: 7, justice: 14 };
 /** fetch_queue rows retried per source and run. */
 export const RETRY_BATCH = 500;
 
@@ -96,7 +94,7 @@ export async function syncSource(ctx: CrawlContext, source: MirrorSource, option
     return;
   }
 
-  if (source === "justice") {
+  {
     const months = [...new Set(eachDay(from, to).map((d) => d.slice(0, 7)))];
     const entries: JusticeEntry[] = [];
     for (const month of months) {
@@ -107,12 +105,7 @@ export async function syncSource(ctx: CrawlContext, source: MirrorSource, option
     }
     ctx.log(`justice: sync ${from}..${to}: ${entries.length} zveřejněných rozhodnutí`);
     await fetchAndStore(ctx, { source, parserVersion: JUSTICE_PARSER_VERSION, items: entries, id: (e) => e.uuid, fetch: (e) => fetchJusticeDecision(ctx, e), concurrency, refresh: true }, counts);
-    return;
   }
-
-  const items = await listSdeu(ctx, (offset) => sdeuRecentQuery(from, offset), `přijato od ${from}`);
-  ctx.log(`sdeu: sync od ${from}: ${items.length} dokumentů`);
-  await fetchAndStore(ctx, { source, parserVersion: SDEU_PARSER_VERSION, items, id: (i) => i.celex, fetch: (i) => fetchSdeuDecision(ctx, i), concurrency, refresh: true }, counts);
 }
 
 // ---------- retry ----------
@@ -171,7 +164,7 @@ export async function retrySource(ctx: CrawlContext, source: MirrorSource, concu
   } else if (source === "nss") {
     const items = ids.map((id) => ({ id, url: `https://vyhledavac.nssoud.cz/DokumentDetail/Index/${id}` }) as NssHit);
     await fetchAndStore(ctx, { source, parserVersion: NSS_PARSER_VERSION, items, id: (h) => h.id, fetch: (h) => fetchNssDecision(ctx, h), ...common }, counts);
-  } else if (source === "justice") {
+  } else {
     const items: JusticeEntry[] = ids.map((uuid) => {
       const r = rows.get(uuid);
       return {
@@ -186,11 +179,6 @@ export async function retrySource(ctx: CrawlContext, source: MirrorSource, concu
       };
     });
     await fetchAndStore(ctx, { source, parserVersion: JUSTICE_PARSER_VERSION, items, id: (e) => e.uuid, fetch: (e) => fetchJusticeDecision(ctx, e), ...common }, counts);
-  } else {
-    // SDEU: the listing fields come from Cellar itself (a document may never have been stored).
-    const listed = new Map((await listSdeu(ctx, (offset) => sdeuCelexQuery(ids, offset), "fronta")).map((i) => [i.celex, i]));
-    const items: SdeuListItem[] = ids.map((celex) => listed.get(celex) ?? { celex });
-    await fetchAndStore(ctx, { source, parserVersion: SDEU_PARSER_VERSION, items, id: (i) => i.celex, fetch: (i) => fetchSdeuDecision(ctx, i), ...common }, counts);
   }
   return ids.length;
 }

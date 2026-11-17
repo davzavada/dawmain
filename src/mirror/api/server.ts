@@ -93,7 +93,7 @@ function sources(values: string[] | undefined): MirrorSource[] | undefined {
     .filter(Boolean);
   if (!list.every(isMirrorSource))
     throw new BadRequest(
-      "source must be us, ns, nss, justice or sdeu, several as ns,nss",
+      "source must be us, ns, nss or justice, several as ns,nss",
     );
   return list.length ? [...new Set(list)] : undefined;
 }
@@ -254,7 +254,7 @@ export function createMirrorApi(options: {
     const started = performance.now();
     if (perSource !== undefined) {
       // One lane per court, as caselaw_search: a court with many matches does not push the others out.
-      const lanes = courts ?? MIRROR_SOURCES.filter((s) => s !== "sdeu");
+      const lanes = courts ?? MIRROR_SOURCES;
       const results = await Promise.all(lanes.map((s) => run({ ...input, sources: [s], limit: perSource })));
       return c.json({
         lanes: Object.fromEntries(lanes.map((s, i) => [s, { hits: results[i].hits, channel: results[i].channel }])),
@@ -273,7 +273,7 @@ export function createMirrorApi(options: {
   app.get("/v1/decisions/:source/:id", async (c) => {
     const { source, id } = c.req.param();
     if (!isMirrorSource(source))
-      throw new BadRequest("source must be us, ns, nss, justice or sdeu");
+      throw new BadRequest("source must be us, ns, nss or justice");
     const decision = await getDecision(db, source, id);
     if (!decision) return c.json({ error: "not found" }, 404);
     const format = c.req.query("format");
@@ -305,7 +305,7 @@ export function createMirrorApi(options: {
   app.get("/v1/decisions/:source/:id/citations", async (c) => {
     const { source, id } = c.req.param();
     if (!isMirrorSource(source))
-      throw new BadRequest("source must be us, ns, nss, justice or sdeu");
+      throw new BadRequest("source must be us, ns, nss or justice");
     const q = c.req.query();
     const limit = q.limit ? Number(q.limit) : undefined;
     if (limit !== undefined && !(Number.isInteger(limit) && limit >= 1 && limit <= CITED_BY_MAX_LIMIT))
@@ -321,7 +321,7 @@ export function createMirrorApi(options: {
   app.get("/v1/decisions/:source/:id/provisions", async (c) => {
     const { source, id } = c.req.param();
     if (!isMirrorSource(source))
-      throw new BadRequest("source must be us, ns, nss, justice or sdeu");
+      throw new BadRequest("source must be us, ns, nss or justice");
     const provisions = await provisionsOfDecision(db, source, id);
     if (!provisions) return c.json({ error: "not found" }, 404);
     return c.json({ provisions });
