@@ -19,7 +19,7 @@ export function SiteHeader() {
         <img src="/logo.svg" alt="" width={24} height={24} />
         <span>Dawmain - právní rešerše s AI</span>
       </Link>
-      <span className="site-tagline">MCP server pro české a unijní právo · David Závada</span>
+      <span className="site-tagline">MCP server pro české, slovenské a unijní právo · David Závada</span>
       <StatusSummary />
       {/* Without Clerk there is no account at all; Zotero only where the deployment can connect it (the OAuth app and CREDENTIALS_SECRET). */}
       {clerkConfigured() ? <AccountControl zotero={zoteroConfigured()} /> : null}

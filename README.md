@@ -33,6 +33,13 @@ průběhem projednávání): [Poslanecká sněmovna](https://www.psp.cz/sqw/tisk
 unijní legislativa, judikatura a legislativní materiály:
 [EUR-Lex](https://eur-lex.europa.eu).
 
+Slovenské právo přes [Slov-Lex](https://www.slov-lex.sk): předpisy ze Zbierky
+zákonov SR v kterémkoli znění, legislativní procesy z eLegislatívy (včetně
+důvodových zpráv) a rozhodnutí slovenských soudů — všech všeobecných súdů
+včetně NS SR a NSS SR i vybraných judikátů s právní větou. Server je
+použije, jen když se otázka týká slovenského práva nebo srovnání CZ/SK.
+Ústavný súd SR jen ve sbírce judikátů (1993–2014); novější rozhodnutí pokrytá nejsou.
+
 Doktrína (knihy, kapitoly, články) přes
 [UKAŽ](https://cuni.primo.exlibrisgroup.com/discovery/search?vid=420CKIS_INST:UKAZ)
 Univerzity Karlovy (Primo: katalog UK a Central Discovery Index licencovaných

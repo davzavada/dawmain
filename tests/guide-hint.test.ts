@@ -26,7 +26,7 @@ describe("dawmain_guide pointer", () => {
     const tools = registered(true);
     const searches = tools.filter((t) => isSearchTool(t.name));
     expect(searches.map((t) => t.name).sort()).toEqual(
-      ["caselaw_search", "doctrine_search", "esbirka_search", "eurlex_search", "files_search", "justice_search", "ns_search", "nss_search", "psp_search", "sdeu_search", "us_search", "zotero_search"].sort(),
+      ["caselaw_search", "doctrine_search", "esbirka_search", "eurlex_search", "files_search", "justice_search", "ns_search", "nss_search", "psp_search", "sdeu_search", "sk_judikatura_search", "sk_lp_search", "sk_predpis_search", "us_search", "zotero_search"].sort(),
     );
     for (const t of searches) expect(t.description.startsWith("FIRST, once per conversation: call dawmain_guide"), t.name).toBe(true);
     for (const t of tools.filter((t) => !isSearchTool(t.name))) expect(t.description.startsWith("FIRST, once per conversation"), t.name).toBe(false);

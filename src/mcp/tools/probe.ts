@@ -5,6 +5,9 @@ import { USER_AGENT } from "@/src/sources/shared/http";
 import { PRIMO_PAGE_SIZE, buildPrimoUrl } from "@/src/sources/primo";
 import { READ_ONLY } from "./shared";
 import { DOC_PAGE_CHARS } from "@/src/sources/shared/text";
+import { SLOVLEX_GATEWAY, SLOVLEX_LP, SLOVLEX_STATIC, SLOVLEX_SUDY, SLOVLEX_ZBIERKA } from "@/src/sources/slovlex-base";
+import { buildPredpisSearchUrl } from "@/src/sources/slovlex-predpisy";
+import { buildVseobecneFilterUrl } from "@/src/sources/slovlex-judikatura";
 import { API_ORIGIN as ZOTERO_API, ZOTERO_UA, zoteroConfigured } from "@/src/zotero/config";
 
 /**
@@ -204,6 +207,43 @@ export function canaries(): Canary[] {
         },
       }),
       marker: /"totalResultsLocal"/,
+    },
+    {
+      id: "slovlex-zbierka",
+      source: SLOVLEX_ZBIERKA,
+      note: "Zbierka zákonov search (Solr) for 40/1964 Zb., 1 row",
+      request: () => ({
+        url: buildPredpisSearchUrl({ number: "40/1964" }, 0, 1),
+        init: { headers: { accept: "application/json" } },
+      }),
+      marker: /"numFound"/,
+    },
+    {
+      id: "slovlex-static",
+      source: SLOVLEX_ZBIERKA,
+      note: "static history page of 40/1964 Zb. (the version table sk_predpis_* read)",
+      request: () => ({
+        url: `${SLOVLEX_STATIC}/SK/ZZ/1964/40/`,
+        init: { headers: { accept: "text/html" } },
+      }),
+      marker: /effectivenessHistoryItem/,
+    },
+    {
+      id: "slovlex-lp",
+      source: SLOVLEX_LP,
+      note: "eLegislatíva filter POST, 1 row",
+      request: () => jsonPost(`${SLOVLEX_GATEWAY}/internal/elegislativa/legislativne-materialy/filter?page=1&size=1`, {}),
+      marker: /"legMaterialList"/,
+    },
+    {
+      id: "slovlex-sudy",
+      source: SLOVLEX_SUDY,
+      note: "všeobecné súdy filter, Najvyšší súd SR, 1 row",
+      request: () => ({
+        url: buildVseobecneFilterUrl({ court: "sud_100" }, 1, 1),
+        init: { headers: { accept: "application/json" } },
+      }),
+      marker: /"rozhodnutieList"/,
     },
     {
       // Reachability of the Zotero Web API from this deployment, never a
@@ -440,6 +480,10 @@ const ALLOWED_FETCH_HOSTS = [
   "curia.europa.eu",
   "publications.europa.eu",
   "cuni.primo.exlibrisgroup.com",
+  "api-gateway.slov-lex.sk",
+  "static.slov-lex.sk",
+  "www.slov-lex.sk",
+  "obcan.justice.sk",
 ];
 
 /** Echoed remote bodies are data, never instructions — fence them so a model
@@ -488,7 +532,7 @@ const inputSchema = z.object({
     .array(z.string())
     .optional()
     .describe(
-      "Limit to these canary ids: esbirka-api, esbirka-cache, ns, nalus, nss, justice, psp, curia, cellar-sparql, cellar, primo (zotero where configured). Default: all.",
+      "Limit to these canary ids: esbirka-api, esbirka-cache, ns, nalus, nss, justice, psp, curia, cellar-sparql, cellar, primo, slovlex-zbierka, slovlex-static, slovlex-lp, slovlex-sudy (zotero where configured). Default: all.",
     ),
   include_raw: z
     .boolean()

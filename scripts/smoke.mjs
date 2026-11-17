@@ -144,6 +144,15 @@ const EXPECTED_TOOLS = [
   "psp_search",
   "psp_get_tisk",
   "psp_get_text",
+  // Slovensko (slov-lex.sk).
+  "sk_predpis_search",
+  "sk_predpis_get_act",
+  "sk_predpis_get_text",
+  "sk_lp_search",
+  "sk_lp_get_process",
+  "sk_lp_get_text",
+  "sk_judikatura_search",
+  "sk_judikatura_get_decision",
   "doctrine_search",
   "doctrine_get_record",
   // Vlastní zdroje — registered everywhere, gated per call (see checkFilesGate).

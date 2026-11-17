@@ -19,7 +19,7 @@ const geistMono = Geist_Mono({ subsets: ["latin", "latin-ext"], variable: "--fon
 
 export const metadata: Metadata = {
   title: "Dawmain - MCP server",
-  description: "MCP server pro české a unijní právní rešerše v oficiálních databázích.",
+  description: "MCP server pro české, slovenské a unijní právní rešerše v oficiálních databázích.",
 };
 
 /** Matches the top of the logo's dawn sky - tints mobile browser chrome. */
