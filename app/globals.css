@@ -484,6 +484,11 @@ main > footer a {
   text-transform: uppercase;
   color: var(--muted);
 }
+.source-group-flag {
+  display: block;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px var(--line);
+}
 .source-group-count {
   font-size: 13px;
   color: var(--muted);

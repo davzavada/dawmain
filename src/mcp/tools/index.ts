@@ -11,6 +11,9 @@ import { registerCzCaselaw } from "./cz-caselaw";
 import { registerCuria } from "./curia";
 import { registerEurlex } from "./eurlex";
 import { registerPsp } from "./psp";
+import { registerSkPredpisy } from "./sk-predpisy";
+import { registerSkLp } from "./sk-lp";
+import { registerSkJudikatura } from "./sk-judikatura";
 import { registerJustice } from "./justice";
 import { registerDoctrine } from "./doctrine";
 import { registerFiles } from "./files";
@@ -49,6 +52,10 @@ const registrars: Array<(server: McpServer) => void> = [
   registerCuria,
   registerEurlex,
   registerPsp,
+  // Slovensko (slov-lex.sk): předpisy, legislativní proces, judikatura — docs/research/slovlex.md.
+  registerSkPredpisy,
+  registerSkLp,
+  registerSkJudikatura,
   registerDoctrine,
   // Vlastní zdroje — the user's own uploads; gated per call (registration does no I/O).
   registerFiles,

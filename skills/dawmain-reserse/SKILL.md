@@ -136,6 +136,7 @@ Names follow one pattern: `<zdroj>_search` finds, `<zdroj>_get_*` reads.
 | Literature — monographs, commentaries, articles (doctrine; an admin switches UKAŽ on per account) | `doctrine_search` — UKAŽ (Univerzita Karlova, Primo: the UK catalogue + the Central Discovery Index) → `doctrine_get_record {id}` for the record in full: the whole abstract and table of contents |
 | The user's own books, commentaries, articles and templates (Vlastní soubory — Pro, personal sign-in) | `files_search` → `files_get_document` (the outline first, then `section` / `mn` / `footnote`); `files_list` lists the documents |
 | The user's own Zotero library — references, notes, annotations, PDFs (Pro, personal sign-in, Zotero connected; only where the deployment offers the tools) | `zotero_search` → `zotero_get_item {key}` → `zotero_get_text {key}`; `zotero_cite` formats citations; `zotero_list` names the libraries, collections, tags and saved searches; `zotero_save` adds one new item when the user asks (connected with „Číst a ukládat“) |
+| Slovak law — Zbierka zákonov SR, eLegislatíva, súdne rozhodnutia (only when the question is about Slovak law or a CZ/SK comparison) | `sk_predpis_search` → `sk_predpis_get_text`; `sk_lp_search` → `sk_lp_get_process`; `sk_judikatura_search` → `sk_judikatura_get_decision` — see Slovensko below |
 | A source misbehaves | `dawmain_probe_sources` |
 
 Not covered: EUIPO, ÚPV and the Peace Palace Library. If the question needs them,
@@ -548,6 +549,41 @@ the case; a common word as a name will drown.
 **The total counts cases, the items are documents** — one case brings its judgment, AG
 opinion and the referring request together, so "1 matching case, 5 documents" is
 normal, not a bug.
+
+## Slovensko (slov-lex.sk)
+
+Slovak law has its own `sk_*` tools on slov-lex.sk. Use them only when the
+question is about Slovak law or the user wants a CZ/SK comparison — never as a
+default lane of a Czech rešerše.
+
+| Chci | Volání |
+|---|---|
+| Find an act (fulltext, title, number) | `sk_predpis_search {query: "nájom bytu"}`, `{number: "40/1964"}`, `{in_force_on: "2024-01-01"}` |
+| Its citation and version history | `sk_predpis_get_act {year: 1964, number: 40}` |
+| One § or čl. in a given version | `sk_predpis_get_text {year: 1964, number: 40, section: "§ 420", date: "2020-05-01"}` |
+| The legislative process (LP) | `sk_lp_search {query: "…"}` or `{number: "LP/2025/300"}` → `sk_lp_get_process {year: 2025, number: 300}` |
+| Dôvodová správa, MPK files | `sk_lp_get_text {year: 2025, number: 300}`, or one file: `sk_lp_get_text {document_id: "…"}` |
+| Decisions of any Slovak court, newest first | `sk_judikatura_search {database: "sudy", query: "…", court: "ns"}` (also `case_number`, `date_from`) |
+| Curated judikatúra with právna veta | `sk_judikatura_search {database: "judikaty", query: "…"}` |
+| Full text of a decision | `sk_judikatura_get_decision {id: "…"}` (`find: "…"` locates a passage) |
+
+Rules:
+1. **Query in Slovak terms**, not Czech: *nájom*, *výpoveď*, *náhrada škody*,
+   *zamestnávateľ*, *odstúpenie od zmluvy*. A Czech word often finds nothing.
+2. **`date` picks the version** in force on that day; without it today's.
+   A line marked ⚠ is a published version not yet in force — say so when you
+   rely on it, and give the date it takes effect.
+3. **An amending act (novela) is read by článok**: `section: "čl. I"`. Its
+   § inside Čl. I are the quoted new wording of the amended act — to cite
+   that §, read the amended act itself in the version after the amendment.
+4. **`judikaty` vs `sudy`**: `judikaty` is the small, curated Zbierka
+   stanovísk a rozhodnutí (with právna veta — start here for settled law);
+   `sudy` is every published decision of the všeobecné súdy incl. NS SR and
+   NSS SR (millions, by date — narrow with `court`, `case_number`, dates).
+5. **Ústavný súd SR only to 2014**: `database: "judikaty"`, `court: "us"`
+   (1993–2014); newer ÚS SR decisions are not covered — point the user to
+   ustavnysud.sk. Cite acts as „§ 420 zákona č. 40/1964 Zb.“ (after 1993
+   „… Z. z.“) and decisions with the URL the tool gives.
 
 ## Doktrína (literatura): pole
 

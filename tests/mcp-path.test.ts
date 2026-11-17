@@ -18,6 +18,9 @@ import { registerPsp } from "@/src/mcp/tools/psp";
 import { registerDoctrine } from "@/src/mcp/tools/doctrine";
 import { registerFiles } from "@/src/mcp/tools/files";
 import { registerZotero } from "@/src/mcp/tools/zotero";
+import { registerSkPredpisy } from "@/src/mcp/tools/sk-predpisy";
+import { registerSkLp } from "@/src/mcp/tools/sk-lp";
+import { registerSkJudikatura } from "@/src/mcp/tools/sk-judikatura";
 
 /**
  * The MCP request path (src/mcp/tools/index.ts): registrations are recorded
@@ -59,6 +62,9 @@ function registerTheOldWay(server: McpServer, zotero: boolean): void {
     registerCuria,
     registerEurlex,
     registerPsp,
+    registerSkPredpisy,
+    registerSkLp,
+    registerSkJudikatura,
     registerDoctrine,
     registerFiles,
   ]) {

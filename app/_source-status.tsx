@@ -5,6 +5,7 @@ import {
   DATABASE_GROUPS,
   DATABASES,
   formatTime,
+  type DatabaseGroup,
   type DatabaseStatus,
   type MirrorCounts,
 } from "@/src/mcp/databases";
@@ -109,7 +110,13 @@ const LOOK: Record<string, { icon: IconName; color: string }> = {
   curia: { icon: "eu", color: "var(--blue)" },
   "esbirka-api": { icon: "list", color: "var(--green)" },
   "cellar-sparql": { icon: "eu", color: "var(--blue)" },
+  "slovlex-zbierka": { icon: "list", color: "var(--green)" },
+  "slovlex-lp": { icon: "list", color: "var(--soft)" },
+  "slovlex-sudy": { icon: "court", color: "var(--indigo)" },
 };
+
+/** A group's flag in front of its heading (a static SVG, not an emoji: those render as letters on Windows). */
+const GROUP_FLAG: Partial<Record<DatabaseGroup, string>> = { Slovensko: "/flag-sk.svg" };
 
 /** What a row needs to render; a pending row has no status yet. */
 type Row = Pick<DatabaseStatus, "id" | "label" | "group" | "href"> & {
@@ -176,6 +183,7 @@ export function SourceList() {
     return (
       <div key={group} className="source-group">
         <div className="source-group-head">
+          {GROUP_FLAG[group] ? <img className="source-group-flag" src={GROUP_FLAG[group]} alt="" width={18} height={12} /> : null}
           <h3 className="source-group-name">{group}</h3>
         </div>
         {mirrored.length > 0 ? (
