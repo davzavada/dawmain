@@ -79,4 +79,6 @@ Judikáty (Zbierka stanovísk a rozhodnutí, ≈ 2,9 tis.):
 
 Další sekce (nepoužito): `/eslp/filter`, `/sdeu/filter` (ESĽP a SD EÚ ve slovenštině).
 
-Ústavný súd SR na slov-lex není (vlastní web ustavnysud.sk) — mimo rozsah.
+Ústavný súd SR je na slov-lex jen ve sbírce judikátů: `sud` „USSR“, ≈ 2,2 tis. nálezů a uznesení
+z let 1993–2014 (vedle NS SR „NSSR“, ≈ 715, do 2018; jiný kód → 422). Novější rozhodnutí ÚS SR
+jsou jen na ustavnysud.sk — mimo rozsah.
