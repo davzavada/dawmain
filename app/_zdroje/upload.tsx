@@ -30,7 +30,7 @@ import { buildUploadMeta, gzipText, missingBrowserFeatures, sha256Text, UNSUPPOR
 type Converted = ConvertResult & { fileSha256: string; fileName: string; bytes: number };
 
 const DEFAULT_OPTS: ConvertOptions = { footnotes: true, columns: "auto", marginalNumbers: true, plain: false, pageRange: null, labelOffset: null };
-const ACCEPT = ".pdf,.docx,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown";
+const ACCEPT = ".pdf,.docx,.txt,.md,.eml,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown,message/rfc822";
 
 const PHASES: Record<string, string> = {
   read: "Načítám soubor",
@@ -234,7 +234,7 @@ export function Uploader({ library, folderId = null, onUploaded }: { library: Li
             Přetáhněte soubory sem, nebo <span className="zd-link">vyberte z počítače</span>
           </span>
           <span className="zd-dropzone-sub">
-            PDF, DOCX, TXT nebo MD, nejvýš {maxMb} MB. Převádí se na text přímo ve vašem prohlížeči.
+            PDF, DOCX, TXT, MD nebo e-mail (.eml), nejvýš {maxMb} MB. Převádí se na text přímo ve vašem prohlížeči.
           </span>
         </button>
         <input

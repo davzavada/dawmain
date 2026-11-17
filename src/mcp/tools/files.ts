@@ -10,6 +10,7 @@ import {
   getDocument,
   isUuid,
   listDocuments,
+  nameWithoutExtension,
   pendingCounts,
   type DocumentRow,
 } from "@/src/files/db/documents";
@@ -861,8 +862,7 @@ function libraryName(access: Access, id: string): string {
 
 /** A file's name as the assistant cites it: the name the user gave it in the explorer, without its extension. */
 function displayName(row: DocumentRow): string {
-  const name = row.file_name.replace(/\.(pdf|docx|txt|md)$/i, "").trim() || row.file_name;
-  return sanitizeLine(name, 200);
+  return sanitizeLine(nameWithoutExtension(row.file_name), 200);
 }
 
 /**

@@ -5,7 +5,8 @@
  * extension for PDF/DOCX), hashes the ORIGINAL file before any converter
  * runs (pdf.js transfers — detaches — the ArrayBuffer to its worker), and
  * dispatches: PDF → ./pdf (loaded lazily, it pulls in pdf.js), DOCX →
- * ./docx (mammoth, also lazy inside), TXT/MD → ./text. Formats we cannot
+ * ./docx (mammoth, also lazy inside), TXT/MD → ./text, an e-mail (.eml) →
+ * ./email. Formats we cannot
  * read well (.doc, .rtf, .odt, .epub, .html …) are rejected with a Czech
  * message telling the user what to save instead.
  *
@@ -48,6 +49,8 @@ const REJECTED_EXTENSIONS: Record<string, string> = {
 
 const TEXT_EXTENSIONS: Record<string, "txt" | "md"> = { txt: "txt", text: "txt", md: "md", markdown: "md" };
 const DOCX_EXTENSIONS = new Set(["docx", "docm", "dotx", "dotm"]);
+/** An Outlook message: an OLE2 container we do not read. */
+const MSG_HELP = "Zprávu Outlooku (.msg) tu nelze převést. Uložte ji jako .eml (nový Outlook a Outlook na webu: Stáhnout; jinak ji přetáhněte do Thunderbirdu), nebo jako PDF.";
 
 function extensionOf(fileName: string): string {
   const dot = fileName.lastIndexOf(".");
@@ -133,7 +136,7 @@ function zipKind(bytes: Uint8Array): "docx" | string {
 /**
  * The file's kind from its bytes: `%PDF-` (within the first 1 KB, as
  * readers allow) → pdf; a ZIP with word/document.xml → docx (also .docm,
- * .dotx); else a .txt / .md by extension. Everything else throws
+ * .dotx); else a .txt / .md / .eml by extension. Everything else throws
  * ConvertError('unsupported', "… Uložte dokument jako PDF nebo DOCX."),
  * a password-protected Word file (an OLE2 container named .docx) throws
  * 'encrypted', an empty file 'broken'. Pure.
@@ -152,11 +155,14 @@ export function detectKind(bytes: Uint8Array, fileName: string): FileKind {
       // Word stores an encrypted .docx inside an OLE2 container.
       throw new ConvertError("encrypted", "Dokument je chráněný heslem. Heslo ve Wordu odstraňte a soubor nahrajte znovu.");
     }
+    if (ext === "msg") throw new ConvertError("unsupported", MSG_HELP);
     throw unsupported("Starý formát Wordu (DOC) tu nelze převést.");
   }
   if (indexOfAscii(bytes, RTF, 8) >= 0) throw unsupported("Formát RTF tu nelze převést.");
   const text = TEXT_EXTENSIONS[ext];
   if (text) return text;
+  if (ext === "eml") return "eml";
+  if (ext === "msg") throw new ConvertError("unsupported", MSG_HELP);
   if (DOCX_EXTENSIONS.has(ext)) throw unsupported("Soubor není platný dokument DOCX.");
   if (ext === "pdf") throw new ConvertError("broken", "Soubor není platné PDF.");
   const known = REJECTED_EXTENSIONS[ext];
@@ -207,6 +213,11 @@ export async function convertFile(
     report("docx", 0, 1);
     result = await convertDocx(data, opts);
     report("docx", 1, 1);
+  } else if (kind === "eml") {
+    report("text", 0, 1);
+    const { convertEmail } = await import("./email");
+    result = convertEmail(data);
+    report("text", 1, 1);
   } else {
     report("text", 0, 1);
     let decoded: ReturnType<typeof decodeText>;

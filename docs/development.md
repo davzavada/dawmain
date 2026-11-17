@@ -457,6 +457,7 @@ co čeká. Už aplikovaný soubor se nemění — oprava = nový soubor.
 | `0006_always_enabled.sql` | přepínač zapnuto/vypnuto u dokumentu zmizel z webu i API: zapne zpět všechny dříve vypnuté dokumenty (sloupec `enabled` zůstává) |
 | `0007_teams_folders.sql` | týmy ve vlastní databázi (`teams`, `team_members`; knihovna týmu má id týmu `org_…`) a složky knihoven (`folders`, `documents.folder_id`) s RLS jako ostatní obsah |
 | `0008_no_metadata.sql` | soubor je jen název a text: dokumenty čekající na potvrzení metadat (`review`) se stanou prohledávanými; sloupce metadat zůstávají, aplikace je nečte |
+| `0009_eml.sql` | `documents.file_kind` smí být i `eml` (e-mailová zpráva převedená v prohlížeči na text) |
 
 **Tahle verze potřebuje `0003` až `0006`** — pusť `--dry-run`, pak
 migraci, a teprve potom nasazuj. `0003`–`0005` přidávají jen sloupce `IF NOT

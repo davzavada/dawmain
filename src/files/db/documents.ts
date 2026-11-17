@@ -3,6 +3,7 @@ import { UUID_RE } from "../config";
 import type { ParsedDoc } from "../dmd/types";
 import type { Derived } from "../index/types";
 import {
+  FILE_EXTENSION_RE,
   ANCHOR_LABELS,
   DOC_TYPES,
   TEMPLATE_KINDS,
@@ -196,7 +197,7 @@ function objectOr<T>(v: unknown, fallback: T): T {
 
 /** "Komentář OZ.pdf" → "Komentář OZ": a file's name without its extension. Pure. */
 export function nameWithoutExtension(fileName: string): string {
-  return fileName.replace(/\.(pdf|docx|txt|md)$/i, "").trim() || fileName;
+  return fileName.replace(FILE_EXTENSION_RE, "").trim() || fileName;
 }
 
 /**
