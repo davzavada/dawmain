@@ -1,12 +1,13 @@
 import "server-only";
-import { auth } from "@clerk/nextjs/server";
+import { auth, clerkClient } from "@clerk/nextjs/server";
 import { after } from "next/server";
 import { z } from "zod";
 import { canDeleteDocument, canEditDocument, getAccess, type Access, type LibraryAccess } from "./access";
 import { envOnlyMode, effectiveMode, sameOrigin } from "./guards";
-import { LIBRARY_ID_RE, LIMITS, PAGE_CHARS, TERMS_VERSION, UUID_RE, type FilesMode } from "./config";
+import { TtlCache } from "@/src/sources/shared/cache";
+import { LIBRARY_ID_RE, LIMITS, PAGE_CHARS, TERMS_VERSION, USER_ID_RE, UUID_RE, type FilesMode } from "./config";
 import { withScope, type Queryable } from "./db/client";
-import { confirmDocument, deleteDocument, getDocument, listDocuments, updateDocumentMeta, type DocumentRow } from "./db/documents";
+import { confirmDocument, deleteDocument, getDocument, listDocuments, renameDocument, updateDocumentMeta, type DocumentRow } from "./db/documents";
 import { documentPreviewText, libraryDocCounts, mergeIdentKeys, metaContext } from "./db/documents-web";
 import { forgetPages, getLibraries, releasePages } from "./db/libraries";
 import { loadReadDoc, loadText } from "./db/reading";
@@ -241,7 +242,45 @@ export async function listFor(userId: string, libraryId: string): Promise<{ libr
   const { rows, total } = await withScope(scope.libraryIds, (db) =>
     listDocuments(db, { libraryIds: [...scope.libraryIds], limit: LIST_LIMIT, offset: 0, sort: "added" }),
   );
-  return { libraryId: lib.id, documents: rows.map((r) => listItem(r, lib, userId)), total };
+  const documents = rows.map((r) => listItem(r, lib, userId));
+  if (lib.kind === "org") {
+    const names = await uploaderNames(rows.map((r) => r.uploaded_by));
+    rows.forEach((r, i) => (documents[i].uploadedByName = names.get(r.uploaded_by) ?? null));
+  }
+  return { libraryId: lib.id, documents, total };
+}
+
+/** Uploaders' names stay put for ten minutes: a team's list is opened far more often than a name changes. */
+const uploaderNameCache = new TtlCache<string>(10 * 60_000, 2_000);
+
+/**
+ * Who uploaded what in a team library: user id → a short name ("Jan Novák",
+ * else the user name). One Clerk call for the ids not cached; a failure
+ * (or a deleted account) leaves the name out — the list never waits on it.
+ */
+export async function uploaderNames(userIds: readonly string[]): Promise<Map<string, string>> {
+  const ids = [...new Set(userIds)].filter((id) => USER_ID_RE.test(id));
+  const names = new Map<string, string>();
+  const missing: string[] = [];
+  for (const id of ids) {
+    const hit = uploaderNameCache.get(id);
+    if (hit !== undefined) names.set(id, hit);
+    else missing.push(id);
+  }
+  if (missing.length === 0) return names;
+  try {
+    const client = await clerkClient();
+    const { data } = await client.users.getUserList({ userId: missing.slice(0, 100), limit: 100 });
+    for (const u of data) {
+      const name = sanitizeLine([u.firstName, u.lastName].filter(Boolean).join(" ") || u.username || "", 60);
+      if (!name) continue;
+      uploaderNameCache.set(u.id, name);
+      names.set(u.id, name);
+    }
+  } catch (error) {
+    logFilesError("documents.uploaders", error);
+  }
+  return names;
 }
 
 // ---------------------------------------------------------------------------
@@ -276,7 +315,25 @@ export async function detailFor(userId: string, id: string): Promise<DocumentDet
 const patchSchema = z.discriminatedUnion("action", [
   z.strictObject({ action: z.literal("confirm"), version: z.number().int().min(0), meta: z.unknown() }),
   z.strictObject({ action: z.literal("save"), version: z.number().int().min(0), meta: z.unknown() }),
+  z.strictObject({ action: z.literal("rename"), name: z.string().max(1_000) }),
 ]);
+
+/** The longest file name a rename accepts (the column allows 255; the list has to show it). */
+export const MAX_FILE_NAME = 160;
+
+/**
+ * A file name as the user typed it: one line, no control characters or path
+ * separators, trimmed; null when nothing is left or it is too long. Pure.
+ */
+export function cleanFileName(raw: string): string | null {
+  const name = sanitizeLine(raw.replace(/[\\/]+/g, " "), 400).trim();
+  return name && name.length <= MAX_FILE_NAME ? name : null;
+}
+
+/** "Komentář OZ.pdf" → "Komentář OZ": the title the assistant sees for a file name. Pure. */
+export function titleFromFileName(name: string): string {
+  return name.replace(/\.(pdf|docx|txt|md)$/i, "").trim() || name;
+}
 
 /** Validation errors of the metadata form: field path → Czech message (first per field). */
 export class MetaValidationError extends FilesUserError {
@@ -320,6 +377,7 @@ export async function patchFor(userId: string, id: string, body: unknown): Promi
   if (mode === "readonly") throw new FilesUserError(503, MESSAGES.readonly);
   if (mode !== "on") throw new FilesUserError(503, MESSAGES.off);
   const input = parsed.data;
+  if (input.action === "rename") return renameFor(userId, id, input.name);
   const meta = parseMetaForm(input.meta, input.action === "confirm");
 
   const access = await getAccess(userId, { fresh: true });
@@ -363,6 +421,39 @@ export async function patchFor(userId: string, id: string, body: unknown): Promi
       await reindexDocument(docId, libraryId);
     });
   }
+  return detailFor(userId, id);
+}
+
+/**
+ * PATCH { action: "rename", name }: the one thing a user edits. The name is
+ * what the list shows and — without its extension — the title the
+ * assistant cites and the search's metadata channel matches. Same rights
+ * as any edit (canEditDocument).
+ */
+async function renameFor(userId: string, id: string, rawName: string): Promise<DocumentDetail> {
+  const fileName = cleanFileName(rawName);
+  if (!fileName) throw new FilesUserError(422, `Zadejte název, nejvýš ${MAX_FILE_NAME} znaků.`);
+  const access = await getAccess(userId, { fresh: true });
+  const ids = libraryIdsOf(access);
+  if (ids.length === 0) throw new FilesUserError(404, "Dokument nenalezen.");
+  await withScope(ids, async (db) => {
+    const { row, lib } = await findDocument(db, access, id);
+    if (!lib.pro && canDeleteDocument(lib, row.uploaded_by, userId)) throw new FilesUserError(403, NO_PRO_EDIT);
+    if (!canEditDocument(lib, row.uploaded_by, userId)) throw new FilesUserError(403, "Tento soubor může přejmenovat jen ten, kdo ho nahrál, nebo správce týmu.");
+    if (row.file_name === fileName) return;
+    const ctx = await metaContext(db, row.id, row.library_id);
+    if (!ctx) throw new FilesUserError(404, "Dokument nenalezen.");
+    const title = titleFromFileName(fileName);
+    const renamed = await renameDocument(db, {
+      id: row.id,
+      libraryId: row.library_id,
+      fileName,
+      title,
+      metaTsv: buildMetaTsv({ ...row.meta, title }, ctx.sections),
+    });
+    if (!renamed) throw new FilesUserError(409, "Soubor se ještě zpracovává — přejmenovat půjde, až bude hotový.");
+    await audit(db, { libraryId: row.library_id, actor: userId, action: "document.rename", docId: row.id });
+  });
   return detailFor(userId, id);
 }
 

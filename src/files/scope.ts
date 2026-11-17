@@ -47,13 +47,14 @@ function makeScope(libraries: readonly LibraryAccess[]): Scope {
   return Object.freeze({ libraryIds: Object.freeze(libs.map((l) => l.id)), libraries: libs }) as unknown as Scope;
 }
 
-/** Does one filter value name this library (by id, slug or the personal aliases)? */
+/** Does one filter value name this library (by id, slug, a team's name, or the personal aliases)? */
 export function matchesLibrary(lib: LibraryAccess, filter: string): boolean {
   const f = fold(filter);
   if (!f) return false;
   if (f === lib.id.toLowerCase()) return true;
   if (lib.slug && f === fold(lib.slug)) return true;
-  return lib.kind === "user" && PERSONAL_ALIASES.has(f);
+  if (lib.kind === "org") return f === fold(lib.name);
+  return PERSONAL_ALIASES.has(f);
 }
 
 /** The `library` filter value that selects this library (a slug only when it is a plain one). Pure. */
@@ -95,7 +96,7 @@ function describe(lib: LibraryAccess): string {
 
 /**
  * The Pro libraries of the caller, optionally narrowed by `libraryFilter`
- * (one value or several; each an id or "osobni"). A filter
+ * (one value or several; each an id, "osobni" or a team's name or slug). A filter
  * value that matches none of them throws SourceError INPUT_INVALID naming
  * the available libraries — the same answer whether the library exists
  * elsewhere or not at all.

@@ -18,6 +18,7 @@ vi.mock("@clerk/nextjs/server", () => ({
 }));
 
 import { dayBefore, formatDay, metadataPatch, roleFrom, toAdminUser } from "@/src/admin/model";
+import { cleanTeamName, clerkRole, isLastAdmin, teamRole, toAdminTeam } from "@/src/admin/teams";
 import { applyChange, isEnvAdmin, listAdminUsers, requireAdmin } from "@/src/admin/server";
 import { __setAccessLoaderForTests, buildAccess, emptyAccess, ukazOn } from "@/src/files/access";
 import { doctrineRefusal } from "@/src/mcp/doctrine-gate";
@@ -236,5 +237,41 @@ describe("guard caps the own server can raise", () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+});
+
+describe("teams (model)", () => {
+  const members = [
+    { role: "org:member", publicUserData: { userId: "user_b", identifier: "b@x.cz", firstName: "Bára", lastName: "Malá" } },
+    { role: "org:admin", publicUserData: { userId: "user_a", identifier: "a@x.cz", firstName: null, lastName: null } },
+    { role: "org:member", publicUserData: null },
+  ];
+
+  it("a team as the admin sees it: the organization's switches read like an account's, admins first", () => {
+    const team = toAdminTeam({ id: "org_t", name: " Kancelář ", createdAt: 5, publicMetadata: { pro: true, features: { zotero: false, ukaz: true }, filesQuota: { pages: 2500.7 } } }, members);
+    expect(team).toMatchObject({ id: "org_t", name: "Kancelář", pro: true, features: { files: true, zotero: false, ukaz: true }, quotaPages: 2500 });
+    expect(team.members).toEqual([
+      { userId: "user_a", name: "a@x.cz", email: "a@x.cz", role: "admin" },
+      { userId: "user_b", name: "Bára Malá", email: "b@x.cz", role: "member" },
+    ]);
+    expect(toAdminTeam({ id: "org_u" }, [])).toMatchObject({ name: "org_u", pro: false, quotaPages: null, members: [] });
+  });
+
+  it("the last admin is recognised; roles map to Clerk's and back", () => {
+    const team = toAdminTeam({ id: "org_t" }, members);
+    expect(isLastAdmin(team, "user_a")).toBe(true);
+    expect(isLastAdmin(team, "user_b")).toBe(false);
+    expect([clerkRole("admin"), clerkRole("member")]).toEqual(["org:admin", "org:member"]);
+    expect([teamRole("org:admin"), teamRole("org:member"), teamRole("basic_member"), teamRole(undefined)]).toEqual(["admin", "member", "member", "member"]);
+  });
+
+  it("a team's name is one line of 2–60 characters", () => {
+    expect(cleanTeamName("  AK  Novák\n& spol. ")).toBe("AK Novák & spol.");
+    for (const bad of ["", " a ", "x".repeat(61), null, 5]) expect(cleanTeamName(bad)).toBeNull();
+  });
+
+  it("a team's switch is the same metadata patch as an account's", () => {
+    expect(metadataPatch({ features: { zotero: false } }, { kind: "feature", feature: "ukaz", on: true })).toEqual({ features: { zotero: false, ukaz: true } });
+    expect(metadataPatch({}, { kind: "quota", pages: null })).toEqual({ filesQuota: null });
   });
 });

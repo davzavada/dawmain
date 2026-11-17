@@ -52,6 +52,10 @@ export const LIMITS = {
   get personalPages() {
     return intEnv("FILES_PERSONAL_PAGES", 10_000);
   },
+  /** Default quota of a team library (override: the organization's publicMetadata.filesQuota.pages). */
+  get teamPages() {
+    return intEnv("FILES_TEAM_PAGES", 10_000);
+  },
   get globalPages() {
     return intEnv("FILES_GLOBAL_MAX_PAGES", 30_000);
   },
@@ -124,10 +128,8 @@ export function cronSecret(): string | undefined {
   return process.env.CRON_SECRET?.trim() || undefined;
 }
 
-/**
- * Library ids are Clerk ids: `user_…`. `org_…` (a team library from before
- * teams were removed) is still a valid id, so the cron can purge one.
- */
+/** Library ids are Clerk ids: `user_…` a personal library, `org_…` a team's (a Clerk organization). */
 export const LIBRARY_ID_RE = /^(user|org)_[A-Za-z0-9]+$/;
+export const ORG_ID_RE = /^org_[A-Za-z0-9]+$/;
 export const USER_ID_RE = /^user_[A-Za-z0-9]+$/;
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

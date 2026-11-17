@@ -5,7 +5,7 @@ import {
   countPages,
   countPagesAcc,
   downloadFileName,
-  fileLine,
+  fileLine, foldName,
   formatBytes,
   formatCount,
   formatDate,
@@ -134,14 +134,19 @@ describe("file list lines", () => {
     expect(typeLabel("bogus" as never)).toBe(typeLabel("jine"));
   });
 
-  it("the line under a title: type · publication · pages, the open row adds the upload date", () => {
+  it("the line under a file's name, as in a folder: pages · upload date · who uploaded it (a team)", () => {
     const now = new Date("2026-09-27T10:00:00Z");
-    const article = { docType: "clanek" as const, publication: "Právník 2/2024", physicalPages: 28, billablePages: 30 };
-    expect(fileLine(article)).toBe("Článek · Právník 2/2024 · 28 stran");
-    expect(fileLine(article, "2026-09-12T09:00:00Z", now)).toBe("Článek · Právník 2/2024 · 28 stran · nahráno 12. 9. 2026");
+    const article = { physicalPages: 28, billablePages: 30 };
+    expect(fileLine(article)).toBe("28 stran");
+    expect(fileLine(article, "2026-09-12T09:00:00Z", null, now)).toBe("28 stran · nahráno 12. 9. 2026");
+    expect(fileLine(article, "2026-09-12T09:00:00Z", "Jan Novák", now)).toBe("28 stran · nahráno 12. 9. 2026 · Jan Novák");
     // A text without pages counts its billed pages; no pages at all leaves the count out.
-    expect(fileLine({ docType: "vzor", publication: null, physicalPages: null, billablePages: 3 })).toBe("Vzor · 3 strany");
-    expect(fileLine({ docType: "vzor", publication: null, physicalPages: null, billablePages: 0 })).toBe("Vzor");
+    expect(fileLine({ physicalPages: null, billablePages: 3 })).toBe("3 strany");
+    expect(fileLine({ physicalPages: null, billablePages: 0 })).toBe("");
+  });
+
+  it("foldName: the list's filter ignores case and diacritics", () => {
+    expect(foldName("  Občanský ZÁKONÍK.pdf ")).toBe("obcansky zakonik.pdf");
   });
 
   it("publicationLine: where an article appeared, null for other types", () => {

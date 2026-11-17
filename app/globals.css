@@ -2281,6 +2281,14 @@ button.zd-file-row:hover .zd-file-title {
   flex: 1;
   min-height: 0;
 }
+/* …unless it is the library switch: then the part after it does. */
+.zd-dialog-head + .zd-lib-tabs {
+  flex: none;
+}
+.zd-lib-tabs + * {
+  flex: 1;
+  min-height: 0;
+}
 
 /* ==========================================================================
    Správa (app/sprava): accounts, switches and use of the tools. Prefixed adm-.
@@ -2877,4 +2885,140 @@ button.zd-file-row:hover .zd-file-title {
   .adm-texts {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* Vlastní soubory as a folder: the library switch (personal | teams), the list's filter, renaming. */
+.zd-lib-tabs {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 22px 0;
+}
+.zd-lib-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: none;
+  color: var(--body);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.zd-lib-tab > span:first-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zd-lib-tab:hover {
+  background: var(--surface);
+}
+.zd-lib-tab[aria-selected="true"] {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-weight: 500;
+}
+.zd-lib-tab-count {
+  color: var(--faint);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.zd-lib-tab[aria-selected="true"] .zd-lib-tab-count {
+  color: inherit;
+  opacity: 0.7;
+}
+.zd-team-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.zd-files-tools {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+  min-width: 0;
+}
+.zd-layer .zd-files-tools input[type="search"],
+.zd-layer .zd-files-tools select {
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 400;
+}
+.zd-layer .zd-files-tools .zd-files-filter {
+  flex: 0 1 200px;
+  width: 200px;
+  min-width: 0;
+}
+.zd-layer .zd-files-tools .zd-files-sort {
+  flex: none;
+  width: auto;
+}
+.zd-file-rename {
+  display: flex;
+  gap: 8px;
+}
+.zd-file-rename input {
+  flex: 1;
+  min-width: 0;
+}
+@media (max-width: 560px) {
+  .zd-files-head {
+    flex-wrap: wrap;
+  }
+  .zd-files-tools {
+    width: 100%;
+    margin-left: 0;
+  }
+  .zd-layer .zd-files-tools .zd-files-filter {
+    flex: 1 1 0;
+    width: auto;
+  }
+  .zd-file-rename {
+    flex-direction: column;
+  }
+}
+
+/* Správa → Týmy */
+.adm-input,
+.adm-select {
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+.adm-input {
+  flex: 1;
+}
+.adm-select {
+  max-width: 100%;
+}
+.adm-team-new {
+  border-top: 1px solid var(--line);
+}
+.adm-member-tools {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+.adm-quota-form {
+  flex-wrap: wrap;
 }

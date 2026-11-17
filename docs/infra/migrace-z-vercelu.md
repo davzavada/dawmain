@@ -414,7 +414,7 @@ běh doma (`app/api/cron/files/route.ts`) proto dožene všechno najednou:
 | Úkol | Co první běh udělá |
 | --- | --- |
 | purge | Knihovny s prošlým `purge_after` (max. 5 za běh): smaže všechny jejich dokumenty (s texty, stránkami, oddíly, poznámkami, chunky), jejich počitadla a audit kromě záznamu o smazání. Bez webhooku je jich nejspíš 0. |
-| owners | Až 50 knihoven za běh se ověří v Clerku. **Vlastník smazaný** → smaže hned jeho souhlas s podmínkami a počitadla čtení a volání, knihovnu smaže za 6 dní. **Vlastník bez `publicMetadata.pro === true` nebo zablokovaný** → `pro_revoked_at`; po 6 dnech označení a další den smazání. **Každá týmová knihovna `org_…`** (pozůstatek zrušených týmů) je vždy „bez Pro“ → za ~7 dní smazána. Pro vrácené dřív, než se smaže, knihovnu zachrání. |
+| owners | Až 50 knihoven za běh se ověří v Clerku. **Vlastník smazaný** → smaže hned jeho souhlas s podmínkami a počitadla čtení a volání, knihovnu smaže za 6 dní. **Vlastník bez `publicMetadata.pro === true` nebo zablokovaný** → `pro_revoked_at`; po 6 dnech označení a další den smazání. **Týmová knihovna `org_…`** se řídí svou organizací v Clerku stejně (smazaná organizace / organizace bez `pro`). Pro vrácené dřív, než se smaže, knihovnu zachrání. |
 | ingest | Dokumenty ve frontě s vyčerpanými 3 pokusy → chyba, uvolní rezervované stránky; v režimu `on` zpracuje až 3 čekající. |
 | pending | Nahrávky v chybě starší 7 dní ztratí uložený text (`pending_gz`) — ruční „znovu zpracovat“ pak nejde. |
 | recount | Přepočítá počitadla stránek a dokumentů knihoven (nic nemaže). |

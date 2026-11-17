@@ -66,7 +66,7 @@ export function avatarSrc(image: string): string {
 }
 
 const MODES = new Set(["on", "readonly", "off"]);
-const ROLES = new Set(["owner"]);
+const ROLES = new Set(["owner", "admin", "member"]);
 const COUNT_KEYS = ["total", "ready", "review", "processing", "error", "searchable"] as const;
 
 const isInt = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 1e9;
@@ -90,7 +90,7 @@ function library(v: unknown): LibrarySummary | null {
   const c = counts(o.counts);
   if (
     !isStr(o.id, 80) ||
-    o.kind !== "user" ||
+    (o.kind !== "user" && o.kind !== "org") ||
     !isStr(o.name, 200) ||
     !ROLES.has(o.role as string) ||
     typeof o.pro !== "boolean" ||
@@ -189,11 +189,14 @@ export const FILES_DESC = "Nahrané knihy, články, komentáře a vzory, ve kte
 /** The Vlastní soubory row for a signed-in user with this summary (null: not loaded yet). */
 export function filesRowView(summary: SummaryResponse | null): FilesRowView {
   if (summary?.state === "unavailable") return { desc: "Teď dočasně vypnuté.", locked: false };
-  const library = summary?.state === "ok" ? (summary.libraries.find((l) => l.kind === "user") ?? null) : null;
-  if (!library) return { desc: "Načítám…", locked: false };
-  if (!library.pro) return { desc: FILES_DESC, locked: true };
-  if (library.counts && library.counts.total > 0) {
-    return { desc: `${countDocuments(library.counts.total)} · ${countPages(library.pagesUsed ?? 0)}`, locked: false };
+  // The personal library and the teams' count together: one row for everything the assistant searches.
+  const libraries = summary?.state === "ok" ? summary.libraries : [];
+  if (libraries.length === 0) return { desc: "Načítám…", locked: false };
+  const pro = libraries.filter((l) => l.pro);
+  if (pro.length === 0) return { desc: FILES_DESC, locked: true };
+  const total = pro.reduce((n, l) => n + (l.counts?.total ?? 0), 0);
+  if (total > 0) {
+    return { desc: `${countDocuments(total)} · ${countPages(pro.reduce((n, l) => n + (l.pagesUsed ?? 0), 0))}`, locked: false };
   }
   return { desc: "Zatím žádné dokumenty", locked: false };
 }

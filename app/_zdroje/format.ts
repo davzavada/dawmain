@@ -159,16 +159,24 @@ export function typeLabel(type: DocType): string {
 }
 
 /**
- * The line under a file's title: "Článek · Právník 2/2024 · 28 stran"; with
- * `uploadedAt` (the open row) also "· nahráno 12. 9. 2026".
+ * The line under a file's name, as in a folder: "28 stran · nahráno
+ * 12. 9. 2026", in a team's library also "· Jan Novák" (who uploaded it).
  */
 export function fileLine(
-  doc: { docType: DocType; publication: string | null; physicalPages: number | null; billablePages: number },
+  doc: { physicalPages: number | null; billablePages: number },
   uploadedAt?: string,
+  uploadedBy?: string | null,
   now = new Date(),
 ): string {
   const pages = doc.physicalPages ?? doc.billablePages;
-  return [typeLabel(doc.docType), doc.publication, pages > 0 ? countPages(pages) : null, uploadedAt ? `nahráno ${formatDate(uploadedAt, now)}` : null]
-    .filter(Boolean)
-    .join(" · ");
+  return [pages > 0 ? countPages(pages) : null, uploadedAt ? `nahráno ${formatDate(uploadedAt, now)}` : null, uploadedBy || null].filter(Boolean).join(" · ");
+}
+
+/** A name folded for the list's filter: no diacritics, lower case. */
+export function foldName(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/\p{M}+/gu, "")
+    .toLowerCase()
+    .trim();
 }

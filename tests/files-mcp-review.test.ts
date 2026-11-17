@@ -436,7 +436,7 @@ describe("follow-up calls keep their parameters (MCP-3, MCP-9)", () => {
 
 describe("output budget (MCP-5)", () => {
   it("a library-wide search at limit 20 stays within the answer budget and pages on exactly", async () => {
-    const r = await call("files_search", { query: "náhrada škody", library: "tym-r", limit: 20 });
+    const r = await call("files_search", { query: "náhrada škody", limit: 20 });
     expect(r.isError).toBe(false);
     expect(r.text.length).toBeLessThanOrEqual(DOC_PAGE_CHARS);
     const m = /showing 1–(\d+) \(more: limit: (\d+), page: 2\)/.exec(r.text);

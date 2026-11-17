@@ -1,6 +1,6 @@
 import { verifyWebhook } from "@clerk/nextjs/webhooks";
 import type { NextRequest } from "next/server";
-import { USER_ID_RE } from "@/src/files/config";
+import { ORG_ID_RE, USER_ID_RE } from "@/src/files/config";
 import { withScope } from "@/src/files/db/client";
 import { getLibraries, markLibraryForPurge } from "@/src/files/db/libraries";
 import { audit, forgetTermsAcceptance, forgetUserUsage } from "@/src/files/db/usage";
@@ -12,7 +12,6 @@ export const dynamic = "force-dynamic";
 
 /** Soft delete: the library is purged by the daily cron after this grace period. */
 const PURGE_GRACE_DAYS = 6;
-const ORG_ID_RE = /^org_[A-Za-z0-9]+$/;
 
 /**
  * POST /api/webhooks/clerk — Clerk (Svix-signed) account lifecycle events.

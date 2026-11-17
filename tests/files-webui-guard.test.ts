@@ -107,7 +107,7 @@ describe("discard question only when something is lost (web:Z3)", () => {
     window.history.replaceState(null, "", "/?soubory=1");
     await act(async () => root.render(createElement(FilesModal, { documentId: null })));
     await settle();
-    expect(row().textContent).toContain("Komentář k OZ");
+    expect(row().textContent).toContain(ITEM.fileName);
     expect(host.textContent).toMatch(/Zbývá 2\s988 z 3\s000 stran\./);
     store.registerUnsavedWork(() => true);
 

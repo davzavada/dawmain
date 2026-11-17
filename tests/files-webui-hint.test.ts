@@ -56,10 +56,13 @@ describe("hint cookie", () => {
     // A tampered library drops the summary, not the page.
     const bad = { ...SUMMARY, libraries: [{ ...LIB, pro: "yes" }] };
     expect(parseHint(encodeURIComponent(JSON.stringify({ i: "DZ", s: bad })))).toEqual({ initials: "DZ", image: null, summary: null });
-    // So does a team library or role from before teams were removed (an old cookie).
-    for (const lib of [{ ...LIB, id: "org_1", kind: "org" }, { ...LIB, role: "org:admin" }]) {
+    // So does a kind or a role the page does not know (Clerk's own role names never reach the cookie).
+    for (const lib of [{ ...LIB, kind: "group" }, { ...LIB, role: "org:admin" }]) {
       expect(parseHint(encodeURIComponent(JSON.stringify({ i: "DZ", s: { ...SUMMARY, libraries: [lib] } })))).toEqual({ initials: "DZ", image: null, summary: null });
     }
+    // A team's library is a library like the personal one.
+    const team = { ...LIB, id: "org_1", kind: "org", name: "Kancelář", role: "member", canManageAll: false };
+    expect(parseHint(encodeURIComponent(JSON.stringify({ i: "DZ", s: { ...SUMMARY, libraries: [LIB, team] } })))?.summary).toMatchObject({ libraries: [{ id: LIB.id }, { id: "org_1", kind: "org", role: "member" }] });
     // Markup in the initials never survives.
     expect(parseHint(encodeURIComponent(JSON.stringify({ i: "<b>", s: null })))?.initials).toBe("b");
   });

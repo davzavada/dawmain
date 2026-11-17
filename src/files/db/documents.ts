@@ -822,6 +822,26 @@ export async function updateDocumentMeta(db: Queryable, args: MetaEdit): Promise
   return saveMeta(db, args, false);
 }
 
+/**
+ * Rename a document: the file name the list shows, and with it the title
+ * the assistant sees and searches (meta_tsv). Only a processed document
+ * ('review' / 'ready'). False when there is none such.
+ */
+export async function renameDocument(
+  db: Queryable,
+  args: { id: string; libraryId: string; fileName: string; title: string; metaTsv: string },
+): Promise<boolean> {
+  if (!isUuid(args.id)) return false;
+  const { rows } = await db.query(
+    `UPDATE documents SET file_name = $3, title = $4, meta_tsv = $5::tsvector,
+            meta_version = meta_version + 1, updated_at = now()
+      WHERE id = $1 AND library_id = $2 AND status IN ('review', 'ready')
+      RETURNING id`,
+    [args.id, args.libraryId, args.fileName, args.title, args.metaTsv],
+  );
+  return rows.length > 0;
+}
+
 // ---------------------------------------------------------------------------
 // Reads
 // ---------------------------------------------------------------------------

@@ -597,10 +597,11 @@ describe("files_search", () => {
   });
 
   it("rejects bad input with fixed, actionable messages", async () => {
-    // `library` is no longer an input: an old client's value is ignored, never an error.
-    const staleLib = await call("files_search", { query: "škoda", library: "cizi-tym" });
-    expect(staleLib.isError).toBe(false);
-    expect(staleLib.text).not.toContain("cizi-tym");
+    // A library the caller does not belong to: one answer, naming the ones they have — never whether it exists.
+    const foreign = await call("files_search", { query: "škoda", library: "cizi-tym" });
+    expect(foreign.text).toContain('No library "cizi-tym" among this account\'s Vlastní zdroje libraries.');
+    expect(foreign.text).toContain('library: "osobni"');
+    expect((await call("files_search", { query: "škoda", library: "osobni" })).isError).toBe(false);
     expect((await call("files_search", { query: "škoda", act: "nesmysl" })).text).toContain('Unknown act "nesmysl"');
     expect((await call("files_search", { case_number: "nic takového" })).text).toContain("not a recognisable spisová značka");
     expect((await call("files_search", {})).text).toContain("Provide query/queries, case_number or section.");
@@ -826,8 +827,7 @@ describe("files_list", () => {
   it("lists libraries with counts and documents with fenced titles", async () => {
     const r = await call("files_list", {});
     expect(r.text).toContain("✓ Vlastní zdroje: 1 library");
-    expect(r.text).toMatch(/- „Osobní“ — 5 připraveno · 1 ke kontrole · 0 zpracovává se · \d+ \/ 3 000 stran/);
-    expect(r.text).not.toContain("library:");
+    expect(r.text).toMatch(/- „Osobní“ \(library: "osobni"\) — 5 připraveno · 1 ke kontrole · 0 zpracovává se · \d+ \/ 3 000 stran/);
     expect(r.text).not.toContain("osobní,");
     const { inside, outside } = split(r.text);
     expect(inside).toContain(`[komentář] „Občanský zákoník VI. Komentář“ — MELZER, F., TÉGL, P. (2018) · Osobní · připraveno · 3 s. · id ${commentaryId}`);

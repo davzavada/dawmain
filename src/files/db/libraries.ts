@@ -3,8 +3,8 @@ import type { Queryable } from "./client";
 import { capString, isoOrNull, iso, num } from "./codec";
 
 /**
- * Libraries: one row per Clerk user (an `org_…` row is a team library left
- * over from before teams were removed, on its way to the 90-day purge),
+ * Libraries: one row per Clerk user (`user_…`, personal) or Clerk
+ * organization (`org_…`, a team's shared library),
  * holding the page counters the quotas are enforced against. Rows in scope
  * are read and written directly (RLS on `libraries` is keyed on the id);
  * cross-library views go through the SECURITY DEFINER functions of

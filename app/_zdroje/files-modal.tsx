@@ -1,28 +1,30 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Icon } from "@/app/_icons";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CONTACT } from "@/app/_legal";
-import { DOC_TYPES, type DocStatus, type DocType } from "@/src/files/types";
+import type { DocStatus } from "@/src/files/types";
 import type { DocumentDetail, DocumentListItem, DocumentListResponse, LibrarySummary } from "@/src/files/web-types";
 import { api, NETWORK_ERROR } from "./api";
 import { Confirm, Dialog } from "./dialog";
-import { downloadFileName, fileLine, remainingLine, statusBadge, typeLabel } from "./format";
+import { downloadFileName, fileLine, foldName, remainingLine, statusBadge } from "./format";
 import { ZIcon } from "./icons";
-import { compactFields, formFromMeta, lineToList, listToLine, MAIN_DOC_TYPES, payloadFromForm, type FieldDef, type FieldWidth, type FormValues } from "./meta-form";
 import { closeFiles, refreshSummary, requestSignIn, showFile, useZdroje } from "./store";
 
 /**
- * The Vlastní soubory modal (wireframe 04, 05), opened by ZdrojeModals
- * (./modals.tsx) from ?soubory=1. One library, the user's own: the drop
- * zone on top, the list of files under it. A new file is converted in the
- * browser and posted; the server converts it further and proposes its
- * type and metadata — the row just spins ("Zpracovávám…") until the
- * type badge appears. Clicking a row opens it in place (&dokument=<id>):
- * the type switch (Komentář / Článek / Kniha, the rest under "Jiný typ"),
- * saved at once, and a short form per type saved with Uložit; Smazat
- * dokument and Stáhnout text sit at its end.
+ * The Vlastní soubory modal, opened by ZdrojeModals (./modals.tsx) from
+ * ?soubory=1. It looks and works like a folder: the libraries on top
+ * ("Osobní" and the user's teams — shown only when there is more than one),
+ * the drop zone, and under it the files by name. A new file is converted
+ * in the browser and posted into the library shown; its row spins
+ * ("Zpracovávám…") until the server has indexed it. Clicking a row opens
+ * it in place (&dokument=<id>): rename, download the text, delete. There
+ * is no metadata to fill in — the name is all a file has, and it is what
+ * the assistant cites.
+ *
+ * In a team's library every member uploads; a member renames and deletes
+ * what they uploaded, the team's admin everything (the server decides:
+ * canEdit / canDelete on each row).
  *
  * The uploader — and with it the DMD parser — loads only where someone may
  * upload.
@@ -43,7 +45,9 @@ const SUBTITLE = "Dokumenty, ve kterých asistent hledá vedle oficiálních dat
 
 export function FilesModal({ documentId }: { documentId: string | null }) {
   const { auth, summary, failed } = useZdroje();
-  const library = summary?.state === "ok" ? (summary.libraries.find((l) => l.kind === "user") ?? null) : null;
+  const libraries = summary?.state === "ok" ? summary.libraries : NO_LIBRARIES;
+  const [chosen, setChosen] = useState<string | null>(null);
+  const library = pickLibrary(libraries, chosen);
   const mode = summary?.state === "ok" ? summary.mode : "off";
   const subtitle =
     library?.pro && library.pagesUsed !== null ? `${SUBTITLE} ${remainingLine(library.pagesUsed, library.quotaPages)}` : SUBTITLE;
@@ -74,7 +78,12 @@ export function FilesModal({ documentId }: { documentId: string | null }) {
   } else if (summary.state === "signed_out" || !library) {
     body = <Notice title="Přihlaste se" text="Vlastní soubory patří k vašemu účtu." />;
   } else {
-    body = <Library key={library.id} lib={library} mode={mode} openId={documentId} />;
+    body = (
+      <>
+        <LibraryTabs libraries={libraries} active={library.id} onChoose={setChosen} />
+        <Library key={library.id} lib={library} mode={mode} openId={documentId} />
+      </>
+    );
   }
 
   return (
@@ -91,6 +100,43 @@ export function FilesModal({ documentId }: { documentId: string | null }) {
     >
       {body}
     </Dialog>
+  );
+}
+
+const NO_LIBRARIES: LibrarySummary[] = [];
+
+/**
+ * The library the modal shows: the one chosen, else the first the user can
+ * work in (a team's member without Pro of their own lands in the team), else
+ * the personal one. Pure (exported for tests).
+ */
+export function pickLibrary(libraries: readonly LibrarySummary[], chosen: string | null): LibrarySummary | null {
+  return libraries.find((l) => l.id === chosen) ?? libraries.find((l) => l.pro) ?? libraries[0] ?? null;
+}
+
+/** "Osobní | Tým A | Tým B" — only when there is something to switch between. */
+function LibraryTabs({ libraries, active, onChoose }: { libraries: readonly LibrarySummary[]; active: string; onChoose: (id: string) => void }) {
+  if (libraries.length < 2) return null;
+  return (
+    <div className="zd-lib-tabs" role="tablist" aria-label="Knihovna">
+      {libraries.map((lib) => (
+        <button
+          key={lib.id}
+          type="button"
+          role="tab"
+          aria-selected={lib.id === active}
+          className="zd-lib-tab"
+          onClick={() => {
+            showFile(null);
+            onChoose(lib.id);
+          }}
+        >
+          <ZIcon name={lib.kind === "org" ? "users" : "library"} size={14} />
+          <span>{lib.name}</span>
+          {lib.counts ? <span className="zd-lib-tab-count">{lib.counts.total}</span> : null}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -212,6 +258,9 @@ function Library({ lib, mode, openId }: { lib: LibrarySummary; mode: string; ope
 
   if (!lib.pro && !hasDocs) {
     if (documents === null && !error) return <Loading text="Načítám…" />;
+    if (lib.kind === "org") {
+      return <Notice title="Týmová knihovna teď není aktivní" text="Tým nemá zapnuté Vlastní soubory. Obraťte se na správce týmu." />;
+    }
     return (
       <Notice
         title="Vlastní soubory přiděluji ručně a zdarma"
@@ -226,6 +275,12 @@ function Library({ lib, mode, openId }: { lib: LibrarySummary; mode: string; ope
 
   return (
     <div className="zd-files">
+      {lib.kind === "org" && lib.pro ? (
+        <p className="zd-team-note">
+          <ZIcon name="users" size={14} />
+          Sdílená knihovna týmu {lib.name}: soubory tu vidí a asistent v nich hledá všem členům.
+        </p>
+      ) : null}
       {!lib.pro ? (
         <p className="zd-banner">Režim Pro tu už není aktivní. Soubory můžete smazat nebo si stáhnout jejich text, nové nahrát nejde.</p>
       ) : mode === "readonly" ? (
@@ -259,7 +314,9 @@ function Library({ lib, mode, openId }: { lib: LibrarySummary; mode: string; ope
             reload();
             void refreshSummary();
           }}
-          onSaved={(detail) => setDocuments((list) => list?.map((d) => (d.id === detail.id ? { ...d, ...pickListFields(detail) } : d)) ?? list)}
+          onRenamed={(detail) =>
+            setDocuments((list) => list?.map((d) => (d.id === detail.id ? { ...d, title: detail.title, fileName: detail.fileName } : d)) ?? list)
+          }
         />
       ) : (
         <Loading text="Načítám soubory…" />
@@ -268,22 +325,28 @@ function Library({ lib, mode, openId }: { lib: LibrarySummary; mode: string; ope
   );
 }
 
-/** The list fields of a saved detail, so the row shows the new title and type at once. */
-function pickListFields(d: DocumentDetail): Partial<DocumentListItem> {
-  return { title: d.title, docType: d.docType, publication: d.publication, status: d.status, statusDetail: d.statusDetail };
-}
-
 // ---------------------------------------------------------------------------
 // The list
+
+/** From this many files on, the list gets its filter and sorting. */
+const FILTER_FROM = 8;
+
+type Sort = "added" | "name";
+
+/** The files a filter leaves, in the chosen order (name: Czech collation; added: as the server sent them, newest first). Pure. */
+export function visibleFiles(documents: readonly DocumentListItem[], query: string, sort: Sort): DocumentListItem[] {
+  const q = foldName(query);
+  const hits = q ? documents.filter((d) => foldName(d.fileName).includes(q)) : [...documents];
+  return sort === "name" ? hits.sort((a, b) => a.fileName.localeCompare(b.fileName, "cs", { numeric: true })) : hits;
+}
 
 function FileList({
   documents,
   total,
   openId,
   readonly,
-  onChanged,
   onDeleted,
-  onSaved,
+  onRenamed,
 }: {
   documents: DocumentListItem[];
   total: number;
@@ -291,58 +354,58 @@ function FileList({
   readonly: boolean;
   onChanged: () => void;
   onDeleted: (id: string) => void;
-  onSaved: (detail: DocumentDetail) => void;
+  onRenamed: (detail: DocumentDetail) => void;
 }) {
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<Sort>("added");
+  const shown = useMemo(() => visibleFiles(documents, query, sort), [documents, query, sort]);
+  const tools = documents.length >= FILTER_FROM;
   return (
     <section className="zd-files-list" aria-label="Soubory">
       <div className="zd-files-head">
         <span>Soubory</span>
         <span className="zd-files-count">{total}</span>
+        {tools ? (
+          <span className="zd-files-tools">
+            <input type="search" className="zd-files-filter" placeholder="Hledat podle názvu" aria-label="Hledat podle názvu" value={query} onChange={(e) => setQuery(e.target.value)} />
+            <select className="zd-files-sort" aria-label="Řazení" value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
+              <option value="added">Nejnovější</option>
+              <option value="name">Podle názvu</option>
+            </select>
+          </span>
+        ) : null}
       </div>
-      {documents.length === 0 ? <p className="zd-empty">Zatím tu nic není.</p> : null}
+      {documents.length === 0 ? <p className="zd-empty">Zatím tu nic není.</p> : shown.length === 0 ? <p className="zd-empty">Žádný soubor neodpovídá.</p> : null}
       <ul>
-        {documents.map((doc) => (
-          <FileRow
-            key={doc.id}
-            doc={doc}
-            open={openId === doc.id}
-            readonly={readonly}
-            onChanged={onChanged}
-            onDeleted={() => onDeleted(doc.id)}
-            onSaved={onSaved}
-          />
+        {shown.map((doc) => (
+          <FileRow key={doc.id} doc={doc} open={openId === doc.id} readonly={readonly} onDeleted={() => onDeleted(doc.id)} onRenamed={onRenamed} />
         ))}
       </ul>
     </section>
   );
 }
 
-/** Badge colours per type (wireframe 04): komentář indigo, článek teal, kniha amber, the rest neutral. */
-const TYPE_TONE: Partial<Record<DocType, string>> = { komentar: "indigo", clanek: "teal", kniha: "amber" };
-
 function FileRow({
   doc,
   open,
   readonly,
-  onChanged,
   onDeleted,
-  onSaved,
+  onRenamed,
 }: {
   doc: DocumentListItem;
   open: boolean;
   readonly: boolean;
-  onChanged: () => void;
   onDeleted: () => void;
-  onSaved: (detail: DocumentDetail) => void;
+  onRenamed: (detail: DocumentDetail) => void;
 }) {
   const pending = PENDING.has(doc.status) || doc.status === "deleting";
   if (pending) {
     return (
       <li className="zd-file" data-pending="true">
         <div className="zd-file-row">
-          <Icon name="book" />
+          <ZIcon name="file" size={18} />
           <span className="zd-file-text">
-            <span className="zd-file-title">{doc.title}</span>
+            <span className="zd-file-title">{doc.fileName}</span>
             <span className="zd-file-line">{doc.status === "deleting" ? "Mažu…" : "Zpracovávám…"}</span>
           </span>
           <span className="zd-spinner zd-file-spinner" role="status" aria-label="Zpracovávám" />
@@ -354,155 +417,64 @@ function FileRow({
   return (
     <li className="zd-file" data-open={open || undefined}>
       <button type="button" className="zd-file-row" aria-expanded={open} onClick={() => showFile(open ? null : doc.id)}>
-        <Icon name="book" />
+        <ZIcon name="file" size={18} />
         <span className="zd-file-text">
-          <span className="zd-file-title">{doc.title}</span>
+          <span className="zd-file-title">{doc.fileName}</span>
           {failed ? (
             <span className="zd-file-line zd-file-line-bad">
               {statusBadge(doc.status, doc.statusDetail).label}
               {doc.statusDetail ? ` · ${doc.statusDetail}` : ""}
             </span>
           ) : (
-            <span className="zd-file-line">{fileLine(doc, open ? doc.uploadedAt : undefined)}</span>
+            <span className="zd-file-line">{fileLine(doc, doc.uploadedAt, doc.uploadedByName)}</span>
           )}
         </span>
-        {failed ? null : (
-          <span className="zd-type-badge" data-tone={TYPE_TONE[doc.docType] ?? "neutral"}>
-            {typeLabel(doc.docType)}
-          </span>
-        )}
         <ZIcon name="chevron" className="zd-file-chevron" />
       </button>
-      {open ? <FileEditor doc={doc} readonly={readonly} onChanged={onChanged} onDeleted={onDeleted} onSaved={onSaved} /> : null}
+      {open ? <FileActions doc={doc} readonly={readonly} onDeleted={onDeleted} onRenamed={onRenamed} /> : null}
     </li>
   );
 }
 
 // ---------------------------------------------------------------------------
-// The open row: type, metadata, delete
+// The open row: rename, download, delete
 
-const WIDTH_CLASS: Record<FieldWidth, string> = { full: "w-full", wide: "w-wide", half: "w-half", mid: "w-mid", narrow: "w-narrow" };
-
-function FileEditor({
-  doc: item,
+function FileActions({
+  doc,
   readonly,
-  onChanged,
   onDeleted,
-  onSaved,
+  onRenamed,
 }: {
   doc: DocumentListItem;
   readonly: boolean;
-  onChanged: () => void;
   onDeleted: () => void;
-  onSaved: (detail: DocumentDetail) => void;
+  onRenamed: (detail: DocumentDetail) => void;
 }) {
-  const [doc, setDoc] = useState<DocumentDetail | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [values, setValues] = useState<FormValues>({});
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [name, setName] = useState(doc.fileName);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
-  const [conflict, setConflict] = useState(false);
-  const [busy, setBusy] = useState<"type" | "save" | "delete" | "export" | null>(null);
+  const [busy, setBusy] = useState<"rename" | "delete" | "export" | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [reload, setReload] = useState(0);
-
-  useEffect(() => {
-    const ctrl = new AbortController();
-    setLoadError(null);
-    void (async () => {
-      try {
-        const res = await api<DocumentDetail>(`/api/files/documents/${encodeURIComponent(item.id)}`, { signal: ctrl.signal });
-        if (!res.ok) {
-          setLoadError(res.error);
-          return;
-        }
-        setDoc(res.data);
-        setValues(formFromMeta(res.data.meta));
-        setFieldErrors({});
-        setConflict(false);
-      } catch {
-        // aborted
-      }
-    })();
-    return () => ctrl.abort();
-  }, [item.id, reload]);
-
-  if (loadError) {
-    return (
-      <div className="zd-file-open">
-        <p className="zd-error" role="alert">
-          {loadError}
-        </p>
-      </div>
-    );
-  }
-  if (!doc) {
-    return (
-      <div className="zd-file-open">
-        <p className="zd-progress" role="status">
-          <span className="zd-spinner" aria-hidden="true" />
-          Načítám…
-        </p>
-      </div>
-    );
-  }
 
   const settled = doc.status === "review" || doc.status === "ready";
   const editable = doc.canEdit && !readonly && settled;
-  const docType = (values.doc_type as DocType) || doc.meta.doc_type;
+  const changed = name.trim() !== "" && name.trim() !== doc.fileName;
 
-  function failed(res: { status: number; error: string; body: { fields?: Record<string, string> } | null }) {
-    if (res.status === 409) setConflict(true);
-    if (res.body?.fields) setFieldErrors(res.body.fields);
+  async function rename() {
+    if (!changed) return;
+    setBusy("rename");
+    setMessage(null);
+    const res = await api<DocumentDetail>(`/api/files/documents/${doc.id}`, { method: "PATCH", json: { action: "rename", name: name.trim() } });
+    setBusy(null);
+    if (res.ok) {
+      setName(res.data.fileName);
+      setMessage({ ok: true, text: "Přejmenováno." });
+      onRenamed(res.data);
+      return;
+    }
     setMessage({ ok: false, text: res.error });
   }
 
-  /** The type is saved at once — over the stored metadata, so unsaved field edits stay in the form only. */
-  async function changeType(next: DocType) {
-    if (!doc || next === docType) return;
-    setBusy("type");
-    setMessage(null);
-    setFieldErrors({});
-    const previous = docType;
-    setValues((v) => ({ ...v, doc_type: next }));
-    const res = await api<DocumentDetail>(`/api/files/documents/${doc.id}`, {
-      method: "PATCH",
-      json: { action: "save", version: doc.metaVersion, meta: payloadFromForm({ ...formFromMeta(doc.meta), doc_type: next }) },
-    });
-    setBusy(null);
-    if (res.ok) {
-      setDoc(res.data);
-      onSaved(res.data);
-      return;
-    }
-    setValues((v) => ({ ...v, doc_type: previous }));
-    failed(res);
-  }
-
-  async function save() {
-    if (!doc) return;
-    setBusy("save");
-    setMessage(null);
-    setFieldErrors({});
-    // "confirm": the metadata must be complete (a commentary keeps its act); a file in review becomes searchable.
-    const res = await api<DocumentDetail>(`/api/files/documents/${doc.id}`, {
-      method: "PATCH",
-      json: { action: "confirm", version: doc.metaVersion, meta: payloadFromForm(values) },
-    });
-    setBusy(null);
-    if (res.ok) {
-      setDoc(res.data);
-      setValues(formFromMeta(res.data.meta));
-      setMessage({ ok: true, text: "Uloženo." });
-      onSaved(res.data);
-      void refreshSummary();
-      return;
-    }
-    failed(res);
-  }
-
   async function remove() {
-    if (!doc) return;
     setBusy("delete");
     const res = await api(`/api/files/documents/${doc.id}`, { method: "DELETE" });
     setBusy(null);
@@ -516,7 +488,6 @@ function FileEditor({
 
   /** Download the stored text (GET …/export): fetched first, so a refusal shows its Czech message here. */
   async function exportText() {
-    if (!doc) return;
     setBusy("export");
     setMessage(null);
     try {
@@ -545,114 +516,33 @@ function FileEditor({
     }
   }
 
-  const otherTypes = DOC_TYPES.filter((t) => !MAIN_DOC_TYPES.includes(t));
-  const other = !MAIN_DOC_TYPES.includes(docType);
-
   return (
     <form
       className="zd-file-open"
       onSubmit={(e) => {
         e.preventDefault();
-        void save();
+        void rename();
       }}
     >
       {doc.status === "error" && doc.statusDetail ? <p className="zd-error">{doc.statusDetail}</p> : null}
-      {doc.status === "review" ? <p className="zd-banner zd-banner-info">Zkontrolujte údaje a uložte je. Dokud je neuložíte, asistent v souboru nehledá.</p> : null}
-      {settled ? (
-        <fieldset className="zd-file-fields" disabled={!editable || busy !== null}>
-          <div className="zd-file-type">
-            <span className="zd-file-label" id={`typ-${doc.id}`}>
-              Typ
-            </span>
-            <div className="zd-segmented-pill" role="radiogroup" aria-labelledby={`typ-${doc.id}`}>
-              {MAIN_DOC_TYPES.map((t) => (
-                <button key={t} type="button" role="radio" aria-checked={docType === t} onClick={() => void changeType(t)}>
-                  {typeLabel(t)}
-                </button>
-              ))}
-              <select
-                aria-label="Jiný typ"
-                data-checked={other || undefined}
-                value={other ? docType : ""}
-                onChange={(e) => e.target.value && void changeType(e.target.value as DocType)}
-              >
-                {other ? null : <option value="">Jiný typ</option>}
-                {otherTypes.map((t) => (
-                  <option key={t} value={t}>
-                    {typeLabel(t)}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <span className="zd-file-hint">
-              <Icon name="sparkles" size={13} />
-              Změna typu se uloží hned.
-            </span>
-          </div>
-          <div className="zd-file-grid">
-            {compactFields(docType).map(({ field, width }) => (
-              <CompactField
-                key={field.key + field.label}
-                field={field}
-                width={width}
-                value={values[field.key] ?? ""}
-                error={fieldErrors[field.key] ?? null}
-                onChange={(value) => setValues((v) => ({ ...v, [field.key]: value }))}
-              />
-            ))}
-          </div>
-        </fieldset>
+      {editable ? (
+        <div className="zd-file-rename">
+          <input type="text" aria-label="Název souboru" value={name} maxLength={160} disabled={busy !== null} onChange={(e) => setName(e.target.value)} />
+          <button type="submit" className="zd-btn zd-btn-primary" disabled={busy !== null || !changed}>
+            {busy === "rename" ? "Ukládám…" : "Přejmenovat"}
+          </button>
+        </div>
       ) : null}
-      {!doc.canEdit && settled ? (
-        <p className="zd-muted zd-small">Režim Pro tu už není aktivní: údaje upravit nejde. Text si můžete stáhnout a soubor smazat.</p>
-      ) : readonly && settled ? (
-        <p className="zd-muted zd-small">Vlastní soubory jsou teď jen pro čtení — údaje upravit nejde.</p>
-      ) : null}
+      {doc.flags.length > 0 ? <p className="zd-muted zd-small">{doc.flags.join(" · ")}</p> : null}
       {message ? (
         <p className={message.ok ? "zd-ok-line" : "zd-error"} role={message.ok ? "status" : "alert"}>
           {message.text}
-          {conflict ? (
-            <>
-              {" "}
-              <button
-                type="button"
-                className="zd-link-button"
-                onClick={() => {
-                  setMessage(null);
-                  setReload((r) => r + 1);
-                  onChanged();
-                }}
-              >
-                Načíst znovu
-              </button>
-            </>
-          ) : null}
         </p>
       ) : null}
       <div className="zd-file-actions">
-        {editable ? (
-          <>
-            <button type="submit" className="zd-btn zd-btn-primary" disabled={busy !== null}>
-              {busy === "save" ? "Ukládám…" : "Uložit"}
-            </button>
-            <button
-              type="button"
-              className="zd-btn zd-btn-secondary"
-              disabled={busy !== null}
-              onClick={() => {
-                setValues(formFromMeta(doc.meta));
-                setFieldErrors({});
-                setMessage(null);
-                showFile(null);
-              }}
-            >
-              Zrušit
-            </button>
-          </>
-        ) : null}
         <span className="zd-file-actions-end">
           {doc.canDelete && settled ? (
-            // Who may download is who may delete (the owner) — Pro not required, as the export route checks.
+            // Who may download is who may delete — Pro not required, as the export route checks.
             <button type="button" className="zd-link-button" onClick={() => void exportText()} disabled={busy !== null}>
               {busy === "export" ? "Stahuji…" : "Stáhnout text"}
             </button>
@@ -660,14 +550,14 @@ function FileEditor({
           {doc.canDelete ? (
             // Pro not required: whoever owns the text may delete it, also after Pro was withdrawn.
             <button type="button" className="zd-link-button zd-danger-link" onClick={() => setConfirmDelete(true)} disabled={busy !== null}>
-              Smazat dokument
+              Smazat soubor
             </button>
           ) : null}
         </span>
       </div>
       {confirmDelete ? (
         <Confirm
-          question={<>Smazat „{doc.title}“? Text i index se odstraní natrvalo.</>}
+          question={<>Smazat „{doc.fileName}“? Text i index se odstraní natrvalo.</>}
           confirmLabel="Smazat"
           busy={busy === "delete"}
           onConfirm={() => void remove()}
@@ -675,51 +565,5 @@ function FileEditor({
         />
       ) : null}
     </form>
-  );
-}
-
-function CompactField({
-  field,
-  width,
-  value,
-  error,
-  onChange,
-}: {
-  field: FieldDef;
-  width: FieldWidth;
-  value: string;
-  error: string | null;
-  onChange: (value: string) => void;
-}) {
-  const list = field.kind === "list";
-  return (
-    <label className={`zd-field zd-file-field ${WIDTH_CLASS[width]}`} data-error={error ? true : undefined}>
-      <span>
-        {field.label}
-        {field.required ? " *" : ""}
-      </span>
-      {field.kind === "select" ? (
-        <select value={value} onChange={(e) => onChange(e.target.value)}>
-          {(field.options ?? []).map(([v, l]) => (
-            <option key={v} value={v}>
-              {l}
-            </option>
-          ))}
-        </select>
-      ) : field.kind === "textarea" ? (
-        <textarea rows={3} maxLength={600} value={value} placeholder={field.placeholder} onChange={(e) => onChange(e.target.value)} />
-      ) : (
-        <input
-          type="text"
-          value={list ? listToLine(value) : value}
-          placeholder={field.placeholder}
-          inputMode={field.kind === "year" ? "numeric" : undefined}
-          maxLength={field.kind === "year" ? 4 : list ? 1_200 : 400}
-          aria-invalid={error ? true : undefined}
-          onChange={(e) => onChange(list ? lineToList(e.target.value) : e.target.value)}
-        />
-      )}
-      {error ? <small className="zd-field-error">{error}</small> : null}
-    </label>
   );
 }

@@ -415,6 +415,82 @@ describe("PATCH /api/files/documents/[id]", () => {
   });
 });
 
+describe("rename (PATCH { action: \"rename\" })", () => {
+  it("renames the file: the list shows the name, the assistant's title follows it, the search finds it", async () => {
+    const id = await uploaded("user_a", "user_a", "r");
+    const v = (await row(id)).meta_version;
+    const res = await patch("user_a", id, { action: "rename", name: "  Smlouva o dílo / vzor 2026.pdf\n" });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as DocumentDetail;
+    expect(body.fileName).toBe("Smlouva o dílo vzor 2026.pdf");
+    expect(body.title).toBe("Smlouva o dílo vzor 2026");
+    expect(await row(id)).toMatchObject({ title: "Smlouva o dílo vzor 2026", meta_version: v + 1 });
+    const { rows } = await t.owner.query<{ hit: boolean }>("SELECT meta_tsv @@ $2::tsquery AS hit FROM documents WHERE id = $1", [id, buildTsQuery("smlouva dílo").and]);
+    expect(rows[0].hit).toBe(true);
+    const audit = await t.owner.query("SELECT action FROM audit_log WHERE doc_id = $1 AND action = 'document.rename'", [id]);
+    expect(audit.rows).toHaveLength(1);
+    // The same name again changes nothing.
+    expect((await patch("user_a", id, { action: "rename", name: "Smlouva o dílo vzor 2026.pdf" })).status).toBe(200);
+    expect((await row(id)).meta_version).toBe(v + 1);
+  });
+
+  it("refuses an empty or overlong name, a stranger, and a library without Pro", async () => {
+    const id = await uploaded("user_a", "user_a", "s");
+    expect((await patch("user_a", id, { action: "rename", name: "   " })).status).toBe(422);
+    expect((await patch("user_a", id, { action: "rename", name: "x".repeat(161) })).status).toBe(422);
+    expect((await patch("user_a", id, { action: "rename", name: "a", extra: 1 })).status).toBe(400);
+    expect((await patch("user_x", id, { action: "rename", name: "cizí.pdf" })).status).toBe(404);
+    setAccess("user_a", buildAccess({ id: "user_a", publicMetadata: {} }));
+    expect((await patch("user_a", id, { action: "rename", name: "bez pro.pdf" })).status).toBe(403);
+  });
+});
+
+describe("a team's library (a Clerk organization)", () => {
+  const org = (role: string) => [{ role, organization: { id: "org_t", name: "Kancelář", slug: null, publicMetadata: { pro: true } } }];
+  beforeEach(() => {
+    // user_a: a member with Pro of their own; user_x: the team's admin; user_none: a member without Pro.
+    setAccess("user_a", buildAccess({ id: "user_a", publicMetadata: { pro: true } }, org("org:member")));
+    setAccess("user_x", buildAccess({ id: "user_x", publicMetadata: { pro: true } }, org("org:admin")));
+    setAccess("user_none", buildAccess({ id: "user_none", publicMetadata: {} }, org("org:member")));
+  });
+
+  it("every member uploads and lists; the summary carries the team after the personal library", async () => {
+    const id = await uploaded("user_none", "org_t", "t1");
+    signedIn("user_a");
+    const summary = (await (await summaryGET(get("/api/files/summary"))).json()) as Extract<SummaryResponse, { state: "ok" }>;
+    expect(summary.libraries.map((l) => [l.id, l.kind, l.role, l.counts?.total])).toEqual([
+      ["user_a", "user", "owner", 0],
+      ["org_t", "org", "member", 1],
+    ]);
+    const list = (await (await listGET(get("/api/files/documents?lib=org_t"))).json()) as DocumentListResponse;
+    expect(list.documents.map((d) => [d.id, d.mine, d.canEdit, d.canDelete])).toEqual([[id, false, false, false]]);
+    // A member without Pro of their own sees the team's library as their Pro one.
+    signedIn("user_none");
+    const own = (await (await summaryGET(get("/api/files/summary"))).json()) as Extract<SummaryResponse, { state: "ok" }>;
+    expect(own.libraries.map((l) => [l.id, l.pro])).toEqual([["user_none", false], ["org_t", true]]);
+  });
+
+  it("a member renames and deletes their own file; a colleague cannot, the team's admin can", async () => {
+    const id = await uploaded("user_none", "org_t", "t2");
+    expect((await patch("user_a", id, { action: "rename", name: "kolega.pdf" })).status).toBe(403);
+    expect((await del("user_a", id)).status).toBe(403);
+    expect((await patch("user_none", id, { action: "rename", name: "moje.pdf" })).status).toBe(200);
+    expect((await patch("user_x", id, { action: "rename", name: "správce.pdf" })).status).toBe(200);
+    expect((await del("user_x", id)).status).toBe(200);
+  });
+
+  it("someone outside the team gets the same 404 as for a library that does not exist", async () => {
+    const id = await uploaded("user_a", "org_t", "t3");
+    setAccess("user_x", buildAccess({ id: "user_x", publicMetadata: { pro: true } }));
+    signedIn("user_x");
+    expect((await listGET(get("/api/files/documents?lib=org_t"))).status).toBe(404);
+    expect((await detail("user_x", id)).status).toBe(404);
+    expect((await del("user_x", id)).status).toBe(404);
+    signedIn("user_x");
+    expect((await uploadPOST(uploadRequest("org_t", dmd(3, "t4")))).status).toBe(403);
+  });
+});
+
 describe("DELETE /api/files/documents/[id]", () => {
   it("a stranger gets 404; the owner deletes, and the pages come back", async () => {
     const id = await uploaded("user_a", "user_a", "m");

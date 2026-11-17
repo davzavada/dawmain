@@ -488,6 +488,7 @@ až novým buildem, `deploy.sh`).
 | `DATABASE_URL_UNPOOLED` | vlastnické připojení (`files_owner`), jen pro `scripts/db-migrate.mjs` z terminálu; aplikace ho nečte | — |
 | `FILES_GLOBAL_MAX_PAGES` | strop stran pro celou instalaci | 30 000 |
 | `FILES_PERSONAL_PAGES` | kvóta osobní knihovny (stran) | 10 000 |
+| `FILES_TEAM_PAGES` | kvóta týmové knihovny (stran) | 10 000 |
 | `FILES_OPERATOR_IDS` | Clerk `user_…` oddělená čárkou — provozovatelé Vlastních zdrojů (`src/files/operator.ts`) a zároveň správci na `/sprava` | — |
 | `ADMIN_USER_IDS` | Clerk `user_…` oddělená čárkou — správci na `/sprava` bez ohledu na Clerk: první správce a cesta zpět. Další správce se povyšují na stránce Správa (`publicMetadata.role = "admin"`) | — |
 | `FILES_GLOBAL_UPLOADS_PER_DAY` | nahrání za den ve všech knihovnách dohromady | 200 |
@@ -508,10 +509,16 @@ přepsat v Clerku (níže).
 1. *Configure → Organizations*: zapnout, **Membership optional** (osobní
    účty zůstanou; s „required“ by každý uživatel včetně těch, kdo jen
    připojují MCP, dostal úkol vybrat si organizaci), **vypnout Allow
-   user-created organizations**. Výchozí limit je 5 členů na tým; zdarma jde
-   zvednout nejvýš na 20.
-2. **Tým zakládej ty, s jeho budoucím správcem jako tvůrcem** — kdybys ho
-   založil za sebe, stal by ses členem a viděl bys týmové dokumenty. Pak
+   user-created organizations**. Zdarma má tým nejvýš 20 členů.
+2. **Týmy se spravují na stránce Správa → Týmy** (`/sprava/tymy`,
+   `src/admin/teams-server.ts`): založení (název a správce týmu), zapnutí
+   týmu a jeho funkcí, kvóta sdílené knihovny, členové a jejich role
+   (správce / člen), zrušení týmu. Přidat jde jen účet, který se už na webu
+   registroval. Tým se zakládá **jménem svého budoucího správce** — kdyby
+   ho správce webu založil za sebe, stal by se členem a viděl by týmové
+   dokumenty. Zapnutý tým dává členům sdílenou knihovnu a své funkce
+   (Zotero, UKAŽ), i když sami Pro nemají; v okně Vlastních souborů se pak
+   přepíná mezi „Osobní“ a týmy. Totéž jde ručně přes API Clerku; tam také
    vypni mazání týmu adminem (smazání týmu = výmaz celé knihovny):
 
    ```bash

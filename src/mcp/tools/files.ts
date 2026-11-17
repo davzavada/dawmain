@@ -42,7 +42,7 @@ import { allowToolCall, cachedMode, effectiveMode, envOnlyMode } from "@/src/fil
 import { actName, resolveAct, zakId } from "@/src/files/index/acts";
 import { bestWindow, findMatches } from "@/src/files/index/highlight";
 import { euActId, pinpointOnly, queryIdentKeys, stripIdentifiers } from "@/src/files/index/identifiers";
-import { readScope, safeLibraryName, type Scope } from "@/src/files/scope";
+import { libraryHandle, readScope, safeLibraryName, type Scope } from "@/src/files/scope";
 import { buildTsQuery, MAX_QUERY_CHARS } from "@/src/files/text/analyze";
 import { DOC_TYPES, DOC_TYPE_LABELS, type AnchorLabel, type DocType, type PageLabelSource } from "@/src/files/types";
 import { SourceError, toToolError, type SourceErrorKind } from "@/src/sources/shared/errors";
@@ -856,9 +856,9 @@ function libraryOf(access: Access, id: string): LibraryAccess | undefined {
   return access.libraries.find((l) => l.id === id) ?? access.all.find((l) => l.id === id);
 }
 
-/** The caller's Pro library — the only one there is (no shared libraries). */
-function scopeFor(access: Access): Scope {
-  return readScope(access);
+/** The caller's Pro libraries — the personal one and their teams' — optionally narrowed to one (`library`). */
+function scopeFor(access: Access, library?: string): Scope {
+  return readScope(access, library);
 }
 
 function libraryName(access: Access, id: string): string {
@@ -1715,6 +1715,7 @@ export function registerFiles(server: McpServer): void {
           .describe("Up to 3 query variants (other word forms, synonyms), merged round-robin."),
         case_number: z.string().min(3).max(200).optional().describe("Passages citing this decision: spisová značka (\"25 Cdo 1234/2019\", short year \"/19\" too), ECLI or \"R 51/2011\"."),
         doc_type: z.array(docTypeSchema).max(7).optional().describe("Only these document types: kniha, kapitola, clanek, komentar, vzor, rozhodnuti, jine."),
+        library: z.string().min(1).max(80).optional().describe('Only this library: "osobni" (the personal one) or a team\'s name or id, as files_list prints them. Omit to cover all of them.'),
         act: z.string().min(2).optional().describe("Only commentaries on this act or passages citing it (with a § in the query: citing that §): \"OZ\", \"o. s. ř.\", \"89/2012\", \"GDPR\", \"32016R0679\"."),
         section: z.string().min(1).optional().describe("Only passages inside this § or článek, e.g. \"§ 2913\" or \"čl. III\" (combine with act)."),
         doc: z.string().min(1).optional().describe("Search inside this one document (id from a hit or files_list): its passages ranked, each with its pinpoint."),
@@ -1775,6 +1776,7 @@ export function registerFiles(server: McpServer): void {
         "LIST the user's own libraries (Vlastní soubory, Pro) with their document counts — připraveno (searched), ke kontrole (awaiting the user's confirmation on the website), zpracovává se — and page usage, and the documents themselves: type, title, authors, year, status and id. Filters: doc_type, status, query (words of the title or authors), sort (added/title/year); limit up to 50, page. Only documents marked připraveno are searched and readable (files_search, files_get_document {id}).",
       inputSchema: z.object({
         doc_type: z.array(docTypeSchema).max(7).optional().describe("Only these document types."),
+        library: z.string().min(1).max(80).optional().describe('Only this library: "osobni" (the personal one) or a team\'s name or id, as files_list prints them. Omit to cover all of them.'),
         status: z.enum(["ready", "review", "processing", "error"]).optional().describe("Only documents in this state."),
         query: z.string().min(1).max(200).optional().describe("Words of the title, file name or authors (diacritics-insensitive)."),
         sort: z.enum(["added", "title", "year"]).default("added").describe("Order: newest upload first, by title, or by year."),
@@ -1807,6 +1809,7 @@ async function filesSearch(
     queries?: string[];
     case_number?: string;
     doc_type?: DocType[];
+    library?: string;
     act?: string;
     section?: string;
     doc?: string;
@@ -1817,7 +1820,7 @@ async function filesSearch(
     page: number;
   },
 ): Promise<ToolResult> {
-  const scope = scopeFor(g.access);
+  const scope = scopeFor(g.access, args.library);
   const libs = [...scope.libraryIds];
   // Parsed as far as buildTsQuery reads: identifier parsing of a longer string is wasted work.
   const variants = uniqueQueries(args.query, args.queries).map((v) => v.slice(0, MAX_QUERY_CHARS));
@@ -2388,9 +2391,9 @@ const STATUS_FILTER: Record<"ready" | "review" | "processing" | "error", Array<"
 
 async function filesList(
   g: Gated,
-  args: { doc_type?: DocType[]; status?: "ready" | "review" | "processing" | "error"; query?: string; sort: "added" | "title" | "year"; limit: number; page: number },
+  args: { doc_type?: DocType[]; library?: string; status?: "ready" | "review" | "processing" | "error"; query?: string; sort: "added" | "title" | "year"; limit: number; page: number },
 ): Promise<ToolResult> {
-  const scope = scopeFor(g.access);
+  const scope = scopeFor(g.access, args.library);
   const libs = [...scope.libraryIds];
   const { counts, libRows, list } = await withScope(libs, async (db) => ({
     counts: await pendingCounts(db, libs),
@@ -2408,7 +2411,7 @@ async function filesList(
   const pagesUsed = new Map(libRows.map((l) => [l.id, l.page_count]));
   const libLines = scope.libraries.map((l) => {
     const c = counts[l.id] ?? { review: 0, processing: 0, ready: 0 };
-    return `- „${safeLibraryName(l)}“ — ${c.ready} připraveno · ${c.review} ke kontrole · ${c.processing} zpracovává se · ${formatCount(pagesUsed.get(l.id) ?? 0)} / ${formatCount(l.quotaPages)} stran`;
+    return `- „${safeLibraryName(l)}“ (${l.kind === "org" ? "team, shared with its members; " : ""}library: "${libraryHandle(l)}") — ${c.ready} připraveno · ${c.review} ke kontrole · ${c.processing} zpracovává se · ${formatCount(pagesUsed.get(l.id) ?? 0)} / ${formatCount(l.quotaPages)} stran`;
   });
   const first = (args.page - 1) * args.limit;
   const nonce = newNonce();
