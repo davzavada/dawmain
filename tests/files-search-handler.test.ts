@@ -102,7 +102,6 @@ async function ingest(dmd: string, meta: BibMeta, physicalPages: number | null =
         quality,
         hints: {},
         rights: "vlastni",
-        doc_type_hint: meta.doc_type,
       },
       contentSha256: sha(`${text}:${meta.title}`),
       charCount: text.length,

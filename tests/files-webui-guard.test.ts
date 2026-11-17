@@ -50,8 +50,6 @@ const ITEM: DocumentListItem = {
   mine: true,
   canEdit: true,
   canDelete: true,
-  docType: "komentar",
-  publication: null,
   physicalPages: 12,
   billablePages: 12,
   flags: [],

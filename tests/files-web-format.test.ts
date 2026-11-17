@@ -17,24 +17,9 @@ import {
   statusBadge,
   typeLabel,
 } from "@/app/_zdroje/format";
-import {
-  actInput,
-  compactFields,
-  czechDate,
-  fieldsFor,
-  formFromMeta,
-  lineToList,
-  listToLine,
-  MAIN_DOC_TYPES,
-  payloadFromForm,
-  proposalBadge,
-  splitFields,
-} from "@/app/_zdroje/meta-form";
 import { buildUploadMeta, gzipText, missingBrowserFeatures, sha256Text, uploadCost, uploadForm, uploadOutcome } from "@/app/_zdroje/upload-core";
 import { parseDmd } from "@/src/files/dmd/parse";
-import { bibMetaBaseSchema, bibMetaSchema } from "@/src/files/meta/schema";
 import { DOC_TYPES, type BibMeta } from "@/src/files/types";
-import { publicationLine } from "@/src/files/web";
 import { gunzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
 
@@ -149,17 +134,7 @@ describe("file list lines", () => {
     expect(foldName("  Občanský ZÁKONÍK.pdf ")).toBe("obcansky zakonik.pdf");
   });
 
-  it("publicationLine: where an article appeared, null for other types", () => {
-    const meta = { doc_type: "clanek" as const, container_title: "Právník", issue: "2", year: 2024 };
-    expect(publicationLine(meta)).toBe("Právník 2/2024");
-    expect(publicationLine({ ...meta, issue: null })).toBe("Právník 2024");
-    expect(publicationLine({ ...meta, issue: null, year: null })).toBe("Právník");
-    expect(publicationLine({ ...meta, container_title: "  " })).toBeNull();
-    expect(publicationLine({ ...meta, doc_type: "kniha" })).toBeNull();
-  });
 });
-
-// ---------------------------------------------------------------------------
 
 const PAGED = ["[s. 417]", "", "# Úvod", "", "Text první strany s poznámkou[^1].", "", "[^1]: Poznámka.", "", "[s. 418]", "", "## § 2913", "", "[m. č. 1] Odstavec.", "", "[s. 419]", "", "## § 2914", "", "Konec."].join("\n");
 const QUALITY = { footnotes: "linked" as const, linked_ratio: 1, columns_pages: 0, headings_from: "outline", mn: 1, unsure_pages: [] };
@@ -183,7 +158,6 @@ describe("upload core", () => {
       parsed,
       contentSha256: "d".repeat(64),
       rights: "licence",
-      docTypeHint: "komentar",
     });
     expect(meta).toEqual({
       library_id: "user_a",
@@ -194,7 +168,6 @@ describe("upload core", () => {
       quality: QUALITY,
       hints: {},
       rights: "licence",
-      doc_type_hint: "komentar",
     });
     const plain = buildUploadMeta({
       libraryId: "user_b",
@@ -203,10 +176,10 @@ describe("upload core", () => {
       parsed: parseDmd("Text."),
       contentSha256: "d".repeat(64),
       rights: "vlastni",
-      docTypeHint: null,
     });
     expect(plain.pages).toBeUndefined();
-    expect(plain.doc_type_hint).toBeUndefined();
+    // Nothing about the document's type travels with an upload.
+    expect("doc_type_hint" in plain).toBe(false);
     expect("replaces" in plain).toBe(false);
   });
 
@@ -274,104 +247,6 @@ const BASE: BibMeta = {
   summary: null,
   language: "cs",
 };
-
-describe("metadata form", () => {
-  it("every type starts with the title and ends with keywords and language (no summary)", () => {
-    for (const t of DOC_TYPES) {
-      const keys = fieldsFor(t).map((f) => f.key);
-      expect(keys[0]).toBe("title");
-      expect(keys.slice(-2)).toEqual(["keywords", "language"]);
-      expect(keys).not.toContain("summary");
-      expect(new Set(keys).size).toBe(keys.length);
-    }
-    expect(fieldsFor("komentar").find((f) => f.key === "commented_act")?.required).toBe(true);
-    expect(fieldsFor("rozhodnuti").map((f) => f.key)).toEqual(expect.arrayContaining(["court", "case_number", "decided_on", "ecli"]));
-    expect(fieldsFor("clanek").find((f) => f.key === "container_title")?.label).toBe("Časopis");
-  });
-
-  it("the form shows the essential fields up front, the rest under Další údaje", () => {
-    for (const t of DOC_TYPES) {
-      const { essential, extra } = splitFields(t);
-      expect(essential[0].key).toBe("title");
-      expect([...essential, ...extra].map((f) => f.key).sort()).toEqual(fieldsFor(t).map((f) => f.key).sort());
-      expect(extra.some((f) => f.required)).toBe(false);
-    }
-    expect(splitFields("komentar").essential.map((f) => f.key)).toContain("commented_act");
-    expect(splitFields("rozhodnuti").essential.map((f) => f.key)).toEqual(["title", "case_number", "decided_on"]);
-    expect(splitFields("clanek").essential.map((f) => f.key)).toEqual(["title", "authors", "year"]);
-    expect(splitFields("kniha").extra.map((f) => f.key)).toContain("isbn");
-  });
-
-  it("stored metadata → form → payload round-trips through the server schema", () => {
-    const values = formFromMeta(BASE);
-    expect(values.authors).toBe("Jan Petrov\nMilan Výtisk");
-    expect(values.year).toBe("2019");
-    const payload = payloadFromForm(values);
-    const parsed = bibMetaSchema.parse(payload);
-    expect(parsed).toMatchObject({ doc_type: "kniha", title: "Občanský zákoník", authors: ["Jan Petrov", "Milan Výtisk"], year: 2019, isbn: ["9788074007736"], publisher: "C. H. Beck" });
-    // Derived on the server: sent empty, which keeps the stored value.
-    expect(payload.section_range).toBeNull();
-  });
-
-  it("switching the type drops the other type's fields", () => {
-    const values = { ...formFromMeta(BASE), doc_type: "clanek", container_title: "Právní rozhledy", volume: "27", issue: "5", pages_range: "417-425" };
-    const payload = payloadFromForm(values);
-    expect(payload.isbn).toEqual([]);
-    expect(payload.publisher).toBeNull();
-    expect(payload.edition).toBeNull();
-    const parsed = bibMetaBaseSchema.parse(payload);
-    expect(parsed).toMatchObject({ doc_type: "clanek", container_title: "Právní rozhledy", pages_range: "417–425", isbn: [] });
-  });
-
-  it("commentary and decision fields in the forms people type", () => {
-    const komentar = formFromMeta({ ...BASE, doc_type: "komentar", commented_act: "zak:89/2012" });
-    expect(komentar.commented_act).toBe("89/2012");
-    expect(bibMetaSchema.parse(payloadFromForm(komentar)).commented_act).toBe("zak:89/2012");
-    const decision = formFromMeta({ ...BASE, doc_type: "rozhodnuti", decided_on: "2019-04-24", case_number: "25 Cdo 1234/2019" });
-    expect(decision.decided_on).toBe("24. 4. 2019");
-    expect(bibMetaSchema.parse(payloadFromForm(decision)).decided_on).toBe("2019-04-24");
-    expect(czechDate("nonsense")).toBe("nonsense");
-    expect(actInput("eu:32016R0679")).toBe("32016R0679");
-    // An unknown type in the form falls back to "jine" instead of reaching the server.
-    expect(payloadFromForm({ ...komentar, doc_type: "<script>" }).doc_type).toBe("jine");
-  });
-
-  it("the open row's short form per type (wireframe 05) and its one-line list fields", () => {
-    expect(MAIN_DOC_TYPES).toEqual(["komentar", "clanek", "kniha"]);
-    const keys = (t: (typeof DOC_TYPES)[number]) => compactFields(t).map((c) => c.field.key);
-    expect(keys("clanek")).toEqual(["title", "authors", "year", "container_title", "volume", "pages_range"]);
-    expect(keys("kniha")).toEqual(["title", "authors", "year", "publisher", "isbn"]);
-    expect(keys("komentar")).toEqual(["title", "authors", "year", "commented_act", "publisher"]);
-    expect(compactFields("kniha").find((c) => c.field.key === "publisher")?.field.label).toBe("Vydavatel");
-    for (const t of DOC_TYPES) {
-      const shown = keys(t);
-      expect(shown[0]).toBe("title");
-      // Required fields are always in the short form.
-      for (const f of fieldsFor(t).filter((f) => f.required)) expect(shown, `${t}: ${f.key}`).toContain(f.key);
-    }
-    expect(listToLine("Lavický, P.\nNovák, J.")).toBe("Lavický, P.; Novák, J.");
-    expect(lineToList("Lavický, P.; Novák, J.;Dvořák, K.")).toBe("Lavický, P.\nNovák, J.\nDvořák, K.");
-    expect(lineToList(listToLine("a\nb"))).toBe("a\nb");
-  });
-
-  it("proposal badges and the low-confidence highlight", () => {
-    const proposed = {
-      title: { value: "X", source: "heuristic" as const, confidence: 0.4 },
-      isbn: { value: ["1"], source: "heuristic" as const, confidence: 0.95 },
-      doc_type: { value: "kniha" as const, source: "user" as const, confidence: 0.3 },
-      year: { value: 2019, source: "bogus" as never, confidence: 0.9 },
-    };
-    expect(proposalBadge(proposed, "title")).toEqual({ label: "z textu", low: true });
-    expect(proposalBadge(proposed, "isbn")).toEqual({ label: "z textu", low: false });
-    // A proposal stored while the AI proposal still existed gets no badge.
-    expect(proposalBadge({ title: { value: "X", source: "ai" as never, confidence: 0.8 } }, "title")).toBeNull();
-    expect(proposalBadge(proposed, "doc_type")).toEqual({ label: "od vás", low: false });
-    expect(proposalBadge(proposed, "year")).toBeNull();
-    expect(proposalBadge(null, "title")).toBeNull();
-    expect(proposalBadge({ publisher: { value: "Y", source: "pdf", confidence: 0.6 } }, "publisher")?.label).toBe("z PDF");
-    expect(proposalBadge({ title: { value: "a", source: "filename", confidence: 0.3 } }, "title")).toEqual({ label: "z názvu souboru", low: true });
-  });
-});
 
 describe("Czech cases and downloads (review web:Z4, export)", () => {
   it("counts pages in the accusative after zabere / má", () => {

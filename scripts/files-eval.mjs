@@ -167,7 +167,7 @@ async function loadModules() {
     ssr: { noExternal: [/^@clerk\//] },
   });
   const load = (p) => server.ssrLoadModule(p);
-  const [config, client, documents, libraries, reading, search, blocks, normalize, parse, derive, identifiers, analyze, input, heuristics, schema, files] =
+  const [config, client, documents, libraries, reading, search, blocks, normalize, parse, derive, identifiers, analyze, files] =
     await Promise.all([
       load("/src/files/config.ts"),
       load("/src/files/db/client.ts"),
@@ -181,14 +181,11 @@ async function loadModules() {
       load("/src/files/index/derive.ts"),
       load("/src/files/index/identifiers.ts"),
       load("/src/files/text/analyze.ts"),
-      load("/src/files/meta/input.ts"),
-      load("/src/files/meta/heuristics.ts"),
-      load("/src/files/meta/schema.ts"),
       load("/src/mcp/tools/files.ts"),
     ]);
   return {
     server,
-    m: { ...config, ...client, ...documents, ...libraries, ...reading, ...search, ...blocks, ...normalize, ...parse, ...derive, ...identifiers, ...analyze, ...input, ...heuristics, ...schema, files },
+    m: { ...config, ...client, ...documents, ...libraries, ...reading, ...search, ...blocks, ...normalize, ...parse, ...derive, ...identifiers, ...analyze, files },
   };
 }
 
@@ -234,10 +231,9 @@ async function ingestEntry(m, entry, baseDir) {
   const text = m.normalizeDmd(raw).text;
   const fileName = entry.file_name ?? (entry.file ? path.basename(entry.file) : `${entry.key}.md`);
   const parsed = m.parseDmd(text);
-  const heuristic = m.heuristicMeta(m.buildMetaInput(parsed, {}, fileName, entry.meta?.doc_type ?? null));
-  const meta = { ...m.proposalToBibMeta(heuristic, fileName), ...(entry.meta ?? {}) };
-  if (meta.doc_type === "komentar" && !entry.meta?.section_range) meta.section_range = m.sectionRangeOf(parsed.sections);
-  if (!meta.anchor_label) meta.anchor_label = parsed.anchorLabel;
+  // As ingest.ts: a file is its name and its text — nothing is guessed about the document
+  // (a `meta` in the set, from before, is ignored).
+  const meta = { doc_type: "jine", title: m.nameWithoutExtension(fileName), authors: [], editors: [], isbn: [], keywords: [], language: "cs", anchor_label: parsed.anchorLabel };
   const uploadMeta = {
     library_id: LIBRARY,
     file: { name: fileName, bytes: Buffer.byteLength(raw), sha256: sha(`file:${entry.key}:${text}`), kind: "md" },
@@ -247,7 +243,6 @@ async function ingestEntry(m, entry, baseDir) {
     quality: { footnotes: "linked", linked_ratio: 1, columns_pages: 0, headings_from: "outline", mn: 0, unsure_pages: [] },
     hints: {},
     rights: "vlastni",
-    doc_type_hint: meta.doc_type,
   };
   const inserted = await m.withScope([LIBRARY], (db) =>
     m.insertUploadedDocument(db, {
@@ -267,7 +262,7 @@ async function ingestEntry(m, entry, baseDir) {
   if (!("id" in inserted)) throw new Error(`corpus "${entry.key}": the same text as another entry`);
   const claim = await m.withScope([LIBRARY], (db) => m.claimForIngest(db, inserted.id, LIBRARY));
   if (!claim) throw new Error(`corpus "${entry.key}": claim failed`);
-  const derived = m.deriveIndex(parsed, { docType: meta.doc_type, commentedAct: meta.commented_act ?? null });
+  const derived = m.deriveIndex(parsed, { docType: null });
   await m.withScope([LIBRARY], async (db) => {
     const wrote = await m.writeDocumentIndex(db, {
       id: inserted.id,
@@ -285,7 +280,7 @@ async function ingestEntry(m, entry, baseDir) {
         id: inserted.id,
         libraryId: LIBRARY,
         runToken: claim.runToken,
-        proposed: heuristic,
+        proposed: {},
         meta,
         metaTsv: m.buildMetaTsv(meta, parsed.sections),
         identKeys: [...new Set([...m.metaIdentKeys(meta), ...derived.docIdentKeys])],

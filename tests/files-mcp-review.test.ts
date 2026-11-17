@@ -68,7 +68,6 @@ async function ingest(
     quality,
     hints: {},
     rights: "vlastni",
-    doc_type_hint: meta.doc_type,
   };
   const scoped = <T>(fn: (db: Queryable) => Promise<T>) => withScope([lib], fn);
   const inserted = await scoped((db) =>
@@ -538,15 +537,13 @@ describe("library names outside the fence (MCP-10)", () => {
   });
 });
 
-describe("grouping by act (PC-10)", () => {
-  it("a § without an act groups hits by the act commented and suggests the filter", async () => {
+describe("a § without its act (PC-10)", () => {
+  it("lists the hits of every document plainly: nothing is known about which act a file comments on", async () => {
     const r = await call("files_search", { query: "§ 45 zastoupení" });
-    const { inside, outside } = split(r.text);
-    expect(inside).toMatch(/— zákon č\. (89|90)\/2012 Sb\. \(.+\) —\n1\. /);
-    expect(inside).toContain("— zákon č. 89/2012 Sb. (občanský zákoník) —");
-    expect(inside).toContain("— zákon č. 90/2012 Sb.");
+    const { inside } = split(r.text);
+    expect(inside).not.toContain("— zákon č.");
     expect(r.text).toContain(ozId);
-    expect(outside).toMatch(/several acts/);
+    expect(r.text).toContain(zokId);
     const one = await call("files_search", { query: "§ 45 zastoupení", act: "OZ" });
     expect(split(one.text).inside).not.toContain("— zákon č.");
     expect(one.text).not.toContain(zokId);

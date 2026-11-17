@@ -6,7 +6,7 @@
  */
 
 import type { FilesMode } from "./config";
-import type { BibMeta, ConversionQuality, DocStatus, DocType, FileKind, PageLabelSource, ProposedMeta, Rights } from "./types";
+import type { ConversionQuality, DocStatus, FileKind, PageLabelSource, Rights } from "./types";
 
 /** Per-library document counts. */
 export interface LibraryDocCounts {
@@ -57,7 +57,7 @@ export interface DocumentListItem {
   libraryId: string;
   /** The folder the file sits in; null at the library's root. */
   folderId: string | null;
-  /** Confirmed (or provisional) title; the file name until ingest wrote one. */
+  /** The file's name without its extension — what the assistant cites. */
   title: string;
   fileName: string;
   fileKind: FileKind;
@@ -72,9 +72,6 @@ export interface DocumentListItem {
   canEdit: boolean;
   /** May delete and export the text: the owner, the team's admin or the uploader — Pro not required. */
   canDelete: boolean;
-  docType: DocType;
-  /** Where an article appeared ("Právník 2/2024"); null for other types. */
-  publication: string | null;
   /** Pages of the PDF; null for a text without pages. */
   physicalPages: number | null;
   billablePages: number;
@@ -100,13 +97,9 @@ export interface DocumentListResponse {
   folders: FolderItem[];
 }
 
-/** The detail / review panel. */
+/** One file in full (the answer to a rename or a move). */
 export interface DocumentDetail extends DocumentListItem {
   libraryName: string;
-  meta: BibMeta;
-  proposed: ProposedMeta | null;
-  metaVersion: number;
-  confirmedAt: string | null;
   charCount: number;
   pageLabelSource: PageLabelSource;
   converter: string;
@@ -120,6 +113,4 @@ export interface DocumentDetail extends DocumentListItem {
 export interface ErrorBody {
   error: string;
   duplicate?: { id: string; title: string | null };
-  /** 422 from the metadata form: field → Czech message. */
-  fields?: Record<string, string>;
 }

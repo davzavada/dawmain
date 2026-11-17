@@ -114,8 +114,6 @@ async function uploaded(user: string, salt: string): Promise<string> {
   const res = await uploadPOST(uploadRequest(user, dmd(salt)));
   expect(res.status).toBe(201);
   const { id } = (await res.json()) as { id: string };
-  // The review step (a library with autoConfirm: false) — what these tests exercise.
-  await t.owner.query(`UPDATE libraries SET settings = settings || '{"autoConfirm": false}'::jsonb WHERE id = $1`, [user]);
   for (const fn of mocks.after.splice(0)) await fn();
   return id;
 }
@@ -163,21 +161,20 @@ describe("operatorSnapshot", () => {
 });
 
 describe("reindex", () => {
-  it("re-derives one document from its stored text, keeping its status and metadata", async () => {
+  it("re-derives one document from its stored text, keeping its status — by the same rules for every document", async () => {
     const id = await uploaded("user_a", "x");
-    await t.owner.query("UPDATE documents SET doc_type = 'komentar', commented_act = 'zak:89/2012', status = 'ready' WHERE id = $1", [id]);
+    // What the columns said about the document before (a commentary on the civil code) no longer shapes its index.
+    await t.owner.query("UPDATE documents SET doc_type = 'komentar', commented_act = 'zak:89/2012', analyzer_version = 0 WHERE id = $1", [id]);
     const chunksBefore = (await t.owner.query("SELECT count(*)::int AS n FROM chunks WHERE doc_id = $1", [id])).rows[0];
     expect(await reindexDocument(id, "user_a")).toBe("done");
-    const after = (await t.owner.query<{ status: string; run_token: string | null; ident_keys: string[]; section_range: string | null }>(
-      "SELECT status, run_token, ident_keys, section_range FROM documents WHERE id = $1",
+    const after = (await t.owner.query<{ status: string; run_token: string | null; ident_keys: string[]; analyzer_version: number }>(
+      "SELECT status, run_token, ident_keys, analyzer_version FROM documents WHERE id = $1",
       [id],
     )).rows[0];
-    expect(after.status).toBe("ready");
-    expect(after.run_token).toBeNull();
-    expect(after.ident_keys).toContain("zak:89/2012");
-    expect(after.section_range).toBe("§ 2913–2914");
+    expect(after).toMatchObject({ status: "ready", run_token: null, analyzer_version: ANALYZER_VERSION });
+    expect(after.ident_keys).not.toContain("zak:89/2012");
     const keys = (await t.owner.query<{ k: string }>("SELECT DISTINCT unnest(ident_keys) AS k FROM chunks WHERE doc_id = $1", [id])).rows.map((r) => r.k);
-    expect(keys).toContain("parz:89/2012/2913");
+    expect(keys.some((k) => k.startsWith("parz:"))).toBe(false);
     expect((await t.owner.query("SELECT count(*)::int AS n FROM chunks WHERE doc_id = $1", [id])).rows[0]).toEqual(chunksBefore);
   });
 
@@ -187,13 +184,13 @@ describe("reindex", () => {
     expect(await reindexDocument("nope", "user_a")).toBe("skipped");
     await t.owner.query("UPDATE documents SET status = 'error' WHERE id = $1", [id]);
     expect(await reindexDocument(id, "user_a")).toBe("skipped");
-    await t.owner.query("UPDATE documents SET status = 'review' WHERE id = $1", [id]);
+    await t.owner.query("UPDATE documents SET status = 'ready' WHERE id = $1", [id]);
     // A text shorter than char_count claims: fail, and leave the document untouched.
     await t.owner.query("UPDATE documents SET char_count = char_count + 50000 WHERE id = $1", [id]);
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     expect(await reindexDocument(id, "user_a")).toBe("failed");
     const doc = (await t.owner.query<{ status: string; run_token: string | null }>("SELECT status, run_token FROM documents WHERE id = $1", [id])).rows[0];
-    expect(doc).toEqual({ status: "review", run_token: null });
+    expect(doc).toEqual({ status: "ready", run_token: null });
   });
 
   it("reindexBatch: only stale documents, across libraries, at most `limit`", async () => {
@@ -272,11 +269,11 @@ describe("documents-web repository", () => {
     const id = await uploaded("user_a", "x");
     await t.runner(["user_a"], async (db) => {
       const lease = await leaseForReindex(db, id, "user_a");
-      expect(lease?.previous).toBe("review");
+      expect(lease?.previous).toBe("ready");
       expect(await leaseForReindex(db, id, "user_a")).toBeNull();
-      expect(await finishReindex(db, { id, libraryId: "user_a", runToken: "00000000-0000-4000-8000-000000000000", previous: "review", metaTsv: "", identKeys: [] })).toBe(false);
-      expect(await finishReindex(db, { id, libraryId: "user_a", runToken: lease!.runToken, previous: "review", metaTsv: "", identKeys: ["a"] })).toBe(true);
+      expect(await finishReindex(db, { id, libraryId: "user_a", runToken: "00000000-0000-4000-8000-000000000000", previous: "ready", metaTsv: "", identKeys: [] })).toBe(false);
+      expect(await finishReindex(db, { id, libraryId: "user_a", runToken: lease!.runToken, previous: "ready", metaTsv: "", identKeys: ["a"] })).toBe(true);
     });
-    expect((await t.owner.query<{ status: string }>("SELECT status FROM documents WHERE id = $1", [id])).rows[0].status).toBe("review");
+    expect((await t.owner.query<{ status: string }>("SELECT status FROM documents WHERE id = $1", [id])).rows[0].status).toBe("ready");
   });
 });

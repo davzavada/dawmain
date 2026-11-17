@@ -106,7 +106,6 @@ async function processFile(
     contentSha256,
     // Who uploads answers for having the right to (the rules under the dropzone).
     rights: "jine",
-    docTypeHint: null,
   });
 
   onProgress(`Nahrávám ${formatBytes(gz.size)}…`);

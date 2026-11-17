@@ -7,7 +7,7 @@ import { envOnlyMode, effectiveMode, sameOrigin } from "./guards";
 import { TtlCache } from "@/src/sources/shared/cache";
 import { LIBRARY_ID_RE, LIMITS, PAGE_CHARS, TERMS_VERSION, USER_ID_RE, UUID_RE, type FilesMode } from "./config";
 import { withScope, type Queryable } from "./db/client";
-import { confirmDocument, deleteDocument, getDocument, listDocuments, renameDocument, updateDocumentMeta, type DocumentRow } from "./db/documents";
+import { deleteDocument, getDocument, listDocuments, nameWithoutExtension, renameDocument, type DocumentRow } from "./db/documents";
 import { documentPreviewText, libraryDocCounts, mergeIdentKeys, metaContext } from "./db/documents-web";
 import { createFolder, deleteFolder, depthOf, getFolder, heightOf, isDuplicate, isWithin, listFolders, MAX_DEPTH, MAX_FOLDER_NAME, MAX_FOLDERS, moveDocument, updateFolder, type FolderRow } from "./db/folders";
 import { ensureLibrary, forgetPages, getLibraries, releasePages } from "./db/libraries";
@@ -15,11 +15,8 @@ import { loadReadDoc, loadText } from "./db/reading";
 import { acceptTerms, audit, bumpUsage, hasAcceptedTerms, usageSum } from "./db/usage";
 import { sanitizeLine } from "./dmd/normalize";
 import { filesError, filesJson, FilesUserError, logFilesError, MESSAGES } from "./errors";
-import { buildMetaTsv, metaIdentKeys } from "./index/derive";
-import { bibMetaBaseSchema, bibMetaSchema } from "./meta/schema";
-import { reindexDocument } from "./reindex";
+import { buildMetaTsv } from "./index/derive";
 import { ownedScope, writeScope } from "./scope";
-import type { BibMeta } from "./types";
 import type { DocumentDetail, DocumentListItem, DocumentListResponse, FolderItem, LibrarySummary, SummaryResponse } from "./web-types";
 
 /**
@@ -75,7 +72,6 @@ export function envRefusal(): Response | null {
 
 /** Any thrown error → its Response: a FilesUserError speaks for itself, the rest is logged and 503. */
 export function errorResponse(where: string, error: unknown): Response {
-  if (error instanceof MetaValidationError) return filesJson({ error: error.message, fields: error.fields }, 422);
   if (error instanceof FilesUserError) return filesError(error.status, error.message);
   logFilesError(where, error);
   return filesError(503, MESSAGES.unavailable);
@@ -124,20 +120,6 @@ export function documentFlags(row: Pick<DocumentRow, "quality" | "injection_flag
   return flags;
 }
 
-/**
- * Where an article appeared, as the list row shows it: "Právník 2/2024",
- * "Právník 2024", "Právník"; null for any other type or without a journal. Pure.
- */
-export function publicationLine(meta: Pick<BibMeta, "doc_type" | "container_title" | "issue" | "year">): string | null {
-  if (meta.doc_type !== "clanek") return null;
-  const journal = (meta.container_title ?? "").trim();
-  if (!journal) return null;
-  const issue = String(meta.issue ?? "").trim();
-  const year = meta.year ? String(meta.year) : "";
-  const when = issue && year ? `${issue}/${year}` : year;
-  return when ? `${journal} ${when}` : journal;
-}
-
 /** One list row from a document row and the caller's rights. Pure. */
 export function listItem(row: DocumentRow, lib: LibraryAccess, userId: string): DocumentListItem {
   return {
@@ -154,8 +136,6 @@ export function listItem(row: DocumentRow, lib: LibraryAccess, userId: string): 
     mine: row.uploaded_by === userId,
     canEdit: canEditDocument(lib, row.uploaded_by, userId),
     canDelete: canDeleteDocument(lib, row.uploaded_by, userId),
-    docType: row.meta.doc_type,
-    publication: publicationLine(row.meta),
     physicalPages: row.physical_pages,
     billablePages: row.billable_pages,
     flags: documentFlags(row),
@@ -166,10 +146,6 @@ function detailOf(row: DocumentRow, lib: LibraryAccess, userId: string, preview:
   return {
     ...listItem(row, lib, userId),
     libraryName: lib.name,
-    meta: row.meta,
-    proposed: row.proposed_meta,
-    metaVersion: row.meta_version,
-    confirmedAt: row.confirmed_at,
     charCount: row.char_count,
     pageLabelSource: row.page_label_source,
     converter: row.converter,
@@ -335,8 +311,6 @@ export async function detailFor(userId: string, id: string): Promise<DocumentDet
 }
 
 const patchSchema = z.discriminatedUnion("action", [
-  z.strictObject({ action: z.literal("confirm"), version: z.number().int().min(0), meta: z.unknown() }),
-  z.strictObject({ action: z.literal("save"), version: z.number().int().min(0), meta: z.unknown() }),
   z.strictObject({ action: z.literal("rename"), name: z.string().max(1_000) }),
   z.strictObject({ action: z.literal("move"), folderId: z.string().regex(UUID_RE).nullable() }),
 ]);
@@ -353,45 +327,15 @@ export function cleanName(raw: string, max = MAX_FILE_NAME): string | null {
   return name && name.length <= max ? name : null;
 }
 
-/** "Komentář OZ.pdf" → "Komentář OZ": the title the assistant sees for a file name. Pure. */
-export function titleFromFileName(name: string): string {
-  return name.replace(/\.(pdf|docx|txt|md)$/i, "").trim() || name;
-}
-
-/** Validation errors of the metadata form: field path → Czech message (first per field). */
-export class MetaValidationError extends FilesUserError {
-  constructor(public readonly fields: Record<string, string>) {
-    super(422, Object.values(fields)[0] ?? "Metadata nejsou platná.");
-    this.name = "MetaValidationError";
-  }
-}
-
-/** Parse the form's metadata: "confirm" needs a commentary's act, "save" is a draft. */
-export function parseMetaForm(raw: unknown, confirm: boolean): BibMeta {
-  const result = (confirm ? bibMetaSchema : bibMetaBaseSchema).safeParse(raw);
-  if (result.success) return result.data;
-  const fields: Record<string, string> = {};
-  for (const issue of result.error.issues) {
-    const key = issue.path.length > 0 ? String(issue.path[0]) : "_";
-    fields[key] ??= issue.message;
-  }
-  throw new MetaValidationError(fields);
-}
 
 /** Edits of a document in a library without Pro (listing, deleting and exporting stay). */
 const NO_PRO_EDIT = "Upravovat dokumenty lze jen v knihovně s Pro. Dokument můžete dál smazat nebo si stáhnout jeho text.";
 
-/** Changes to these fields change how the text is indexed — re-derive after saving. */
-function indexInputsChanged(before: BibMeta, after: BibMeta): boolean {
-  return before.doc_type !== after.doc_type || (before.commented_act ?? null) !== (after.commented_act ?? null);
-}
-
 /**
- * PATCH: confirm or save the metadata (optimistic `version` = meta_version
- * the form was loaded with). Edit rights: canEditDocument (a Pro library
- * and its owner) — a
- * library that lost Pro is only listed, deleted and exported. Refused
- * while the feature is read-only or off.
+ * PATCH: rename the file or move it to another folder — the two things a
+ * user changes about a file. Edit rights: canEditDocument (a Pro library;
+ * its owner, the team's admin, or the uploader). Refused while the feature
+ * is read-only or off.
  */
 export async function patchFor(userId: string, id: string, body: unknown): Promise<DocumentDetail> {
   const parsed = patchSchema.safeParse(body);
@@ -400,52 +344,7 @@ export async function patchFor(userId: string, id: string, body: unknown): Promi
   if (mode === "readonly") throw new FilesUserError(503, MESSAGES.readonly);
   if (mode !== "on") throw new FilesUserError(503, MESSAGES.off);
   const input = parsed.data;
-  if (input.action === "rename") return renameFor(userId, id, input.name);
-  if (input.action === "move") return moveFor(userId, id, input.folderId);
-  const meta = parseMetaForm(input.meta, input.action === "confirm");
-
-  const access = await getAccess(userId, { fresh: true });
-  const ids = libraryIdsOf(access);
-  if (ids.length === 0) throw new FilesUserError(404, "Dokument nenalezen.");
-  const changed: { reindex?: { id: string; libraryId: string } } = {};
-  await withScope(ids, async (db) => {
-    const { row, lib } = await findDocument(db, access, id);
-    // Only someone who could still delete it hears about Pro; anyone else about ownership.
-    if (!lib.pro && canDeleteDocument(lib, row.uploaded_by, userId)) throw new FilesUserError(403, NO_PRO_EDIT);
-    if (!canEditDocument(lib, row.uploaded_by, userId)) throw new FilesUserError(403, "Tento dokument může upravit jen jeho vlastník.");
-    const ctx = await metaContext(db, row.id, row.library_id);
-    if (!ctx) throw new FilesUserError(404, "Dokument nenalezen.");
-    const next = meta;
-    const edit = {
-      id: row.id,
-      libraryId: row.library_id,
-      meta: next,
-      expectedVersion: input.version,
-      userId,
-      metaTsv: buildMetaTsv(next, ctx.sections),
-      identKeys: mergeIdentKeys(ctx.identKeys, metaIdentKeys(row.meta), metaIdentKeys(next)),
-    };
-    const outcome = input.action === "confirm" ? await confirmDocument(db, edit) : await updateDocumentMeta(db, edit);
-    if (outcome === "not_found") throw new FilesUserError(404, "Dokument nenalezen.");
-    if (outcome === "conflict") {
-      throw new FilesUserError(
-        409,
-        row.status === "review" || row.status === "ready"
-          ? "Dokument mezitím upravil někdo jiný. Načtěte ho znovu a změny zopakujte."
-          : "Dokument se ještě zpracovává — metadata půjde upravit, až bude hotový.",
-      );
-    }
-    await audit(db, { libraryId: row.library_id, actor: userId, action: input.action === "confirm" ? "document.confirm" : "document.meta", docId: row.id });
-    if (indexInputsChanged(row.meta, next)) changed.reindex = { id: row.id, libraryId: row.library_id };
-  });
-  if (changed.reindex) {
-    const { id: docId, libraryId } = changed.reindex;
-    // The index depends on the type and the commented act; rebuild it after the response.
-    after(async () => {
-      await reindexDocument(docId, libraryId);
-    });
-  }
-  return detailFor(userId, id);
+  return input.action === "rename" ? renameFor(userId, id, input.name) : moveFor(userId, id, input.folderId);
 }
 
 /**
@@ -467,7 +366,7 @@ async function renameFor(userId: string, id: string, rawName: string): Promise<D
     if (row.file_name === fileName) return;
     const ctx = await metaContext(db, row.id, row.library_id);
     if (!ctx) throw new FilesUserError(404, "Dokument nenalezen.");
-    const title = titleFromFileName(fileName);
+    const title = nameWithoutExtension(fileName);
     const renamed = await renameDocument(db, {
       id: row.id,
       libraryId: row.library_id,
@@ -719,12 +618,7 @@ export function exportDisposition(title: string): string {
 export function exportHeader(row: DocumentRow, libraryName: string, exportedAt: Date): string {
   const q = (s: string, max = 300) => JSON.stringify(sanitizeLine(s, max));
   const date = (iso: string) => (/^\d{4}-\d{2}-\d{2}/.test(iso) ? iso.slice(0, 10) : null);
-  const lines = ["---", `title: ${q(row.meta.title || row.file_name)}`];
-  if (row.meta.subtitle) lines.push(`subtitle: ${q(row.meta.subtitle)}`);
-  const authors = (row.meta.authors ?? []).filter((a) => typeof a === "string" && a.trim() !== "");
-  if (authors.length > 0) lines.push(`authors: [${authors.map((a) => q(a, 200)).join(", ")}]`);
-  if (typeof row.meta.year === "number" && Number.isInteger(row.meta.year)) lines.push(`year: ${row.meta.year}`);
-  lines.push(`doc_type: ${q(row.meta.doc_type ?? "jine", 40)}`, `source_file: ${q(row.file_name, 200)}`, `library: ${q(libraryName, 120)}`);
+  const lines = ["---", `title: ${q(row.meta.title || row.file_name)}`, `source_file: ${q(row.file_name, 200)}`, `library: ${q(libraryName, 120)}`];
   const uploaded = date(row.uploaded_at);
   if (uploaded) lines.push(`uploaded: ${uploaded}`);
   lines.push(`exported: ${exportedAt.toISOString().slice(0, 10)}`, `format: "DMD (Dawmain Markdown)"`, "---", "", "");

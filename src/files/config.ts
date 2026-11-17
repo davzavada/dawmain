@@ -7,8 +7,10 @@
 
 /** Bump when the stemmer, tokenizer, chunker, identifier keys or tsvector
  * layout changes: stored indexes carry the version they were built with and
- * get re-derived. 2: chunks carry the EU acts they cite (eu:<CELEX> keys). */
-export const ANALYZER_VERSION = 2;
+ * get re-derived. 2: chunks carry the EU acts they cite (eu:<CELEX> keys).
+ * 3: nothing depends on a document type or a commented act any more (every
+ * document is indexed by the same rules). */
+export const ANALYZER_VERSION = 3;
 
 /** Version of the Vlastní zdroje content rules a user accepts before uploading. */
 export const TERMS_VERSION = "2026-10";

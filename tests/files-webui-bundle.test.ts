@@ -69,7 +69,7 @@ describe("first-load JS of every page (review web:Z8, ops:FT-8)", () => {
     // The walker really walks: the header's account menu and the modal reader are in every page.
     expect(loaded).toContain("app/_zdroje/store.ts");
     expect(loaded).toContain("app/_zdroje/modals.tsx");
-    for (const lazy of ["app/_zdroje/files-modal.tsx", "app/_zdroje/zotero-modal.tsx", "app/_zdroje/meta-form.ts"]) {
+    for (const lazy of ["app/_zdroje/files-modal.tsx", "app/_zdroje/zotero-modal.tsx"]) {
       expect(loaded, lazy).not.toContain(lazy);
     }
   });

@@ -137,5 +137,4 @@ export interface UploadMeta {
   quality: ConversionQuality;
   hints: UploadHints;
   rights: Rights;
-  doc_type_hint?: DocType;
 }

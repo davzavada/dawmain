@@ -64,7 +64,6 @@ export function buildUploadMeta(args: {
   parsed: ParsedDoc;
   contentSha256: string;
   rights: Rights;
-  docTypeHint: DocType | null;
 }): UploadMeta {
   const meta: UploadMeta = {
     library_id: args.libraryId,
@@ -76,7 +75,6 @@ export function buildUploadMeta(args: {
     rights: args.rights,
   };
   if (args.parsed.paged) meta.pages = { physical: args.parsed.stats.physicalPages, label_source: args.result.labelSource };
-  if (args.docTypeHint) meta.doc_type_hint = args.docTypeHint;
   return meta;
 }
 

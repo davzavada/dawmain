@@ -45,7 +45,7 @@ import { bestWindow, findMatches } from "@/src/files/index/highlight";
 import { euActId, pinpointOnly, queryIdentKeys, stripIdentifiers } from "@/src/files/index/identifiers";
 import { libraryHandle, readScope, safeLibraryName, type Scope } from "@/src/files/scope";
 import { buildTsQuery, MAX_QUERY_CHARS } from "@/src/files/text/analyze";
-import { DOC_TYPES, DOC_TYPE_LABELS, type AnchorLabel, type DocType, type PageLabelSource } from "@/src/files/types";
+import type { AnchorLabel, DocType, PageLabelSource } from "@/src/files/types";
 import { SourceError, toToolError, type SourceErrorKind } from "@/src/sources/shared/errors";
 import { DOC_PAGE_CHARS, interleave, uniqueQueries } from "@/src/sources/shared/text";
 import { caseNumberKeys, czechDate, formatCount, hintArg, officialTextLines, toolCall } from "./private-text";
@@ -294,7 +294,7 @@ function asFilesError(error: unknown, where: string): SourceError {
       SOURCE,
       "UPSTREAM_ERROR",
       "Vlastní zdroje: the request took too long and was stopped.",
-      "Use more distinctive words or narrow it (doc_type, doc, section) and try once more.",
+      "Use more distinctive words or narrow it (doc, section) and try once more.",
     );
   }
   if (errorCode(error).startsWith("clerk:")) {
@@ -337,12 +337,7 @@ function notReady(row: DocumentRow, origin: string | null): ToolResult {
       `It is switched back on at ${uploadUrl(origin)}.`,
     );
   }
-  const why =
-    row.status === "review"
-      ? "its metadata await the user's confirmation (ke kontrole)"
-      : row.status === "error"
-        ? "it could not be processed (chyba)"
-        : "it is still being processed";
+  const why = row.status === "error" ? "it could not be processed (chyba)" : "it is still being processed";
   return errorResult("NOT_FOUND", `This document is not readable yet: ${why}.`, `The user manages it at ${uploadUrl(origin)}.`);
 }
 
@@ -849,9 +844,6 @@ const STATUS_LABELS: Record<string, string> = {
   deleting: "maže se",
 };
 
-function typeLabel(t: DocType | null | undefined): string {
-  return t ? DOC_TYPE_LABELS[t] : DOC_TYPE_LABELS.jine;
-}
 
 function libraryOf(access: Access, id: string): LibraryAccess | undefined {
   return access.libraries.find((l) => l.id === id) ?? access.all.find((l) => l.id === id);
@@ -1003,7 +995,12 @@ export function planVariant(plan: SearchPlan, variant: string | undefined): Vari
   const lone = !anchored;
   let ts = buildTsQuery(stripped, { weights: plan.weights, loneStopwords: lone });
   let meta = buildTsQuery(stripped, { loneStopwords: lone }).and;
-  const act = plan.act ?? implicitAct(ids);
+  // The act named WITH a § in the query ("§ 2914 OZ") no longer filters: a file does not say which
+  // act it comments on, and a commentary writes its own §§ bare. It only adds the § keys of that
+  // act, so passages that cite the § with the act rank above those that merely stand in a § 2914.
+  // The `act` parameter stays a strict filter (passages citing the act).
+  const keyAct = plan.act ?? implicitAct(ids);
+  const act = plan.act;
   // With words to rank, `section` is only the filter (in SQL): as identifier keys it would hand
   // every chunk of the § the same idn score, ordered by position, and the first chunks of the §
   // (1.5 / 61) would outrank the passage that holds the words (1.0 / 61). Without words the
@@ -1012,7 +1009,7 @@ export function planVariant(plan: SearchPlan, variant: string | undefined): Vari
   const identKeys = [
     ...new Set([
       ...ids.keys,
-      ...parzKeys(act, [...ids.sections, ...sectionKeys]),
+      ...parzKeys(keyAct, [...ids.sections, ...sectionKeys]),
       ...plan.caseKeys,
       ...sectionKeys.map((k) => `sec:${k}`),
     ]),
@@ -1422,7 +1419,7 @@ async function rangeAnswer(
 
   const total = opts.single ? 1 : plan.length;
   const head = [
-    `[${typeLabel(r.row.meta.doc_type)}] Úsek: ${opts.label}${total > 1 ? ` · okno ${opts.window}/${total}` : ""}${pageSpan(r.pages, from, to) ? ` · ${pageSpan(r.pages, from, to)}` : ""}${r.pages.length ? " · ⟦s. N⟧ = strana" : ""} · ${r.mode === "after" ? 'poznámky za odstavcem (footnotes: "omit" je vynechá)' : "poznámky vynechány"}`,
+    `Úsek: ${opts.label}${total > 1 ? ` · okno ${opts.window}/${total}` : ""}${pageSpan(r.pages, from, to) ? ` · ${pageSpan(r.pages, from, to)}` : ""}${r.pages.length ? " · ⟦s. N⟧ = strana" : ""} · ${r.mode === "after" ? 'poznámky za odstavcem (footnotes: "omit" je vynechá)' : "poznámky vynechány"}`,
     ...pageFlagLines(shownPages),
   ];
   const pin = locate(
@@ -1600,7 +1597,7 @@ async function footnoteAnswer(r: ReadCtx, label: string, within: SectionLite | n
     },
     f.defStart,
   );
-  const head = [`[${typeLabel(r.row.meta.doc_type)}] Poznámka ${clean}${f.pageLabel ? ` · s. ${sanitizeLine(f.pageLabel, 12)}` : ""}`];
+  const head = [`Poznámka ${clean}${f.pageLabel ? ` · s. ${sanitizeLine(f.pageLabel, 12)}` : ""}`];
   const tail = [
     `Cite as „vlastní dokument“: the reference line + ${loc.pin || `pozn. ${clean}`}. The whole passage: ${readCall(r.row.id, { ...loc, footnote: null })}.`,
     ...officialTextLines(stripMarkup(src.slice(f.defStart, f.defEnd)).text),
@@ -1710,7 +1707,6 @@ async function findAnswer(r: ReadCtx, find: string, within: SectionLite | null):
 // ---------------------------------------------------------------------------
 // Registration
 
-const docTypeSchema = z.enum(DOC_TYPES);
 
 export function registerFiles(server: McpServer): void {
   server.registerTool(
@@ -1718,7 +1714,7 @@ export function registerFiles(server: McpServer): void {
     {
       title: "Vlastní zdroje: search the user's own documents",
       description:
-        "SEARCH the user's OWN uploaded documents (Vlastní zdroje — books, commentaries, articles, templates; Pro, personal OAuth sign-in only): Czech full text with stemming (inflected forms and words typed without diacritics match), identifiers (spisová značka incl. short years, ECLI, § with its act, ISBN, DOI) and the documents' metadata. A query that is only an act (\"GDPR\", \"OZ\") searches for that act. 'queries' runs up to 3 variants and merges them round-robin. Filters: doc_type, act (\"OZ\", \"89/2012\", \"GDPR\" — commentaries on it or passages citing it; with a § in the query, passages citing that §; a § asked without its act over commentaries on several acts comes grouped by act), section (\"§ 2913\" — only passages inside that §), case_number (only passages citing that decision; a query then ranks them), in_footnotes (true: footnotes only; false: without footnotes), year_from/year_to; doc (an id) ranks the passages INSIDE one document. Each hit: the reference line, the section path, a pinpoint computed from the match itself (\"§ 2913, m. č. 14, s. 1245\", \"s. 245, pozn. 12\"), an excerpt, which channel matched (and / or-fallback / identifiers / metadata), 'oficiální text: ns_search {case_number: …}' for every spisová značka the passage cites, and the files_get_document call that reads it. Own documents have no public URL: cite them as „vlastní dokument“ with the pinpoint, quote only from a files_get_document read, and cite a decision found in them from its official text. If the answer says the account has no library, do not call files_* again.",
+        "SEARCH the user's OWN uploaded documents (Vlastní zdroje — files the user uploaded into their own library and their teams' shared ones: books, commentaries, articles, templates; Pro, personal OAuth sign-in only): Czech full text with stemming (inflected forms and words typed without diacritics match), identifiers (spisová značka incl. short years, ECLI, § with its act, ISBN, DOI) and the files' names. A file has no bibliographic record — only the name the user gave it. A query that is only an act (\"GDPR\", \"OZ\") searches for that act. 'queries' runs up to 3 variants and merges them round-robin. Filters: library, act (\"OZ\", \"89/2012\", \"GDPR\" — passages citing it; with a § in the query, passages citing that §), section (\"§ 2913\" — only passages inside that §), case_number (only passages citing that decision; a query then ranks them), in_footnotes (true: footnotes only; false: without footnotes); doc (an id) ranks the passages INSIDE one document. Each hit: the reference line, the section path, a pinpoint computed from the match itself (\"§ 2913, m. č. 14, s. 1245\", \"s. 245, pozn. 12\"), an excerpt, which channel matched (and / or-fallback / identifiers / metadata), 'oficiální text: ns_search {case_number: …}' for every spisová značka the passage cites, and the files_get_document call that reads it. Own documents have no public URL: cite them as „vlastní dokument“ by the file's name with the pinpoint, quote only from a files_get_document read, and cite a decision found in them from its official text. If the answer says the account has no library, do not call files_* again.",
       inputSchema: z.object({
         query: z.string().min(2).optional().describe("Czech words, a § (\"§ 2913 OZ\") or a spisová značka; \"quoted words\" are a phrase."),
         queries: z
@@ -1727,14 +1723,11 @@ export function registerFiles(server: McpServer): void {
           .optional()
           .describe("Up to 3 query variants (other word forms, synonyms), merged round-robin."),
         case_number: z.string().min(3).max(200).optional().describe("Passages citing this decision: spisová značka (\"25 Cdo 1234/2019\", short year \"/19\" too), ECLI or \"R 51/2011\"."),
-        doc_type: z.array(docTypeSchema).max(7).optional().describe("Only these document types: kniha, kapitola, clanek, komentar, vzor, rozhodnuti, jine."),
         library: z.string().min(1).max(80).optional().describe('Only this library: "osobni" (the personal one) or a team\'s name or id, as files_list prints them. Omit to cover all of them.'),
-        act: z.string().min(2).optional().describe("Only commentaries on this act or passages citing it (with a § in the query: citing that §): \"OZ\", \"o. s. ř.\", \"89/2012\", \"GDPR\", \"32016R0679\"."),
+        act: z.string().min(2).optional().describe("Only passages citing this act (with a § in the query: citing that §): \"OZ\", \"o. s. ř.\", \"89/2012\", \"GDPR\", \"32016R0679\"."),
         section: z.string().min(1).optional().describe("Only passages inside this § or článek, e.g. \"§ 2913\" or \"čl. III\" (combine with act)."),
         doc: z.string().min(1).optional().describe("Search inside this one document (id from a hit or files_list): its passages ranked, each with its pinpoint."),
         in_footnotes: z.boolean().optional().describe("true: match words in footnotes only; false: ignore footnotes. Omit to search both."),
-        year_from: z.number().int().min(1800).max(2100).optional().describe("Publication year from (inclusive)."),
-        year_to: z.number().int().min(1800).max(2100).optional().describe("Publication year to (inclusive)."),
         limit: z.number().int().min(1).max(20).default(10).describe("Documents per page (with doc: passages per page), max 20. A page of long hits may come shorter to fit the answer size — its header then names the call for the rest."),
         page: z.number().int().min(1).default(1).describe("1-based page."),
       }),
@@ -1786,13 +1779,12 @@ export function registerFiles(server: McpServer): void {
     {
       title: "Vlastní zdroje: libraries and documents",
       description:
-        "LIST the user's own libraries (Vlastní soubory, Pro) with their document counts — připraveno (searched), ke kontrole (awaiting the user's confirmation on the website), zpracovává se — and page usage, and the documents themselves: type, name (what the user called the file — cite it by this name), folder, status and id. Filters: doc_type, status, query (words of the title or authors), sort (added/title/year); limit up to 50, page. Only documents marked připraveno are searched and readable (files_search, files_get_document {id}).",
+        "LIST the user's own libraries (Vlastní soubory, Pro) with their document counts — připraveno (searched), zpracovává se — and page usage, and the documents themselves: name (what the user called the file — cite it by this name), folder, status and id. Filters: library, status, query (words of the file name), sort (added/title); limit up to 50, page. Only documents marked připraveno are searched and readable (files_search, files_get_document {id}).",
       inputSchema: z.object({
-        doc_type: z.array(docTypeSchema).max(7).optional().describe("Only these document types."),
         library: z.string().min(1).max(80).optional().describe('Only this library: "osobni" (the personal one) or a team\'s name or id, as files_list prints them. Omit to cover all of them.'),
-        status: z.enum(["ready", "review", "processing", "error"]).optional().describe("Only documents in this state."),
-        query: z.string().min(1).max(200).optional().describe("Words of the title, file name or authors (diacritics-insensitive)."),
-        sort: z.enum(["added", "title", "year"]).default("added").describe("Order: newest upload first, by title, or by year."),
+        status: z.enum(["ready", "processing", "error"]).optional().describe("Only documents in this state."),
+        query: z.string().min(1).max(200).optional().describe("Words of the file name (diacritics-insensitive)."),
+        sort: z.enum(["added", "title"]).default("added").describe("Order: newest upload first, or by name."),
         limit: z.number().int().min(1).max(50).default(20).describe("Documents per page (max 50)."),
         page: z.number().int().min(1).default(1).describe("1-based page."),
       }),
@@ -1821,14 +1813,11 @@ async function filesSearch(
     query?: string;
     queries?: string[];
     case_number?: string;
-    doc_type?: DocType[];
     library?: string;
     act?: string;
     section?: string;
     doc?: string;
     in_footnotes?: boolean;
-    year_from?: number;
-    year_to?: number;
     limit: number;
     page: number;
   },
@@ -1853,11 +1842,8 @@ async function filesSearch(
     return errorResult(
       "INPUT_INVALID",
       "Provide query/queries, case_number or section.",
-      "doc_type, act, doc and the years only narrow a search; files_list lists the documents.",
+      "act and doc only narrow a search; files_list lists the documents.",
     );
-  }
-  if (args.year_from && args.year_to && args.year_from > args.year_to) {
-    return errorResult("INPUT_INVALID", "year_from must not exceed year_to.", "Swap or drop one of them.");
   }
   if (args.doc && !isUuid(args.doc)) return notFound();
   const docId = args.doc ?? null;
@@ -1865,9 +1851,9 @@ async function filesSearch(
     libraryIds: libs,
     weights: args.in_footnotes === true ? "D" : args.in_footnotes === false ? "ABC" : undefined,
     inFootnotes: args.in_footnotes,
-    docTypes: args.doc_type?.length ? args.doc_type : null,
-    yearFrom: args.year_from ?? null,
-    yearTo: args.year_to ?? null,
+    docTypes: null,
+    yearFrom: null,
+    yearTo: null,
     act: actFilter?.act ?? null,
     sectionKey,
     caseKeys,
@@ -1933,7 +1919,7 @@ async function filesSearch(
       "INPUT_INVALID",
       `page ${args.page} is past the end: ${formatCount(docMode ? knownInDoc : entries.length)}${saturated ? "+" : ""} ${unit} (pages 1–${Math.ceil(entries.length / args.limit)} at limit ${args.limit}).`,
       saturated
-        ? `Only the best-ranked ${formatCount(entries.length)} ${unit} are listed — narrow the search (section, act, doc_type, years or more distinctive words) to reach others.`
+        ? `Only the best-ranked ${formatCount(entries.length)} ${unit} are listed — narrow the search (section, act or more distinctive words) to reach others.`
         : `Every hit is on those pages — refine the query or drop a filter for others.`,
     );
   }
@@ -2013,15 +1999,13 @@ async function filesSearch(
       ? `Variants: ${keyed.map((p, i) => `"${sanitizeLine(p.v ?? "", 60)}" ${values[i] ? formatCount(variantCount(values[i]!)) : "✗"}`).join(" · ")} (merged round-robin)`
       : null;
   const filters = [
-    plan.docTypes ? `doc_type ${plan.docTypes.join(", ")}` : null,
     actFilter ? `act ${actFilter.act}${actFilter.name ? ` (${sanitizeLine(actFilter.name, 60)})` : ""}` : null,
     sectionKey ? (designator({ key: sectionKey }) ?? sectionKey) : null,
     caseKeys.length ? `case_number ${sanitizeLine(args.case_number ?? "", 40)}` : null,
     args.in_footnotes === true ? "footnotes only" : args.in_footnotes === false ? "without footnotes" : null,
-    args.year_from || args.year_to ? `years ${args.year_from ?? "…"}–${args.year_to ?? "…"}` : null,
   ].filter(Boolean);
   // The call that searches one hit's document further repeats everything that shaped this search
-  // (library, doc_type and the years are implied by the document).
+  // (the library is implied by the document).
   const echoed = keyed.flatMap((p) => (p.v === undefined ? [] : [p.v]));
   const echo = [
     echoed.length > 1
@@ -2043,7 +2027,7 @@ async function filesSearch(
     const data: string[] = [];
     const hitTools: string[] = [];
     if (!docMode) {
-      data.push(`${n}. [${typeLabel(row.meta.doc_type)}] ${referenceOf(row)}`);
+      data.push(`${n}. ${referenceOf(row)}`);
       const lib = libraryName(g.access, row.library_id);
       hitTools.push(
         `${n}. id ${row.id} · knihovna „${lib}“ · matched: ${channelLabel(entry.matchedBy)}${
@@ -2096,7 +2080,7 @@ async function filesSearch(
   const data: string[] = [];
   const tools: string[] = [];
   if (docMode && docRow) {
-    data.push(`[${typeLabel(docRow.meta.doc_type)}] ${referenceOf(docRow)}`);
+    data.push(referenceOf(docRow));
     if (docRow.injection_flag) tools.push(qualityFlags(docRow)[0]);
   }
   let group: string | null | undefined;
@@ -2121,7 +2105,7 @@ async function filesSearch(
     tools.push(
       docMode
         ? `(The best-ranked ${formatCount(entries.length)} of at least ${formatCount(knownInDoc)} matching passages are listed — narrow with section or more distinctive words for the rest.)`
-        : `(The list stops at the ${formatCount(entries.length)} best-ranked documents — more may match: narrow with act, doc_type, year_from/year_to, section or more distinctive words.)`,
+        : `(The list stops at the ${formatCount(entries.length)} best-ranked documents — more may match: narrow with act, section or more distinctive words.)`,
     );
   }
 
@@ -2200,11 +2184,9 @@ export function budgetHits(blocks: readonly HitBlock[], first: number, budget = 
 export function actFilterNote(actFilter: { act: string; name: string | null } | null, variants: string[]): string | null {
   const label = (act: string, name: string | null) => `${act}${name ? ` (${sanitizeLine(name, 60)})` : ""}`;
   if (actFilter) {
-    return `Filtered by act ${label(actFilter.act, actFilter.name)}: only commentaries on it and passages citing it were searched — drop \`act\` to search every document.`;
+    return `Filtered by act ${label(actFilter.act, actFilter.name)}: only passages citing it were searched — a commentary writes its own §§ without the act, so drop \`act\` to search every document.`;
   }
-  const implied = [...new Set(variants.map((v) => implicitAct(queryIdentKeys(v))).filter((a): a is string => a !== null))];
-  if (!implied.length) return null;
-  return `The § with its act in the query limited the search to commentaries on ${implied.map((a) => label(a, actName(a))).join(", ")} and passages citing that § — ask for the § without its act (grouped by act) or with words only to search more widely.`;
+  return null;
 }
 
 /**
@@ -2236,14 +2218,14 @@ function noHitsText(
   if (!docRow && ready === 0) {
     const lines = libraries.map((l) => {
       const c = counts?.[l.id] ?? { review: 0, processing: 0, ready: 0 };
-      return `- „${safeLibraryName(l)}“: ${c.ready} připraveno, ${c.review} ke kontrole, ${c.processing} zpracovává se`;
+      return `- „${safeLibraryName(l)}“: ${c.ready} připraveno, ${c.processing} zpracovává se`;
     });
-    const pending = counts ? Object.values(counts).reduce((n, c) => n + c.review + c.processing, 0) : 0;
+    const pending = counts ? Object.values(counts).reduce((n, c) => n + c.processing, 0) : 0;
     return [
       "Vlastní zdroje: no searchable document yet.",
       ...lines,
       pending
-        ? `${pending} document(s) wait: "ke kontrole" become searchable once the user confirms their metadata, "zpracovává se" within minutes — at ${uploadUrl(g.origin)}.`
+        ? `${pending} document(s) are still being processed (zpracovává se) and become searchable within minutes — see ${uploadUrl(g.origin)}.`
         : `Documents are uploaded at ${uploadUrl(g.origin)}.`,
       "Continue with the official sources.",
     ].join("\n");
@@ -2395,16 +2377,15 @@ async function filesGetDocument(
 // ---------------------------------------------------------------------------
 // files_list — the handler
 
-const STATUS_FILTER: Record<"ready" | "review" | "processing" | "error", Array<"ready" | "review" | "queued" | "processing" | "error">> = {
+const STATUS_FILTER: Record<"ready" | "processing" | "error", Array<"ready" | "review" | "queued" | "processing" | "error">> = {
   ready: ["ready"],
-  review: ["review"],
   processing: ["queued", "processing"],
   error: ["error"],
 };
 
 async function filesList(
   g: Gated,
-  args: { doc_type?: DocType[]; library?: string; status?: "ready" | "review" | "processing" | "error"; query?: string; sort: "added" | "title" | "year"; limit: number; page: number },
+  args: { library?: string; status?: "ready" | "processing" | "error"; query?: string; sort: "added" | "title"; limit: number; page: number },
 ): Promise<ToolResult> {
   const scope = scopeFor(g.access, args.library);
   const libs = [...scope.libraryIds];
@@ -2415,7 +2396,6 @@ async function filesList(
     list: await listDocuments(db, {
       libraryIds: libs,
       status: args.status ? STATUS_FILTER[args.status] : undefined,
-      docType: args.doc_type?.length ? args.doc_type : undefined,
       q: args.query,
       limit: args.limit,
       offset: (args.page - 1) * args.limit,
@@ -2425,7 +2405,7 @@ async function filesList(
   const pagesUsed = new Map(libRows.map((l) => [l.id, l.page_count]));
   const libLines = scope.libraries.map((l) => {
     const c = counts[l.id] ?? { review: 0, processing: 0, ready: 0 };
-    return `- „${safeLibraryName(l)}“ (${l.kind === "org" ? "team, shared with its members; " : ""}library: "${libraryHandle(l)}") — ${c.ready} připraveno · ${c.review} ke kontrole · ${c.processing} zpracovává se · ${formatCount(pagesUsed.get(l.id) ?? 0)} / ${formatCount(l.quotaPages)} stran`;
+    return `- „${safeLibraryName(l)}“ (${l.kind === "org" ? "team, shared with its members; " : ""}library: "${libraryHandle(l)}") — ${c.ready} připraveno · ${c.processing} zpracovává se · ${formatCount(pagesUsed.get(l.id) ?? 0)} / ${formatCount(l.quotaPages)} stran`;
   });
   const first = (args.page - 1) * args.limit;
   const nonce = newNonce();
@@ -2433,7 +2413,7 @@ async function filesList(
     const status = STATUS_LABELS[row.status] ?? row.status;
     const pages = row.physical_pages ? ` · ${formatCount(row.physical_pages)} s.` : "";
     const folder = folderPath(folders, row.folder_id);
-    return `${first + i + 1}. [${typeLabel(row.meta.doc_type)}] „${displayName(row)}“${folder ? ` · složka ${sanitizeLine(folder, 200)}` : ""} · ${libraryName(g.access, row.library_id)} · ${status}${pages} · id ${row.id}`;
+    return `${first + i + 1}. „${displayName(row)}“${folder ? ` · složka ${sanitizeLine(folder, 200)}` : ""} · ${libraryName(g.access, row.library_id)} · ${status}${pages} · id ${row.id}`;
   });
   const hasMore = list.total > first + list.rows.length;
   const text = [
@@ -2444,10 +2424,10 @@ async function filesList(
       ? `Documents ${first + 1}–${first + list.rows.length} of ${formatCount(list.total)}${hasMore ? ` (more: page ${args.page + 1})` : ""}:`
       : list.total
         ? `No documents on page ${args.page} (${formatCount(list.total)} in all).`
-        : `No documents${args.status || args.doc_type || args.query ? " match these filters" : " yet"} — they are uploaded at ${uploadUrl(g.origin)}.`,
+        : `No documents${args.status || args.query ? " match these filters" : " yet"} — they are uploaded at ${uploadUrl(g.origin)}.`,
     ...(list.rows.length ? [FENCE_NOTE(nonce), fence(nonce, docLines.join("\n"))] : []),
     "",
-    `Only documents marked připraveno are searched (files_search) and read (files_get_document {id}). ke kontrole = the user confirms the metadata at ${uploadUrl(g.origin)}.`,
+    "Only documents marked připraveno are searched (files_search) and read (files_get_document {id}).",
   ].join("\n");
   return textResult(text);
 }

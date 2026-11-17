@@ -65,42 +65,42 @@ function joinParts(parts: Array<string | null | undefined>): string {
   return parts.filter((p): p is string => !!p).join(", ");
 }
 
+/** Is the section a provision (§ or článek) rather than a chapter or a plain heading? */
+function isProvision(section: PinpointLoc["section"]): boolean {
+  return /^(par|cl):/.test(section?.key ?? "");
+}
+
 /**
- * Per-type pinpoint (plan §6). `loc.footnote.page` is the page the note is
- * printed on (defaults to `pageFrom`). Returns "" when nothing locates the
- * match. Pure.
+ * Where a match is, from what the text itself gives — nothing depends on a
+ * document type any more. `docType` is kept for callers and ignored.
+ *
+ *   - a text with provisions or marginal numbers (a commentary, a decision
+ *     with numbered points): "§ 2913, m. č. 14, s. 1245"; a footnote
+ *     replaces the page: "§ 2913, m. č. 14, pozn. 12 (s. 1245)";
+ *   - anything else with pages: "s. 245", "s. 245, pozn. 12";
+ *   - no pages at all: the section's heading, the marginal number, the note.
+ *
+ * `loc.footnote.page` is the page the note is printed on (defaults to
+ * `pageFrom`). Returns "" when nothing locates the match. Pure.
  */
-export function pinpoint(docType: DocType | null, loc: PinpointLoc): string {
+export function pinpoint(_docType: DocType | null, loc: PinpointLoc): string {
   const pages = pageRef(loc.pageFrom, loc.pageTo, loc.physicalPages);
   const fnLabel = loc.footnote ? clip(loc.footnote.label, 12) : null;
   const note = fnLabel ? `pozn. ${fnLabel}` : null;
   const notePage = loc.footnote ? pageRef(loc.footnote.page ?? loc.pageFrom, null, loc.physicalPages) : null;
   const section = sectionRef(loc.section);
   const anchorValue = clip(loc.anchor, 16);
+  const anchor = anchorValue ? `${loc.anchorLabel ?? "m. č."} ${anchorValue}` : null;
 
-  switch (docType) {
-    case "komentar": {
-      const anchor = anchorValue ? `${loc.anchorLabel ?? "m. č."} ${anchorValue}` : null;
-      if (note) return joinParts([section, anchor, notePage ? `${note} (${notePage})` : note]);
-      return joinParts([section, anchor, pages]);
-    }
-    case "vzor": {
-      const clause = clip(loc.clause, 30);
-      const base = section && clause ? `${section} ${clause}` : (section ?? clause);
-      if (!base) return joinParts([pages, note]);
-      return joinParts([base, note]);
-    }
-    case "rozhodnuti": {
-      const anchor = anchorValue ? `${loc.anchorLabel ?? "bod"} ${anchorValue}` : null;
-      return joinParts([anchor, pages, note]);
-    }
-    default: {
-      // kniha, kapitola, clanek, jine, unknown type.
-      if (pages || notePage) return note ? joinParts([notePage ?? pages, note]) : pages!;
-      const anchor = anchorValue ? `${loc.anchorLabel ?? "m. č."} ${anchorValue}` : null;
-      return joinParts([section, anchor, note]);
-    }
+  if (isProvision(loc.section) || anchor) {
+    // "čl. III odst. 2": a clause the match sits in follows its provision.
+    const clause = clip(loc.clause, 30);
+    const provision = isProvision(loc.section) ? (clause ? `${section} ${clause}` : section) : null;
+    if (note) return joinParts([provision, anchor, notePage ? `${note} (${notePage})` : note]);
+    return joinParts([provision, anchor, pages]);
   }
+  if (pages || notePage) return note ? joinParts([notePage ?? pages, note]) : pages!;
+  return joinParts([section ?? clip(loc.clause, 30), note]);
 }
 
 // ─────────────────────────────────────────────────────────────── ČSN ISO 690
