@@ -167,16 +167,18 @@ describe("documents helpers", () => {
     expect((v[1] as string).length).toBe(500);
   });
 
-  it("mapDocumentRow assembles BibMeta with fallbacks", () => {
+  it("mapDocumentRow: a file is its name — the metadata columns are not read", () => {
     const row = mapDocumentRow({
       id: "x",
       library_id: "user_a",
       status: "review",
       file_name: "kniha.pdf",
-      doc_type: null,
-      title: null,
-      authors: null,
+      doc_type: "komentar",
+      title: "Občanský zákoník. Komentář",
+      authors: ["Petrov, Jan"],
       year: "2019",
+      commented_act: "zak:89/2012",
+      anchor_label: "bod",
       key_num: null,
       quality: null,
       hints: [],
@@ -185,9 +187,12 @@ describe("documents helpers", () => {
       uploaded_at: new Date(0),
     });
     expect(row.meta.doc_type).toBe("jine");
-    expect(row.meta.title).toBe("kniha.pdf");
+    expect(row.meta.title).toBe("kniha");
     expect(row.meta.authors).toEqual([]);
-    expect(row.meta.year).toBe(2019);
+    expect(row.meta.year).toBeUndefined();
+    expect(row.meta.commented_act).toBeUndefined();
+    // The label of the marginal numbers is the parser's reading of the text, not a guess about the document.
+    expect(row.meta.anchor_label).toBe("bod");
     expect(row.meta.language).toBe("cs");
     expect(row.hints).toEqual({});
     expect(row.enabled).toBe(true);

@@ -4,18 +4,17 @@ import { setScopeRunner, withScope, type Queryable } from "@/src/files/db/client
 import {
   MAX_INGEST_ATTEMPTS,
   claimForIngest,
-  confirmDocument,
-  deleteDocument,
+    deleteDocument,
   documentStatuses,
   failIngest,
   finishIngest,
   getDocument,
   insertUploadedDocument,
+  renameDocument,
   isBlocked,
   listDocuments,
   pendingCounts,
-  updateDocumentMeta,
-  writeDocumentIndex,
+    writeDocumentIndex,
 } from "@/src/files/db/documents";
 import { ensureLibrary } from "@/src/files/db/libraries";
 import { loadFootnotes, loadReadDoc, loadText } from "@/src/files/db/reading";
@@ -111,7 +110,7 @@ function tile(text: string, size: number) {
   return blocks;
 }
 
-function uploadMeta(lib: string, name: string, content: string, hint?: DocType): UploadMeta {
+function uploadMeta(lib: string, name: string, content: string): UploadMeta {
   return {
     library_id: lib,
     file: { name, bytes: 12345, sha256: sha(`file:${content}`), kind: "pdf" },
@@ -121,7 +120,6 @@ function uploadMeta(lib: string, name: string, content: string, hint?: DocType):
     quality: { footnotes: "linked", linked_ratio: 1, columns_pages: 0, headings_from: "outline", mn: 0, unsure_pages: [] },
     hints: {},
     rights: "vlastni",
-    doc_type_hint: hint,
   };
 }
 
@@ -139,12 +137,12 @@ const META: BibMeta = {
   section_range: "§ 2913",
 };
 
-async function upload(lib: string, content: string, name = "kniha.pdf", hint?: DocType, scope = [lib]) {
+async function upload(lib: string, content: string, name = "kniha.pdf", _unused?: undefined, scope = [lib]) {
   return scoped(scope, (db) =>
     insertUploadedDocument(db, {
       libraryId: lib,
       uploadedBy: "user_u1",
-      meta: uploadMeta(lib, name, content, hint),
+      meta: uploadMeta(lib, name, content),
       contentSha256: sha(content),
       charCount: content.length,
       billablePages: 2,
@@ -158,8 +156,8 @@ async function upload(lib: string, content: string, name = "kniha.pdf", hint?: D
 }
 
 /** Upload + full ingest; returns the id. */
-async function ingested(lib: string, content: string, status: "review" | "ready" = "review", meta: BibMeta = META) {
-  const res = await upload(lib, content);
+async function ingested(lib: string, content: string, status: "review" | "ready" = "review", meta: BibMeta = META, name = "kniha.pdf") {
+  const res = await upload(lib, content, name);
   if (!("id" in res)) throw new Error("duplicate");
   const claim = await scoped([lib], (db) => claimForIngest(db, res.id, lib));
   if (!claim) throw new Error("claim failed");
@@ -205,8 +203,8 @@ afterAll(async () => {
 });
 
 describe("insertUploadedDocument", () => {
-  it("inserts a queued document with the hint as provisional doc_type and a user proposal", async () => {
-    const res = await upload(A, "content-insert", "Komentář.pdf", "komentar");
+  it("inserts a queued document: its name, its numbers, and nothing guessed about it", async () => {
+    const res = await upload(A, "content-insert", "Komentář.pdf");
     expect("id" in res).toBe(true);
     const id = (res as { id: string }).id;
     const row = await scoped([A], (db) => getDocument(db, id, [A]));
@@ -223,9 +221,8 @@ describe("insertUploadedDocument", () => {
       meta_version: 0,
       hints: { pdf_info: { title: "T" } },
     });
-    expect(row!.meta.doc_type).toBe("komentar");
-    expect(row!.meta.title).toBe("Komentář.pdf");
-    expect(row!.proposed_meta?.doc_type).toEqual({ value: "komentar", source: "user", confidence: 0.9 });
+    expect(row!.meta).toEqual({ doc_type: "jine", title: "Komentář", authors: [], editors: [], isbn: [], keywords: [], anchor_label: null, language: "cs" });
+    expect(row!.proposed_meta).toBeNull();
     expect(row!.quality.footnotes).toBe("linked");
   });
 
@@ -528,84 +525,47 @@ describe("writeDocumentIndex", () => {
 });
 
 describe("finishIngest", () => {
-  it("writes typed metadata, proposals, meta_tsv and keys; 'ready' also confirms", async () => {
+  it("stores the status, meta_tsv and keys; whatever metadata is handed in is not read back", async () => {
     const id = await ingested(A, "content-finish-ready", "ready");
     const row = (await scoped([A], (db) => getDocument(db, id, [A])))!;
     expect(row.status).toBe("ready");
-    expect(row.confirmed_by).toBe("user_u1");
-    expect(row.confirmed_at).not.toBeNull();
     expect(row.meta_version).toBe(1);
-    expect(row.meta).toMatchObject({
-      doc_type: "komentar",
-      title: "Občanský zákoník. Komentář",
-      authors: ["Petrov, Jan"],
-      year: 2019,
-      isbn: ["9788074007855"],
-      commented_act: "zak:89/2012",
-      decided_on: "2019-05-01",
-      section_range: "§ 2913",
-      keywords: ["náhrada škody"],
-    });
-    expect(row.proposed_meta).toEqual({ title: { value: META.title, source: "heuristic", confidence: 0.8 } });
+    // The typed columns are written but never read: a file is its name.
+    expect(row.meta).toMatchObject({ doc_type: "jine", title: "kniha", authors: [] });
+    expect(row.meta).not.toHaveProperty("commented_act");
+    expect(row.meta).not.toHaveProperty("year");
     const raw = await t.owner.query<{ meta_tsv: string; ident_keys: string[] }>("SELECT meta_tsv, ident_keys FROM documents WHERE id = $1", [id]);
     expect(raw.rows[0]).toEqual({ meta_tsv: "'obcansk':1A 'zakonik':2A", ident_keys: ["zak:89/2012"] });
-
-    const review = await ingested(A, "content-finish-review", "review");
-    const r2 = (await scoped([A], (db) => getDocument(db, review, [A])))!;
-    expect(r2.status).toBe("review");
-    expect(r2.confirmed_at).toBeNull();
   });
 });
 
-describe("confirmDocument / updateDocumentMeta", () => {
-  const edit = (id: string, libraryId: string, expectedVersion: number, meta: Partial<BibMeta> = {}) => ({
-    id,
-    libraryId,
-    meta: { ...META, ...meta },
-    expectedVersion,
-    userId: "user_u2",
-    metaTsv: "'novy':1A",
-    identKeys: ["zak:89/2012", "isbn:9788074007855"],
-  });
+describe("renameDocument", () => {
+  const rename = (id: string, lib: string, fileName: string, scope = [lib]) =>
+    scoped(scope, (db) => renameDocument(db, { id, libraryId: lib, fileName, title: fileName.replace(/\.pdf$/, ""), metaTsv: "'novy':1A" }));
 
-  it("confirms with the loaded version; a stale version conflicts", async () => {
-    const id = await ingested(A, "content-confirm");
+  it("changes the name and the name's index, and bumps the version", async () => {
+    const id = await ingested(A, "content-rename", "ready");
     const v = (await scoped([A], (db) => getDocument(db, id, [A])))!.meta_version;
-    expect(await scoped([A], (db) => confirmDocument(db, edit(id, A, v, { title: "Nový název" })))).toBe("ok");
+    expect(await rename(id, A, "Nový název.pdf")).toBe(true);
     const row = (await scoped([A], (db) => getDocument(db, id, [A])))!;
-    expect(row).toMatchObject({ status: "ready", confirmed_by: "user_u2", meta_version: v + 1 });
+    expect(row).toMatchObject({ status: "ready", file_name: "Nový název.pdf", meta_version: v + 1 });
     expect(row.meta.title).toBe("Nový název");
-    expect(await scoped([A], (db) => confirmDocument(db, edit(id, A, v)))).toBe("conflict");
-    expect(await scoped([A], (db) => updateDocumentMeta(db, edit(id, A, v)))).toBe("conflict");
-    expect(await scoped([A], (db) => confirmDocument(db, edit(id, A, 1.5)))).toBe("conflict");
+    const raw = await t.owner.query<{ meta_tsv: string }>("SELECT meta_tsv FROM documents WHERE id = $1", [id]);
+    expect(raw.rows[0].meta_tsv).toBe("'novy':1A");
   });
 
-  it("update keeps the status; section_range survives a form that does not send it", async () => {
-    const id = await ingested(A, "content-update");
-    const v = (await scoped([A], (db) => getDocument(db, id, [A])))!.meta_version;
-    expect(await scoped([A], (db) => updateDocumentMeta(db, edit(id, A, v, { section_range: null, year: 2020, summary: "Shrnutí" })))).toBe("ok");
-    const row = (await scoped([A], (db) => getDocument(db, id, [A])))!;
-    expect(row.status).toBe("review");
-    expect(row.confirmed_at).toBeNull();
-    expect(row.meta).toMatchObject({ year: 2020, summary: "Shrnutí", section_range: "§ 2913" });
+  it("a document still being processed is not renamed; unknown and malformed ids are not found", async () => {
+    const { id } = (await upload(A, "content-rename-early")) as { id: string };
+    expect(await rename(id, A, "brzy.pdf")).toBe(false);
+    expect(await rename(NOBODY, A, "nikdo.pdf")).toBe(false);
+    expect(await rename("x' OR 1=1 --", A, "sql.pdf")).toBe(false);
   });
 
-  it("a document still being processed cannot be confirmed; unknown ids are not_found", async () => {
-    const { id } = (await upload(A, "content-confirm-early")) as { id: string };
-    expect(await scoped([A], (db) => confirmDocument(db, edit(id, A, 0)))).toBe("conflict");
-    expect(await scoped([A], (db) => confirmDocument(db, edit(NOBODY, A, 0)))).toBe("not_found");
-    expect(await scoped([A], (db) => confirmDocument(db, edit("x' OR 1=1 --", A, 0)))).toBe("not_found");
-  });
-
-  it("isolation: a foreign document is not_found, and stays untouched", async () => {
-    const id = await ingested(B, "content-confirm-b");
-    const v = (await scoped([B], (db) => getDocument(db, id, [B])))!.meta_version;
-    expect(await scoped([A], (db) => confirmDocument(db, edit(id, B, v)))).toBe("not_found");
-    expect(await scoped([A, B], (db) => confirmDocument(db, edit(id, A, v)))).toBe("not_found");
-    expect(await scoped([A], (db) => updateDocumentMeta(db, edit(id, B, v)))).toBe("not_found");
-    expect(await scoped([A, B], (db) => updateDocumentMeta(db, edit(id, A, v)))).toBe("not_found");
-    const row = (await scoped([B], (db) => getDocument(db, id, [B])))!;
-    expect(row).toMatchObject({ status: "review", meta_version: v });
+  it("isolation: a foreign document stays untouched", async () => {
+    const id = await ingested(B, "content-rename-b", "ready");
+    expect(await rename(id, B, "cizí.pdf", [A])).toBe(false);
+    expect(await rename(id, A, "cizí.pdf", [A, B])).toBe(false);
+    expect((await scoped([B], (db) => getDocument(db, id, [B])))!.file_name).toBe("kniha.pdf");
   });
 });
 
@@ -618,12 +578,12 @@ describe("reads: getDocument, listDocuments, documentStatuses, pendingCounts", (
     await scoped([lib], (db) => ensureLibrary(db, lib, null));
     await scoped([other], (db) => ensureLibrary(db, other, null));
     aDocs = [
-      await ingested(lib, "list-1", "ready", { ...META, title: "Škoda a její náhrada", year: 2015, doc_type: "kniha" }),
-      await ingested(lib, "list-2", "review", { ...META, title: "Alfa 100% jistota", year: 2021 }),
-      await ingested(lib, "list-3", "ready", { ...META, title: "Beta", authors: ["Novák, Petr"], year: 2018 }),
+      await ingested(lib, "list-1", "ready", META, "Škoda a její náhrada.pdf"),
+      await ingested(lib, "list-2", "review", META, "Alfa 100% jistota.pdf"),
+      await ingested(lib, "list-3", "ready", META, "Beta.pdf"),
     ];
     await upload(lib, "list-queued", "queued.pdf");
-    bDoc = await ingested(other, "list-b", "ready", { ...META, title: "Škoda cizí" });
+    bDoc = await ingested(other, "list-b", "ready", META, "Škoda cizí.pdf");
   });
   const L = ["user_list"];
   const both = ["user_list", "org_list"];
@@ -643,18 +603,19 @@ describe("reads: getDocument, listDocuments, documentStatuses, pendingCounts", (
     expect((await list()).total).toBe(4);
     const skoda = await list({ q: "skoda" });
     expect(skoda.rows.map((r) => r.meta.title)).toEqual(["Škoda a její náhrada"]);
-    expect((await list({ q: "NOVÁK" })).rows.map((r) => r.meta.title)).toEqual(["Beta"]);
+    // Only the name is searched: what the columns say about authors is not.
+    expect((await list({ q: "petrov" })).total).toBe(0);
+    expect((await list({ q: "BETA" })).rows.map((r) => r.meta.title)).toEqual(["Beta"]);
     expect((await list({ q: "100%" })).rows.map((r) => r.meta.title)).toEqual(["Alfa 100% jistota"]);
     expect((await list({ q: "%" })).rows.map((r) => r.meta.title)).toEqual(["Alfa 100% jistota"]);
     expect((await list({ q: "_" })).total).toBe(0);
     expect((await list({ q: "queued" })).rows.map((r) => r.file_name)).toEqual(["queued.pdf"]);
     expect((await list({ status: ["ready"], sort: "title" })).rows.map((r) => r.meta.title)).toEqual(["Beta", "Škoda a její náhrada"]);
-    expect((await list({ docType: ["kniha"] })).rows.map((r) => r.meta.title)).toEqual(["Škoda a její náhrada"]);
     expect((await list({ status: ["bogus" as never] })).total).toBe(0);
     expect((await list({ sort: "__proto__" as never })).total).toBe(4);
     expect((await list({ sort: "1; DROP TABLE documents" as never, limit: Number.NaN, offset: -5 })).rows).toHaveLength(1);
-    const byYear = await list({ status: ["ready", "review"], sort: "year" });
-    expect(byYear.rows.map((r) => r.meta.year)).toEqual([2021, 2018, 2015]);
+    // An unknown sort (the removed "year") falls back to the newest first.
+    expect((await list({ sort: "year" as never })).total).toBe(4);
     const page = await list({ sort: "title", limit: 2, offset: 2 });
     expect(page.total).toBe(4);
     expect(page.rows).toHaveLength(2);

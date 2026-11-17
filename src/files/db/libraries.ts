@@ -3,8 +3,8 @@ import type { Queryable } from "./client";
 import { capString, isoOrNull, iso, num } from "./codec";
 
 /**
- * Libraries: one row per Clerk user (an `org_…` row is a team library left
- * over from before teams were removed, on its way to the 90-day purge),
+ * Libraries: one row per Clerk user (`user_…`, personal) or team
+ * (`org_…`, its shared library; src/files/db/teams.ts),
  * holding the page counters the quotas are enforced against. Rows in scope
  * are read and written directly (RLS on `libraries` is keyed on the id);
  * cross-library views go through the SECURITY DEFINER functions of
@@ -220,6 +220,8 @@ export async function purgeLibraryContent(db: Queryable, libraryId: string): Pro
     deleted += rows.length;
     if (rows.length < PURGE_BATCH) break;
   }
+  // The folders go with the documents (their names are the user's own words).
+  await db.query("DELETE FROM folders WHERE library_id = $1", [libraryId]);
   await db.query(
     `UPDATE libraries SET page_count = 0, pages_reserved = 0, doc_count = 0, display_name = NULL,
             settings = '{}'::jsonb, purged_at = now()

@@ -22,7 +22,10 @@ export const DOC_TYPE_LABELS: Record<DocType, string> = {
 export const DOC_STATUSES = ["queued", "processing", "review", "ready", "error", "deleting"] as const;
 export type DocStatus = (typeof DOC_STATUSES)[number];
 
-export const FILE_KINDS = ["pdf", "docx", "txt", "md"] as const;
+/** What a file was before the browser converted it to text (migration 0009 adds "eml" to the column's CHECK). */
+export const FILE_KINDS = ["pdf", "docx", "txt", "md", "eml"] as const;
+/** File-name extensions a document's name is shown without ("Komentář OZ.pdf" → "Komentář OZ"). */
+export const FILE_EXTENSION_RE = /\.(pdf|docx|txt|md|eml)$/i;
 export type FileKind = (typeof FILE_KINDS)[number];
 
 /** What the uploader declares about their right to store the text. */
@@ -137,5 +140,4 @@ export interface UploadMeta {
   quality: ConversionQuality;
   hints: UploadHints;
   rights: Rights;
-  doc_type_hint?: DocType;
 }

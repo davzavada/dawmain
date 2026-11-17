@@ -3,6 +3,7 @@ import { UUID_RE } from "../config";
 import type { ParsedDoc } from "../dmd/types";
 import type { Derived } from "../index/types";
 import {
+  FILE_EXTENSION_RE,
   ANCHOR_LABELS,
   DOC_TYPES,
   TEMPLATE_KINDS,
@@ -30,7 +31,7 @@ import { bytes, capString, deflateText, iso, isoOrNull, jsonParam, num, numOrNul
  * Foreign or malformed ids read as "not found" — never as an error that
  * would reveal whether the id exists elsewhere.
  *
- * Status flow: queued → processing → review → ready (confirmDocument), or
+ * Status flow: queued → processing → ready, or
  * → error (failIngest after the last attempt). Only 'ready' AND enabled
  * documents are searched (src/files/db/search.ts).
  */
@@ -65,6 +66,8 @@ export interface DocumentRow {
    *  doc_type reads as "jine" and a missing title as the file name. */
   meta: BibMeta;
   // Additions beyond the contract (additive):
+  /** The folder the document sits in (same library), or null at the library's root. */
+  folder_id: string | null;
   /** Ingest attempts so far (claimForIngest increments). */
   attempts: number;
   /** Document this upload replaces (same library), or null. */
@@ -142,6 +145,7 @@ const META_COLUMNS = [
 const ROW_COLUMNS = [
   "id",
   "library_id",
+  "folder_id",
   "status",
   "status_detail",
   "uploaded_by",
@@ -191,39 +195,31 @@ function objectOr<T>(v: unknown, fallback: T): T {
   return v && typeof v === "object" && !Array.isArray(v) ? (v as T) : fallback;
 }
 
+/** "Komentář OZ.pdf" → "Komentář OZ": a file's name without its extension. Pure. */
+export function nameWithoutExtension(fileName: string): string {
+  return fileName.replace(FILE_EXTENSION_RE, "").trim() || fileName;
+}
+
+/**
+ * A file has no bibliographic record: its name is all it has. `meta` is
+ * kept in the row's shape for the index and the reader, but carries only
+ * the name (as the title the search's metadata channel indexes) and the
+ * label of the marginal numbers the PARSER found in the text ("m. č.",
+ * "bod") — nothing is guessed about the document. The typed columns of
+ * `documents` from before (type, authors, year, commented act…) are no
+ * longer read.
+ */
 export function mapDocumentRow(r: Record<string, unknown>): DocumentRow {
   const fileName = String(r.file_name ?? "");
-  const docType = strOrNull(r.doc_type);
   const meta: BibMeta = {
-    doc_type: docType && DOC_TYPE_SET.has(docType) ? (docType as DocType) : "jine",
-    title: strOrNull(r.title) ?? fileName,
-    subtitle: strOrNull(r.subtitle),
-    authors: strArray(r.authors),
-    editors: strArray(r.editors),
-    year: numOrNull(r.year),
-    edition: strOrNull(r.edition),
-    publisher: strOrNull(r.publisher),
-    place: strOrNull(r.place),
-    series: strOrNull(r.series),
-    isbn: strArray(r.isbn),
-    issn: strOrNull(r.issn),
-    doi: strOrNull(r.doi),
-    container_title: strOrNull(r.container_title),
-    volume: strOrNull(r.volume),
-    issue: strOrNull(r.issue),
-    pages_range: strOrNull(r.pages_range),
-    commented_act: strOrNull(r.commented_act),
-    commented_act_name: strOrNull(r.commented_act_name),
-    section_range: strOrNull(r.section_range),
+    doc_type: "jine",
+    title: nameWithoutExtension(fileName),
+    authors: [],
+    editors: [],
+    isbn: [],
+    keywords: [],
     anchor_label: (strOrNull(r.anchor_label) as BibMeta["anchor_label"]) ?? null,
-    template_kind: (strOrNull(r.template_kind) as BibMeta["template_kind"]) ?? null,
-    court: strOrNull(r.court),
-    case_number: strOrNull(r.case_number),
-    ecli: strOrNull(r.ecli),
-    decided_on: strOrNull(r.decided_on),
-    keywords: strArray(r.keywords),
-    summary: strOrNull(r.summary),
-    language: strOrNull(r.language) ?? "cs",
+    language: "cs",
   };
   return {
     id: String(r.id),
@@ -251,6 +247,7 @@ export function mapDocumentRow(r: Record<string, unknown>): DocumentRow {
     injection_flag: r.injection_flag === true,
     analyzer_version: numOrNull(r.analyzer_version),
     meta,
+    folder_id: strOrNull(r.folder_id),
     attempts: num(r.attempts),
     replaces: strOrNull(r.replaces),
     enabled: r.enabled !== false,
@@ -377,8 +374,9 @@ export async function insertUploadedDocument(
 ): Promise<{ id: string } | { duplicate: { id: string; title: string | null } }> {
   const m = row.meta;
   const contentSha = row.contentSha256.toLowerCase();
-  const hint = inSet(m.doc_type_hint, DOC_TYPE_SET);
-  const proposed: ProposedMeta | null = hint ? { doc_type: { value: hint as DocType, source: "user", confidence: 0.9 } } : null;
+  // No type and no proposal: a file is its name and its text.
+  const hint: string | null = null;
+  const proposed: ProposedMeta | null = null;
   // Re-uploads (`replaces`) are no longer accepted; the column stays for rows ingest may still settle.
   const replaces: string | null = null;
   const { rows } = await db.query<{ id: string }>(
@@ -764,62 +762,27 @@ export async function failIngest(
 }
 
 // ---------------------------------------------------------------------------
-// Metadata edits (optimistic concurrency on meta_version)
+// The one edit: the name
 // ---------------------------------------------------------------------------
 
-export interface MetaEdit {
-  id: string;
-  libraryId: string;
-  meta: BibMeta;
-  /** meta_version the form was loaded with. */
-  expectedVersion: number;
-  userId: string;
-  metaTsv: string;
-  identKeys: string[];
-}
-
-async function saveMeta(db: Queryable, args: MetaEdit, confirm: boolean): Promise<"ok" | "conflict" | "not_found"> {
-  if (!isUuid(args.id)) return "not_found";
-  if (Number.isInteger(args.expectedVersion) && (await tryUpdateMeta(db, args, confirm))) return "ok";
-  const current = await db.query("SELECT status FROM documents WHERE id = $1 AND library_id = $2 AND status <> 'deleting'", [
-    args.id,
-    args.libraryId,
-  ]);
-  // Exists but the version moved on, or it is not (yet) in a reviewable state.
-  return current.rows.length > 0 ? "conflict" : "not_found";
-}
-
-async function tryUpdateMeta(db: Queryable, args: MetaEdit, confirm: boolean): Promise<boolean> {
-  const params: unknown[] = [args.id, args.libraryId, args.expectedVersion, args.metaTsv, cleanKeys(args.identKeys)];
-  const assignments = metaAssignments(params.length + 1);
-  params.push(...metaValues(args.meta));
-  let confirmSet = "";
-  if (confirm) {
-    params.push(args.userId);
-    confirmSet = `, status = 'ready', status_detail = NULL, confirmed_at = now(), confirmed_by = $${params.length}`;
-  }
+/**
+ * Rename a document: the file name the list shows, and with it the title
+ * the assistant sees and searches (meta_tsv). Only a processed document
+ * ('review' / 'ready'). False when there is none such.
+ */
+export async function renameDocument(
+  db: Queryable,
+  args: { id: string; libraryId: string; fileName: string; title: string; metaTsv: string },
+): Promise<boolean> {
+  if (!isUuid(args.id)) return false;
   const { rows } = await db.query(
-    `UPDATE documents SET ${assignments}, meta_tsv = $4::tsvector, ident_keys = $5::text[],
-            meta_version = meta_version + 1, updated_at = now()${confirmSet}
-      WHERE id = $1 AND library_id = $2 AND meta_version = $3 AND status IN ('review', 'ready')
+    `UPDATE documents SET file_name = $3, title = $4, meta_tsv = $5::tsvector,
+            meta_version = meta_version + 1, updated_at = now()
+      WHERE id = $1 AND library_id = $2 AND status IN ('review', 'ready')
       RETURNING id`,
-    params,
+    [args.id, args.libraryId, args.fileName, args.title, args.metaTsv],
   );
   return rows.length > 0;
-}
-
-/**
- * Confirm the metadata: status → 'ready' (searchable), confirmed_at/by,
- * meta_version + 1. Only from 'review' or 'ready'; a document that is still
- * being processed, or failed, answers "conflict".
- */
-export async function confirmDocument(db: Queryable, args: MetaEdit): Promise<"ok" | "conflict" | "not_found"> {
-  return saveMeta(db, args, true);
-}
-
-/** Save metadata without changing the status (same rules as confirmDocument). */
-export async function updateDocumentMeta(db: Queryable, args: MetaEdit): Promise<"ok" | "conflict" | "not_found"> {
-  return saveMeta(db, args, false);
 }
 
 // ---------------------------------------------------------------------------
@@ -853,24 +816,22 @@ export function likeContains(s: string): string {
 
 const SORTS = {
   added: "d.uploaded_at DESC, d.id",
-  title: "lower(coalesce(d.title, d.file_name)), d.id",
-  year: "d.year DESC NULLS LAST, lower(coalesce(d.title, d.file_name)), d.id",
+  title: "lower(d.file_name), d.id",
 } as const;
 
 /**
  * One page of documents with the total. `q` matches (folded, substring)
- * title, subtitle, file name, authors and editors. limit 1–200.
+ * the file name. limit 1–200.
  */
 export async function listDocuments(
   db: Queryable,
   args: {
     libraryIds: string[];
     status?: DocStatus[];
-    docType?: DocType[];
     q?: string;
     limit: number;
     offset: number;
-    sort?: "added" | "title" | "year";
+    sort?: "added" | "title";
   },
 ): Promise<{ rows: DocumentRow[]; total: number }> {
   if (args.libraryIds.length === 0) return { rows: [], total: 0 };
@@ -881,18 +842,10 @@ export async function listDocuments(
     params.push(statuses);
     where.push(`d.status = ANY($${params.length}::text[])`);
   }
-  const types = (args.docType ?? []).filter((t) => DOC_TYPE_SET.has(t));
-  if (args.docType && args.docType.length > 0) {
-    params.push(types);
-    where.push(`d.doc_type = ANY($${params.length}::text[])`);
-  }
   const q = foldForFilter(capString((args.q ?? "").trim(), 200));
   if (q) {
     params.push(likeContains(q));
-    where.push(
-      `lower(translate(concat_ws(' ', d.title, d.subtitle, d.file_name, array_to_string(d.authors, ' '), array_to_string(d.editors, ' ')),
-         '${FOLD_FROM}', '${FOLD_TO}')) LIKE $${params.length} ESCAPE '\\'`,
-    );
+    where.push(`lower(translate(d.file_name, '${FOLD_FROM}', '${FOLD_TO}')) LIKE $${params.length} ESCAPE '\\'`);
   }
   const whereSql = where.join(" AND ");
   const limit = Math.min(200, Math.max(1, Math.floor(args.limit) || 1));

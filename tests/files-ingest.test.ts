@@ -7,20 +7,20 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
  * dawmain_app under RLS: claim → inflate → parse → metadata → derive →
  * one-transaction commit, failures, retries, the lease, `replaces` and
  * kickPendingIngests. All of it is the production code; two seams are
- * wrapped so a test can step in: the heuristic proposal (heuristicMeta,
+ * wrapped so a test can step in: the derivation of the index (deriveIndex,
  * which runs the real one unless a test says otherwise) and a hook right
  * after the claim, inside its transaction.
  */
 
 const seams = vi.hoisted(() => ({
-  heuristicMeta: vi.fn(),
+  deriveIndex: vi.fn(),
   real: null as null | ((...args: never[]) => unknown),
   afterClaim: null as null | ((id: string) => Promise<void>),
 }));
-vi.mock("@/src/files/meta/heuristics", async (importOriginal) => {
-  const real = await importOriginal<typeof import("@/src/files/meta/heuristics")>();
-  seams.real = real.heuristicMeta as never;
-  return { ...real, heuristicMeta: seams.heuristicMeta };
+vi.mock("@/src/files/index/derive", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/src/files/index/derive")>();
+  seams.real = real.deriveIndex as never;
+  return { ...real, deriveIndex: seams.deriveIndex };
 });
 vi.mock("@/src/files/db/documents", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/src/files/db/documents")>();
@@ -43,7 +43,7 @@ import { normalizeDmd } from "@/src/files/dmd/normalize";
 import { parseDmd } from "@/src/files/dmd/parse";
 import { __resetGuardsForTests, MODE_OVERRIDE_KEY } from "@/src/files/guards";
 import { inflatePending, IngestFailure, ingestDocument, kickPendingIngests } from "@/src/files/ingest";
-import type { ConversionQuality, DocType, UploadMeta } from "@/src/files/types";
+import type { ConversionQuality, UploadMeta } from "@/src/files/types";
 import { createTestDb, type TestDb } from "./helpers/pglite";
 
 // ---------------------------------------------------------------------------
@@ -108,8 +108,8 @@ beforeEach(() => {
   process.env.FILES_MODE = "on";
   setScopeRunner(t.runner);
   __resetGuardsForTests();
-  seams.heuristicMeta.mockReset();
-  seams.heuristicMeta.mockImplementation(seams.real!);
+  seams.deriveIndex.mockReset();
+  seams.deriveIndex.mockImplementation(seams.real!);
   seams.afterClaim = null;
 });
 afterEach(async () => {
@@ -128,13 +128,13 @@ interface Seeded {
 async function seed(
   lib: string,
   text: string,
-  opts: { hint?: DocType; replaces?: string; uploadedBy?: string; pendingGz?: Uint8Array; sha?: string; pages?: number } = {},
+  opts: { replaces?: string; uploadedBy?: string; pendingGz?: Uint8Array; sha?: string; pages?: number } = {},
 ): Promise<Seeded> {
   const pages = opts.pages ?? billablePages(parseDmd(normalizeDmd(text).text).stats.countedChars);
   return t.runner([lib], async (db) => {
     await ensureLibrary(db, lib, "Knihovna");
     expect(await reservePages(db, lib, pages, 100_000, 1_000_000)).toBe("ok");
-    const meta = uploadMeta(lib, text, { doc_type_hint: opts.hint });
+    const meta = uploadMeta(lib, text);
     const r = await insertUploadedDocument(db, {
       libraryId: lib,
       uploadedBy: opts.uploadedBy ?? "user_owner",
@@ -157,7 +157,7 @@ async function seed(
 
 async function doc(id: string) {
   const { rows } = await t.owner.query<Record<string, unknown>>(
-    `SELECT status, status_detail, pending_gz IS NULL AS pending_cleared, attempts, doc_type, title, section_range, anchor_label,
+    `SELECT status, status_detail, pending_gz IS NULL AS pending_cleared, attempts, doc_type, title, file_name, section_range, anchor_label,
             proposed_meta, ident_keys, analyzer_version, confirmed_at, run_token, lease_until, meta_version, authors
        FROM documents WHERE id = $1`,
     [id],
@@ -178,7 +178,7 @@ const count = async (sql: string, params: unknown[]) => Number((await t.owner.qu
 // ---------------------------------------------------------------------------
 
 describe("ingestDocument — success", () => {
-  it("indexes a queued upload, proposes metadata, is ready at once and settles the pages", async () => {
+  it("indexes a queued upload, is ready at once and settles the pages — and guesses nothing about it", async () => {
     const text = commentaryDmd(6);
     const { id, pages } = await seed(LIB, text);
     expect(await lib(LIB)).toEqual({ page_count: 0, pages_reserved: pages, doc_count: 0 });
@@ -187,37 +187,32 @@ describe("ingestDocument — success", () => {
 
     const d = await doc(id);
     expect(d).toMatchObject({ status: "ready", pending_cleared: true, attempts: 1, analyzer_version: ANALYZER_VERSION, run_token: null, lease_until: null });
-    expect(d.title).toBeTruthy();
+    // The name is the title; no type, no authors, no commented act, no proposal.
+    expect(d).toMatchObject({ doc_type: "jine", authors: [], section_range: null, proposed_meta: {} });
+    expect(d.title).toBe(String(d.file_name).replace(/\.pdf$/, ""));
     expect(d.ident_keys as string[]).toContain("sz:25cdo1000-2019");
+    expect((d.ident_keys as string[]).some((k) => k.startsWith("zak:"))).toBe(false);
     expect(await count("SELECT count(*) AS n FROM chunks WHERE doc_id = $1", [id])).toBeGreaterThan(0);
     expect(await count("SELECT count(*) AS n FROM doc_pages WHERE doc_id = $1", [id])).toBe(6);
     expect(await count("SELECT count(*) AS n FROM doc_footnotes WHERE doc_id = $1", [id])).toBe(6);
     expect(await count("SELECT count(*) AS n FROM doc_blocks WHERE doc_id = $1", [id])).toBeGreaterThan(0);
     expect(await lib(LIB)).toEqual({ page_count: pages, pages_reserved: 0, doc_count: 1 });
-    expect(seams.heuristicMeta).toHaveBeenCalledTimes(1);
-    // The stored proposal is the server's own: heuristics (and the file name), nothing else.
-    const sources = Object.values(d.proposed_meta as Record<string, { source: string }>).map((f) => f.source);
-    expect(sources.length).toBeGreaterThan(0);
-    for (const source of sources) expect(["heuristic", "pdf", "filename", "user"]).toContain(source);
+    expect(seams.deriveIndex).toHaveBeenCalledTimes(1);
+    // Every document is indexed by the same rules: no type, no commented act.
+    expect(seams.deriveIndex.mock.calls[0][1]).toEqual({ docType: null });
   });
 
-  it("the uploader's type hint wins; a commentary gets its § range and anchor label", async () => {
-    const { id } = await seed(LIB, commentaryDmd(6), { hint: "komentar" });
+  it("keeps what the parser read off the text: the label of the marginal numbers", async () => {
+    const { id } = await seed(LIB, commentaryDmd(6));
     expect(await ingestDocument(id, LIB)).toBe("done");
-    const d = await doc(id);
-    expect(d.doc_type).toBe("komentar");
-    expect(d.section_range).toBe("§ 2913–2915");
-    expect(d.anchor_label).toBe("m. č.");
-    expect((d.proposed_meta as Record<string, { source: string }>).doc_type.source).toBe("user");
+    expect((await doc(id)).anchor_label).toBe("m. č.");
   });
 
-  it("with the review step on, the document waits in review with no note", async () => {
+  it("there is no review step: a leftover library setting changes nothing", async () => {
     const { id } = await seed(LIB, commentaryDmd(4));
-    await t.owner.query(`UPDATE libraries SET settings = '{"autoConfirm": false}'::jsonb WHERE id = $1`, [LIB]);
+    await t.owner.query(`UPDATE libraries SET settings = '{"autoConfirm": false, "aiProposals": true}'::jsonb WHERE id = $1`, [LIB]);
     expect(await ingestDocument(id, LIB)).toBe("done");
-    const d = await doc(id);
-    expect(d).toMatchObject({ status: "review", confirmed_at: null, status_detail: null });
-    expect(d.title).toBeTruthy();
+    expect(await doc(id)).toMatchObject({ status: "ready", status_detail: null });
   });
 
   it("records the run's CPU time", async () => {
@@ -226,64 +221,23 @@ describe("ingestDocument — success", () => {
     expect(await count("SELECT count(*) AS n FROM usage_daily WHERE scope = 'global' AND cpu_ms > 0", [])).toBe(1);
   });
 
-  it("autoConfirm (the default) → ready; a leftover aiProposals setting changes nothing", async () => {
-    const { id } = await seed(ORG, commentaryDmd(4));
-    await t.owner.query(`UPDATE libraries SET settings = '{"autoConfirm": true, "aiProposals": false}' WHERE id = $1`, [ORG]);
-    expect(await ingestDocument(id, ORG)).toBe("done");
-    const d = await doc(id);
-    expect(d.status).toBe("ready");
-    expect(d.confirmed_at).not.toBeNull();
-    expect(seams.heuristicMeta).toHaveBeenCalledTimes(1);
-  });
 });
 
 describe("ingestDocument — replaces (legacy re-uploads still in flight)", () => {
-  it("with the review step on, a re-upload of a confirmed document keeps the confirmed metadata, goes back to review and deletes the old one", async () => {
+  it("the new document replaces the old one: ready at once under its own name, the old one deleted, audited", async () => {
     const old = await seed(LIB, commentaryDmd(6, "stará verze"));
-    await t.owner.query(`UPDATE libraries SET settings = '{"autoConfirm": false}'::jsonb WHERE id = $1`, [LIB]);
     expect(await ingestDocument(old.id, LIB)).toBe("done");
-    const oldProposed = (await doc(old.id)).proposed_meta;
-    await t.owner.query(
-      `UPDATE documents SET status = 'ready', confirmed_at = now(), confirmed_by = 'user_owner', doc_type = 'komentar',
-              title = 'Potvrzený název', authors = '{"Jan Petrov"}', commented_act = 'zak:89/2012' WHERE id = $1`,
-      [old.id],
-    );
     const fresh = await seed(LIB, commentaryDmd(8, "nová verze"), { replaces: old.id });
     expect(await lib(LIB)).toMatchObject({ page_count: old.pages, pages_reserved: fresh.pages, doc_count: 1 });
 
     expect(await ingestDocument(fresh.id, LIB)).toBe("done");
 
-    const d = await doc(fresh.id);
-    expect(d).toMatchObject({ status: "review", title: "Potvrzený název", doc_type: "komentar", authors: ["Jan Petrov"], confirmed_at: null });
-    expect(d.status_detail).toMatch(/převzata z původní verze/);
-    expect(d.section_range).toBe("§ 2913–2916");
-    expect(d.ident_keys as string[]).toContain("zak:89/2012");
+    expect(await doc(fresh.id)).toMatchObject({ status: "ready", status_detail: null, doc_type: "jine" });
     expect(await doc(old.id)).toBeUndefined();
     expect(await count("SELECT count(*) AS n FROM chunks WHERE doc_id = $1", [old.id])).toBe(0);
     expect(await lib(LIB)).toEqual({ page_count: fresh.pages, pages_reserved: 0, doc_count: 1 });
-    expect(d.proposed_meta).toEqual(oldProposed); // the original's proposal, not a new one
     const audit = await t.owner.query<{ action: string; detail: { replaced: string } }>("SELECT action, detail FROM audit_log WHERE doc_id = $1", [fresh.id]);
     expect(audit.rows).toEqual([expect.objectContaining({ action: "document.replaced", detail: expect.objectContaining({ replaced: old.id }) })]);
-  });
-
-  it("a re-upload of a confirmed document is ready at once (default settings)", async () => {
-    const old = await seed(LIB, commentaryDmd(4, "a"));
-    await ingestDocument(old.id, LIB);
-    await t.owner.query("UPDATE documents SET status = 'ready', confirmed_at = now(), title = 'Potvrzený' WHERE id = $1", [old.id]);
-    const fresh = await seed(LIB, commentaryDmd(4, "b"), { replaces: old.id });
-    expect(await ingestDocument(fresh.id, LIB)).toBe("done");
-    expect(await doc(fresh.id)).toMatchObject({ status: "ready", title: "Potvrzený", status_detail: null });
-  });
-
-  it("replacing a document still in review: the new one goes to review, the old one is deleted", async () => {
-    const old = await seed(LIB, commentaryDmd(4, "a"));
-    await t.owner.query(`UPDATE libraries SET settings = '{"autoConfirm": false}'::jsonb WHERE id = $1`, [LIB]);
-    await ingestDocument(old.id, LIB);
-    const fresh = await seed(LIB, commentaryDmd(4, "b"), { replaces: old.id });
-    expect(await ingestDocument(fresh.id, LIB)).toBe("done");
-    expect((await doc(fresh.id)).status).toBe("review");
-    expect(await doc(old.id)).toBeUndefined();
-    expect(await lib(LIB)).toEqual({ page_count: fresh.pages, pages_reserved: 0, doc_count: 1 });
   });
 
   it("a replaced document still queued gives its reservation back", async () => {
@@ -364,7 +318,7 @@ describe("ingestDocument — failures", () => {
 
   it("unexpected failures are retried up to 3 attempts, then error + release; logs carry no content", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    seams.heuristicMeta.mockImplementation(() => {
+    seams.deriveIndex.mockImplementation(() => {
       throw Object.assign(new Error("secret text of the document"), { code: "XX000" });
     });
     const { id, pages } = await seed(LIB, commentaryDmd(4));
@@ -379,7 +333,7 @@ describe("ingestDocument — failures", () => {
     log.mockRestore();
 
     // A later success is impossible without a new upload.
-    seams.heuristicMeta.mockImplementation(seams.real!);
+    seams.deriveIndex.mockImplementation(seams.real!);
     expect(await ingestDocument(id, LIB)).toBe("lost");
   });
 
@@ -388,7 +342,7 @@ describe("ingestDocument — failures", () => {
     await t.owner.query("UPDATE documents SET status = 'processing', attempts = 3, lease_until = now() - interval '1 minute' WHERE id = $1", [id]);
     expect(await ingestDocument(id, LIB)).toBe("failed");
     expect(await doc(id)).toMatchObject({ status: "error", attempts: 4 });
-    expect(seams.heuristicMeta).not.toHaveBeenCalled();
+    expect(seams.deriveIndex).not.toHaveBeenCalled();
     expect(await lib(LIB)).toMatchObject({ pages_reserved: 0 });
   });
 

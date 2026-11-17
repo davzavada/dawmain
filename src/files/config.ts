@@ -7,8 +7,10 @@
 
 /** Bump when the stemmer, tokenizer, chunker, identifier keys or tsvector
  * layout changes: stored indexes carry the version they were built with and
- * get re-derived. 2: chunks carry the EU acts they cite (eu:<CELEX> keys). */
-export const ANALYZER_VERSION = 2;
+ * get re-derived. 2: chunks carry the EU acts they cite (eu:<CELEX> keys).
+ * 3: nothing depends on a document type or a commented act any more (every
+ * document is indexed by the same rules). */
+export const ANALYZER_VERSION = 3;
 
 /** Version of the Vlastní zdroje content rules a user accepts before uploading. */
 export const TERMS_VERSION = "2026-10";
@@ -51,6 +53,10 @@ function intEnv(name: string, fallback: number): number {
 export const LIMITS = {
   get personalPages() {
     return intEnv("FILES_PERSONAL_PAGES", 10_000);
+  },
+  /** Default quota of a team library (override: teams.quota_pages). */
+  get teamPages() {
+    return intEnv("FILES_TEAM_PAGES", 10_000);
   },
   get globalPages() {
     return intEnv("FILES_GLOBAL_MAX_PAGES", 30_000);
@@ -124,10 +130,8 @@ export function cronSecret(): string | undefined {
   return process.env.CRON_SECRET?.trim() || undefined;
 }
 
-/**
- * Library ids are Clerk ids: `user_…`. `org_…` (a team library from before
- * teams were removed) is still a valid id, so the cron can purge one.
- */
+/** Library ids: `user_…` (a Clerk user id) a personal library, `org_…` a team's (src/files/db/teams.ts). */
 export const LIBRARY_ID_RE = /^(user|org)_[A-Za-z0-9]+$/;
+export const ORG_ID_RE = /^org_[A-Za-z0-9]+$/;
 export const USER_ID_RE = /^user_[A-Za-z0-9]+$/;
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

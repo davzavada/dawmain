@@ -23,9 +23,9 @@ Uživatelský popis je v [README](../README.md).
 | `eurlex_get_history` | Cellar SPARQL (Publications Office) | travaux préparatoires aktu z dossieru interinstitucionálního postupu (`cdm:dossier_contains_work` — obsahuje i přijatý akt, takže kotví CELEX aktu i kteréhokoli dokumentu postupu, případně číslo postupu `2012/0011(COD)`); vrací návrh s důvodovou zprávou, impact assessmenty, stanoviska, postoje EP/Rady + číslo postupu, právní základ a stav (přijato/projednáváno/staženo) |
 | `doctrine_search` | cuni.primo.exlibrisgroup.com | doktrína: knihy, kapitoly a články z UKAŽ Univerzity Karlovy (Primo VE: katalog UK + Central Discovery Index licencovaných e-zdrojů); `query`/`queries` (≤ 3 varianty), `title`, `author`, `subject`, `language`, `year_from`/`year_to`; katalog stránkuje po 10, `limit` (≤ 20; nad 10 záznamy stručně, bez abstraktů) stáhne víc stránek v paralelní dávce a `page` kráčí dál (`total` = `total_local` + `total_central`) — vrací bibliografické záznamy s odkazem na záznam, abstraktem/obsahem a přístupovými odkazy, žádné plné texty; klient postavený na zachyceném požadavku SPA (HAR 2026-09), ověřený živě z produkce |
 | `doctrine_get_record` | cuni.primo.exlibrisgroup.com | jeden záznam v plném znění přes full-display endpoint Prima (ověřený živě): celý abstrakt, obsah (TOC), hesla, identifikátory a přístupové odkazy — hledání ukazuje jen začátek abstraktu a obsahu; text díla se nestahuje (k němu vede odkaz na záznam, licencované tituly si čtenář otevře sám přes vzdálený přístup UK) |
-| `files_search` | Vlastní zdroje (Postgres) | hledání ve vlastních dokumentech uživatele s Pro (osobní knihovna): český fulltext (Snowball stemmer v aplikaci; váhy vlastní nadpis › nadřazený nadpis › tělo › poznámky pod čarou), identifikátory (sp. zn. i s krátkým rokem, §, předpisy i zkratkami „o. z.“/„OSŘ“, ISBN, DOI, ECLI) a metadata — kanály sloučené přes RRF se stropem shod na dokument už v SQL; filtry typu dokumentu, roku, předpisu, § / článku, sp. zn., jednoho dokumentu a jen poznámek (§ a sp. zn. se uplatní v SQL před stropem); hit nese cestu oddíly, pinpoint (s., § + m. č., pozn.), výřez se zvýrazněním a pro každou sp. zn. řádek „oficiální text:“ s voláním `ns_search`/`nss_search`/`us_search`/`sdeu_search` |
+| `files_search` | Vlastní zdroje (Postgres) | hledání ve vlastních dokumentech uživatele s Pro (osobní knihovna a sdílené knihovny jeho týmů): český fulltext (Snowball stemmer v aplikaci; váhy vlastní nadpis › nadřazený nadpis › tělo › poznámky pod čarou), identifikátory (sp. zn. i s krátkým rokem, §, předpisy i zkratkami „o. z.“/„OSŘ“, ISBN, DOI, ECLI) a název souboru — kanály sloučené přes RRF se stropem shod na dokument už v SQL; filtry knihovny, předpisu, § / článku, sp. zn., jednoho dokumentu a jen poznámek (§ a sp. zn. se uplatní v SQL před stropem); hit nese cestu oddíly, pinpoint (s., § + m. č., pozn.), výřez se zvýrazněním a pro každou sp. zn. řádek „oficiální text:“ s voláním `ns_search`/`nss_search`/`us_search`/`sdeu_search` |
 | `files_get_document` | Vlastní zdroje (Postgres) | čtení vlastního dokumentu: u dokumentu nad ~30 stran bez cíle osnova (`toc`), jinak `section` (§, článek, kapitola), `mn` (marginální číslo, i rozsah), `at` (tištěná strana), `footnote`, `find`; okna ≤ 45 000 znaků zarovnaná na celé strany, hlavička „VLASTNÍ DOKUMENT“ s citací ČSN ISO 690, pokračování omezené na zvolený úsek, denní limit čtení na dokument (proti vysávání celých knih) |
-| `files_list` | Vlastní zdroje (Postgres) | knihovny uživatele a jejich dokumenty (stav, typ, strany, co čeká na potvrzení metadat) a odkaz na nahrávání |
+| `files_list` | Vlastní zdroje (Postgres) | knihovny uživatele (osobní i týmové) a jejich soubory (název, složka, stav, strany) a odkaz na nahrávání |
 | `zotero_search` | Zotero (api.zotero.org, klíč uživatele) | hledání v připojené knihovně Zotero, jen ke čtení: `mode` `title` (názvy, autoři, roky) / `everything` (všechna pole, poznámky, full-text index příloh), prázdné `title` se samo zopakuje v `everything`; `query`/`queries` (≤ 3 varianty round-robin), `library` (výchozí osobní + skupiny, nejvýš 6), `collection`, `tags` (všechny), `item_type`, `sort`, `limit` (≤ 50 na knihovnu), `page`; shody v přílohách, poznámkách a anotacích seskupené pod dílo; sp. zn. v dotazu navíc projde nejnovější položky `case` (Zotero `q` do `docketNumber` nevidí) a řekne, kolik jich prošla; řazení není podle relevance |
 | `zotero_get_item` | Zotero | jedna položka celá: pole po oddílech, abstrakt, extra, štítky, kolekce, poznámky jako text, přílohy (každá s voláním `zotero_get_text`) a anotace prvních PDF; u rozhodnutí řádek „oficiální text:“ |
 | `zotero_get_text` | Zotero | text přílohy: full-text index Zotera, když pokrývá celý soubor; jinak PDF ze Zotero Storage přes převodník Vlastních zdrojů (jen v paměti, 10 min); jinak částečný index s varováním nebo důvod, proč text není (neindexováno, WebDAV, odkazovaný soubor, sken, heslo) a co s tím; stránky ~45k znaků, `find` |
@@ -145,7 +145,6 @@ src/files/text/             český stemmer (vendorovaný Snowball 3.1.1), token
                             stavba tsquery jen ze sanitizovaných slov
 src/files/index/            chunky, tsvector, identifikátory a zkratky předpisů,
                             zvýraznění
-src/files/meta/             návrh metadat: heuristiky (nic neodchází mimo server)
 src/files/db/               withScope (transakce + RLS), repozitáře, migrace
                             v čistém SQL (migrations/)
 src/files/access.ts         Clerk → osobní knihovna, Pro, kvóta
@@ -422,11 +421,12 @@ přihlašovací okno. Diskovery kontroluje i `npm run smoke` (krok
 Uživatel s Pro si na webu nahraje vlastní dokumenty; prohlížeč je převede na
 text (DMD), server ho uloží do PostgreSQL na vlastním serveru (databáze
 `files`, [infra/proxmox.md](infra/proxmox.md)), zaindexuje (český stemmer
-běží v aplikaci), navrhne metadata (heuristiky, text dokumentu neodchází k žádnému
-poskytovateli AI) a hned po zpracování v
-nich hledají nástroje `files_*` (metadata uživatel opraví v detailu
-dokumentu; krok kontroly před hledáním zapne knihovně
-`settings.autoConfirm = false`). Originály se nikam neukládají. Pojistky
+běží v aplikaci; text dokumentu neodchází k žádnému poskytovateli AI) a hned
+po zpracování v nich hledají nástroje `files_*`. Soubor je jen název a text:
+o dokumentu se nic neodvozuje (žádný typ, autoři, rok ani komentovaný
+předpis), není co potvrzovat a asistent ho cituje jeho názvem. Uživatel
+soubor přejmenuje, přesune do složky, stáhne jeho text nebo smaže.
+Originály se nikam neukládají. Pojistky
 níže vznikly pro bezplatné plány Vercelu a Neonu (jejich překročení
 pozastavilo celý tým, resp. zablokovalo zápisy) a zatím platí beze změny.
 Bez nastavení je funkce vypnutá (`FILES_MODE` chybí → `off`, chybí
@@ -455,6 +455,9 @@ co čeká. Už aplikovaný soubor se nemění — oprava = nový soubor.
 | `0004_search.sql` | kanály hledání jako funkce `SECURITY DEFINER` (`files_search_chunks`, `files_search_meta`), aby dotazy role aplikace šly přes GIN indexy |
 | `0005_search_filters.sql` | přetížení obou funkcí: filtry `case_number` a `section` (§ i s vnořenými oddíly) přímo v SQL před stropem shod na dokument, strop na dokument až 200 (hledání uvnitř dokumentu), knihovna u každé shody, ISBN/DOI z metadat dokumentu; podpisy z `0004` zůstávají, dokud je volá nasazená verze |
 | `0006_always_enabled.sql` | přepínač zapnuto/vypnuto u dokumentu zmizel z webu i API: zapne zpět všechny dříve vypnuté dokumenty (sloupec `enabled` zůstává) |
+| `0007_teams_folders.sql` | týmy ve vlastní databázi (`teams`, `team_members`; knihovna týmu má id týmu `org_…`) a složky knihoven (`folders`, `documents.folder_id`) s RLS jako ostatní obsah |
+| `0008_no_metadata.sql` | soubor je jen název a text: dokumenty čekající na potvrzení metadat (`review`) se stanou prohledávanými; sloupce metadat zůstávají, aplikace je nečte |
+| `0009_eml.sql` | `documents.file_kind` smí být i `eml` (e-mailová zpráva převedená v prohlížeči na text) |
 
 **Tahle verze potřebuje `0003` až `0006`** — pusť `--dry-run`, pak
 migraci, a teprve potom nasazuj. `0003`–`0005` přidávají jen sloupce `IF NOT
@@ -488,6 +491,7 @@ až novým buildem, `deploy.sh`).
 | `DATABASE_URL_UNPOOLED` | vlastnické připojení (`files_owner`), jen pro `scripts/db-migrate.mjs` z terminálu; aplikace ho nečte | — |
 | `FILES_GLOBAL_MAX_PAGES` | strop stran pro celou instalaci | 30 000 |
 | `FILES_PERSONAL_PAGES` | kvóta osobní knihovny (stran) | 10 000 |
+| `FILES_TEAM_PAGES` | kvóta týmové knihovny (stran) | 10 000 |
 | `FILES_OPERATOR_IDS` | Clerk `user_…` oddělená čárkou — provozovatelé Vlastních zdrojů (`src/files/operator.ts`) a zároveň správci na `/sprava` | — |
 | `ADMIN_USER_IDS` | Clerk `user_…` oddělená čárkou — správci na `/sprava` bez ohledu na Clerk: první správce a cesta zpět. Další správce se povyšují na stránce Správa (`publicMetadata.role = "admin"`) | — |
 | `FILES_GLOBAL_UPLOADS_PER_DAY` | nahrání za den ve všech knihovnách dohromady | 200 |
@@ -505,27 +509,22 @@ přepsat v Clerku (níže).
 
 ### Clerk
 
-1. *Configure → Organizations*: zapnout, **Membership optional** (osobní
-   účty zůstanou; s „required“ by každý uživatel včetně těch, kdo jen
-   připojují MCP, dostal úkol vybrat si organizaci), **vypnout Allow
-   user-created organizations**. Výchozí limit je 5 členů na tým; zdarma jde
-   zvednout nejvýš na 20.
-2. **Tým zakládej ty, s jeho budoucím správcem jako tvůrcem** — kdybys ho
-   založil za sebe, stal by ses členem a viděl bys týmové dokumenty. Pak
-   vypni mazání týmu adminem (smazání týmu = výmaz celé knihovny):
-
-   ```bash
-   curl -sS https://api.clerk.com/v1/organizations \
-     -H "Authorization: Bearer $CLERK_SECRET_KEY" -H 'Content-Type: application/json' \
-     -d '{"name":"AK Novák","created_by":"user_…","max_allowed_memberships":20,"public_metadata":{"pro":true}}'
-   curl -sS -X PATCH https://api.clerk.com/v1/organizations/org_… \
-     -H "Authorization: Bearer $CLERK_SECRET_KEY" -H 'Content-Type: application/json' \
-     -d '{"admin_delete_enabled":false}'
-   ```
-
-3. **Pro se přiděluje v public metadata** (*Users → uživatel → Metadata*,
-   resp. *Organizations → tým → Metadata*): `{ "pro": true }` — přesně
-   boolean `true`. Vlastní kvóta: `{ "pro": true, "filesQuota": { "pages": 5000 } }`.
+1. **Organizace v Clerku se nepoužívají.** Týmy jsou ve vlastní databázi
+   (`teams`, `team_members`, migrace `0007`; `src/files/db/teams.ts`), takže
+   počet členů nic neomezuje a v Clerku není co zapínat.
+2. **Týmy se spravují na stránce Správa → Týmy** (`/sprava/tymy`,
+   `src/admin/teams-server.ts`): založení (název a správce týmu), zapnutí
+   týmu a jeho funkcí, kvóta sdílené knihovny, členové a jejich role
+   (správce / člen), zrušení týmu. Přidat jde jen účet, který se už na webu
+   registroval. Správce webu se členem nestává, takže týmové dokumenty
+   nevidí. Zapnutý tým dává členům sdílenou knihovnu (její id je id týmu,
+   `org_…`) a své funkce (Zotero, UKAŽ), i když sami Pro nemají; v okně
+   Vlastních souborů se pak nahoře přepíná mezi „Osobní“ a týmy. Zrušený
+   tým: členové o knihovnu přijdou do minuty, její obsah smaže denní cron
+   do týdne.
+3. **Pro účtu se přiděluje v public metadata** (*Users → uživatel →
+   Metadata*, nebo na stránce Správa): `{ "pro": true }` — přesně
+   boolean `true`. Tým má tytéž přepínače ve své řádce tabulky `teams`. Vlastní kvóta: `{ "pro": true, "filesQuota": { "pages": 5000 } }`.
    Projeví se do minuty (přístup se cachuje 60 s). Členové týmu s Pro nahrávat
    smějí všichni; správce (`org:admin`) upravuje a maže všechno, člen jen své.
 4. **Vypnutí jednotlivých funkcí** (tamtéž, public metadata uživatele nebo
@@ -562,12 +561,16 @@ přepsat v Clerku (níže).
    ji oživí hned). **Před smazáním mu napiš** (slibují to zásady ochrany
    osobních údajů); knihovny s odebraným Pro ukazuje stránka provozu.
 6. **Webhook**: *Configure → Webhooks → Add endpoint*
-   `https://<doména>/api/webhooks/clerk`, události `user.deleted`,
-   `organization.deleted`, `organizationMembership.deleted`; *Signing
+   `https://<doména>/api/webhooks/clerk`, událost `user.deleted`; *Signing
    secret* → `CLERK_WEBHOOK_SIGNING_SECRET` → restart služby. Smazání
-   účtu nebo týmu označí knihovnu k výmazu za 7 dní (vymaže ji denní cron).
-   Doručení Clerk nezaručuje; výpadek webhooku zachytí denní kontrola Pro
-   v cronu (smazaný účet ani tým Pro nemá).
+   účtu hned smaže jeho souhlasy s podmínkami, počitadla čtení a volání
+   a členství v týmech; osobní knihovnu (dokumenty, složky, index) označí
+   k výmazu a denní cron ji do týdne smaže. Soubory, které účet nahrál do
+   týmové knihovny, zůstávají týmu. Připojení Zotera je v private metadata
+   Clerku a mizí s účtem. Doručení Clerk nezaručuje; výpadek webhooku
+   zachytí denní kontrola vlastníků v cronu — ale jen u účtů, které mají
+   knihovnu (účet bez knihovny, jehož webhook nedorazil, si u nás nechá
+   souhlas s podmínkami a případné členství v týmu).
 
 ### Pojistky bezplatných limitů
 
@@ -609,11 +612,11 @@ přepsat v Clerku (níže).
   `statement_timeout` pro každou transakci (`set_config(…, true)`): 10 s,
   60 s pro zpracování, přeindexování a výmaz. `connectionTimeoutMillis` 4 s —
   nedostupná databáze dá rychlou odpověď „dočasně nedostupné“, ne 60 s čekání.
-- **Přeindexování po uložení metadat** (změna typu dokumentu nebo
-  komentovaného předpisu): nejvýš 20 za den na knihovnu; žádné, dokud je
-  vyčerpaná společná rezerva CPU (výše). Opakované uložení během běžícího
-  přeindexování se k němu připojí. Odmítnuté zůstanou označené a dožene je
-  denní cron.
+- **Přeindexování** (po změně `ANALYZER_VERSION`, nebo ruční z provozu):
+  nejvýš 20 za den na knihovnu; žádné, dokud je vyčerpaná společná rezerva
+  CPU (výše). Odmítnuté zůstanou označené a dožene je denní cron. Verze 3
+  (soubory bez metadat) přeindexuje dříve nahrané dokumenty podle stejných
+  pravidel jako nové.
 - Denní cron (`/api/cron/files`, `dawmain-cron.timer` ve 04:00 místního
   času): pojistky a velikost DB; výmaz knihoven po lhůtě
   (knihovnu, kterou mezitím nahrání oživilo, nechá být); kontrola Pro (≤ 50
@@ -682,8 +685,7 @@ bez webového rozhraní; volají se ze skriptu nebo přímo v databázi.
 
 Kdo dokument nahrál, a správce týmu u všech týmových, si v detailu stáhne jeho
 uložený text („Exportovat text“, `GET /api/files/documents/[id]/export?lib=`):
-DMD s hlavičkou metadat (název, autoři, rok, typ, původní soubor, knihovna,
-data). Pro není potřeba — tak si uživatel text stáhne i po odebrání Pro
+DMD s krátkou hlavičkou (název, původní soubor, knihovna, data). Pro není potřeba — tak si uživatel text stáhne i po odebrání Pro
 než se knihovna smaže, a plní se právo na přenositelnost; nejde jen při `FILES_MODE=off`. Stropy: jeden
 dokument nejvýš 10× za den (`EXPORTS_PER_DOC_PER_DAY`) a jeden uživatel za den
 tolik stran, kolik má největší kvóta knihovny (`max(FILES_PERSONAL_PAGES,
@@ -719,8 +721,8 @@ měsíc předem (podmínky to slibují). `tests/files-legal-texts.test.ts` hlíd
 ty, které jdou přečíst z kódu.
 
 - zpracovatelé: jen Clerk a Cloudflare; server i databáze jsou vlastní, v
-  Česku — nová služba = nový subdodavatel. Metadata navrhuje server sám
-  (heuristiky) a text dokumentu neposílá žádnému poskytovateli AI;
+  Česku — nová služba = nový subdodavatel. O dokumentu se nic
+  neodvozuje a jeho text se neposílá žádnému poskytovateli AI;
 - výmaz knihovny 6 dní po smazání účtu nebo po odebrání Pro (+ nejvýš den do
   cronu → text říká „do týdne“; platí jen, dokud `dawmain-cron.timer` běží
   denně), žádná pravidelná záloha, jen snímek před údržbou; po výmazu

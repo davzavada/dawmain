@@ -50,9 +50,11 @@ describe("pinpoint", () => {
     expect(pinpoint("vzor", { pageFrom: "3" })).toBe("s. 3");
   });
 
-  it("rozhodnutí: bod and page", () => {
-    expect(pinpoint("rozhodnuti", { anchor: "24", pageFrom: "5" })).toBe("bod 24, s. 5");
-    expect(pinpoint("rozhodnuti", { anchor: "24" })).toBe("bod 24");
+  it("numbered points: the label the parser read off the text (bod), and the page", () => {
+    expect(pinpoint("rozhodnuti", { anchor: "24", anchorLabel: "bod", pageFrom: "5" })).toBe("bod 24, s. 5");
+    expect(pinpoint("rozhodnuti", { anchor: "24", anchorLabel: "bod" })).toBe("bod 24");
+    // Nothing depends on a document type: the same location reads the same whatever is passed.
+    expect(pinpoint(null, { anchor: "24", anchorLabel: "bod", pageFrom: "5" })).toBe("bod 24, s. 5");
     expect(pinpoint("rozhodnuti", { pageFrom: "5" })).toBe("s. 5");
   });
 

@@ -105,7 +105,6 @@ async function ingest(lib: string, dmd: string, meta: BibMeta, fileName: string)
     quality: { footnotes: "linked", linked_ratio: 1, columns_pages: 0, headings_from: "outline", mn: 4, unsure_pages: [] },
     hints: {},
     rights: "vlastni",
-    doc_type_hint: meta.doc_type,
   };
   const inserted = await scoped([lib], (db) =>
     insertUploadedDocument(db, {
@@ -224,7 +223,8 @@ afterAll(async () => {
 describe("files search end to end (PGlite)", () => {
   it("stores the derived index: sections, chunks with sec: keys, document keys and metadata", async () => {
     expect(readDoc.row).toMatchObject({ status: "ready", analyzer_version: ANALYZER_VERSION });
-    expect(readDoc.row.meta.section_range).toBe("§ 2913–2914");
+    // Nothing about the document is kept beside its name.
+    expect(readDoc.row.meta.section_range).toBeUndefined();
     expect(readDoc.sections.map((s) => s.key)).toEqual([
       "part:cast-ctvrta",
       "part:hlava-iii",

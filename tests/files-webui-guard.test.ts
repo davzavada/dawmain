@@ -39,6 +39,7 @@ const SUMMARY: SummaryResponse = { state: "ok", mode: "on", termsAccepted: true,
 const ITEM: DocumentListItem = {
   id: DOC,
   libraryId: "user_a",
+  folderId: null,
   title: "Komentář k OZ",
   fileName: "k.pdf",
   fileKind: "pdf",
@@ -49,8 +50,6 @@ const ITEM: DocumentListItem = {
   mine: true,
   canEdit: true,
   canDelete: true,
-  docType: "komentar",
-  publication: null,
   physicalPages: 12,
   billablePages: 12,
   flags: [],
@@ -107,7 +106,7 @@ describe("discard question only when something is lost (web:Z3)", () => {
     window.history.replaceState(null, "", "/?soubory=1");
     await act(async () => root.render(createElement(FilesModal, { documentId: null })));
     await settle();
-    expect(row().textContent).toContain("Komentář k OZ");
+    expect(row().textContent).toContain(ITEM.fileName);
     expect(host.textContent).toMatch(/Zbývá 2\s988 z 3\s000 stran\./);
     store.registerUnsavedWork(() => true);
 

@@ -18,6 +18,7 @@ vi.mock("@clerk/nextjs/server", () => ({
 }));
 
 import { dayBefore, formatDay, metadataPatch, roleFrom, toAdminUser } from "@/src/admin/model";
+import { cleanTeamName, isLastAdmin, teamPatch, toAdminTeam } from "@/src/admin/teams";
 import { applyChange, isEnvAdmin, listAdminUsers, requireAdmin } from "@/src/admin/server";
 import { __setAccessLoaderForTests, buildAccess, emptyAccess, ukazOn } from "@/src/files/access";
 import { doctrineRefusal } from "@/src/mcp/doctrine-gate";
@@ -236,5 +237,44 @@ describe("guard caps the own server can raise", () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+});
+
+describe("teams (model)", () => {
+  const row = { id: "org_t", name: "Kancelář", pro: true, features: { zotero: false, ukaz: true }, quota_pages: 2500 };
+  const members = [
+    { user_id: "user_b", role: "member" as const },
+    { user_id: "user_a", role: "admin" as const },
+  ];
+
+  it("a team as the admin sees it: its switches read like an account's, admins first", () => {
+    expect(toAdminTeam(row, members)).toEqual({
+      id: "org_t",
+      name: "Kancelář",
+      pro: true,
+      features: { files: true, zotero: false, ukaz: true },
+      quotaPages: 2500,
+      members: [
+        { userId: "user_a", role: "admin" },
+        { userId: "user_b", role: "member" },
+      ],
+    });
+  });
+
+  it("the last admin is recognised", () => {
+    const team = toAdminTeam(row, members);
+    expect(isLastAdmin(team, "user_a")).toBe(true);
+    expect(isLastAdmin(team, "user_b")).toBe(false);
+  });
+
+  it("a team's name is one line of 2–60 characters", () => {
+    expect(cleanTeamName("  AK  Novák\n& spol. ")).toBe("AK Novák & spol.");
+    for (const bad of ["", " a ", "x".repeat(61), null, 5]) expect(cleanTeamName(bad)).toBeNull();
+  });
+
+  it("one change sets one column; a feature switch keeps the other switches", () => {
+    expect(teamPatch({ zotero: false }, { kind: "feature", feature: "ukaz", on: true })).toEqual({ features: { zotero: false, ukaz: true } });
+    expect(teamPatch({}, { kind: "quota", pages: null })).toEqual({ quotaPages: null });
+    expect(teamPatch({}, { kind: "pro", on: true })).toEqual({ pro: true });
   });
 });

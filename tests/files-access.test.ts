@@ -12,7 +12,6 @@ const clerk = vi.hoisted(() => ({
   getOrganization: vi.fn(),
 }));
 
-// The membership / organization calls are mocked only to prove they are never made (no teams).
 vi.mock("@clerk/nextjs/server", () => ({
   clerkClient: async () => ({
     users: { getUser: clerk.getUser, getOrganizationMembershipList: clerk.getOrganizationMembershipList },
@@ -36,6 +35,7 @@ import {
   type LibraryAccess,
 } from "@/src/files/access";
 import { LIMITS } from "@/src/files/config";
+import { setScopeRunner } from "@/src/files/db/client";
 import { FilesUserError } from "@/src/files/errors";
 import { libraryHandle, matchesLibrary, ownedScope, readScope, safeLibraryName, writeScope } from "@/src/files/scope";
 import { SourceError } from "@/src/sources/shared/errors";
@@ -47,10 +47,83 @@ beforeEach(() => {
   __setOwnerLookupForTests(null);
   clerk.getUser.mockReset();
   clerk.getOrganizationMembershipList.mockReset();
+  clerk.getOrganizationMembershipList.mockResolvedValue({ data: [], totalCount: 0 });
   clerk.getOrganization.mockReset();
 });
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
+  setScopeRunner(null);
+  delete process.env.FILES_DATABASE_URL;
+});
+
+/** A membership as the files database gives it; `meta` in the shape of an account's metadata, for short. */
+const membership = (id: string, name: string, role: string, meta: { pro?: boolean; features?: unknown; filesQuota?: { pages: number } } = {}) => ({
+  role: role === "org:admin" ? "admin" : "member",
+  team: { id, name, pro: meta.pro === true, features: meta.features ?? {}, quota_pages: meta.filesQuota?.pages ?? null },
+});
+
+describe("teams", () => {
+  it("a member gets the team's library with no Pro of their own; the admin manages everything", () => {
+    const a = buildAccess({ id: "user_a", publicMetadata: {} }, [
+      membership("org_t", "Kancelář", "org:member", { pro: true, filesQuota: { pages: 50_000 } }),
+      membership("org_u", "Advokáti", "org:admin", { pro: true }),
+    ]);
+    // The personal library first, the teams by name; only the Pro ones are searched.
+    expect(a.all.map((l) => l.id)).toEqual(["user_a", "org_u", "org_t"]);
+    expect(a.libraries.map((l) => l.id)).toEqual(["org_u", "org_t"]);
+    expect(a.all[2]).toEqual({ id: "org_t", kind: "org", name: "Kancelář", slug: null, role: "member", pro: true, canUpload: true, canManageAll: false, quotaPages: 50_000 });
+    expect(a.all[1]).toMatchObject({ role: "admin", canManageAll: true, quotaPages: LIMITS.teamPages });
+  });
+
+  it("a team that is off, or has files switched off, is listed but not searched or uploaded into", () => {
+    const a = buildAccess({ id: "user_a", publicMetadata: { pro: true } }, [
+      membership("org_off", "Vypnutý", "org:admin"),
+      membership("org_nofiles", "Bez souborů", "org:member", { pro: true, features: { files: false } }),
+    ]);
+    expect(a.libraries.map((l) => l.id)).toEqual(["user_a"]);
+    expect(a.all.filter((l) => l.kind === "org").map((l) => [l.id, l.pro, l.canUpload])).toEqual([
+      ["org_nofiles", false, false],
+      ["org_off", false, false],
+    ]);
+  });
+
+  it("a team's features reach its members: Zotero with the team on, UKAŽ only when switched on", () => {
+    const user = { id: "user_a", publicMetadata: {} };
+    expect(buildAccess(user, [membership("org_t", "T", "org:member", { pro: true })])).toMatchObject({ zotero: true, ukaz: false });
+    expect(buildAccess(user, [membership("org_t", "T", "org:member", { pro: true, features: { zotero: false, ukaz: true } })])).toMatchObject({ zotero: false, ukaz: true });
+    // A team that is off grants nothing, whatever its switches say.
+    expect(buildAccess(user, [membership("org_t", "T", "org:member", { features: { ukaz: true } })])).toMatchObject({ zotero: false, ukaz: false });
+    // A switch-off on the user holds everywhere, their teams included.
+    const off = buildAccess({ id: "user_a", publicMetadata: { pro: true, features: { zotero: false, files: false } } }, [membership("org_t", "T", "org:member", { pro: true })]);
+    expect(off.zotero).toBe(false);
+    expect(off.libraries).toEqual([]);
+    expect(off.all.map((l) => [l.id, l.pro])).toEqual([["user_a", false], ["org_t", false]]);
+  });
+
+  it("a banned account has no team either; a membership without a usable organization is skipped", () => {
+    expect(buildAccess({ id: "user_a", banned: true }, [membership("org_t", "T", "org:admin", { pro: true })]).all).toEqual([]);
+    const a = buildAccess({ id: "user_a" }, [{ role: "admin", team: null as never }, membership("nonsense", "X", "org:admin"), membership("org_t", "", "org:admin")]);
+    expect(a.all.map((l) => [l.id, l.name])).toEqual([["user_a", "Osobní"], ["org_t", "Tým"]]);
+  });
+
+  it("rights in a team: a member edits and deletes their own files, the admin everyone's", () => {
+    const a = buildAccess({ id: "user_a" }, [membership("org_t", "T", "org:member", { pro: true }), membership("org_u", "U", "org:admin", { pro: true })]);
+    const member = a.all.find((l) => l.id === "org_t")!;
+    const admin = a.all.find((l) => l.id === "org_u")!;
+    expect([canEditDocument(member, "user_a", "user_a"), canDeleteDocument(member, "user_a", "user_a")]).toEqual([true, true]);
+    expect([canEditDocument(member, "user_b", "user_a"), canDeleteDocument(member, "user_b", "user_a")]).toEqual([false, false]);
+    expect([canEditDocument(admin, "user_b", "user_a"), canDeleteDocument(admin, "user_b", "user_a")]).toEqual([true, true]);
+  });
+
+  it("scopes: a team is named by its name or id; uploading needs membership of a team that is on", () => {
+    const a = buildAccess({ id: "user_a", publicMetadata: { pro: true } }, [membership("org_t", "Kancelář", "org:member", { pro: true })]);
+    expect(readScope(a, "kancelar").libraryIds).toEqual(["org_t"]);
+    expect(readScope(a, "osobni").libraryIds).toEqual(["user_a"]);
+    expect(readScope(a).libraryIds).toEqual(["user_a", "org_t"]);
+    expect(writeScope(a, "org_t").library.id).toBe("org_t");
+    expect(() => writeScope(a, "org_other")).toThrow(FilesUserError);
+  });
 });
 
 describe("proFrom / quotaFrom", () => {
@@ -137,7 +210,7 @@ describe("feature switches (publicMetadata.features)", () => {
 });
 
 describe("getAccess", () => {
-  it("loads from Clerk (getUser only — no memberships) and freezes the result", async () => {
+  it("loads the account from Clerk (getUser only — teams are not Clerk's) and freezes the result", async () => {
     clerk.getUser.mockResolvedValue({ id: "user_a", banned: false, locked: false, publicMetadata: { pro: true } });
     const a = await getAccess("user_a");
     expect(clerk.getUser).toHaveBeenCalledWith("user_a");
@@ -159,6 +232,21 @@ describe("getAccess", () => {
     await expect(getAccess("user_flaky")).rejects.toThrow();
     clerk.getUser.mockResolvedValue({ id: "user_flaky", publicMetadata: { pro: true } });
     expect((await getAccess("user_flaky")).libraries).toHaveLength(1);
+  });
+
+  it("the user's teams come from the files database; when it fails the account's own access stands", async () => {
+    process.env.FILES_DATABASE_URL = "postgres://test";
+    clerk.getUser.mockImplementation(async (id: string) => ({ id, publicMetadata: { pro: true } }));
+    const team = { id: "org_t", name: "Kancelář", pro: true, features: {}, quota_pages: null, created_at: "", role: "member" };
+    setScopeRunner(async (_ids, fn) => fn({ query: async () => ({ rows: [team] as never[] }) }));
+    expect((await getAccess("user_a")).libraries.map((l) => l.id)).toEqual(["user_a", "org_t"]);
+    setScopeRunner(async () => {
+      throw new Error("database down");
+    });
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const degraded = await getAccess("user_b");
+    expect(degraded.libraries.map((l) => l.id)).toEqual(["user_b"]);
+    expect(degraded.zotero).toBe(true);
   });
 
   it("a malformed user id never reaches Clerk", async () => {
@@ -240,9 +328,15 @@ describe("libraryOwnerState", () => {
     await expect(libraryOwnerState("user_a")).rejects.toThrow();
   });
 
-  it("a team library left over from before teams were removed is 'not_pro' without asking Clerk", async () => {
+  it("a team's library follows its team: on, switched off, or 'gone' once the team is deleted", async () => {
+    process.env.FILES_DATABASE_URL = "postgres://test";
+    let rows: unknown[] = [{ id: "org_b", name: "B", pro: true, features: { files: false }, quota_pages: null }];
+    setScopeRunner(async (_ids, fn) => fn({ query: async () => ({ rows: rows as never[] }) }));
+    expect(await libraryOwnerState("org_b")).toBe("pro");
+    rows = [{ id: "org_b", name: "B", pro: false, features: {}, quota_pages: null }];
     expect(await libraryOwnerState("org_b")).toBe("not_pro");
-    expect(clerk.getOrganization).not.toHaveBeenCalled();
+    rows = [];
+    expect(await libraryOwnerState("org_b")).toBe("gone");
     expect(clerk.getUser).not.toHaveBeenCalled();
   });
 });

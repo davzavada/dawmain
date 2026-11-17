@@ -32,6 +32,8 @@ vi.mock("next/server", async (importOriginal) => ({
 import { GET as exportGET } from "@/app/api/files/documents/[id]/export/route";
 import { DELETE as docDELETE, GET as docGET, PATCH as docPATCH } from "@/app/api/files/documents/[id]/route";
 import { GET as listGET, POST as uploadPOST } from "@/app/api/files/documents/route";
+import { DELETE as folderDELETE, PATCH as folderPATCH } from "@/app/api/files/folders/[id]/route";
+import { POST as foldersPOST } from "@/app/api/files/folders/route";
 import { GET as summaryGET } from "@/app/api/files/summary/route";
 import { POST as termsPOST } from "@/app/api/files/terms/route";
 import { __setAccessLoaderForTests, buildAccess, type Access } from "@/src/files/access";
@@ -44,7 +46,7 @@ import { normalizeDmd } from "@/src/files/dmd/normalize";
 import { buildTsQuery } from "@/src/files/text/analyze";
 import type { ConversionQuality, UploadMeta } from "@/src/files/types";
 import { EXPORTS_PER_DOC_PER_DAY, exportDisposition, exportFileNames, exportFor, exportHeader } from "@/src/files/web";
-import type { DocumentDetail, DocumentListResponse, SummaryResponse } from "@/src/files/web-types";
+import type { DocumentDetail, DocumentListResponse, FolderItem, SummaryResponse } from "@/src/files/web-types";
 import { createTestDb, type TestDb } from "./helpers/pglite";
 
 // ---------------------------------------------------------------------------
@@ -138,16 +140,14 @@ const row = async (id: string) =>
     [id],
   )).rows[0];
 
-/** Upload as `user` into `lib` and run the ingest: the document ends in 'review'. */
+/** Upload as `user` into `lib` and run the ingest: the document is searchable at once. */
 async function uploaded(user: string, lib: string, salt: string): Promise<string> {
   signedIn(user);
   const res = await uploadPOST(uploadRequest(lib, dmd(3, salt)));
   expect(res.status).toBe(201);
   const { id } = (await res.json()) as { id: string };
-  // The review step (a library with autoConfirm: false) — what these tests exercise.
-  await t.owner.query(`UPDATE libraries SET settings = settings || '{"autoConfirm": false}'::jsonb WHERE id = $1`, [lib]);
   await runAfter();
-  expect((await row(id)).status).toBe("review");
+  expect((await row(id)).status).toBe("ready");
   return id;
 }
 
@@ -223,7 +223,6 @@ describe("GET /api/files/summary", () => {
     const a = await uploaded("user_a", "user_a", "a");
     await uploaded("user_a", "user_a", "b");
     signedIn("user_a");
-    await patch("user_a", a, { action: "confirm", version: (await row(a)).meta_version, meta: META() });
     const body = (await (await summaryGET(get("/api/files/summary"))).json()) as SummaryResponse;
     if (body.state !== "ok") throw new Error("expected ok");
     expect(body.mode).toBe("on");
@@ -232,29 +231,24 @@ describe("GET /api/files/summary", () => {
     const personal = body.libraries[0];
     expect(personal).toMatchObject({ id: "user_a", kind: "user", role: "owner", name: "Osobní" });
     expect(personal).not.toHaveProperty("memberCount");
-    expect(personal.counts).toMatchObject({ total: 2, ready: 1, review: 1, searchable: 1 });
+    expect(personal.counts).toMatchObject({ total: 2, ready: 2, review: 0, searchable: 2 });
     expect(personal.pagesUsed).toBeGreaterThan(0);
   });
 });
 
 describe("GET /api/files/documents?lib=", () => {
-  it("lists the owner's documents with their rights, pages and publication", async () => {
+  it("lists the owner's documents with their rights and pages — and nothing guessed about them", async () => {
     const id = await uploaded("user_a", "user_a", "m");
     signedIn("user_a");
     const res = await listGET(get("/api/files/documents?lib=user_a"));
     expect(res.status).toBe(200);
     const body = (await res.json()) as DocumentListResponse;
     expect(body.total).toBe(1);
-    expect(body.documents[0]).toMatchObject({ id, mine: true, canEdit: true, canDelete: true, fileBytes: 2_400_000, status: "review", physicalPages: 3 });
-    expect(body.documents[0].publication).toBeNull();
+    expect(body.documents[0]).toMatchObject({ id, mine: true, canEdit: true, canDelete: true, fileBytes: 2_400_000, status: "ready", physicalPages: 3 });
+    for (const gone of ["docType", "publication", "meta", "proposed"]) expect(body.documents[0]).not.toHaveProperty(gone);
     // No on/off switch and no uploader names any more.
     expect(body.documents[0]).not.toHaveProperty("enabled");
     expect(body.documents[0]).not.toHaveProperty("uploaderName");
-    // An article names where it appeared.
-    await patch("user_a", id, { action: "save", version: (await row(id)).meta_version, meta: META({ doc_type: "clanek", container_title: "Právník", issue: "2", year: "2024" }) });
-    signedIn("user_a");
-    const after = (await (await listGET(get("/api/files/documents?lib=user_a"))).json()) as DocumentListResponse;
-    expect(after.documents[0].publication).toBe("Právník 2/2024");
   });
 
   it("a foreign or unknown library is 404 either way", async () => {
@@ -311,71 +305,19 @@ describe("GET /api/files/documents/[id]", () => {
 });
 
 describe("PATCH /api/files/documents/[id]", () => {
-  it("confirm: review → ready with the validated metadata, meta_version bumped", async () => {
-    const id = await uploaded("user_a", "user_a", "a");
-    // The server's own proposal (heuristics, nothing sent anywhere) is there to confirm.
-    const proposal = (await (await detail("user_a", id)).json()) as DocumentDetail;
-    const sources = Object.values(proposal.proposed ?? {}).map((f) => f?.source);
-    expect(sources.length).toBeGreaterThan(0);
-    for (const source of sources) expect(["heuristic", "pdf", "filename", "user"]).toContain(source);
-    expect(proposal.meta.title).toBeTruthy();
-    const before = await row(id);
-    const res = await patch("user_a", id, { action: "confirm", version: before.meta_version, meta: META({ year: "2019", isbn: "978-80-7400-773-6" }) });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as DocumentDetail;
-    expect(body.status).toBe("ready");
-    expect(body.meta.title).toBe("Občanský zákoník. Komentář");
-    expect(body.meta.year).toBe(2019);
-    expect((await row(id)).meta_version).toBe(before.meta_version + 1);
-  });
-
-  it("a stale version is 409; a document still processing is 409 with its own message", async () => {
-    const id = await uploaded("user_a", "user_a", "a");
-    const v = (await row(id)).meta_version;
-    expect((await patch("user_a", id, { action: "save", version: v, meta: META() })).status).toBe(200);
-    const stale = await patch("user_a", id, { action: "save", version: v, meta: META() });
-    expect(stale.status).toBe(409);
-    expect(((await stale.json()) as { error: string }).error).toContain("upravil někdo jiný");
-  });
-
-  it("another user cannot edit the owner's document: the same 404 as a missing one", async () => {
-    const id = await uploaded("user_a", "user_a", "m");
-    const v = (await row(id)).meta_version;
-    const res = await patch("user_x", id, { action: "confirm", version: v, meta: META() });
-    expect(res.status).toBe(404);
-    expect((await row(id)).meta_version).toBe(v);
-    expect((await patch("user_a", id, { action: "confirm", version: v, meta: META() })).status).toBe(200);
-  });
-
-  it("the metadata schema rejects oversized and unknown input with field messages", async () => {
-    const id = await uploaded("user_a", "user_a", "a");
-    const v = (await row(id)).meta_version;
-    const long = await patch("user_a", id, { action: "confirm", version: v, meta: META({ title: "x".repeat(301) }) });
-    expect(long.status).toBe(422);
-    const body = (await long.json()) as { error: string; fields: Record<string, string> };
-    expect(body.fields.title).toMatch(/nejvýš 300/);
-    const unknown = await patch("user_a", id, { action: "confirm", version: v, meta: META({ injected: "x" }) });
-    expect(unknown.status).toBe(422);
-    const authors = await patch("user_a", id, { action: "confirm", version: v, meta: META({ authors: Array.from({ length: 11 }, (_, i) => `Autor ${i}`) }) });
-    expect(authors.status).toBe(422);
-    // A commentary needs its act to be confirmed, not to be saved as a draft.
-    expect((await patch("user_a", id, { action: "confirm", version: v, meta: META({ doc_type: "komentar" }) })).status).toBe(422);
-    expect((await patch("user_a", id, { action: "save", version: v, meta: META({ doc_type: "komentar" }) })).status).toBe(200);
-    expect((await row(id)).title).toBe("Občanský zákoník. Komentář");
-  });
-
   it("a body over 64 KB is 413, malformed JSON 400, an unknown action 400", async () => {
     const id = await uploaded("user_a", "user_a", "a");
     signedIn("user_a");
-    const huge = await docPATCH(send(`/api/files/documents/${id}`, "PATCH", JSON.stringify({ action: "save", version: 0, meta: { title: "x".repeat(70_000) } })), ctx("id", id));
+    const huge = await docPATCH(send(`/api/files/documents/${id}`, "PATCH", JSON.stringify({ action: "rename", name: "x".repeat(70_000) })), ctx("id", id));
     expect(huge.status).toBe(413);
     expect((await docPATCH(send(`/api/files/documents/${id}`, "PATCH", "{not json"), ctx("id", id))).status).toBe(400);
     expect((await patch("user_a", id, { action: "publish" })).status).toBe(400);
+    // The metadata form is gone: its actions are unknown now.
+    for (const action of ["save", "confirm"]) expect((await patch("user_a", id, { action, version: 0, meta: { title: "x" } })).status).toBe(400);
   });
 
   it("the on/off switch is gone: an enable action is 400 and the document stays searchable", async () => {
     const id = await uploaded("user_a", "user_a", "hledej");
-    await patch("user_a", id, { action: "confirm", version: (await row(id)).meta_version, meta: META() });
     const q = buildTsQuery("odpovědnost škodu");
     const search = () =>
       t.runner(["user_a"], (db) =>
@@ -391,27 +333,210 @@ describe("PATCH /api/files/documents/[id]", () => {
     const v = (await row(id)).meta_version;
     await t.runner([], (db) => setSystemState(db, MODE_OVERRIDE_KEY, { mode: "readonly" }));
     __resetGuardsForTests();
-    const res = await patch("user_a", id, { action: "save", version: v, meta: META() });
+    const res = await patch("user_a", id, { action: "rename", name: "jinak.pdf" });
     expect(res.status).toBe(503);
     expect(((await res.json()) as { error: string }).error).toContain("jen pro čtení");
     expect((await row(id)).meta_version).toBe(v);
   });
 
-  it("changing the type re-derives the index after the response", async () => {
-    const id = await uploaded("user_a", "user_a", "a");
-    mocks.after.length = 0;
-    await patch("user_a", id, { action: "confirm", version: (await row(id)).meta_version, meta: META({ doc_type: "komentar", commented_act: "89/2012" }) });
-    expect(mocks.after).toHaveLength(1);
-    await runAfter();
-    const keys = (await t.owner.query<{ ident_keys: string[] }>("SELECT ident_keys FROM documents WHERE id = $1", [id])).rows[0].ident_keys;
-    expect(keys).toContain("zak:89/2012");
-    const chunkKeys = (await t.owner.query<{ k: string }>("SELECT unnest(ident_keys) AS k FROM chunks WHERE doc_id = $1", [id])).rows.map((r) => r.k);
-    expect(chunkKeys).toContain("parz:89/2012/2913");
-    expect((await row(id)).status).toBe("ready");
-    // Same type again: nothing to re-derive.
-    mocks.after.length = 0;
-    await patch("user_a", id, { action: "confirm", version: (await row(id)).meta_version, meta: META({ doc_type: "komentar", commented_act: "89/2012", year: "2020" }) });
-    expect(mocks.after).toHaveLength(0);
+});
+
+describe("rename (PATCH { action: \"rename\" })", () => {
+  it("renames the file: the list shows the name, the assistant's title follows it, the search finds it", async () => {
+    const id = await uploaded("user_a", "user_a", "r");
+    const v = (await row(id)).meta_version;
+    const res = await patch("user_a", id, { action: "rename", name: "  Smlouva o dílo / vzor 2026.pdf\n" });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as DocumentDetail;
+    expect(body.fileName).toBe("Smlouva o dílo vzor 2026.pdf");
+    expect(body.title).toBe("Smlouva o dílo vzor 2026");
+    expect(await row(id)).toMatchObject({ title: "Smlouva o dílo vzor 2026", meta_version: v + 1 });
+    const { rows } = await t.owner.query<{ hit: boolean }>("SELECT meta_tsv @@ $2::tsquery AS hit FROM documents WHERE id = $1", [id, buildTsQuery("smlouva dílo").and]);
+    expect(rows[0].hit).toBe(true);
+    const audit = await t.owner.query("SELECT action FROM audit_log WHERE doc_id = $1 AND action = 'document.rename'", [id]);
+    expect(audit.rows).toHaveLength(1);
+    // The same name again changes nothing.
+    expect((await patch("user_a", id, { action: "rename", name: "Smlouva o dílo vzor 2026.pdf" })).status).toBe(200);
+    expect((await row(id)).meta_version).toBe(v + 1);
+  });
+
+  it("refuses an empty or overlong name, a stranger, and a library without Pro", async () => {
+    const id = await uploaded("user_a", "user_a", "s");
+    expect((await patch("user_a", id, { action: "rename", name: "   " })).status).toBe(422);
+    expect((await patch("user_a", id, { action: "rename", name: "x".repeat(161) })).status).toBe(422);
+    expect((await patch("user_a", id, { action: "rename", name: "a", extra: 1 })).status).toBe(400);
+    expect((await patch("user_x", id, { action: "rename", name: "cizí.pdf" })).status).toBe(404);
+    setAccess("user_a", buildAccess({ id: "user_a", publicMetadata: {} }));
+    expect((await patch("user_a", id, { action: "rename", name: "bez pro.pdf" })).status).toBe(403);
+  });
+});
+
+describe("a team's library", () => {
+  const org = (role: string) => [{ role: role === "org:admin" ? "admin" : "member", team: { id: "org_t", name: "Kancelář", pro: true, features: {}, quota_pages: null } }];
+  beforeEach(() => {
+    // user_a: a member with Pro of their own; user_x: the team's admin; user_none: a member without Pro.
+    setAccess("user_a", buildAccess({ id: "user_a", publicMetadata: { pro: true } }, org("org:member")));
+    setAccess("user_x", buildAccess({ id: "user_x", publicMetadata: { pro: true } }, org("org:admin")));
+    setAccess("user_none", buildAccess({ id: "user_none", publicMetadata: {} }, org("org:member")));
+  });
+
+  it("every member uploads and lists; the summary carries the team after the personal library", async () => {
+    const id = await uploaded("user_none", "org_t", "t1");
+    signedIn("user_a");
+    const summary = (await (await summaryGET(get("/api/files/summary"))).json()) as Extract<SummaryResponse, { state: "ok" }>;
+    expect(summary.libraries.map((l) => [l.id, l.kind, l.role, l.counts?.total])).toEqual([
+      ["user_a", "user", "owner", 0],
+      ["org_t", "org", "member", 1],
+    ]);
+    const list = (await (await listGET(get("/api/files/documents?lib=org_t"))).json()) as DocumentListResponse;
+    expect(list.documents.map((d) => [d.id, d.mine, d.canEdit, d.canDelete])).toEqual([[id, false, false, false]]);
+    // A member without Pro of their own sees the team's library as their Pro one.
+    signedIn("user_none");
+    const own = (await (await summaryGET(get("/api/files/summary"))).json()) as Extract<SummaryResponse, { state: "ok" }>;
+    expect(own.libraries.map((l) => [l.id, l.pro])).toEqual([["user_none", false], ["org_t", true]]);
+  });
+
+  it("a member renames and deletes their own file; a colleague cannot, the team's admin can", async () => {
+    const id = await uploaded("user_none", "org_t", "t2");
+    expect((await patch("user_a", id, { action: "rename", name: "kolega.pdf" })).status).toBe(403);
+    expect((await del("user_a", id)).status).toBe(403);
+    expect((await patch("user_none", id, { action: "rename", name: "moje.pdf" })).status).toBe(200);
+    expect((await patch("user_x", id, { action: "rename", name: "správce.pdf" })).status).toBe(200);
+    expect((await del("user_x", id)).status).toBe(200);
+  });
+
+  it("someone outside the team gets the same 404 as for a library that does not exist", async () => {
+    const id = await uploaded("user_a", "org_t", "t3");
+    setAccess("user_x", buildAccess({ id: "user_x", publicMetadata: { pro: true } }));
+    signedIn("user_x");
+    expect((await listGET(get("/api/files/documents?lib=org_t"))).status).toBe(404);
+    expect((await detail("user_x", id)).status).toBe(404);
+    expect((await del("user_x", id)).status).toBe(404);
+    signedIn("user_x");
+    expect((await uploadPOST(uploadRequest("org_t", dmd(3, "t4")))).status).toBe(403);
+  });
+});
+
+describe("folders", () => {
+  const folderReq = (method: string, id: string | null, body?: unknown) => send(`/api/files/folders${id ? `/${id}` : ""}`, method, body);
+  async function make(user: string, lib: string, name: string, parentId: string | null = null): Promise<Response> {
+    signedIn(user);
+    return foldersPOST(folderReq("POST", null, { lib, parentId, name }));
+  }
+  const made = async (user: string, lib: string, name: string, parentId: string | null = null) => ((await (await make(user, lib, name, parentId)).json()) as FolderItem).id;
+  const patchFolder = async (user: string, id: string, body: unknown) => {
+    signedIn(user);
+    return folderPATCH(folderReq("PATCH", id, body), ctx("id", id));
+  };
+  const delFolder = async (user: string, id: string) => {
+    signedIn(user);
+    return folderDELETE(folderReq("DELETE", id), ctx("id", id));
+  };
+  const list = async (user: string, lib: string) => {
+    signedIn(user);
+    return (await (await listGET(get(`/api/files/documents?lib=${lib}`))).json()) as DocumentListResponse;
+  };
+  afterEach(async () => {
+    await t.owner.query("UPDATE documents SET folder_id = NULL");
+    await t.owner.query("DELETE FROM folders");
+  });
+
+  it("a tree of folders travels with the list; a file moves into a folder and back to the root", async () => {
+    const id = await uploaded("user_a", "user_a", "f1");
+    const top = await made("user_a", "user_a", "  Komentáře / OZ ");
+    const sub = await made("user_a", "user_a", "Svazek IX", top);
+    const before = await list("user_a", "user_a");
+    expect(before.folders).toEqual([
+      { id: top, parentId: null, name: "Komentáře OZ", canManage: true },
+      { id: sub, parentId: top, name: "Svazek IX", canManage: true },
+    ]);
+    expect(before.documents[0].folderId).toBeNull();
+    const moved = await patch("user_a", id, { action: "move", folderId: sub });
+    expect(moved.status).toBe(200);
+    expect(((await moved.json()) as DocumentDetail).folderId).toBe(sub);
+    expect((await list("user_a", "user_a")).documents[0].folderId).toBe(sub);
+    expect((await patch("user_a", id, { action: "move", folderId: null })).status).toBe(200);
+    expect((await list("user_a", "user_a")).documents[0].folderId).toBeNull();
+  });
+
+  it("names: one per place whatever the case, cleaned, never empty", async () => {
+    const top = await made("user_a", "user_a", "Vzory");
+    expect((await make("user_a", "user_a", "vzory")).status).toBe(409);
+    expect((await make("user_a", "user_a", "Vzory", top)).status).toBe(201);
+    expect((await make("user_a", "user_a", "   ")).status).toBe(422);
+    expect((await make("user_a", "user_a", "x".repeat(81))).status).toBe(422);
+    const other = await made("user_a", "user_a", "Jiná");
+    expect((await patchFolder("user_a", other, { action: "rename", name: "VZORY" })).status).toBe(409);
+    const renamed = await patchFolder("user_a", other, { action: "rename", name: "Smlouvy" });
+    expect(((await renamed.json()) as FolderItem).name).toBe("Smlouvy");
+  });
+
+  it("moving a folder: never into itself or below, never deeper than six levels", async () => {
+    const a = await made("user_a", "user_a", "A");
+    const b = await made("user_a", "user_a", "B", a);
+    expect((await patchFolder("user_a", a, { action: "move", parentId: b })).status).toBe(422);
+    expect((await patchFolder("user_a", a, { action: "move", parentId: a })).status).toBe(422);
+    let at = b;
+    for (let level = 3; level <= 6; level++) at = await made("user_a", "user_a", `L${level}`, at);
+    expect((await make("user_a", "user_a", "L7", at)).status).toBe(422);
+    const c = await made("user_a", "user_a", "C");
+    const d = await made("user_a", "user_a", "D", c);
+    expect((await patchFolder("user_a", c, { action: "move", parentId: at })).status).toBe(422);
+    expect((await patchFolder("user_a", d, { action: "move", parentId: null })).status).toBe(200);
+    expect((await list("user_a", "user_a")).folders.find((f) => f.id === d)?.parentId).toBeNull();
+  });
+
+  it("only an empty folder is deleted", async () => {
+    const id = await uploaded("user_a", "user_a", "f2");
+    const top = await made("user_a", "user_a", "Plná");
+    const sub = await made("user_a", "user_a", "Pod", top);
+    await patch("user_a", id, { action: "move", folderId: sub });
+    expect((await delFolder("user_a", top)).status).toBe(409);
+    expect((await delFolder("user_a", sub)).status).toBe(409);
+    await patch("user_a", id, { action: "move", folderId: null });
+    expect((await delFolder("user_a", sub)).status).toBe(200);
+    expect((await delFolder("user_a", top)).status).toBe(200);
+    expect((await list("user_a", "user_a")).folders).toEqual([]);
+  });
+
+  it("a stranger sees no folder of another library, and a file never goes into one", async () => {
+    const mine = await made("user_a", "user_a", "Moje");
+    const theirs = await made("user_x", "user_x", "Cizí");
+    const id = await uploaded("user_a", "user_a", "f3");
+    expect((await make("user_x", "user_a", "Vetřelec")).status).toBe(403);
+    expect((await make("user_x", "user_x", "Pod cizí", mine)).status).toBe(404);
+    expect((await patchFolder("user_x", mine, { action: "rename", name: "Přepsáno" })).status).toBe(404);
+    expect((await delFolder("user_x", mine)).status).toBe(404);
+    expect((await patch("user_a", id, { action: "move", folderId: theirs })).status).toBe(404);
+    expect((await patchFolder("user_a", mine, { action: "move", parentId: theirs })).status).toBe(404);
+    expect((await list("user_a", "user_a")).folders.map((f) => f.name)).toEqual(["Moje"]);
+  });
+
+  it("in a team every member makes folders; a member manages their own, the team's admin all", async () => {
+    const org = (role: string) => [{ role, team: { id: "org_t", name: "Kancelář", pro: true, features: {}, quota_pages: null } }];
+    setAccess("user_a", buildAccess({ id: "user_a", publicMetadata: {} }, org("member")));
+    setAccess("user_none", buildAccess({ id: "user_none", publicMetadata: {} }, org("member")));
+    setAccess("user_x", buildAccess({ id: "user_x", publicMetadata: {} }, org("admin")));
+    const folder = await made("user_none", "org_t", "Sdílené");
+    expect((await list("user_a", "org_t")).folders).toEqual([{ id: folder, parentId: null, name: "Sdílené", canManage: false }]);
+    expect((await patchFolder("user_a", folder, { action: "rename", name: "Moje" })).status).toBe(403);
+    expect((await delFolder("user_a", folder)).status).toBe(403);
+    // A colleague still files their own document there.
+    const id = await uploaded("user_a", "org_t", "f4");
+    expect((await patch("user_a", id, { action: "move", folderId: folder })).status).toBe(200);
+    expect((await patch("user_none", id, { action: "move", folderId: null })).status).toBe(403);
+    expect((await patchFolder("user_x", folder, { action: "rename", name: "Společné" })).status).toBe(200);
+    expect((await patch("user_x", id, { action: "move", folderId: null })).status).toBe(200);
+    expect((await delFolder("user_none", folder)).status).toBe(200);
+  });
+
+  it("read-only mode: no new folders or moves, an empty folder can still be deleted", async () => {
+    const folder = await made("user_a", "user_a", "Stará");
+    await t.runner([], (db) => setSystemState(db, MODE_OVERRIDE_KEY, { mode: "readonly" }));
+    __resetGuardsForTests();
+    expect((await make("user_a", "user_a", "Nová")).status).toBe(503);
+    expect((await patchFolder("user_a", folder, { action: "rename", name: "Jinak" })).status).toBe(503);
+    expect((await delFolder("user_a", folder)).status).toBe(200);
   });
 });
 
@@ -455,22 +580,22 @@ describe("DELETE /api/files/documents/[id]", () => {
 });
 
 describe("rights after Pro is revoked (edit needs Pro, delete and export only ownership)", () => {
-  it("an owner who lost Pro cannot save or confirm — no re-derivation is scheduled", async () => {
+  it("an owner who lost Pro cannot rename or move", async () => {
     const id = await uploaded("user_x", "user_x", "x");
     setAccess("user_x", buildAccess({ id: "user_x", publicMetadata: {} }));
     const v = (await row(id)).meta_version;
     mocks.after.length = 0;
     for (const body of [
-      { action: "save", version: v, meta: META({ doc_type: "komentar" }) },
-      { action: "confirm", version: v, meta: META() },
+      { action: "rename", name: "jinak.pdf" },
+      { action: "move", folderId: null },
     ]) {
       const res = await patch("user_x", id, body);
       expect(res.status).toBe(403);
       expect(((await res.json()) as { error: string }).error).toContain("Pro");
     }
     expect(mocks.after).toHaveLength(0);
-    expect(await row(id)).toMatchObject({ meta_version: v, status: "review" });
-    const audit = await t.owner.query("SELECT 1 FROM audit_log WHERE action IN ('document.meta', 'document.confirm')");
+    expect(await row(id)).toMatchObject({ meta_version: v, status: "ready" });
+    const audit = await t.owner.query("SELECT 1 FROM audit_log WHERE action IN ('document.rename', 'document.move')");
     expect(audit.rows).toHaveLength(0);
     // Deleting still works: what they stored stays theirs.
     expect((await del("user_x", id)).status).toBe(200);
@@ -493,9 +618,9 @@ describe("GET /api/files/documents/[id]/export?lib=", () => {
     return { header: body.slice(0, end + 5), text: body.slice(end + 6) };
   };
 
-  it("the uploader downloads the stored text with a metadata header, as an audited attachment", async () => {
+  it("the uploader downloads the stored text under the file's name, with a short header, as an audited attachment", async () => {
     const id = await uploaded("user_a", "user_a", "a");
-    await patch("user_a", id, { action: "confirm", version: (await row(id)).meta_version, meta: META({ year: "2019", authors: ["Jan Petrov", "Eva Dvořáková"] }) });
+    await patch("user_a", id, { action: "rename", name: "Občanský zákoník. Komentář.pdf" });
     const res = await exportOf("user_a", id, "user_a");
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("text/markdown; charset=utf-8");
@@ -506,8 +631,8 @@ describe("GET /api/files/documents/[id]/export?lib=", () => {
     );
     const { header, text } = splitExport(await res.text());
     expect(header).toContain('title: "Občanský zákoník. Komentář"');
-    expect(header).toContain('authors: ["Jan Petrov", "Eva Dvořáková"]');
-    expect(header).toContain("year: 2019");
+    expect(header).toContain('source_file: "Občanský zákoník. Komentář.pdf"');
+    for (const gone of ["authors:", "year:", "doc_type:"]) expect(header).not.toContain(gone);
     expect(header).toMatch(/\nuploaded: \d{4}-\d{2}-\d{2}\n/);
     expect(text).toBe(normalizeDmd(dmd(3, "a")).text);
     const audit = await t.owner.query<{ actor: string; detail: Record<string, unknown> }>("SELECT actor, detail FROM audit_log WHERE action = 'document.export'");
@@ -641,8 +766,8 @@ describe("GET /api/files/documents/[id]/export?lib=", () => {
     expect(exportDisposition("Ať (zkouška)'s *!")).toBe("attachment; filename=\"At-zkouska-s.md\"; filename*=UTF-8''A%C5%A5%20%28zkou%C5%A1ka%29%27s%20%21.md");
     const header = exportHeader(
       {
-        meta: { title: "Název\n---\n# vložené", authors: ["A\nB"], year: 2020, doc_type: "clanek" },
-        file_name: "a.pdf",
+        meta: { title: "Název\n---\n# vložené" },
+        file_name: "a\n---.pdf",
         uploaded_at: "2026-09-01T10:00:00.000Z",
       } as never,
       "Osobní",
@@ -650,7 +775,7 @@ describe("GET /api/files/documents/[id]/export?lib=", () => {
     );
     expect(header.split("\n").filter((l) => l === "---")).toHaveLength(2);
     expect(header).toContain('title: "Název --- # vložené"');
-    expect(header).toContain('authors: ["A B"]');
+    expect(header).toContain('source_file: "a ---.pdf"');
     expect(header).toContain("uploaded: 2026-09-01\nexported: 2026-09-27\n");
   });
 });

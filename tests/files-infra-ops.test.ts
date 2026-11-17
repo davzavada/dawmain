@@ -202,14 +202,14 @@ describe("database size for the guards (files_db_usage)", () => {
   });
 });
 
-describe("re-derivation budget (metadata saves)", () => {
+describe("re-derivation budget", () => {
   it("a run clears the request, counts against the library's day and books its CPU", async () => {
     const id = await uploaded("user_a", "x");
-    await t.owner.query("UPDATE documents SET doc_type = 'komentar', commented_act = 'zak:89/2012' WHERE id = $1", [id]);
+    await t.owner.query("UPDATE documents SET analyzer_version = 0 WHERE id = $1", [id]);
     vi.spyOn(process, "cpuUsage").mockReturnValue({ user: 7_000, system: 0 });
     expect(await reindexDocument(id, "user_a")).toBe("done");
     expect((await doc(id)).reindex_requested_at).toBeNull();
-    expect((await doc(id)).section_range).toBe("§ 2913–2914");
+    expect((await doc(id)).analyzer_version).toBe(ANALYZER_VERSION);
     expect(await usage("user_a")).toMatchObject({ reindexes: 1 });
     expect(Number((await usage("user_a")).cpu_ms)).toBeGreaterThanOrEqual(7);
     expect(await usage("global")).toMatchObject({ reindexes: 1 });
@@ -233,10 +233,10 @@ describe("re-derivation budget (metadata saves)", () => {
        ON CONFLICT (day, scope) DO UPDATE SET reindexes = EXCLUDED.reindexes`,
       [REINDEXES_PER_LIBRARY_DAY],
     );
-    await t.owner.query("UPDATE documents SET doc_type = 'komentar', commented_act = 'zak:89/2012' WHERE id = $1", [id]);
+    await t.owner.query("UPDATE documents SET analyzer_version = 0 WHERE id = $1", [id]);
     expect(await reindexDocument(id, "user_a")).toBe("deferred");
     expect((await doc(id)).reindex_requested_at).toBeInstanceOf(Date);
-    expect((await doc(id)).section_range).toBeNull();
+    expect((await doc(id)).analyzer_version).toBe(0);
     // Another library's budget is its own.
     expect(await reindexDocument(other, "user_b")).toBe("done");
 
@@ -244,7 +244,7 @@ describe("re-derivation budget (metadata saves)", () => {
     await t.owner.query("UPDATE documents SET reindex_requested_at = now() - interval '11 minutes' WHERE id = $1", [id]);
     const summary = await cron();
     expect(summary).toMatchObject({ ok: true, reindexed: 1 });
-    expect(await doc(id)).toMatchObject({ reindex_requested_at: null, section_range: "§ 2913–2914" });
+    expect(await doc(id)).toMatchObject({ reindex_requested_at: null, analyzer_version: ANALYZER_VERSION });
   });
 
   it("the cron leaves deferred requests alone unless the mode is on, and gives up on a broken document", async () => {
@@ -260,7 +260,7 @@ describe("re-derivation budget (metadata saves)", () => {
     process.env.FILES_MODE = "on";
     __resetGuardsForTests();
     expect(await cron()).toMatchObject({ reindexed: 0 });
-    expect(await doc(id)).toMatchObject({ status: "review", reindex_requested_at: null });
+    expect(await doc(id)).toMatchObject({ status: "ready", reindex_requested_at: null });
   });
 });
 
@@ -274,10 +274,10 @@ describe("re-derivation and the shared CPU allowance", () => {
 
   it("a save is deferred while today's or the 30-day CPU allowance is spent, and the cron waits too", async () => {
     const id = await uploaded("user_a", "x");
-    await t.owner.query("UPDATE documents SET doc_type = 'komentar', commented_act = 'zak:89/2012' WHERE id = $1", [id]);
+    await t.owner.query("UPDATE documents SET analyzer_version = 0 WHERE id = $1", [id]);
     await spendCpu(UPLOAD_GUARDS.globalCpuMsPerDay);
     expect(await reindexDocument(id, "user_a")).toBe("deferred");
-    expect(await doc(id)).toMatchObject({ section_range: null, reindex_requested_at: expect.any(Date) });
+    expect(await doc(id)).toMatchObject({ analyzer_version: 0, reindex_requested_at: expect.any(Date) });
     expect(await usage("user_a")).toMatchObject({ reindexes: 0 });
 
     // Spent over 30 days, not today: still deferred.
@@ -299,7 +299,7 @@ describe("re-derivation and the shared CPU allowance", () => {
     await t.owner.query("DELETE FROM usage_daily WHERE scope = 'global'");
     __resetGuardsForTests();
     expect(await cron()).toMatchObject({ ok: true, reindexed: 1 });
-    expect(await doc(id)).toMatchObject({ reindex_requested_at: null, section_range: "§ 2913–2914" });
+    expect(await doc(id)).toMatchObject({ reindex_requested_at: null, analyzer_version: ANALYZER_VERSION });
   });
 
   it("the library budget is bumped before it is read, and a refused save gives its bump back", async () => {

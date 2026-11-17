@@ -2281,6 +2281,14 @@ button.zd-file-row:hover .zd-file-title {
   flex: 1;
   min-height: 0;
 }
+/* …unless it is the library switch: then the part after it does. */
+.zd-dialog-head + .zd-lib-tabs {
+  flex: none;
+}
+.zd-lib-tabs + * {
+  flex: 1;
+  min-height: 0;
+}
 
 /* ==========================================================================
    Správa (app/sprava): accounts, switches and use of the tools. Prefixed adm-.
@@ -2877,4 +2885,351 @@ button.zd-file-row:hover .zd-file-title {
   .adm-texts {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* Vlastní soubory as a folder: the library switch (personal | teams), the list's filter, renaming. */
+.zd-lib-tabs {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 22px 0;
+}
+.zd-lib-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: none;
+  color: var(--body);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.zd-lib-tab > span:first-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zd-lib-tab:hover {
+  background: var(--surface);
+}
+.zd-lib-tab[aria-selected="true"] {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-weight: 500;
+}
+.zd-lib-tab-count {
+  color: var(--faint);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.zd-lib-tab[aria-selected="true"] .zd-lib-tab-count {
+  color: inherit;
+  opacity: 0.7;
+}
+/* The explorer: path bar, tools, folders and files in columns. */
+.zd-x-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.zd-x-path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  margin-right: auto;
+}
+.zd-x-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  color: var(--faint);
+}
+.zd-x-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.zd-x-crumb > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zd-x-crumb:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+.zd-x-crumb[aria-current="page"] {
+  color: var(--text);
+  font-weight: 600;
+}
+.zd-x-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.zd-layer .zd-x-tools input[type="search"],
+.zd-layer .zd-x-tools select {
+  width: auto;
+  padding: 5px 8px;
+  font-size: 13px;
+}
+.zd-layer .zd-x-tools .zd-x-filter {
+  width: 190px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+.zd-x-new {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.zd-x-folder {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--surface);
+}
+.zd-x-folder-form {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.zd-layer .zd-x-folder-form input[type="text"] {
+  flex: 1 1 160px;
+  width: auto;
+  min-width: 0;
+}
+.zd-layer .zd-x-folder-form select {
+  flex: 0 1 240px;
+  width: auto;
+  min-width: 0;
+}
+.zd-x-folder > .zd-error {
+  flex-basis: 100%;
+  margin: 0;
+}
+.zd-x-list {
+  --x-cols: 20px minmax(0, 1fr) 96px 104px 16px;
+  display: flex;
+  flex-direction: column;
+}
+.zd-x-list[data-team] {
+  --x-cols: 20px minmax(0, 1fr) 96px 104px 132px 16px;
+}
+.zd-x-list ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.zd-x-head,
+.zd-x-row {
+  display: grid;
+  grid-template-columns: var(--x-cols);
+  align-items: center;
+  gap: 12px;
+}
+.zd-x-head {
+  padding: 0 8px 8px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.zd-x-item + .zd-x-item {
+  border-top: 1px solid var(--surface);
+}
+.zd-x-row {
+  width: 100%;
+  padding: 9px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+}
+button.zd-x-row {
+  cursor: pointer;
+}
+button.zd-x-row:hover {
+  background: var(--surface);
+}
+button.zd-x-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.zd-x-icon {
+  color: var(--muted);
+}
+.zd-x-icon-folder {
+  color: var(--accent);
+}
+.zd-x-name {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.zd-x-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 400;
+}
+.zd-x-where {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+.zd-x-narrow {
+  display: none;
+}
+.zd-file[data-pending] .zd-x-narrow,
+.zd-x-where.zd-file-line-bad {
+  display: block;
+}
+.zd-x-cell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.zd-x-chevron {
+  color: var(--faint);
+}
+.zd-x-edit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px;
+}
+.zd-layer .zd-x-edit input[type="text"] {
+  flex: 1 1 180px;
+  width: auto;
+  min-width: 0;
+}
+.zd-x-edit-error {
+  margin: 0 8px 8px 40px;
+}
+.zd-x-foot {
+  margin: 0;
+  padding: 12px 8px 0;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--muted);
+}
+.zd-x-list .zd-file-open {
+  padding: 4px 8px 16px 40px;
+}
+.zd-layer select.zd-file-move {
+  width: auto;
+  max-width: 100%;
+  align-self: flex-start;
+}
+.zd-file-rename {
+  display: flex;
+  gap: 8px;
+}
+.zd-file-rename input {
+  flex: 1;
+  min-width: 0;
+}
+@media (max-width: 620px) {
+  .zd-x-list,
+  .zd-x-list[data-team] {
+    --x-cols: 20px minmax(0, 1fr) 16px;
+  }
+  .zd-x-head {
+    display: none;
+  }
+  .zd-x-cell {
+    display: none;
+  }
+  .zd-x-narrow {
+    display: block;
+  }
+  .zd-layer .zd-x-tools .zd-x-filter {
+    flex: 1 1 100%;
+    width: auto;
+    min-width: 0;
+  }
+  .zd-x-tools {
+    width: 100%;
+  }
+  .zd-file-rename {
+    flex-direction: column;
+  }
+  .zd-x-list .zd-file-open {
+    padding-left: 8px;
+  }
+}
+
+/* Správa → Týmy */
+.adm-input,
+.adm-select {
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+.adm-input {
+  flex: 1;
+}
+.adm-select {
+  max-width: 100%;
+}
+.adm-team-new {
+  border-top: 1px solid var(--line);
+}
+.adm-member-tools {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+.adm-quota-form {
+  flex-wrap: wrap;
 }

@@ -43,6 +43,7 @@ function detail(over: Record<string, unknown> = {}) {
   return {
     id: ID,
     libraryId: "user_a",
+    folderId: null as string | null,
     libraryName: "Osobní",
     title: "Komentář k OZ",
     fileName: "k.pdf",
@@ -95,8 +96,9 @@ afterEach(async () => {
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 /** Fake the API: summary, the list (the document as its list item), its detail, PATCH and the export. */
-async function setup(doc: ReturnType<typeof detail>, opts: { pro?: boolean; exportResponse?: () => Response } = {}) {
-  const summary: SummaryResponse = { state: "ok", mode: "on", termsAccepted: true, libraries: [library(opts.pro ?? true)] };
+async function setup(doc: ReturnType<typeof detail>, opts: { pro?: boolean; team?: boolean; folders?: unknown[]; exportResponse?: () => Response } = {}) {
+  const team = { ...library(true), id: "org_t", kind: "org" as const, name: "Kancelář", role: "member" as const, canManageAll: false, counts: null };
+  const summary: SummaryResponse = { state: "ok", mode: "on", termsAccepted: true, libraries: opts.team ? [{ ...library(false), counts: null }, team] : [library(opts.pro ?? true)] };
   let current = doc;
   vi.stubGlobal(
     "fetch",
@@ -105,11 +107,11 @@ async function setup(doc: ReturnType<typeof detail>, opts: { pro?: boolean; expo
       const body = typeof init.body === "string" ? JSON.parse(init.body) : undefined;
       calls.push({ url, method, body });
       if (url.startsWith("/api/files/summary")) return json(summary);
-      if (url.startsWith("/api/files/documents?")) return json({ libraryId: "user_a", documents: [current], total: 1 });
+      if (url.startsWith("/api/files/documents?")) return json({ libraryId: "user_a", documents: [current], total: 1, folders: opts.folders ?? [] });
       if (url.includes("/export")) return (opts.exportResponse ?? (() => new Response("", { status: 500 })))();
       if (method === "PATCH") {
-        const meta = (body as { meta: { doc_type: string } }).meta;
-        current = { ...current, docType: meta.doc_type, meta: { ...current.meta, ...meta }, metaVersion: current.metaVersion + 1 };
+        const change = body as { action: string; name?: string; folderId?: string | null };
+        current = change.action === "move" ? { ...current, folderId: change.folderId ?? null } : { ...current, fileName: change.name!, title: change.name!, metaVersion: current.metaVersion + 1 };
         return json(current);
       }
       return json(current);
@@ -151,8 +153,8 @@ describe("a file's open row", () => {
         }),
     });
     expect(host.textContent).toContain("Režim Pro tu už není aktivní");
-    expect(button("Uložit")).toBeUndefined();
-    expect(button("Smazat dokument")).toBeDefined();
+    expect(button("Přejmenovat")).toBeUndefined();
+    expect(button("Smazat soubor")).toBeDefined();
     await act(async () => button("Stáhnout text")!.click());
     await waitFor(() => downloaded !== null);
     expect(calls.at(-1)?.url).toBe(`/api/files/documents/${ID}/export?lib=user_a`);
@@ -171,27 +173,67 @@ describe("a file's open row", () => {
 
   it("who may not delete gets neither download nor delete (the server would refuse)", async () => {
     await setup(detail({ canDelete: false, mine: false }));
-    expect(button("Smazat dokument")).toBeUndefined();
+    expect(button("Smazat soubor")).toBeUndefined();
     expect(button("Stáhnout text")).toBeUndefined();
   });
 
-  it("the type switch saves at once; Uložit confirms the short form of that type", async () => {
-    await setup(detail({ canEdit: true, docType: "jine" }));
-    const typeButton = (label: string) => [...host.querySelectorAll('[role="radio"]')].find((b) => b.textContent === label) as HTMLButtonElement;
-    expect(typeButton("Komentář").getAttribute("aria-checked")).toBe("false");
-    await act(async () => typeButton("Kniha").click());
+  it("like a folder: the row shows the file's name, and renaming is the only edit", async () => {
+    await setup(detail({ canEdit: true, fileName: "scan_final.pdf" }));
+    expect(host.querySelector(".zd-file-title")?.textContent).toBe("scan_final.pdf");
+    // No type switch, no metadata form.
+    expect(host.querySelector('[role="radio"]')).toBeNull();
+    expect(host.querySelector(".zd-file-field")).toBeNull();
+    const input = host.querySelector(".zd-file-rename input") as HTMLInputElement;
+    expect(input.value).toBe("scan_final.pdf");
+    expect(button("Přejmenovat")!.disabled).toBe(true);
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "Komentář OZ.pdf");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => button("Přejmenovat")!.click());
     await waitFor(() => calls.some((c) => c.method === "PATCH"));
-    const saved = calls.find((c) => c.method === "PATCH")!;
-    expect(saved.body).toMatchObject({ action: "save", version: 1, meta: { doc_type: "kniha" } });
-    await waitFor(() => typeButton("Kniha").getAttribute("aria-checked") === "true");
-    // The short form of a book: publisher and ISBN, not a commented act.
-    const labels = [...host.querySelectorAll(".zd-file-field > span")].map((s) => s.textContent);
-    expect(labels).toEqual(["Název *", "Autoři", "Rok", "Vydavatel", "ISBN"]);
-    await act(async () => button("Uložit")!.click());
-    await waitFor(() => calls.filter((c) => c.method === "PATCH").length === 2);
-    expect(calls.filter((c) => c.method === "PATCH")[1].body).toMatchObject({ action: "confirm", version: 2, meta: { doc_type: "kniha", title: "Komentář k OZ" } });
+    expect(calls.find((c) => c.method === "PATCH")!.body).toEqual({ action: "rename", name: "Komentář OZ.pdf" });
     await waitFor(() => host.querySelector(".zd-ok-line") !== null);
-    expect(host.querySelector(".zd-ok-line")?.textContent).toBe("Uloženo.");
+    expect(host.querySelector(".zd-ok-line")?.textContent).toBe("Přejmenováno.");
+    expect(host.querySelector(".zd-file-title")?.textContent).toBe("Komentář OZ.pdf");
+  });
+
+  it("a team's library: tabs to switch, who uploaded a file, and a member cannot touch a colleague's file", async () => {
+    await setup(detail({ libraryId: "org_t", mine: false, canEdit: false, canDelete: false, uploadedByName: "Jana Nová" }), { team: true });
+    const tabs = [...host.querySelectorAll('[role="tab"]')];
+    expect(tabs.map((t) => t.textContent)).toEqual(["Osobní", "Kancelář"]);
+    // A member without Pro of their own lands in the team's library.
+    expect(tabs[1].getAttribute("aria-selected")).toBe("true");
+    expect(calls.some((c) => c.url === "/api/files/documents?lib=org_t")).toBe(true);
+    expect(host.querySelector(".zd-file-line")?.textContent).toContain("Jana Nová");
+    expect(button("Přejmenovat")).toBeUndefined();
+    expect(button("Smazat soubor")).toBeUndefined();
+  });
+
+  it("an explorer: folders first, a click opens one, the path leads back; a file moves with a select", async () => {
+    const folders = [
+      { id: "f-kom", parentId: null, name: "Komentáře", canManage: true },
+      { id: "f-oz", parentId: "f-kom", name: "Občanské právo", canManage: true },
+    ];
+    await setup(detail({ canEdit: true, fileName: "oz.pdf", folderId: "f-oz" }), { folders });
+    // The link to the file opened the folder it is in.
+    const path = () => [...host.querySelectorAll(".zd-x-crumb")].map((c) => c.textContent);
+    expect(path()).toEqual(["Osobní", "Komentáře", "Občanské právo"]);
+    expect(host.querySelector(".zd-file-title")?.textContent).toBe("oz.pdf");
+    const move = host.querySelector(".zd-file-move") as HTMLSelectElement;
+    expect([...move.options].map((o) => o.textContent)).toEqual(["Přesunout do: Osobní", "Přesunout do: Osobní / Komentáře", "Je v: Osobní / Komentáře / Občanské právo"]);
+    await act(async () => {
+      move.value = "f-kom";
+      move.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await waitFor(() => calls.some((c) => c.method === "PATCH"));
+    expect(calls.find((c) => c.method === "PATCH")!.body).toEqual({ action: "move", folderId: "f-kom" });
+    // Up one level: the subfolder is listed (now empty), with the file next to it.
+    await act(async () => (host.querySelectorAll(".zd-x-crumb")[1] as HTMLElement).click());
+    await waitFor(() => path().length === 2);
+    const rows = [...host.querySelectorAll(".zd-x-title")].map((r) => r.textContent);
+    expect(rows).toEqual(["Občanské právo", "oz.pdf"]);
+    expect(host.querySelector(".zd-x-row .zd-x-cell")?.textContent).toBe("prázdná");
   });
 
   it("a file still being processed only spins: no row to open", async () => {

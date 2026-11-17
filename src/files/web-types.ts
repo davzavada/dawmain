@@ -6,7 +6,7 @@
  */
 
 import type { FilesMode } from "./config";
-import type { BibMeta, ConversionQuality, DocStatus, DocType, FileKind, PageLabelSource, ProposedMeta, Rights } from "./types";
+import type { ConversionQuality, DocStatus, FileKind, PageLabelSource, Rights } from "./types";
 
 /** Per-library document counts. */
 export interface LibraryDocCounts {
@@ -23,9 +23,9 @@ export interface LibraryDocCounts {
 /** One library as the modal, the home page and the nav see it. */
 export interface LibrarySummary {
   id: string;
-  kind: "user";
+  kind: "user" | "org";
   name: string;
-  role: "owner";
+  role: "owner" | "admin" | "member";
   pro: boolean;
   canUpload: boolean;
   canManageAll: boolean;
@@ -45,7 +45,7 @@ export type SummaryResponse =
       /** Effective mode: "on", "readonly" (search, read, delete — no uploads) or "off". */
       mode: FilesMode;
       termsAccepted: boolean;
-      /** The personal library (Pro or not); empty for a banned account. */
+      /** The personal library (Pro or not) first, then the teams the user belongs to; empty for a banned account. */
       libraries: LibrarySummary[];
       /** UKAŽ (the doctrine tools) is switched on for this account; the home page shows the row greyed out without it. Absent in older hints: off. */
       ukaz?: boolean;
@@ -55,7 +55,9 @@ export type SummaryResponse =
 export interface DocumentListItem {
   id: string;
   libraryId: string;
-  /** Confirmed (or provisional) title; the file name until ingest wrote one. */
+  /** The folder the file sits in; null at the library's root. */
+  folderId: string | null;
+  /** The file's name without its extension — what the assistant cites. */
   title: string;
   fileName: string;
   fileKind: FileKind;
@@ -64,13 +66,12 @@ export interface DocumentListItem {
   statusDetail: string | null;
   uploadedAt: string;
   mine: boolean;
-  /** May edit metadata: a Pro library and its owner. */
+  /** Who uploaded it, for a team library's list (a short name); null in a personal library or when unknown. */
+  uploadedByName?: string | null;
+  /** May rename it / edit metadata: a Pro library, and its owner, the team's admin or the uploader. */
   canEdit: boolean;
-  /** May delete and export the text: the owner — Pro not required. */
+  /** May delete and export the text: the owner, the team's admin or the uploader — Pro not required. */
   canDelete: boolean;
-  docType: DocType;
-  /** Where an article appeared ("Právník 2/2024"); null for other types. */
-  publication: string | null;
   /** Pages of the PDF; null for a text without pages. */
   physicalPages: number | null;
   billablePages: number;
@@ -78,19 +79,27 @@ export interface DocumentListItem {
   flags: string[];
 }
 
+/** One folder of a library's tree (the whole tree travels with the list). */
+export interface FolderItem {
+  id: string;
+  /** The folder it sits in; null at the library's root. */
+  parentId: string | null;
+  name: string;
+  /** May rename, move and delete it: who made it, the library's owner or the team's admin. */
+  canManage: boolean;
+}
+
 export interface DocumentListResponse {
   libraryId: string;
   documents: DocumentListItem[];
   total: number;
+  /** Every folder of the library, by name. */
+  folders: FolderItem[];
 }
 
-/** The detail / review panel. */
+/** One file in full (the answer to a rename or a move). */
 export interface DocumentDetail extends DocumentListItem {
   libraryName: string;
-  meta: BibMeta;
-  proposed: ProposedMeta | null;
-  metaVersion: number;
-  confirmedAt: string | null;
   charCount: number;
   pageLabelSource: PageLabelSource;
   converter: string;
@@ -104,6 +113,4 @@ export interface DocumentDetail extends DocumentListItem {
 export interface ErrorBody {
   error: string;
   duplicate?: { id: string; title: string | null };
-  /** 422 from the metadata form: field → Czech message. */
-  fields?: Record<string, string>;
 }

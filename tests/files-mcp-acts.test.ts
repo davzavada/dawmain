@@ -66,7 +66,6 @@ async function ingest(
     quality,
     hints: {},
     rights: "vlastni",
-    doc_type_hint: meta.doc_type,
   };
   const scoped = <T>(fn: (db: Queryable) => Promise<T>) => withScope([lib], fn);
   const inserted = await scoped((db) =>
@@ -247,9 +246,9 @@ describe("resolveActFilter reads EU citations as EU acts (MCP-6)", () => {
     expect(implicitAct(queryIdentKeys("OZ náhrada škody"))).toBeNull();
   });
 
-  it("the no-hit note names the act filter, explicit or from the query", () => {
+  it("the no-hit note names the explicit act filter; an act named with a § in the query filters nothing", () => {
     expect(actFilterNote({ act: "zak:89/2012", name: "občanský zákoník" }, [])).toMatch(/^Filtered by act zak:89\/2012 \(občanský zákoník\)/);
-    expect(actFilterNote(null, ["§ 2913 OZ ananas"])).toMatch(/commentaries on zak:89\/2012 \(občanský zákoník\) and passages citing that §/);
+    expect(actFilterNote(null, ["§ 2913 OZ ananas"])).toBeNull();
     expect(actFilterNote(null, ["čl. 6 GDPR", "ananas"])).toBeNull();
   });
 });
@@ -277,7 +276,8 @@ describe("files_search and EU acts (MCP-6)", () => {
     expect(explicit.text).toMatch(/Filtered by act zak:89\/2012 \(občanský zákoník\)/);
     const implied = await call("files_search", { query: "§ 2913 OZ ananasová doložka" });
     expect(implied.text).toMatch(/No match in Vlastní zdroje/);
-    expect(implied.text).toMatch(/limited the search to commentaries on zak:89\/2012/);
+    // "§ 2913 OZ" in the query ranks, it does not filter: a file does not say which act it comments on.
+    expect(implied.text).not.toMatch(/Filtered by act|limited the search/);
     const none = await call("files_search", { query: "ananasová doložka" });
     expect(none.text).not.toMatch(/Filtered by act|limited the search/);
   });

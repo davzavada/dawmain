@@ -151,7 +151,6 @@ const uploadMetaSchema = z.object({
   quality: qualitySchema,
   hints: hintsSchema.default({}),
   rights: z.enum(RIGHTS),
-  doc_type_hint: z.enum(DOC_TYPES).optional(),
 });
 
 /** Base name of a client file name, one line, ≤ 255 chars. Pure. */
@@ -203,7 +202,6 @@ export function parseUploadMeta(raw: string): UploadMeta | null {
     quality: m.quality as ConversionQuality,
     hints: sanitizeHints(m.hints),
     rights: m.rights,
-    doc_type_hint: m.doc_type_hint,
   };
 }
 

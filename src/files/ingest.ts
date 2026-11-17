@@ -11,6 +11,7 @@ import {
   getDocument,
   ingestCandidates,
   MAX_INGEST_ATTEMPTS,
+  nameWithoutExtension,
   writeDocumentIndex,
   type DocumentRow,
 } from "./db/documents";
@@ -22,15 +23,12 @@ import { parseDmd } from "./dmd/parse";
 import { DmdLimitError, type ParsedDoc } from "./dmd/types";
 import { errorCode, logFilesError } from "./errors";
 import { effectiveMode, envOnlyMode } from "./guards";
-import { buildMetaTsv, deriveIndex, metaIdentKeys, sectionRangeOf } from "./index/derive";
-import { heuristicMeta } from "./meta/heuristics";
-import { buildMetaInput } from "./meta/input";
-import { proposalToBibMeta } from "./meta/schema";
-import { DOC_TYPES, type BibMeta, type DocType, type ProposedMeta } from "./types";
+import { buildMetaTsv, deriveIndex, metaIdentKeys } from "./index/derive";
+import type { BibMeta } from "./types";
 
 /**
  * Ingest: turns an uploaded document (documents.pending_gz, status
- * 'queued') into a stored, indexed one ('review', or 'ready'). Runs in
+ * 'queued') into a stored, indexed one ('ready'). Runs in
  * after() of the upload route, and is re-kicked by the status poll and the
  * daily cron (kickPendingIngests) — the documents row IS the queue:
  *
@@ -39,11 +37,6 @@ import { DOC_TYPES, type BibMeta, type DocType, type ProposedMeta } from "./type
  *   inflate    gunzip pending_gz with a byte cap, strict UTF-8, re-check
  *              the content hash the upload verified;
  *   parse      normalizeDmd → parseDmd (the same pure parser as the browser);
- *   metadata   the heuristic proposal (meta/heuristics.ts; nothing leaves
- *              the server) — BEFORE the index is derived, because the
- *              document type decides how it is derived (a commentary's
- *              statute quotes are weight D, its
- *              act turns bare "§ 2913" into parz: keys);
  *   derive     storage blocks, chunks with tsvectors, identifier keys;
  *   commit     ONE transaction: writeDocumentIndex, finishIngest, settle the
  *              page reservation, and for a re-upload (`replaces`) delete the
@@ -53,12 +46,9 @@ import { DOC_TYPES, type BibMeta, type DocType, type ProposedMeta } from "./type
  *              MAX_INGEST_ATTEMPTS, then 'error' and the reservation is
  *              released; a document over its attempts is failed on claim.
  *
- * Status after a successful run: 'ready' — the default, the upload is done
- * and the metadata can be edited later; 'review' (searchable only after the
- * user confirms) only in a library with autoConfirm: false. A document
- * that replaces an already confirmed one (authorized at upload: uploader or
- * admin, same library) starts from the confirmed metadata instead of a new
- * proposal (the same status rule applies). Never throws. Records the run's CPU time in usage_daily
+ * Status after a successful run: 'ready' — the document is searchable at
+ * once; there is no metadata to confirm. Never throws. Records the run's
+ * CPU time in usage_daily
  * (CpuMeter: the synchronous work only).
  */
 
@@ -165,15 +155,6 @@ export function inflatePending(gz: Uint8Array, contentSha256?: string | null): s
   return text;
 }
 
-const DOC_TYPE_SET = new Set<string>(DOC_TYPES);
-
-/** The uploader's type hint, stored by the upload as a "user" proposal. */
-function docTypeHint(row: DocumentRow): DocType | null {
-  const field = row.proposed_meta?.doc_type;
-  const value = field?.value;
-  return field?.source === "user" && typeof value === "string" && DOC_TYPE_SET.has(value) ? (value as DocType) : null;
-}
-
 interface Claimed {
   runToken: string;
   pendingGz: Uint8Array;
@@ -187,58 +168,22 @@ interface Prepared {
   text: string;
   parsed: ParsedDoc;
   meta: BibMeta;
-  proposed: ProposedMeta;
-  statusDetail: string | null;
-  status: "review" | "ready";
 }
 
 /**
- * Documents are ready (searchable) straight after ingest: the metadata is
- * proposed and stored, and the user corrects it later in the detail view
- * if needed. A library opts back into the review step with autoConfirm: false.
+ * Parse the text. Nothing is guessed about the document — no type, no
+ * authors, no commented act: a file is its name and its text. What is kept
+ * beside the name is only what the parser read off the text itself, the
+ * label of its marginal numbers.
  */
-export function autoConfirms(settings: Record<string, unknown>): boolean {
-  return settings.autoConfirm !== false;
-}
-
-const REPLACED_DETAIL = "Nový převod dokumentu: metadata jsou převzata z původní verze, zkontrolujte je a potvrďte.";
-
-/** Parse the text and settle the metadata (see the header). */
 function prepare(claim: Claimed, cpu: CpuMeter): Prepared {
-  const { row, replaced, settings } = claim;
-  const confirmedOld = replaced && replaced.status === "ready" && replaced.confirmed_at ? replaced : null;
-  const { text, parsed, heuristic } = cpu.run(() => {
+  const { row } = claim;
+  const { text, parsed } = cpu.run(() => {
     const text = normalizeDmd(inflatePending(claim.pendingGz, row.content_sha256)).text;
-    const parsed = parseDmd(text, { anchorLabel: confirmedOld?.meta.anchor_label ?? undefined });
-    const input = buildMetaInput(parsed, row.hints ?? {}, row.file_name, docTypeHint(row));
-    return { text, parsed, heuristic: heuristicMeta(input) };
+    return { text, parsed: parseDmd(text) };
   });
-
-  if (confirmedOld) {
-    // A better conversion of a confirmed document: keep what the user confirmed.
-    const old = confirmedOld.meta;
-    const meta: BibMeta = {
-      ...old,
-      section_range: old.doc_type === "komentar" ? (sectionRangeOf(parsed.sections) ?? old.section_range ?? null) : (old.section_range ?? null),
-      anchor_label: old.anchor_label ?? parsed.anchorLabel,
-    };
-    const status = autoConfirms(settings) ? "ready" : "review";
-    return {
-      text,
-      parsed,
-      meta,
-      proposed: confirmedOld.proposed_meta ?? heuristic,
-      statusDetail: status === "review" ? REPLACED_DETAIL : null,
-      status,
-    };
-  }
-
-  const proposed = heuristic;
-  const meta = proposalToBibMeta(proposed, row.file_name);
-  if (meta.doc_type === "komentar") meta.section_range = sectionRangeOf(parsed.sections);
-  if (!meta.anchor_label) meta.anchor_label = parsed.anchorLabel;
-  const status = autoConfirms(settings) ? "ready" : "review";
-  return { text, parsed, meta, proposed, statusDetail: null, status };
+  const meta: BibMeta = { ...row.meta, title: nameWithoutExtension(row.file_name), anchor_label: parsed.anchorLabel };
+  return { text, parsed, meta };
 }
 
 /** Write the index and finish, atomically; delete the replaced document. */
@@ -247,7 +192,7 @@ async function commit(claim: Claimed, p: Prepared, cpu: CpuMeter): Promise<void>
   const id = row.id;
   const libraryId = row.library_id;
   const { derived, blocks, metaTsv, identKeys } = cpu.run(() => {
-    const derived = deriveIndex(p.parsed, { docType: p.meta.doc_type, commentedAct: p.meta.commented_act ?? null });
+    const derived = deriveIndex(p.parsed, { docType: null });
     return {
       derived,
       blocks: splitStorageBlocks(p.text),
@@ -274,12 +219,13 @@ async function commit(claim: Claimed, p: Prepared, cpu: CpuMeter): Promise<void>
         id,
         libraryId,
         runToken,
-        proposed: p.proposed,
+        proposed: {},
         meta: p.meta,
         metaTsv,
         identKeys,
-        status: p.status,
-        statusDetail: p.statusDetail,
+        // Searchable at once: there is nothing for the user to confirm.
+        status: "ready",
+        statusDetail: null,
       });
       if (!finished) throw new LeaseLost();
       // The billed pages were fixed (and reserved) at upload; the counters follow that figure.
