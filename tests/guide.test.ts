@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { __setAccessLoaderForTests, emptyAccess, type Access } from "@/src/files/access";
@@ -15,6 +16,7 @@ import {
   skillBody,
   tailorManual,
   topicSections,
+  topicsFromString,
   unavailableSources,
 } from "@/src/mcp/tools/guide";
 import { INSTRUCTIONS, buildInstructions } from "@/src/mcp/server";
@@ -97,6 +99,18 @@ describe("dawmain_guide", () => {
     expect(two).not.toContain("## The memo");
     const all = (await handler({ topics: ["all"] }, SHARED_CTX)).content[0].text;
     expect(all).toBe(tailorManual(body, ["files", "zotero"]));
+  });
+
+  it("takes topics sent as a string by a client holding the old schema", () => {
+    expect(topicsFromString('["ns", "justice"]')).toEqual(["ns", "justice"]);
+    expect(topicsFromString("ns, justice")).toEqual(["ns", "justice"]);
+    expect(topicsFromString("NS justice")).toEqual(["ns", "justice"]);
+    expect(topicsFromString(["ns"])).toEqual(["ns"]);
+    let schema: z.ZodType | undefined;
+    registerGuide({ registerTool: (_n: string, c: { inputSchema: z.ZodType }) => void (schema = c.inputSchema) } as never);
+    expect(schema!.parse({ topics: '["ns", "justice"]' })).toEqual({ topics: ["ns", "justice"] });
+    expect(schema!.parse({})).toEqual({});
+    expect(() => schema!.parse({ topics: "nope" })).toThrow();
   });
 
   it("every topic heading is in SKILL.md, and core + topics put the whole manual back together", () => {

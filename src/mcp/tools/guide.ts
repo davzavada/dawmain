@@ -146,6 +146,24 @@ export function coreManual(body: string): string {
   return text.slice(0, at) + index + text.slice(at);
 }
 
+/** `topics` sent as a string (JSON array, or names split by commas or spaces) → an array; anything else as it is. Pure. */
+export function topicsFromString(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const text = value.trim();
+  if (text.startsWith("[")) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      /* fall through to the plain list */
+    }
+  }
+  return text
+    .replace(/[[\]"']/g, " ")
+    .split(/[\s,;]+/)
+    .map((name) => name.trim().toLowerCase())
+    .filter(Boolean);
+}
+
 /** The sections of `topics`, in the manual's order, each whole. Pure. */
 export function topicSections(body: string, topics: Topic[]): string {
   const parts: string[] = [];
@@ -196,8 +214,10 @@ export function registerGuide(server: McpServer): void {
       description:
         "The research manual for this connector (the dawmain-reserse skill): how to write the brief, query craft in the courts' terms, the user's own sources (Vlastní soubory, Zotero, UKAŽ), how to screen, locate and read decisions whole, how to check a decision is still good law, when to stop, and the memo layout with its citation forms. Call it ONCE at the start of every legal research — whenever the user asks what the law, the courts or the doctrine say ('právní rešerše', 'rešerše k', 'co na to judikatura', 'najdi judikaturu k § X', 'jak to soudy vykládají', 'je na to nějaký rozsudek', 'platí ještě', 'co říká zákon o', 'najdi mi rozhodnutí', 'co na to doktrína', 'najdi důvodovou zprávu', 'co chtěl zákonodárce') or describes a legal problem expecting an answer grounded in statute, case law and literature, including everyday practical questions that name no statute ('je možné / lze / smím / musím…', 'je to platné' about a smlouva, podpis, výpověď, lhůta…), questions about Slovak law ('na Slovensku', 'slovenský zákon', 'Z. z.', 'NS SR', CZ/SK comparison) and EU transposition ('který zákon transponuje směrnici 2004/48') — in the SAME turn as your first searches, not as a step before them. Without arguments it returns the core manual; `topics` returns one source's field reference (esbirka, psp, ns, nss, us, justice, sdeu, sk — Slovak law only when the user names Slovakia) — ask for it in the same turn as your first in-depth search of that source; all returns the whole manual. Nothing needs to be installed.",
       inputSchema: z.object({
+        // A client holding the schema from before `topics` existed sends it as
+        // a string — '["ns", "justice"]' or 'ns, justice' — so take that too.
         topics: z
-          .array(z.enum(["all", ...TOPIC_NAMES]))
+          .preprocess(topicsFromString, z.array(z.enum(["all", ...TOPIC_NAMES])))
           .optional()
           .describe("Source references to return instead of the core manual: esbirka, psp, ns, nss, us, justice, sdeu, sk; or \"all\" for the whole manual."),
       }),
