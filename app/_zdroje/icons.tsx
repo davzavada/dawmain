@@ -41,6 +41,9 @@ const PATHS = {
   // A shelf of books: the Zotero library (the menu item, the modal's panels).
   library: <path d="m16 6 4 14M12 6v14M8 8v12M4 4v16" />,
   check: <path d="M20 6 9 17l-5-5" />,
+  folder: <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z" />,
+  "folder-plus": <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2zM12 10v6M9 13h6" />,
+  "chevron-right": <path d="m9 6 6 6-6 6" />,
   alert: (
     <>
       <path d="M12 9v4M12 17h.01" />

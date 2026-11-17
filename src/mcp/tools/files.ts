@@ -13,6 +13,7 @@ import {
   pendingCounts,
   type DocumentRow,
 } from "@/src/files/db/documents";
+import { folderPath, listFolders } from "@/src/files/db/folders";
 import { getLibraries } from "@/src/files/db/libraries";
 import {
   documentShapes,
@@ -866,9 +867,21 @@ function libraryName(access: Access, id: string): string {
   return lib ? safeLibraryName(lib) : "?";
 }
 
-/** The reference line of a document (document-derived: inside the fence). */
+/** A file's name as the assistant cites it: the name the user gave it in the explorer, without its extension. */
+function displayName(row: DocumentRow): string {
+  const name = row.file_name.replace(/\.(pdf|docx|txt|md)$/i, "").trim() || row.file_name;
+  return sanitizeLine(name, 200);
+}
+
+/**
+ * The reference line of a document (user-chosen text: inside the fence).
+ * A file has no bibliographic record any more — only its name, which the
+ * user sees and can change — so that is what is cited: „name“, for a
+ * commentary's section with a named author "AUTHOR In: „name“".
+ */
 function referenceOf(row: DocumentRow, opts: { sectionAuthor?: string | null } = {}): string {
-  return citationLine({ ...row.meta, doc_type: row.meta.doc_type ?? null, title: row.meta.title ?? null }, opts);
+  const author = opts.sectionAuthor ? formatPersonName(opts.sectionAuthor) : "";
+  return author ? `${author} In: „${displayName(row)}“` : `„${displayName(row)}“`;
 }
 
 /** Provenance header of every read — tool-authored, before the fence. */
@@ -1773,7 +1786,7 @@ export function registerFiles(server: McpServer): void {
     {
       title: "Vlastní zdroje: libraries and documents",
       description:
-        "LIST the user's own libraries (Vlastní soubory, Pro) with their document counts — připraveno (searched), ke kontrole (awaiting the user's confirmation on the website), zpracovává se — and page usage, and the documents themselves: type, title, authors, year, status and id. Filters: doc_type, status, query (words of the title or authors), sort (added/title/year); limit up to 50, page. Only documents marked připraveno are searched and readable (files_search, files_get_document {id}).",
+        "LIST the user's own libraries (Vlastní soubory, Pro) with their document counts — připraveno (searched), ke kontrole (awaiting the user's confirmation on the website), zpracovává se — and page usage, and the documents themselves: type, name (what the user called the file — cite it by this name), folder, status and id. Filters: doc_type, status, query (words of the title or authors), sort (added/title/year); limit up to 50, page. Only documents marked připraveno are searched and readable (files_search, files_get_document {id}).",
       inputSchema: z.object({
         doc_type: z.array(docTypeSchema).max(7).optional().describe("Only these document types."),
         library: z.string().min(1).max(80).optional().describe('Only this library: "osobni" (the personal one) or a team\'s name or id, as files_list prints them. Omit to cover all of them.'),
@@ -2395,7 +2408,8 @@ async function filesList(
 ): Promise<ToolResult> {
   const scope = scopeFor(g.access, args.library);
   const libs = [...scope.libraryIds];
-  const { counts, libRows, list } = await withScope(libs, async (db) => ({
+  const { counts, libRows, list, folders } = await withScope(libs, async (db) => ({
+    folders: await listFolders(db, libs),
     counts: await pendingCounts(db, libs),
     libRows: await getLibraries(db, libs),
     list: await listDocuments(db, {
@@ -2416,11 +2430,10 @@ async function filesList(
   const first = (args.page - 1) * args.limit;
   const nonce = newNonce();
   const docLines = list.rows.map((row, i) => {
-    const names = (row.meta.authors.length ? row.meta.authors : row.meta.editors).map(formatPersonName).filter(Boolean);
-    const who = names.length ? ` — ${names.slice(0, 2).join(", ")}${names.length > 2 ? " a kol." : ""}` : "";
     const status = STATUS_LABELS[row.status] ?? row.status;
     const pages = row.physical_pages ? ` · ${formatCount(row.physical_pages)} s.` : "";
-    return `${first + i + 1}. [${typeLabel(row.meta.doc_type)}] „${sanitizeLine(row.meta.title || row.file_name, 160)}“${who}${row.meta.year ? ` (${row.meta.year})` : ""} · ${libraryName(g.access, row.library_id)} · ${status}${pages} · id ${row.id}`;
+    const folder = folderPath(folders, row.folder_id);
+    return `${first + i + 1}. [${typeLabel(row.meta.doc_type)}] „${displayName(row)}“${folder ? ` · složka ${sanitizeLine(folder, 200)}` : ""} · ${libraryName(g.access, row.library_id)} · ${status}${pages} · id ${row.id}`;
   });
   const hasMore = list.total > first + list.rows.length;
   const text = [

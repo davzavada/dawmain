@@ -19,6 +19,7 @@ export interface TeamCandidate {
   id: string;
   name: string;
   email: string;
+  banned: boolean;
 }
 
 const FEATURE_ROWS: Array<{ key: AdminFeature; title: string; hint: string }> = [
@@ -27,7 +28,9 @@ const FEATURE_ROWS: Array<{ key: AdminFeature; title: string; hint: string }> = 
   { key: "ukaz", title: "Doktrína (UKAŽ)", hint: "Členové hledají v katalogu UKAŽ" },
 ];
 
-export function TeamsConsole({ teams: initial, candidates, defaultQuotaPages }: { teams: AdminTeam[]; candidates: TeamCandidate[]; defaultQuotaPages: number }) {
+export function TeamsConsole({ teams: initial, people, defaultQuotaPages }: { teams: AdminTeam[]; people: TeamCandidate[]; defaultQuotaPages: number }) {
+  // Whom a team can take: every account that is not blocked.
+  const candidates = people.filter((p) => !p.banned);
   const [teams, setTeams] = useState(initial);
   const [selected, setSelected] = useState<string | null>(initial[0]?.id ?? null);
   const [message, setMessage] = useState<string | null>(null);
@@ -87,6 +90,7 @@ export function TeamsConsole({ teams: initial, candidates, defaultQuotaPages }: 
             key={team.id}
             team={team}
             candidates={candidates}
+            people={people}
             defaultQuotaPages={defaultQuotaPages}
             pending={pending}
             message={message}
@@ -149,6 +153,7 @@ function Switch({ label, on, disabled, onToggle }: { label: string; on: boolean;
 function TeamDetail({
   team,
   candidates,
+  people,
   defaultQuotaPages,
   pending,
   message,
@@ -159,6 +164,7 @@ function TeamDetail({
 }: {
   team: AdminTeam;
   candidates: TeamCandidate[];
+  people: TeamCandidate[];
   defaultQuotaPages: number;
   pending: boolean;
   message: string | null;
@@ -230,16 +236,19 @@ function TeamDetail({
         </h3>
         {team.members.map((m) => {
           const last = isLastAdmin(team, m.userId);
+          // An account deleted since (its membership goes with the next webhook or cron) has no name any more.
+          const who = people.find((p) => p.id === m.userId);
+          const name = who?.name ?? "Smazaný účet";
           return (
             <div className="adm-row" key={m.userId}>
               <div>
-                <b>{m.name}</b>
-                <span>{m.email}</span>
+                <b>{name}</b>
+                <span>{who?.email ?? m.userId}</span>
               </div>
               <span className="adm-member-tools">
                 <select
                   className="adm-select"
-                  aria-label={`Role: ${m.name}`}
+                  aria-label={`Role: ${name}`}
                   value={m.role}
                   disabled={pending || last}
                   title={last ? "Jediný správce týmu" : undefined}

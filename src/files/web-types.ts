@@ -55,6 +55,8 @@ export type SummaryResponse =
 export interface DocumentListItem {
   id: string;
   libraryId: string;
+  /** The folder the file sits in; null at the library's root. */
+  folderId: string | null;
   /** Confirmed (or provisional) title; the file name until ingest wrote one. */
   title: string;
   fileName: string;
@@ -80,10 +82,22 @@ export interface DocumentListItem {
   flags: string[];
 }
 
+/** One folder of a library's tree (the whole tree travels with the list). */
+export interface FolderItem {
+  id: string;
+  /** The folder it sits in; null at the library's root. */
+  parentId: string | null;
+  name: string;
+  /** May rename, move and delete it: who made it, the library's owner or the team's admin. */
+  canManage: boolean;
+}
+
 export interface DocumentListResponse {
   libraryId: string;
   documents: DocumentListItem[];
   total: number;
+  /** Every folder of the library, by name. */
+  folders: FolderItem[];
 }
 
 /** The detail / review panel. */

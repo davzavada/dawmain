@@ -32,6 +32,8 @@ vi.mock("next/server", async (importOriginal) => ({
 import { GET as exportGET } from "@/app/api/files/documents/[id]/export/route";
 import { DELETE as docDELETE, GET as docGET, PATCH as docPATCH } from "@/app/api/files/documents/[id]/route";
 import { GET as listGET, POST as uploadPOST } from "@/app/api/files/documents/route";
+import { DELETE as folderDELETE, PATCH as folderPATCH } from "@/app/api/files/folders/[id]/route";
+import { POST as foldersPOST } from "@/app/api/files/folders/route";
 import { GET as summaryGET } from "@/app/api/files/summary/route";
 import { POST as termsPOST } from "@/app/api/files/terms/route";
 import { __setAccessLoaderForTests, buildAccess, type Access } from "@/src/files/access";
@@ -44,7 +46,7 @@ import { normalizeDmd } from "@/src/files/dmd/normalize";
 import { buildTsQuery } from "@/src/files/text/analyze";
 import type { ConversionQuality, UploadMeta } from "@/src/files/types";
 import { EXPORTS_PER_DOC_PER_DAY, exportDisposition, exportFileNames, exportFor, exportHeader } from "@/src/files/web";
-import type { DocumentDetail, DocumentListResponse, SummaryResponse } from "@/src/files/web-types";
+import type { DocumentDetail, DocumentListResponse, FolderItem, SummaryResponse } from "@/src/files/web-types";
 import { createTestDb, type TestDb } from "./helpers/pglite";
 
 // ---------------------------------------------------------------------------
@@ -445,8 +447,8 @@ describe("rename (PATCH { action: \"rename\" })", () => {
   });
 });
 
-describe("a team's library (a Clerk organization)", () => {
-  const org = (role: string) => [{ role, organization: { id: "org_t", name: "Kancelář", slug: null, publicMetadata: { pro: true } } }];
+describe("a team's library", () => {
+  const org = (role: string) => [{ role: role === "org:admin" ? "admin" : "member", team: { id: "org_t", name: "Kancelář", pro: true, features: {}, quota_pages: null } }];
   beforeEach(() => {
     // user_a: a member with Pro of their own; user_x: the team's admin; user_none: a member without Pro.
     setAccess("user_a", buildAccess({ id: "user_a", publicMetadata: { pro: true } }, org("org:member")));
@@ -488,6 +490,129 @@ describe("a team's library (a Clerk organization)", () => {
     expect((await del("user_x", id)).status).toBe(404);
     signedIn("user_x");
     expect((await uploadPOST(uploadRequest("org_t", dmd(3, "t4")))).status).toBe(403);
+  });
+});
+
+describe("folders", () => {
+  const folderReq = (method: string, id: string | null, body?: unknown) => send(`/api/files/folders${id ? `/${id}` : ""}`, method, body);
+  async function make(user: string, lib: string, name: string, parentId: string | null = null): Promise<Response> {
+    signedIn(user);
+    return foldersPOST(folderReq("POST", null, { lib, parentId, name }));
+  }
+  const made = async (user: string, lib: string, name: string, parentId: string | null = null) => ((await (await make(user, lib, name, parentId)).json()) as FolderItem).id;
+  const patchFolder = async (user: string, id: string, body: unknown) => {
+    signedIn(user);
+    return folderPATCH(folderReq("PATCH", id, body), ctx("id", id));
+  };
+  const delFolder = async (user: string, id: string) => {
+    signedIn(user);
+    return folderDELETE(folderReq("DELETE", id), ctx("id", id));
+  };
+  const list = async (user: string, lib: string) => {
+    signedIn(user);
+    return (await (await listGET(get(`/api/files/documents?lib=${lib}`))).json()) as DocumentListResponse;
+  };
+  afterEach(async () => {
+    await t.owner.query("UPDATE documents SET folder_id = NULL");
+    await t.owner.query("DELETE FROM folders");
+  });
+
+  it("a tree of folders travels with the list; a file moves into a folder and back to the root", async () => {
+    const id = await uploaded("user_a", "user_a", "f1");
+    const top = await made("user_a", "user_a", "  Komentáře / OZ ");
+    const sub = await made("user_a", "user_a", "Svazek IX", top);
+    const before = await list("user_a", "user_a");
+    expect(before.folders).toEqual([
+      { id: top, parentId: null, name: "Komentáře OZ", canManage: true },
+      { id: sub, parentId: top, name: "Svazek IX", canManage: true },
+    ]);
+    expect(before.documents[0].folderId).toBeNull();
+    const moved = await patch("user_a", id, { action: "move", folderId: sub });
+    expect(moved.status).toBe(200);
+    expect(((await moved.json()) as DocumentDetail).folderId).toBe(sub);
+    expect((await list("user_a", "user_a")).documents[0].folderId).toBe(sub);
+    expect((await patch("user_a", id, { action: "move", folderId: null })).status).toBe(200);
+    expect((await list("user_a", "user_a")).documents[0].folderId).toBeNull();
+  });
+
+  it("names: one per place whatever the case, cleaned, never empty", async () => {
+    const top = await made("user_a", "user_a", "Vzory");
+    expect((await make("user_a", "user_a", "vzory")).status).toBe(409);
+    expect((await make("user_a", "user_a", "Vzory", top)).status).toBe(201);
+    expect((await make("user_a", "user_a", "   ")).status).toBe(422);
+    expect((await make("user_a", "user_a", "x".repeat(81))).status).toBe(422);
+    const other = await made("user_a", "user_a", "Jiná");
+    expect((await patchFolder("user_a", other, { action: "rename", name: "VZORY" })).status).toBe(409);
+    const renamed = await patchFolder("user_a", other, { action: "rename", name: "Smlouvy" });
+    expect(((await renamed.json()) as FolderItem).name).toBe("Smlouvy");
+  });
+
+  it("moving a folder: never into itself or below, never deeper than six levels", async () => {
+    const a = await made("user_a", "user_a", "A");
+    const b = await made("user_a", "user_a", "B", a);
+    expect((await patchFolder("user_a", a, { action: "move", parentId: b })).status).toBe(422);
+    expect((await patchFolder("user_a", a, { action: "move", parentId: a })).status).toBe(422);
+    let at = b;
+    for (let level = 3; level <= 6; level++) at = await made("user_a", "user_a", `L${level}`, at);
+    expect((await make("user_a", "user_a", "L7", at)).status).toBe(422);
+    const c = await made("user_a", "user_a", "C");
+    const d = await made("user_a", "user_a", "D", c);
+    expect((await patchFolder("user_a", c, { action: "move", parentId: at })).status).toBe(422);
+    expect((await patchFolder("user_a", d, { action: "move", parentId: null })).status).toBe(200);
+    expect((await list("user_a", "user_a")).folders.find((f) => f.id === d)?.parentId).toBeNull();
+  });
+
+  it("only an empty folder is deleted", async () => {
+    const id = await uploaded("user_a", "user_a", "f2");
+    const top = await made("user_a", "user_a", "Plná");
+    const sub = await made("user_a", "user_a", "Pod", top);
+    await patch("user_a", id, { action: "move", folderId: sub });
+    expect((await delFolder("user_a", top)).status).toBe(409);
+    expect((await delFolder("user_a", sub)).status).toBe(409);
+    await patch("user_a", id, { action: "move", folderId: null });
+    expect((await delFolder("user_a", sub)).status).toBe(200);
+    expect((await delFolder("user_a", top)).status).toBe(200);
+    expect((await list("user_a", "user_a")).folders).toEqual([]);
+  });
+
+  it("a stranger sees no folder of another library, and a file never goes into one", async () => {
+    const mine = await made("user_a", "user_a", "Moje");
+    const theirs = await made("user_x", "user_x", "Cizí");
+    const id = await uploaded("user_a", "user_a", "f3");
+    expect((await make("user_x", "user_a", "Vetřelec")).status).toBe(403);
+    expect((await make("user_x", "user_x", "Pod cizí", mine)).status).toBe(404);
+    expect((await patchFolder("user_x", mine, { action: "rename", name: "Přepsáno" })).status).toBe(404);
+    expect((await delFolder("user_x", mine)).status).toBe(404);
+    expect((await patch("user_a", id, { action: "move", folderId: theirs })).status).toBe(404);
+    expect((await patchFolder("user_a", mine, { action: "move", parentId: theirs })).status).toBe(404);
+    expect((await list("user_a", "user_a")).folders.map((f) => f.name)).toEqual(["Moje"]);
+  });
+
+  it("in a team every member makes folders; a member manages their own, the team's admin all", async () => {
+    const org = (role: string) => [{ role, team: { id: "org_t", name: "Kancelář", pro: true, features: {}, quota_pages: null } }];
+    setAccess("user_a", buildAccess({ id: "user_a", publicMetadata: {} }, org("member")));
+    setAccess("user_none", buildAccess({ id: "user_none", publicMetadata: {} }, org("member")));
+    setAccess("user_x", buildAccess({ id: "user_x", publicMetadata: {} }, org("admin")));
+    const folder = await made("user_none", "org_t", "Sdílené");
+    expect((await list("user_a", "org_t")).folders).toEqual([{ id: folder, parentId: null, name: "Sdílené", canManage: false }]);
+    expect((await patchFolder("user_a", folder, { action: "rename", name: "Moje" })).status).toBe(403);
+    expect((await delFolder("user_a", folder)).status).toBe(403);
+    // A colleague still files their own document there.
+    const id = await uploaded("user_a", "org_t", "f4");
+    expect((await patch("user_a", id, { action: "move", folderId: folder })).status).toBe(200);
+    expect((await patch("user_none", id, { action: "move", folderId: null })).status).toBe(403);
+    expect((await patchFolder("user_x", folder, { action: "rename", name: "Společné" })).status).toBe(200);
+    expect((await patch("user_x", id, { action: "move", folderId: null })).status).toBe(200);
+    expect((await delFolder("user_none", folder)).status).toBe(200);
+  });
+
+  it("read-only mode: no new folders or moves, an empty folder can still be deleted", async () => {
+    const folder = await made("user_a", "user_a", "Stará");
+    await t.runner([], (db) => setSystemState(db, MODE_OVERRIDE_KEY, { mode: "readonly" }));
+    __resetGuardsForTests();
+    expect((await make("user_a", "user_a", "Nová")).status).toBe(503);
+    expect((await patchFolder("user_a", folder, { action: "rename", name: "Jinak" })).status).toBe(503);
+    expect((await delFolder("user_a", folder)).status).toBe(200);
   });
 });
 

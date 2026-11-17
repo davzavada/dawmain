@@ -455,6 +455,7 @@ co čeká. Už aplikovaný soubor se nemění — oprava = nový soubor.
 | `0004_search.sql` | kanály hledání jako funkce `SECURITY DEFINER` (`files_search_chunks`, `files_search_meta`), aby dotazy role aplikace šly přes GIN indexy |
 | `0005_search_filters.sql` | přetížení obou funkcí: filtry `case_number` a `section` (§ i s vnořenými oddíly) přímo v SQL před stropem shod na dokument, strop na dokument až 200 (hledání uvnitř dokumentu), knihovna u každé shody, ISBN/DOI z metadat dokumentu; podpisy z `0004` zůstávají, dokud je volá nasazená verze |
 | `0006_always_enabled.sql` | přepínač zapnuto/vypnuto u dokumentu zmizel z webu i API: zapne zpět všechny dříve vypnuté dokumenty (sloupec `enabled` zůstává) |
+| `0007_teams_folders.sql` | týmy ve vlastní databázi (`teams`, `team_members`; knihovna týmu má id týmu `org_…`) a složky knihoven (`folders`, `documents.folder_id`) s RLS jako ostatní obsah |
 
 **Tahle verze potřebuje `0003` až `0006`** — pusť `--dry-run`, pak
 migraci, a teprve potom nasazuj. `0003`–`0005` přidávají jen sloupce `IF NOT
@@ -506,33 +507,22 @@ přepsat v Clerku (níže).
 
 ### Clerk
 
-1. *Configure → Organizations*: zapnout, **Membership optional** (osobní
-   účty zůstanou; s „required“ by každý uživatel včetně těch, kdo jen
-   připojují MCP, dostal úkol vybrat si organizaci), **vypnout Allow
-   user-created organizations**. Zdarma má tým nejvýš 20 členů.
+1. **Organizace v Clerku se nepoužívají.** Týmy jsou ve vlastní databázi
+   (`teams`, `team_members`, migrace `0007`; `src/files/db/teams.ts`), takže
+   počet členů nic neomezuje a v Clerku není co zapínat.
 2. **Týmy se spravují na stránce Správa → Týmy** (`/sprava/tymy`,
    `src/admin/teams-server.ts`): založení (název a správce týmu), zapnutí
    týmu a jeho funkcí, kvóta sdílené knihovny, členové a jejich role
    (správce / člen), zrušení týmu. Přidat jde jen účet, který se už na webu
-   registroval. Tým se zakládá **jménem svého budoucího správce** — kdyby
-   ho správce webu založil za sebe, stal by se členem a viděl by týmové
-   dokumenty. Zapnutý tým dává členům sdílenou knihovnu a své funkce
-   (Zotero, UKAŽ), i když sami Pro nemají; v okně Vlastních souborů se pak
-   přepíná mezi „Osobní“ a týmy. Totéž jde ručně přes API Clerku; tam také
-   vypni mazání týmu adminem (smazání týmu = výmaz celé knihovny):
-
-   ```bash
-   curl -sS https://api.clerk.com/v1/organizations \
-     -H "Authorization: Bearer $CLERK_SECRET_KEY" -H 'Content-Type: application/json' \
-     -d '{"name":"AK Novák","created_by":"user_…","max_allowed_memberships":20,"public_metadata":{"pro":true}}'
-   curl -sS -X PATCH https://api.clerk.com/v1/organizations/org_… \
-     -H "Authorization: Bearer $CLERK_SECRET_KEY" -H 'Content-Type: application/json' \
-     -d '{"admin_delete_enabled":false}'
-   ```
-
-3. **Pro se přiděluje v public metadata** (*Users → uživatel → Metadata*,
-   resp. *Organizations → tým → Metadata*): `{ "pro": true }` — přesně
-   boolean `true`. Vlastní kvóta: `{ "pro": true, "filesQuota": { "pages": 5000 } }`.
+   registroval. Správce webu se členem nestává, takže týmové dokumenty
+   nevidí. Zapnutý tým dává členům sdílenou knihovnu (její id je id týmu,
+   `org_…`) a své funkce (Zotero, UKAŽ), i když sami Pro nemají; v okně
+   Vlastních souborů se pak nahoře přepíná mezi „Osobní“ a týmy. Zrušený
+   tým: členové o knihovnu přijdou do minuty, její obsah smaže denní cron
+   do týdne.
+3. **Pro účtu se přiděluje v public metadata** (*Users → uživatel →
+   Metadata*, nebo na stránce Správa): `{ "pro": true }` — přesně
+   boolean `true`. Tým má tytéž přepínače ve své řádce tabulky `teams`. Vlastní kvóta: `{ "pro": true, "filesQuota": { "pages": 5000 } }`.
    Projeví se do minuty (přístup se cachuje 60 s). Členové týmu s Pro nahrávat
    smějí všichni; správce (`org:admin`) upravuje a maže všechno, člen jen své.
 4. **Vypnutí jednotlivých funkcí** (tamtéž, public metadata uživatele nebo
@@ -569,12 +559,16 @@ přepsat v Clerku (níže).
    ji oživí hned). **Před smazáním mu napiš** (slibují to zásady ochrany
    osobních údajů); knihovny s odebraným Pro ukazuje stránka provozu.
 6. **Webhook**: *Configure → Webhooks → Add endpoint*
-   `https://<doména>/api/webhooks/clerk`, události `user.deleted`,
-   `organization.deleted`, `organizationMembership.deleted`; *Signing
+   `https://<doména>/api/webhooks/clerk`, událost `user.deleted`; *Signing
    secret* → `CLERK_WEBHOOK_SIGNING_SECRET` → restart služby. Smazání
-   účtu nebo týmu označí knihovnu k výmazu za 7 dní (vymaže ji denní cron).
-   Doručení Clerk nezaručuje; výpadek webhooku zachytí denní kontrola Pro
-   v cronu (smazaný účet ani tým Pro nemá).
+   účtu hned smaže jeho souhlasy s podmínkami, počitadla čtení a volání
+   a členství v týmech; osobní knihovnu (dokumenty, složky, index) označí
+   k výmazu a denní cron ji do týdne smaže. Soubory, které účet nahrál do
+   týmové knihovny, zůstávají týmu. Připojení Zotera je v private metadata
+   Clerku a mizí s účtem. Doručení Clerk nezaručuje; výpadek webhooku
+   zachytí denní kontrola vlastníků v cronu — ale jen u účtů, které mají
+   knihovnu (účet bez knihovny, jehož webhook nedorazil, si u nás nechá
+   souhlas s podmínkami a případné členství v týmu).
 
 ### Pojistky bezplatných limitů
 

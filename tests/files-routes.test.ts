@@ -257,14 +257,18 @@ describe("POST /api/webhooks/clerk", () => {
     expect(audit.rows.map((r) => r.action)).toEqual(["user.deleted", "user.deleted"]);
   });
 
-  it("organization.deleted marks the team library; accounts without a library are a no-op", async () => {
+  it("a deleted account leaves its teams; teams are not Clerk's, so organization events change nothing; no library is a no-op", async () => {
     await t.owner.query("INSERT INTO libraries (id) VALUES ('org_b')");
+    await t.owner.query("INSERT INTO teams (id, name, created_by) VALUES ('org_b', 'Kancelář', 'user_admin')");
+    await t.owner.query("INSERT INTO team_members (team_id, user_id, role) VALUES ('org_b', 'user_never', 'member'), ('org_b', 'user_stays', 'admin')");
     mocks.verifyWebhook.mockResolvedValue({ type: "organization.deleted", data: { id: "org_b", deleted: true, object: "organization" } });
     expect((await hook()).status).toBe(200);
-    expect(await purgeAfter("org_b")).toBeInstanceOf(Date);
+    expect(await purgeAfter("org_b")).toBeNull();
     mocks.verifyWebhook.mockResolvedValue({ type: "user.deleted", data: { id: "user_never", deleted: true, object: "user" } });
     expect((await hook()).status).toBe(200);
     expect((await t.owner.query("SELECT 1 FROM libraries WHERE id = 'user_never'")).rows).toHaveLength(0);
+    expect((await t.owner.query("SELECT user_id FROM team_members")).rows).toEqual([{ user_id: "user_stays" }]);
+    await t.owner.query("DELETE FROM teams");
   });
 
   it("malformed ids, a user id in organization.deleted and unrelated events are ignored with 2xx", async () => {

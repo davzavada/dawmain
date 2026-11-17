@@ -1,50 +1,62 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * Správa → Týmy: the Server Functions (admin only, input validated) and the
- * Clerk calls behind them (src/admin/teams-server.ts). Clerk is mocked.
+ * Správa → Týmy: the Server Functions (admin only, input validated) and
+ * the team tables behind them (src/admin/teams-server.ts,
+ * src/files/db/teams.ts) — and what a team means for its members' access.
+ * Clerk is mocked; the database is PGlite with the real migrations.
  */
 
-const clerk = vi.hoisted(() => ({
-  userId: null as string | null,
-  getUser: vi.fn(),
-  getOrganization: vi.fn(),
-  getOrganizationList: vi.fn(),
-  getOrganizationMembershipList: vi.fn(),
-  createOrganization: vi.fn(),
-  updateOrganization: vi.fn(),
-  updateOrganizationMetadata: vi.fn(),
-  deleteOrganization: vi.fn(),
-  createOrganizationMembership: vi.fn(),
-  updateOrganizationMembership: vi.fn(),
-  deleteOrganizationMembership: vi.fn(),
-}));
+const clerk = vi.hoisted(() => ({ userId: null as string | null, getUser: vi.fn() }));
 
 vi.mock("@clerk/nextjs/server", () => ({
   auth: async () => ({ userId: clerk.userId }),
-  clerkClient: async () => ({ users: { getUser: clerk.getUser }, organizations: clerk }),
+  clerkClient: async () => ({ users: { getUser: clerk.getUser } }),
 }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
-import { changeTeamAction, createTeamAction, deleteTeamAction, setTeamMemberAction } from "@/app/sprava/tymy/actions";
+import { changeTeamAction, createTeamAction, deleteTeamAction, renameTeamAction, setTeamMemberAction } from "@/app/sprava/tymy/actions";
+import type { AdminTeam } from "@/src/admin/teams";
 import { listAdminTeams } from "@/src/admin/teams-server";
+import { __setAccessLoaderForTests, getAccess, libraryOwnerState } from "@/src/files/access";
+import { setScopeRunner } from "@/src/files/db/client";
+import { ensureLibrary } from "@/src/files/db/libraries";
+import { forgetMemberships } from "@/src/files/db/teams";
+import { createTestDb, type TestDb } from "./helpers/pglite";
 
 const ADMIN = "user_admin1";
-const clerkError = (status: number) => Object.assign(new Error(`Clerk ${status}`), { code: "api_response_error", status });
-const member = (userId: string, role: string) => ({ role, publicUserData: { userId, identifier: `${userId}@x.cz`, firstName: null, lastName: null } });
+let t: TestDb;
 
+beforeAll(async () => {
+  t = await createTestDb();
+});
+afterAll(async () => {
+  setScopeRunner(null);
+  await t.close();
+});
 beforeEach(() => {
-  for (const fn of Object.values(clerk)) if (typeof fn === "function") fn.mockReset();
+  clerk.getUser.mockReset();
+  clerk.getUser.mockImplementation(async (id: string) => ({ id, publicMetadata: {} }));
   clerk.userId = ADMIN;
   process.env.ADMIN_USER_IDS = ADMIN;
-  clerk.getOrganization.mockResolvedValue({ id: "org_t", name: "Kancelář", publicMetadata: { pro: true } });
-  clerk.getOrganizationMembershipList.mockResolvedValue({ data: [member("user_a", "org:admin"), member("user_b", "org:member")] });
+  process.env.FILES_DATABASE_URL = "postgres://test";
+  setScopeRunner(t.runner);
+  __setAccessLoaderForTests(null);
+});
+afterEach(async () => {
+  delete process.env.FILES_DATABASE_URL;
+  for (const table of ["team_members", "teams", "audit_log", "libraries"]) await t.owner.query(`DELETE FROM ${table}`);
 });
 
+async function made(name = "Kancelář", admin = "user_a"): Promise<AdminTeam> {
+  const result = await createTeamAction(name, admin);
+  if (!result.ok || !result.team) throw new Error("team not created");
+  return result.team;
+}
+
 describe("Týmy: Server Functions", () => {
-  it("anyone but an admin is refused before Clerk is asked for anything", async () => {
+  it("anyone but an admin is refused before anything is written", async () => {
     clerk.userId = "user_nobody";
-    clerk.getUser.mockResolvedValue({ id: "user_nobody", publicMetadata: {} });
     for (const result of [
       await createTeamAction("Kancelář", "user_a"),
       await changeTeamAction("org_t", { kind: "pro", on: true }),
@@ -53,49 +65,82 @@ describe("Týmy: Server Functions", () => {
     ]) {
       expect(result).toEqual({ ok: false, error: "Nemáš oprávnění správce." });
     }
-    expect(clerk.createOrganization).not.toHaveBeenCalled();
-    expect(clerk.deleteOrganization).not.toHaveBeenCalled();
+    expect((await t.owner.query("SELECT 1 FROM teams")).rows).toHaveLength(0);
   });
 
-  it("creates a team with its first admin; a bad name or admin never reaches Clerk", async () => {
+  it("creates a team with its first admin — off, and the website's admin is not a member", async () => {
     expect((await createTeamAction(" ", "user_a")).ok).toBe(false);
     expect((await createTeamAction("Kancelář", "org_x")).ok).toBe(false);
-    expect(clerk.createOrganization).not.toHaveBeenCalled();
-    clerk.createOrganization.mockResolvedValue({ id: "org_t" });
-    const made = await createTeamAction("  Kancelář ", "user_a");
-    expect(clerk.createOrganization).toHaveBeenCalledWith({ name: "Kancelář", createdBy: "user_a", maxAllowedMemberships: 20 });
-    expect(made).toMatchObject({ ok: true, team: { id: "org_t", members: [{ userId: "user_a", role: "admin" }, { userId: "user_b", role: "member" }] } });
+    const team = await made("  Kancelář ");
+    expect(team).toMatchObject({ name: "Kancelář", pro: false, quotaPages: null, members: [{ userId: "user_a", role: "admin" }] });
+    expect(team.id).toMatch(/^org_[A-Za-z0-9]{24}$/);
+    expect(await listAdminTeams()).toEqual({ state: "ok", teams: [team] });
   });
 
-  it("a switch becomes the organization's public metadata, rebuilt from checked fields only", async () => {
-    await changeTeamAction("org_t", { kind: "feature", feature: "ukaz", on: true, extra: "x" } as never);
-    expect(clerk.updateOrganizationMetadata).toHaveBeenCalledWith("org_t", { publicMetadata: { features: { ukaz: true } } });
-    expect((await changeTeamAction("org_t", { kind: "role", admin: true } as never)).ok).toBe(false);
+  it("switches, quota and name; a change is rebuilt from checked fields only", async () => {
+    const { id } = await made();
+    await changeTeamAction(id, { kind: "pro", on: true });
+    await changeTeamAction(id, { kind: "feature", feature: "ukaz", on: true, extra: "x" } as never);
+    await changeTeamAction(id, { kind: "feature", feature: "zotero", on: false });
+    await changeTeamAction(id, { kind: "quota", pages: 50_000 });
+    const renamed = await renameTeamAction(id, "AK Novák");
+    expect(renamed).toMatchObject({ ok: true, team: { name: "AK Novák", pro: true, features: { files: true, zotero: false, ukaz: true }, quotaPages: 50_000 } });
+    expect((await changeTeamAction(id, { kind: "quota", pages: null })).ok && true).toBe(true);
+    expect((await changeTeamAction(id, { kind: "role", admin: true } as never)).ok).toBe(false);
     expect((await changeTeamAction("user_a", { kind: "pro", on: true })).ok).toBe(false);
-    expect(clerk.updateOrganizationMetadata).toHaveBeenCalledTimes(1);
+    expect(await changeTeamAction("org_missing", { kind: "pro", on: true })).toEqual({ ok: false, error: "Tým už neexistuje." });
   });
 
-  it("members: add, change the role, remove — but the last admin stays", async () => {
-    await setTeamMemberAction("org_t", "user_c", "member");
-    expect(clerk.createOrganizationMembership).toHaveBeenCalledWith({ organizationId: "org_t", userId: "user_c", role: "org:member" });
-    await setTeamMemberAction("org_t", "user_b", "admin");
-    expect(clerk.updateOrganizationMembership).toHaveBeenCalledWith({ organizationId: "org_t", userId: "user_b", role: "org:admin" });
-    await setTeamMemberAction("org_t", "user_b", null);
-    expect(clerk.deleteOrganizationMembership).toHaveBeenCalledWith({ organizationId: "org_t", userId: "user_b" });
+  it("members: add, change the role, remove — but the last admin stays; there is no cap on their number", async () => {
+    const { id } = await made();
+    for (let i = 0; i < 30; i++) await setTeamMemberAction(id, `user_m${i}`, "member");
+    const promoted = await setTeamMemberAction(id, "user_m0", "admin");
+    expect(promoted.ok && promoted.team?.members).toHaveLength(31);
+    expect(promoted.ok && promoted.team?.members.slice(0, 2).map((m) => m.role)).toEqual(["admin", "admin"]);
+    const removed = await setTeamMemberAction(id, "user_m0", null);
+    expect(removed.ok && removed.team?.members).toHaveLength(30);
     for (const role of ["member", null] as const) {
-      const refused = await setTeamMemberAction("org_t", "user_a", role);
-      expect(refused).toMatchObject({ ok: false, error: expect.stringContaining("aspoň jednoho správce") });
+      expect(await setTeamMemberAction(id, "user_a", role)).toMatchObject({ ok: false, error: expect.stringContaining("aspoň jednoho správce") });
     }
-    expect(clerk.deleteOrganizationMembership).toHaveBeenCalledTimes(1);
-    expect(clerk.updateOrganizationMembership).toHaveBeenCalledTimes(1);
   });
 
-  it("the list says when the Clerk instance has no organizations, and when Clerk is down", async () => {
-    clerk.getOrganizationList.mockResolvedValueOnce({ data: [{ id: "org_t", name: "Kancelář" }] });
-    expect(await listAdminTeams()).toMatchObject({ state: "ok", teams: [{ id: "org_t", members: [{ userId: "user_a" }, { userId: "user_b" }] }] });
-    clerk.getOrganizationList.mockRejectedValueOnce(clerkError(403));
-    expect(await listAdminTeams()).toEqual({ state: "disabled" });
-    clerk.getOrganizationList.mockRejectedValueOnce(clerkError(500));
-    expect(await listAdminTeams()).toEqual({ state: "failed" });
+  it("what a team gives its members: the shared library and its features, with no Pro of their own", async () => {
+    const { id } = await made();
+    await setTeamMemberAction(id, "user_b", "member");
+    expect((await getAccess("user_b")).all.map((l) => [l.id, l.pro])).toEqual([["user_b", false], [id, false]]);
+    await changeTeamAction(id, { kind: "pro", on: true });
+    await changeTeamAction(id, { kind: "quota", pages: 777 });
+    __setAccessLoaderForTests(null); // drop the cached access
+    const member = await getAccess("user_b");
+    expect(member.libraries).toEqual([{ id, kind: "org", name: "Kancelář", slug: null, role: "member", pro: true, canUpload: true, canManageAll: false, quotaPages: 777 }]);
+    expect(member).toMatchObject({ zotero: true, ukaz: false });
+    expect((await getAccess("user_a")).libraries[0]).toMatchObject({ id, role: "admin", canManageAll: true });
+    expect((await getAccess("user_stranger")).all.map((l) => l.id)).toEqual(["user_stranger"]);
+    expect(await libraryOwnerState(id)).toBe("pro");
+  });
+
+  it("deleting a team removes it and its memberships and marks its library for purge", async () => {
+    const { id } = await made();
+    await t.runner([id], (db) => ensureLibrary(db, id, "Kancelář"));
+    expect(await deleteTeamAction(id)).toEqual({ ok: true, team: null });
+    expect((await t.owner.query("SELECT 1 FROM team_members")).rows).toHaveLength(0);
+    const { rows } = await t.owner.query<{ due: boolean }>("SELECT purge_after > now() + interval '5 days' AS due FROM libraries WHERE id = $1", [id]);
+    expect(rows[0].due).toBe(true);
+    expect(await libraryOwnerState(id)).toBe("gone");
+    expect(await deleteTeamAction(id)).toEqual({ ok: false, error: "Tým už neexistuje." });
+  });
+
+  it("a deleted account leaves every team", async () => {
+    const a = await made("Tým A");
+    const b = await made("Tým B", "user_x");
+    await setTeamMemberAction(b.id, "user_a", "member");
+    expect((await t.runner([], (db) => forgetMemberships(db, "user_a"))).sort()).toEqual([a.id, b.id].sort());
+    expect((await t.owner.query("SELECT user_id FROM team_members")).rows).toEqual([{ user_id: "user_x" }]);
+  });
+
+  it("without the files database the page says so", async () => {
+    delete process.env.FILES_DATABASE_URL;
+    expect(await listAdminTeams()).toEqual({ state: "unconfigured" });
+    expect((await createTeamAction("Kancelář", "user_a")).ok).toBe(false);
   });
 });

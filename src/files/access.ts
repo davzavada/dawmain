@@ -2,28 +2,31 @@ import "server-only";
 import { clerkClient } from "@clerk/nextjs/server";
 import { TtlCache } from "@/src/sources/shared/cache";
 import type { Access, LibraryAccess } from "./access-types";
-import { LIMITS, ORG_ID_RE, USER_ID_RE } from "./config";
-import { clerkStatus } from "./errors";
+import { envMode, LIMITS, ORG_ID_RE, USER_ID_RE } from "./config";
+import { withScope } from "./db/client";
+import { getTeam, membershipsOf, type Membership } from "./db/teams";
+import { clerkStatus, logFilesError } from "./errors";
 
 export type { Access, LibraryAccess } from "./access-types";
 
 /**
- * Who may do what in which library — computed from Clerk on the server,
- * never from input, and never stored (no membership table to go stale):
+ * Who may do what in which library — computed on the server, never from
+ * input: the account from Clerk, its teams from the files database
+ * (`teams` / `team_members`, src/files/db/teams.ts):
  *
  *   - personal library `user_…`: Pro when `user.publicMetadata.pro === true`
  *     (strictly true — "true", 1 or {} are not Pro); the owner uploads and
  *     manages everything;
- *   - team library `org_…`: one per Clerk organization the user is a member
- *     of, Pro when the ORGANIZATION's `publicMetadata.pro === true` — the
- *     member needs no Pro of their own. Every member searches, reads and
- *     uploads; a member edits and deletes what they uploaded, the team's
- *     admin (Clerk role `org:admin`) everything;
+ *   - team library `org_…`: one per team the user is a member of, Pro when
+ *     the TEAM is switched on (`teams.pro`) — the member needs no Pro of
+ *     their own. Every member searches, reads and uploads; a member edits
+ *     and deletes what they uploaded, the team's admin everything;
  *   - quota: `publicMetadata.filesQuota.pages` (a positive number) on the
- *     user / the organization overrides LIMITS.personalPages / teamPages;
+ *     user, `teams.quota_pages` on a team, override LIMITS.personalPages /
+ *     teamPages;
  *   - banned or locked users get no library at all;
- *   - feature switches: `publicMetadata.features`, the same shape on the
- *     user and on the organization, e.g.
+ *   - feature switches: `publicMetadata.features` on the user and
+ *     `teams.features` on a team, the same shape, e.g.
  *     `{ "pro": true, "features": { "zotero": false } }`. Pro switches
  *     every feature on; `false` (strictly) switches one off. Features:
  *     `files` (Vlastní soubory: search, read, upload) and `zotero`. A
@@ -43,9 +46,8 @@ export type { Access, LibraryAccess } from "./access-types";
  * (list, delete, export — a user who lost Pro keeps control over what they
  * stored).
  *
- * Two Clerk calls per lookup, in parallel (getUser and the user's
- * organization memberships, which carry each organization with its
- * metadata), cached per user for 60 s on the
+ * One Clerk call (getUser) and one small query (the user's teams) per
+ * lookup, in parallel, cached per user for 60 s on the
  * instance; `fresh` (uploads, edits) accepts at most 10 s — which also caps
  * the Backend API rate one user can cause. Concurrent lookups of one user share a single request.
  * Cached objects are frozen: one warm instance serves many users at once,
@@ -179,40 +181,41 @@ export interface ClerkUserLike {
   publicMetadata?: unknown;
 }
 
-/** The subset of Clerk's OrganizationMembership the access needs. */
-export interface ClerkMembershipLike {
-  role?: string | null;
-  organization?: { id?: string; name?: string | null; slug?: string | null; publicMetadata?: unknown } | null;
+/** One membership as the access needs it (src/files/db/teams.ts Membership, or a plain object in tests). */
+export interface TeamMembershipLike {
+  role: string;
+  team: { id: string; name?: string | null; pro?: boolean; features?: unknown; quota_pages?: number | null };
 }
 
-/** Teams one user's access carries (Clerk caps memberships far lower; the sign-in hint keeps at most 20 libraries). */
+/** Teams one user's access carries (the sign-in hint keeps at most 20 libraries). */
 const MAX_TEAMS = 19;
 
 /**
  * One team library from a membership; null for a membership without a
- * usable organization. `filesOff`: the user has Vlastní soubory switched
- * off themselves, which holds in their teams too. Pure.
+ * usable team. `filesOff`: the user has Vlastní soubory switched off
+ * themselves, which holds in their teams too. Pure.
  */
-export function teamLibrary(membership: ClerkMembershipLike, filesOff = false): LibraryAccess | null {
-  const org = membership.organization;
-  if (!org || typeof org.id !== "string" || !ORG_ID_RE.test(org.id)) return null;
-  const pro = proFrom(org.publicMetadata) && !featureOff(org.publicMetadata, "files") && !filesOff;
-  const admin = membership.role === "org:admin";
+export function teamLibrary(membership: TeamMembershipLike, filesOff = false): LibraryAccess | null {
+  const team = membership.team;
+  if (!team || typeof team.id !== "string" || !ORG_ID_RE.test(team.id)) return null;
+  const pro = team.pro === true && !featureOff({ features: team.features }, "files") && !filesOff;
+  const admin = membership.role === "admin";
+  const quota = team.quota_pages;
   return {
-    id: org.id,
+    id: team.id,
     kind: "org",
-    name: (org.name ?? "").trim() || "Tým",
-    slug: org.slug ?? null,
+    name: (team.name ?? "").trim() || "Tým",
+    slug: null,
     role: admin ? "admin" : "member",
     pro,
     canUpload: pro,
     canManageAll: admin,
-    quotaPages: quotaFrom(org.publicMetadata, LIMITS.teamPages),
+    quotaPages: typeof quota === "number" && Number.isFinite(quota) && quota >= 1 ? Math.floor(quota) : LIMITS.teamPages,
   };
 }
 
-/** Access from a Clerk user and their organization memberships. Pure — unit-tested with plain objects. */
-export function buildAccess(user: ClerkUserLike, memberships: readonly ClerkMembershipLike[] = []): Access {
+/** Access from a Clerk user and their team memberships. Pure — unit-tested with plain objects. */
+export function buildAccess(user: ClerkUserLike, memberships: readonly TeamMembershipLike[] = []): Access {
   const userId = user.id;
   if (user.banned === true || user.locked === true) return emptyAccess(userId, true);
   const userPro = proFrom(user.publicMetadata);
@@ -230,13 +233,13 @@ export function buildAccess(user: ClerkUserLike, memberships: readonly ClerkMemb
     quotaPages: quotaFrom(user.publicMetadata, LIMITS.personalPages),
   };
   const teams: LibraryAccess[] = [];
-  // What the Pro teams grant their members (a team without Pro grants nothing).
+  // What the teams that are on grant their members (a team that is off grants nothing).
   const teamMeta: unknown[] = [];
   for (const membership of memberships) {
     const team = teamLibrary(membership, filesOff);
     if (!team || teams.some((t) => t.id === team.id)) continue;
     if (teams.length < MAX_TEAMS) teams.push(team);
-    if (proFrom(membership.organization?.publicMetadata)) teamMeta.push(membership.organization?.publicMetadata);
+    if (membership.team.pro === true) teamMeta.push({ features: membership.team.features });
   }
   teams.sort((a, b) => a.name.localeCompare(b.name, "cs") || a.id.localeCompare(b.id));
   const all = [personal, ...teams];
@@ -248,28 +251,28 @@ export function buildAccess(user: ClerkUserLike, memberships: readonly ClerkMemb
 }
 
 /**
- * The user's organization memberships. An instance without organizations
- * (or one that refuses the call) simply has no teams: 403/404 is an empty
- * list, so the personal library never depends on the teams being set up.
- * Anything else throws like a failed getUser.
+ * The user's teams, from the files database. Where that database is not
+ * configured there are no teams; a failed query is logged and read as "no
+ * teams" too, so the account's own Pro (Zotero, UKAŽ, which need no files
+ * database at all) never goes down with it. A file route that follows
+ * reaches the same database and fails there on its own.
  */
-async function loadMemberships(client: Awaited<ReturnType<typeof clerkClient>>, userId: string): Promise<ClerkMembershipLike[]> {
+async function loadMemberships(userId: string): Promise<Membership[]> {
+  if (envMode() === "unconfigured") return [];
   try {
-    const { data } = await client.users.getOrganizationMembershipList({ userId, limit: 100 });
-    return data;
+    return await withScope([], (db) => membershipsOf(db, userId));
   } catch (error) {
-    const status = clerkStatus(error);
-    if (status === 403 || status === 404) return [];
-    throw error;
+    logFilesError("access.teams", error);
+    return [];
   }
 }
 
 async function loadFromClerk(userId: string): Promise<Access> {
   const client = await clerkClient();
   let user: ClerkUserLike;
-  let memberships: ClerkMembershipLike[];
+  let memberships: Membership[];
   try {
-    [user, memberships] = await Promise.all([client.users.getUser(userId), loadMemberships(client, userId)]);
+    [user, memberships] = await Promise.all([client.users.getUser(userId), loadMemberships(userId)]);
   } catch (error) {
     if (clerkStatus(error) === 404) return emptyAccess(userId);
     throw error;
@@ -290,21 +293,21 @@ export function __setOwnerLookupForTests(lookup: OwnerLookup | null): void {
 }
 
 /**
- * Does the owner of a library still exist in Clerk, and is it Pro? Pro
- * alone — deliberately not the feature switches: `features.files: false`
- * pauses Vlastní soubory, it must never start the 90-day purge. One
- * Backend API call: getUser for a personal library, getOrganization for a
- * team's (`org_…`). A 404 is "gone" (the deletion webhook may have been
- * missed); other failures throw.
+ * Does the owner of a library still exist, and is it Pro? Pro alone —
+ * deliberately not the feature switches: `features.files: false` pauses
+ * Vlastní soubory, it must never start the 90-day purge. A personal
+ * library asks Clerk (getUser; a 404 is "gone" — the deletion webhook may
+ * have been missed), a team's (`org_…`) the `teams` table (a deleted team
+ * is "gone", one switched off "not_pro"). Other failures throw.
  */
 export async function libraryOwnerState(libraryId: string): Promise<OwnerState> {
   if (testOwnerLookup) return testOwnerLookup(libraryId);
+  if (ORG_ID_RE.test(libraryId)) {
+    const team = await withScope([], (db) => getTeam(db, libraryId));
+    return team ? (team.pro ? "pro" : "not_pro") : "gone";
+  }
   const client = await clerkClient();
   try {
-    if (ORG_ID_RE.test(libraryId)) {
-      const org = await client.organizations.getOrganization({ organizationId: libraryId });
-      return proFrom(org.publicMetadata) ? "pro" : "not_pro";
-    }
     const user = await client.users.getUser(libraryId);
     return proFrom(user.publicMetadata) && !user.banned ? "pro" : "not_pro";
   } catch (error) {

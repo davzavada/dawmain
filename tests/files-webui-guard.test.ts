@@ -39,6 +39,7 @@ const SUMMARY: SummaryResponse = { state: "ok", mode: "on", termsAccepted: true,
 const ITEM: DocumentListItem = {
   id: DOC,
   libraryId: "user_a",
+  folderId: null,
   title: "Komentář k OZ",
   fileName: "k.pdf",
   fileKind: "pdf",

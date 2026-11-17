@@ -65,6 +65,8 @@ export interface DocumentRow {
    *  doc_type reads as "jine" and a missing title as the file name. */
   meta: BibMeta;
   // Additions beyond the contract (additive):
+  /** The folder the document sits in (same library), or null at the library's root. */
+  folder_id: string | null;
   /** Ingest attempts so far (claimForIngest increments). */
   attempts: number;
   /** Document this upload replaces (same library), or null. */
@@ -142,6 +144,7 @@ const META_COLUMNS = [
 const ROW_COLUMNS = [
   "id",
   "library_id",
+  "folder_id",
   "status",
   "status_detail",
   "uploaded_by",
@@ -251,6 +254,7 @@ export function mapDocumentRow(r: Record<string, unknown>): DocumentRow {
     injection_flag: r.injection_flag === true,
     analyzer_version: numOrNull(r.analyzer_version),
     meta,
+    folder_id: strOrNull(r.folder_id),
     attempts: num(r.attempts),
     replaces: strOrNull(r.replaces),
     enabled: r.enabled !== false,

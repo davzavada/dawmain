@@ -14,10 +14,9 @@ import { buildUploadMeta, gzipText, missingBrowserFeatures, sha256Text, UNSUPPOR
 /**
  * Upload inside the Vlastní soubory modal (wireframe 04): drop files, and
  * each one — one at a time, the rest wait in a queue — is converted to text
- * in the browser, gzipped and posted, with no further step. The server
- * classifies it (komentář, článek, kniha…) and proposes the metadata; the
- * document is searchable once it is processed, and the user changes the
- * type or the metadata later in its row of the list. Only the converted Markdown text goes to the server; the
+ * in the browser, gzipped and posted, with no further step, and put into
+ * the folder that is open. The document is searchable once the server has
+ * processed it; the user renames or moves it later in its row of the list. Only the converted Markdown text goes to the server; the
  * original file never leaves the browser and nothing of it is kept.
  *
  * Uploading accepts the content rules stated under the dropzone (the
@@ -122,7 +121,23 @@ async function processFile(
   return outcome.id;
 }
 
-export function Uploader({ library, onUploaded }: { library: LibrarySummary; onUploaded: (id: string) => void }) {
+/** Put the file just uploaded into the folder that was open (the upload itself lands at the library's root). */
+async function intoFolder(id: string, folderId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/files/documents/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "move", folderId }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** `folderId`: the folder shown in the list — new files go there (null: the library's root). */
+export function Uploader({ library, folderId = null, onUploaded }: { library: LibrarySummary; folderId?: string | null; onUploaded: (id: string) => void }) {
   const [queue, setQueue] = useState<File[]>([]);
   const [current, setCurrent] = useState<{ file: File; progress: string } | null>(null);
   const [log, setLog] = useState<LogEntry[]>([]);
@@ -147,8 +162,8 @@ export function Uploader({ library, onUploaded }: { library: LibrarySummary; onU
   }, [hasWork]);
 
   // The latest props for the running upload (the quota moves after each document).
-  const props = useRef({ library, onUploaded });
-  props.current = { library, onUploaded };
+  const props = useRef({ library, folderId, onUploaded });
+  props.current = { library, folderId, onUploaded };
 
   // Take the next file from the queue whenever nothing is in progress.
   // The ref keeps a re-run of the effect (React's dev double-invoke) from uploading a file twice.
@@ -160,10 +175,14 @@ export function Uploader({ library, onUploaded }: { library: LibrarySummary; onU
     setQueue(rest);
     setCurrent({ file, progress: "Připravuji převod…" });
     const update = (progress: string) => setCurrent((c) => (c && c.file === file ? { ...c, progress } : c));
-    const { library: lib } = props.current;
+    // The folder open when the file's turn came: that is where the user dropped it.
+    const { library: lib, folderId: folder } = props.current;
     void (async () => {
       try {
         const id = await processFile(file, lib, update);
+        if (folder && !(await intoFolder(id, folder))) {
+          setLog((l) => [{ name: file.name, ok: false, message: "Soubor je nahraný, ale do složky se ho nepodařilo zařadit. Najdete ho v kořeni knihovny." }, ...l].slice(0, 8));
+        }
         // Nothing to report here: the file's row in the list below spins until it is processed.
         props.current.onUploaded(id);
       } catch (error) {
@@ -216,7 +235,7 @@ export function Uploader({ library, onUploaded }: { library: LibrarySummary; onU
             Přetáhněte soubory sem, nebo <span className="zd-link">vyberte z počítače</span>
           </span>
           <span className="zd-dropzone-sub">
-            PDF, DOCX, TXT nebo MD, nejvýš {maxMb} MB. Převádí se na text přímo ve vašem prohlížeči; typ dokumentu rovnou zařadí server.
+            PDF, DOCX, TXT nebo MD, nejvýš {maxMb} MB. Převádí se na text přímo ve vašem prohlížeči.
           </span>
         </button>
         <input
@@ -236,7 +255,7 @@ export function Uploader({ library, onUploaded }: { library: LibrarySummary; onU
         <a href="/podminky" target="_blank" rel="noopener">
           pravidla
         </a>
-        ). Typ a údaje změníte po rozkliknutí řádku.
+        ).
       </p>
       {current ? (
         <div className="zd-row zd-upload-current">

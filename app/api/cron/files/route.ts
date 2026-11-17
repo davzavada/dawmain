@@ -1,4 +1,5 @@
 import { libraryOwnerState } from "@/src/files/access";
+import { forgetMemberships } from "@/src/files/db/teams";
 import { cronSecret, envMode } from "@/src/files/config";
 import { withScope } from "@/src/files/db/client";
 import { clearStalePending, ingestCandidates, MAX_INGEST_ATTEMPTS } from "@/src/files/db/documents";
@@ -227,6 +228,7 @@ async function runMaintenance(started: number): Promise<Summary> {
             // The user.deleted webhook was missed: what goes with the account goes now.
             await forgetTermsAcceptance(db, lib.id);
             await forgetUserUsage(db, lib.id);
+            await forgetMemberships(db, lib.id);
           }
           await audit(db, { libraryId: lib.id, actor: "cron", action: "library.owner_gone" });
           summary.scheduledPurges += 1;

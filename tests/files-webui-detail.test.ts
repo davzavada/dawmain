@@ -43,6 +43,7 @@ function detail(over: Record<string, unknown> = {}) {
   return {
     id: ID,
     libraryId: "user_a",
+    folderId: null as string | null,
     libraryName: "Osobní",
     title: "Komentář k OZ",
     fileName: "k.pdf",
@@ -95,7 +96,7 @@ afterEach(async () => {
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 /** Fake the API: summary, the list (the document as its list item), its detail, PATCH and the export. */
-async function setup(doc: ReturnType<typeof detail>, opts: { pro?: boolean; team?: boolean; exportResponse?: () => Response } = {}) {
+async function setup(doc: ReturnType<typeof detail>, opts: { pro?: boolean; team?: boolean; folders?: unknown[]; exportResponse?: () => Response } = {}) {
   const team = { ...library(true), id: "org_t", kind: "org" as const, name: "Kancelář", role: "member" as const, canManageAll: false, counts: null };
   const summary: SummaryResponse = { state: "ok", mode: "on", termsAccepted: true, libraries: opts.team ? [{ ...library(false), counts: null }, team] : [library(opts.pro ?? true)] };
   let current = doc;
@@ -106,11 +107,11 @@ async function setup(doc: ReturnType<typeof detail>, opts: { pro?: boolean; team
       const body = typeof init.body === "string" ? JSON.parse(init.body) : undefined;
       calls.push({ url, method, body });
       if (url.startsWith("/api/files/summary")) return json(summary);
-      if (url.startsWith("/api/files/documents?")) return json({ libraryId: "user_a", documents: [current], total: 1 });
+      if (url.startsWith("/api/files/documents?")) return json({ libraryId: "user_a", documents: [current], total: 1, folders: opts.folders ?? [] });
       if (url.includes("/export")) return (opts.exportResponse ?? (() => new Response("", { status: 500 })))();
       if (method === "PATCH") {
-        const name = (body as { name: string }).name;
-        current = { ...current, fileName: name, title: name, metaVersion: current.metaVersion + 1 };
+        const change = body as { action: string; name?: string; folderId?: string | null };
+        current = change.action === "move" ? { ...current, folderId: change.folderId ?? null } : { ...current, fileName: change.name!, title: change.name!, metaVersion: current.metaVersion + 1 };
         return json(current);
       }
       return json(current);
@@ -207,6 +208,32 @@ describe("a file's open row", () => {
     expect(host.querySelector(".zd-file-line")?.textContent).toContain("Jana Nová");
     expect(button("Přejmenovat")).toBeUndefined();
     expect(button("Smazat soubor")).toBeUndefined();
+  });
+
+  it("an explorer: folders first, a click opens one, the path leads back; a file moves with a select", async () => {
+    const folders = [
+      { id: "f-kom", parentId: null, name: "Komentáře", canManage: true },
+      { id: "f-oz", parentId: "f-kom", name: "Občanské právo", canManage: true },
+    ];
+    await setup(detail({ canEdit: true, fileName: "oz.pdf", folderId: "f-oz" }), { folders });
+    // The link to the file opened the folder it is in.
+    const path = () => [...host.querySelectorAll(".zd-x-crumb")].map((c) => c.textContent);
+    expect(path()).toEqual(["Osobní", "Komentáře", "Občanské právo"]);
+    expect(host.querySelector(".zd-file-title")?.textContent).toBe("oz.pdf");
+    const move = host.querySelector(".zd-file-move") as HTMLSelectElement;
+    expect([...move.options].map((o) => o.textContent)).toEqual(["Přesunout do: Osobní", "Přesunout do: Osobní / Komentáře", "Je v: Osobní / Komentáře / Občanské právo"]);
+    await act(async () => {
+      move.value = "f-kom";
+      move.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await waitFor(() => calls.some((c) => c.method === "PATCH"));
+    expect(calls.find((c) => c.method === "PATCH")!.body).toEqual({ action: "move", folderId: "f-kom" });
+    // Up one level: the subfolder is listed (now empty), with the file next to it.
+    await act(async () => (host.querySelectorAll(".zd-x-crumb")[1] as HTMLElement).click());
+    await waitFor(() => path().length === 2);
+    const rows = [...host.querySelectorAll(".zd-x-title")].map((r) => r.textContent);
+    expect(rows).toEqual(["Občanské právo", "oz.pdf"]);
+    expect(host.querySelector(".zd-x-row .zd-x-cell")?.textContent).toBe("prázdná");
   });
 
   it("a file still being processed only spins: no row to open", async () => {

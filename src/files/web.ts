@@ -9,7 +9,8 @@ import { LIBRARY_ID_RE, LIMITS, PAGE_CHARS, TERMS_VERSION, USER_ID_RE, UUID_RE, 
 import { withScope, type Queryable } from "./db/client";
 import { confirmDocument, deleteDocument, getDocument, listDocuments, renameDocument, updateDocumentMeta, type DocumentRow } from "./db/documents";
 import { documentPreviewText, libraryDocCounts, mergeIdentKeys, metaContext } from "./db/documents-web";
-import { forgetPages, getLibraries, releasePages } from "./db/libraries";
+import { createFolder, deleteFolder, depthOf, getFolder, heightOf, isDuplicate, isWithin, listFolders, MAX_DEPTH, MAX_FOLDER_NAME, MAX_FOLDERS, moveDocument, updateFolder, type FolderRow } from "./db/folders";
+import { ensureLibrary, forgetPages, getLibraries, releasePages } from "./db/libraries";
 import { loadReadDoc, loadText } from "./db/reading";
 import { acceptTerms, audit, bumpUsage, hasAcceptedTerms, usageSum } from "./db/usage";
 import { sanitizeLine } from "./dmd/normalize";
@@ -17,9 +18,9 @@ import { filesError, filesJson, FilesUserError, logFilesError, MESSAGES } from "
 import { buildMetaTsv, metaIdentKeys } from "./index/derive";
 import { bibMetaBaseSchema, bibMetaSchema } from "./meta/schema";
 import { reindexDocument } from "./reindex";
-import { ownedScope } from "./scope";
+import { ownedScope, writeScope } from "./scope";
 import type { BibMeta } from "./types";
-import type { DocumentDetail, DocumentListItem, LibrarySummary, SummaryResponse } from "./web-types";
+import type { DocumentDetail, DocumentListItem, DocumentListResponse, FolderItem, LibrarySummary, SummaryResponse } from "./web-types";
 
 /**
  * The web API of the Vlastní zdroje modal — the logic behind the thin
@@ -45,6 +46,8 @@ import type { DocumentDetail, DocumentListItem, LibrarySummary, SummaryResponse 
 
 /** Documents one list request returns (the modal shows a library at once). */
 const LIST_LIMIT = 200;
+/** …and a library with folders is listed whole, so the tree can be walked without asking again. */
+const TREE_LIMIT = 1_000;
 /** JSON bodies of the mutating routes; the metadata form is far below this. */
 const MAX_BODY_BYTES = 64 * 1024;
 /** First characters of the text shown in the detail panel. */
@@ -140,6 +143,7 @@ export function listItem(row: DocumentRow, lib: LibraryAccess, userId: string): 
   return {
     id: row.id,
     libraryId: row.library_id,
+    folderId: row.folder_id,
     title: row.meta.title || row.file_name,
     fileName: row.file_name,
     fileKind: row.file_kind,
@@ -234,20 +238,38 @@ export async function summaryFor(userId: string, opts: { fresh?: boolean } = {})
  * (ownedScope: a user who lost Pro can still see and delete what they
  * stored). Newest first, at most 200.
  */
-export async function listFor(userId: string, libraryId: string): Promise<{ libraryId: string; documents: DocumentListItem[]; total: number }> {
+export async function listFor(userId: string, libraryId: string): Promise<DocumentListResponse> {
   if (!LIBRARY_ID_RE.test(libraryId)) throw new FilesUserError(404, "Knihovna nenalezena.");
   const access = await getAccess(userId);
   const scope = ownedScope(access, libraryId);
   const lib = scope.libraries[0];
-  const { rows, total } = await withScope(scope.libraryIds, (db) =>
-    listDocuments(db, { libraryIds: [...scope.libraryIds], limit: LIST_LIMIT, offset: 0, sort: "added" }),
-  );
+  const { rows, total, folders } = await withScope(scope.libraryIds, async (db) => {
+    const list: DocumentRow[] = [];
+    let count = 0;
+    // listDocuments answers at most LIST_LIMIT a page.
+    for (let offset = 0; offset < TREE_LIMIT; offset += LIST_LIMIT) {
+      const page = await listDocuments(db, { libraryIds: [...scope.libraryIds], limit: LIST_LIMIT, offset, sort: "added" });
+      list.push(...page.rows);
+      count = page.total;
+      if (page.rows.length < LIST_LIMIT) break;
+    }
+    return { rows: list, total: count, folders: await listFolders(db, [...scope.libraryIds]) };
+  });
   const documents = rows.map((r) => listItem(r, lib, userId));
   if (lib.kind === "org") {
     const names = await uploaderNames(rows.map((r) => r.uploaded_by));
     rows.forEach((r, i) => (documents[i].uploadedByName = names.get(r.uploaded_by) ?? null));
   }
-  return { libraryId: lib.id, documents, total };
+  return { libraryId: lib.id, documents, total, folders: folders.map((f) => folderItem(f, lib, userId)) };
+}
+
+function folderItem(folder: FolderRow, lib: LibraryAccess, userId: string): FolderItem {
+  return { id: folder.id, parentId: folder.parent_id, name: folder.name, canManage: canManageFolder(lib, folder, userId) };
+}
+
+/** May rename, move and delete a folder: who made it, the library's owner or the team's admin. */
+function canManageFolder(lib: LibraryAccess, folder: FolderRow, userId: string): boolean {
+  return lib.canManageAll || folder.created_by === userId;
 }
 
 /** Uploaders' names stay put for ten minutes: a team's list is opened far more often than a name changes. */
@@ -316,18 +338,19 @@ const patchSchema = z.discriminatedUnion("action", [
   z.strictObject({ action: z.literal("confirm"), version: z.number().int().min(0), meta: z.unknown() }),
   z.strictObject({ action: z.literal("save"), version: z.number().int().min(0), meta: z.unknown() }),
   z.strictObject({ action: z.literal("rename"), name: z.string().max(1_000) }),
+  z.strictObject({ action: z.literal("move"), folderId: z.string().regex(UUID_RE).nullable() }),
 ]);
 
 /** The longest file name a rename accepts (the column allows 255; the list has to show it). */
 export const MAX_FILE_NAME = 160;
 
 /**
- * A file name as the user typed it: one line, no control characters or path
+ * A file or folder name as the user typed it: one line, no control characters or path
  * separators, trimmed; null when nothing is left or it is too long. Pure.
  */
-export function cleanFileName(raw: string): string | null {
+export function cleanName(raw: string, max = MAX_FILE_NAME): string | null {
   const name = sanitizeLine(raw.replace(/[\\/]+/g, " "), 400).trim();
-  return name && name.length <= MAX_FILE_NAME ? name : null;
+  return name && name.length <= max ? name : null;
 }
 
 /** "Komentář OZ.pdf" → "Komentář OZ": the title the assistant sees for a file name. Pure. */
@@ -378,6 +401,7 @@ export async function patchFor(userId: string, id: string, body: unknown): Promi
   if (mode !== "on") throw new FilesUserError(503, MESSAGES.off);
   const input = parsed.data;
   if (input.action === "rename") return renameFor(userId, id, input.name);
+  if (input.action === "move") return moveFor(userId, id, input.folderId);
   const meta = parseMetaForm(input.meta, input.action === "confirm");
 
   const access = await getAccess(userId, { fresh: true });
@@ -431,7 +455,7 @@ export async function patchFor(userId: string, id: string, body: unknown): Promi
  * as any edit (canEditDocument).
  */
 async function renameFor(userId: string, id: string, rawName: string): Promise<DocumentDetail> {
-  const fileName = cleanFileName(rawName);
+  const fileName = cleanName(rawName);
   if (!fileName) throw new FilesUserError(422, `Zadejte název, nejvýš ${MAX_FILE_NAME} znaků.`);
   const access = await getAccess(userId, { fresh: true });
   const ids = libraryIdsOf(access);
@@ -455,6 +479,146 @@ async function renameFor(userId: string, id: string, rawName: string): Promise<D
     await audit(db, { libraryId: row.library_id, actor: userId, action: "document.rename", docId: row.id });
   });
   return detailFor(userId, id);
+}
+
+/**
+ * PATCH { action: "move", folderId }: put the file into a folder of its own
+ * library (null: the library's root). Same rights as any edit.
+ */
+async function moveFor(userId: string, id: string, folderId: string | null): Promise<DocumentDetail> {
+  const access = await getAccess(userId, { fresh: true });
+  const ids = libraryIdsOf(access);
+  if (ids.length === 0) throw new FilesUserError(404, "Dokument nenalezen.");
+  await withScope(ids, async (db) => {
+    const { row, lib } = await findDocument(db, access, id);
+    if (!lib.pro && canDeleteDocument(lib, row.uploaded_by, userId)) throw new FilesUserError(403, NO_PRO_EDIT);
+    if (!canEditDocument(lib, row.uploaded_by, userId)) throw new FilesUserError(403, "Tento soubor může přesunout jen ten, kdo ho nahrál, nebo správce týmu.");
+    // A folder of another library is "not found", like one that does not exist.
+    if (folderId !== null && !(await getFolder(db, folderId, [row.library_id]))) throw new FilesUserError(404, "Složka nenalezena.");
+    if (row.folder_id === (folderId?.toLowerCase() ?? null)) return;
+    if (!(await moveDocument(db, { id: row.id, libraryId: row.library_id, folderId: folderId?.toLowerCase() ?? null }))) throw new FilesUserError(404, "Dokument nenalezen.");
+    await audit(db, { libraryId: row.library_id, actor: userId, action: "document.move", docId: row.id });
+  });
+  return detailFor(userId, id);
+}
+
+// ---------------------------------------------------------------------------
+// Folders: /api/files/folders, /api/files/folders/[id]
+
+const folderCreateSchema = z.strictObject({
+  lib: z.string().regex(LIBRARY_ID_RE),
+  parentId: z.string().regex(UUID_RE).nullable(),
+  name: z.string().max(1_000),
+});
+const folderPatchSchema = z.union([
+  z.strictObject({ action: z.literal("rename"), name: z.string().max(1_000) }),
+  z.strictObject({ action: z.literal("move"), parentId: z.string().regex(UUID_RE).nullable() }),
+]);
+
+const FOLDER_NAME = `Zadejte název složky, nejvýš ${MAX_FOLDER_NAME} znaků.`;
+const FOLDER_EXISTS = "Složka s tímto názvem tu už je.";
+const FOLDER_TOO_DEEP = `Složky jdou vnořit nejvýš do ${MAX_DEPTH} úrovní.`;
+const FOLDER_FORBIDDEN = "Tuto složku může měnit jen ten, kdo ji založil, nebo správce týmu.";
+
+/** Mutations of the tree need the feature fully on (deleting an empty folder is allowed while read-only). */
+async function requireOn(): Promise<void> {
+  const mode = await effectiveMode();
+  if (mode === "readonly") throw new FilesUserError(503, MESSAGES.readonly);
+  if (mode !== "on") throw new FilesUserError(503, MESSAGES.off);
+}
+
+/** A unique-name violation → the Czech 409; anything else is thrown on. */
+function folderConflict(error: unknown): never {
+  if (isDuplicate(error)) throw new FilesUserError(409, FOLDER_EXISTS);
+  throw error;
+}
+
+/** POST: a new folder in a library the caller may upload into (any member of a team). */
+export async function createFolderFor(userId: string, body: unknown): Promise<FolderItem> {
+  const parsed = folderCreateSchema.safeParse(body);
+  if (!parsed.success) throw new FilesUserError(400, MESSAGES.badRequest);
+  const name = cleanName(parsed.data.name, MAX_FOLDER_NAME);
+  if (!name) throw new FilesUserError(422, FOLDER_NAME);
+  await requireOn();
+  const access = await getAccess(userId, { fresh: true });
+  const { library } = writeScope(access, parsed.data.lib);
+  const parentId = parsed.data.parentId?.toLowerCase() ?? null;
+  try {
+    return await withScope([library.id], async (db) => {
+      const folders = await listFolders(db, [library.id]);
+      if (parentId !== null && !folders.some((f) => f.id === parentId)) throw new FilesUserError(404, "Složka nenalezena.");
+      if (folders.length >= MAX_FOLDERS) throw new FilesUserError(422, `Knihovna může mít nejvýš ${MAX_FOLDERS} složek.`);
+      if (depthOf(folders, parentId) + 1 > MAX_DEPTH) throw new FilesUserError(422, FOLDER_TOO_DEEP);
+      // The folder points at its library's row: make sure there is one (an empty library has none yet).
+      await ensureLibrary(db, library.id, library.name);
+      const folder = await createFolder(db, { libraryId: library.id, parentId, name, createdBy: userId });
+      await audit(db, { libraryId: library.id, actor: userId, action: "folder.create", detail: { folder: folder.id } });
+      return folderItem(folder, library, userId);
+    });
+  } catch (error) {
+    return folderConflict(error);
+  }
+}
+
+/** The folder in any library the caller belongs to, with that library's access — or 404. */
+async function findFolder(db: Queryable, access: Access, id: string): Promise<{ folder: FolderRow; lib: LibraryAccess }> {
+  const scope = ownedScope(access);
+  const folder = await getFolder(db, id, [...scope.libraryIds]);
+  const lib = folder ? scope.libraries.find((l) => l.id === folder.library_id) : undefined;
+  if (!folder || !lib) throw new FilesUserError(404, "Složka nenalezena.");
+  return { folder, lib };
+}
+
+/** PATCH: rename the folder, or move it (with everything in it) into another folder of its library. */
+export async function patchFolderFor(userId: string, id: string, body: unknown): Promise<FolderItem> {
+  const parsed = folderPatchSchema.safeParse(body);
+  if (!parsed.success || !UUID_RE.test(id)) throw new FilesUserError(400, MESSAGES.badRequest);
+  const input = parsed.data;
+  const name = input.action === "rename" ? cleanName(input.name, MAX_FOLDER_NAME) : undefined;
+  if (name === null) throw new FilesUserError(422, FOLDER_NAME);
+  await requireOn();
+  const access = await getAccess(userId, { fresh: true });
+  const ids = libraryIdsOf(access);
+  if (ids.length === 0) throw new FilesUserError(404, "Složka nenalezena.");
+  try {
+    return await withScope(ids, async (db) => {
+      const { folder, lib } = await findFolder(db, access, id);
+      if (!lib.pro) throw new FilesUserError(403, NO_PRO_EDIT);
+      if (!canManageFolder(lib, folder, userId)) throw new FilesUserError(403, FOLDER_FORBIDDEN);
+      let parentId: string | null | undefined;
+      if (input.action === "move") {
+        parentId = input.parentId?.toLowerCase() ?? null;
+        const folders = await listFolders(db, [folder.library_id]);
+        if (parentId !== null && !folders.some((f) => f.id === parentId)) throw new FilesUserError(404, "Složka nenalezena.");
+        if (isWithin(folders, folder.id, parentId)) throw new FilesUserError(422, "Složku nejde přesunout do sebe samé.");
+        if (depthOf(folders, parentId) + heightOf(folders, folder.id) > MAX_DEPTH) throw new FilesUserError(422, FOLDER_TOO_DEEP);
+      }
+      const updated = await updateFolder(db, { id: folder.id, libraryId: folder.library_id, name, parentId });
+      if (!updated) throw new FilesUserError(404, "Složka nenalezena.");
+      await audit(db, { libraryId: folder.library_id, actor: userId, action: `folder.${input.action}`, detail: { folder: folder.id } });
+      return folderItem(updated, lib, userId);
+    });
+  } catch (error) {
+    return folderConflict(error);
+  }
+}
+
+/** DELETE: an empty folder only — files and subfolders are moved or deleted first, so nothing disappears by accident. */
+export async function deleteFolderFor(userId: string, id: string): Promise<void> {
+  if (!UUID_RE.test(id)) throw new FilesUserError(404, "Složka nenalezena.");
+  const mode = await effectiveMode();
+  if (mode === "unconfigured") throw new FilesUserError(503, MESSAGES.off);
+  const access = await getAccess(userId, { fresh: true });
+  const ids = libraryIdsOf(access);
+  if (ids.length === 0) throw new FilesUserError(404, "Složka nenalezena.");
+  await withScope(ids, async (db) => {
+    const { folder, lib } = await findFolder(db, access, id);
+    if (!canManageFolder(lib, folder, userId)) throw new FilesUserError(403, FOLDER_FORBIDDEN);
+    const outcome = await deleteFolder(db, folder.id, folder.library_id);
+    if (outcome === "not_empty") throw new FilesUserError(409, "Složka není prázdná. Nejdřív z ní soubory a podsložky přesuňte nebo je smažte.");
+    if (outcome === "not_found") throw new FilesUserError(404, "Složka nenalezena.");
+    await audit(db, { libraryId: folder.library_id, actor: userId, action: "folder.delete", detail: { folder: folder.id } });
+  });
 }
 
 /**

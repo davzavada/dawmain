@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Týmy · Správa · Dawmain", robots: { index: false, follow: false } };
 
 /**
- * Týmy: every team (a Clerk organization) with its switches, its shared
+ * Týmy: every team (src/files/db/teams.ts) with its switches, its shared
  * library's quota and its members. A team that is on gives its members a
  * shared library of Vlastní soubory and the team's features, with no Pro
  * of their own. Admins only — anyone else gets the same 404 as a page that
@@ -24,7 +24,7 @@ export default async function TeamsPage() {
   if (!me) notFound();
 
   const [load, users] = await Promise.all([listAdminTeams(), listAdminUsers().catch(() => null)]);
-  const candidates: TeamCandidate[] = (users ?? []).filter((u) => !u.banned).map((u) => ({ id: u.id, name: u.name, email: u.email }));
+  const people: TeamCandidate[] = (users ?? []).map((u) => ({ id: u.id, name: u.name, email: u.email, banned: u.banned }));
 
   return (
     <div className="adm">
@@ -36,17 +36,15 @@ export default async function TeamsPage() {
         <p className="muted">Týmy a jejich sdílené knihovny.</p>
       </header>
       <AdminTabs active="teams" />
-      {load.state === "disabled" ? (
-        <p className="zd-error">
-          V Clerku nejsou zapnuté Organizace. Zapni je v Clerk Dashboardu (Configure → Organizations) a stránku obnov.
-        </p>
+      {load.state === "unconfigured" ? (
+        <p className="zd-error">Týmy potřebují databázi Vlastních souborů, která na tomto nasazení není nastavená.</p>
       ) : load.state === "failed" || users === null ? (
-        <p className="zd-error">Týmy se nepodařilo načíst z Clerku. Zkus stránku obnovit za chvíli.</p>
+        <p className="zd-error">Týmy se nepodařilo načíst. Zkus stránku obnovit za chvíli.</p>
       ) : (
-        <TeamsConsole teams={load.teams} candidates={candidates} defaultQuotaPages={LIMITS.teamPages} />
+        <TeamsConsole teams={load.teams} people={people} defaultQuotaPages={LIMITS.teamPages} />
       )}
       <p className="muted small adm-foot">
-        Tým je organizace v Clerku. Zapnutý tým dává členům sdílenou knihovnu Vlastních souborů a své funkce, i když sami Pro nemají. Správce týmu
+        Zapnutý tým dává členům sdílenou knihovnu Vlastních souborů a své funkce, i když sami Pro nemají. Správce týmu
         spravuje všechny jeho soubory, člen nahrává a spravuje ty své. Změna se projeví do minuty.
       </p>
     </div>

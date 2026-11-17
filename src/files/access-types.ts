@@ -4,25 +4,25 @@
  */
 
 export interface LibraryAccess {
-  /** Clerk id: `user_…` a person's own library, `org_…` a team's shared one. */
+  /** `user_…` (the Clerk user id) a person's own library, `org_…` (a team's id, src/files/db/teams.ts) a team's shared one. */
   id: string;
   kind: "user" | "org";
-  /** "Osobní", or the team's name (the Clerk organization's). */
+  /** "Osobní", or the team's name. */
   name: string;
   slug: string | null;
-  /** "owner" of the personal library; in a team "admin" (Clerk `org:admin`) or "member". */
+  /** "owner" of the personal library; in a team "admin" or "member". */
   role: "owner" | "admin" | "member";
   /**
    * Vlastní soubory enabled here: Pro granted (`publicMetadata.pro === true`
-   * on the user, or on the team's organization) and the feature not switched
-   * off (`publicMetadata.features.files === false`) — see src/files/access.ts.
+   * on the user, or the team switched on) and the feature not switched
+   * off (`features.files === false`) — see src/files/access.ts.
    */
   pro: boolean;
   /** Pro, so the owner — or any member of the team — may upload. */
   canUpload: boolean;
   /** May edit/delete every document: the owner, or a team's admin. A member manages what they uploaded. */
   canManageAll: boolean;
-  /** Page quota of the library (override: publicMetadata.filesQuota.pages on the user / the organization). */
+  /** Page quota of the library (override: publicMetadata.filesQuota.pages on the user, teams.quota_pages on a team). */
   quotaPages: number;
 }
 

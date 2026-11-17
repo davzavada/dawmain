@@ -1,148 +1,117 @@
 import "server-only";
-import { clerkClient } from "@clerk/nextjs/server";
-import { ORG_ID_RE, USER_ID_RE } from "@/src/files/config";
-import { clerkStatus } from "@/src/files/errors";
-import { metadataPatch } from "./model";
-import { clerkRole, isLastAdmin, toAdminTeam, type AdminTeam, type TeamChange, type TeamRole } from "./teams";
+import { envMode, ORG_ID_RE, USER_ID_RE } from "@/src/files/config";
+import { withScope, type Queryable } from "@/src/files/db/client";
+import { markLibraryForPurge } from "@/src/files/db/libraries";
+import { createTeam as insertTeam, deleteTeam as removeTeam, getTeam, listMembers, listTeams, removeMember, setMember, updateTeam } from "@/src/files/db/teams";
+import { audit } from "@/src/files/db/usage";
+import { logFilesError } from "@/src/files/errors";
+import { isLastAdmin, teamPatch, toAdminTeam, type AdminTeam, type TeamChange, type TeamRole } from "./teams";
 
 /**
- * Server side of the Týmy page: the teams (Clerk organizations) with their
- * members, and one change at a time. Every caller has already been
- * verified as an admin (requireAdmin); ids are validated here, never
- * trusted from the client. Clerk's messages are not passed on.
+ * Server side of the Týmy page: the teams with their members, and one
+ * change at a time — all in the files database (src/files/db/teams.ts).
+ * Every caller has already been verified as an admin (requireAdmin); ids
+ * are validated here, never trusted from the client.
  */
 
-/** Teams listed on the page; each costs one more Clerk call for its members. */
-const MAX_TEAMS = 100;
-const MAX_MEMBERS = 100;
+/** A deleted team's library is purged by the daily cron after this grace period. */
+const PURGE_GRACE_DAYS = 6;
 
-export type TeamsLoad = { state: "ok"; teams: AdminTeam[] } | { state: "disabled" } | { state: "failed" };
+export type TeamsLoad = { state: "ok"; teams: AdminTeam[] } | { state: "unconfigured" } | { state: "failed" };
 export type TeamResult = { ok: true; team: AdminTeam | null } | { ok: false; error: string };
 
-const FAILED = "Změnu se nepodařilo uložit, Clerk neodpověděl. Zkus to za chvíli.";
+const FAILED = "Změnu se nepodařilo uložit, databáze neodpověděla. Zkus to za chvíli.";
+const NO_TEAM = "Tým už neexistuje.";
 
-type Client = Awaited<ReturnType<typeof clerkClient>>;
-
-async function loadTeam(client: Client, organizationId: string): Promise<AdminTeam> {
-  const [org, members] = await Promise.all([
-    client.organizations.getOrganization({ organizationId }),
-    client.organizations.getOrganizationMembershipList({ organizationId, limit: MAX_MEMBERS }),
-  ]);
-  return toAdminTeam(org, members.data);
+async function loadTeam(db: Queryable, teamId: string): Promise<AdminTeam | null> {
+  const team = await getTeam(db, teamId);
+  return team ? toAdminTeam(team, await listMembers(db, [teamId])) : null;
 }
 
-/** Every team with its members; "disabled" where the Clerk instance has no organizations switched on. */
+/** Every team with its members; "unconfigured" where the deployment has no files database. */
 export async function listAdminTeams(): Promise<TeamsLoad> {
+  if (envMode() === "unconfigured") return { state: "unconfigured" };
   try {
-    const client = await clerkClient();
-    const { data } = await client.organizations.getOrganizationList({ limit: MAX_TEAMS, orderBy: "+name" });
-    const teams = await Promise.all(
-      data.map(async (org) => {
-        const members = await client.organizations.getOrganizationMembershipList({ organizationId: org.id, limit: MAX_MEMBERS });
-        return toAdminTeam(org, members.data);
-      }),
-    );
-    return { state: "ok", teams };
+    return await withScope([], async (db) => {
+      const [teams, members] = [await listTeams(db), await listMembers(db)];
+      return { state: "ok" as const, teams: teams.map((t) => toAdminTeam(t, members.filter((m) => m.team_id === t.id))) };
+    });
   } catch (error) {
-    const status = clerkStatus(error);
-    if (status === 403 || status === 404) return { state: "disabled" };
-    console.warn("admin teams failed", status);
+    logFilesError("admin.teams", error);
     return { state: "failed" };
   }
 }
 
-function failure(error: unknown, what: string): TeamResult {
-  const status = clerkStatus(error);
-  console.warn(`admin team ${what} failed`, status);
-  if (status === 404) return { ok: false, error: "Tým nebo účet už neexistuje." };
-  if (status === 403) return { ok: false, error: "Clerk změnu odmítl. Jsou v Clerku zapnuté Organizace a není tým plný?" };
-  if (status === 400 || status === 422) return { ok: false, error: "Clerk změnu odmítl. Není už účet členem týmu?" };
-  return { ok: false, error: FAILED };
+/** Run one change in a transaction; a thrown error is logged and answered with the fixed message. */
+async function change(what: string, teamId: string | null, work: (db: Queryable) => Promise<TeamResult>): Promise<TeamResult> {
+  if (envMode() === "unconfigured") return { ok: false, error: "Vlastní soubory nemají na tomto nasazení databázi." };
+  try {
+    // The team's library is in scope only where the change touches it (deleting the team).
+    return await withScope(teamId ? [teamId] : [], work);
+  } catch (error) {
+    logFilesError(`admin.team.${what}`, error);
+    return { ok: false, error: FAILED };
+  }
 }
 
-/** The most members a team may have: Clerk's ceiling without its paid add-on. */
-const MAX_TEAM_MEMBERS = 20;
-
-/**
- * A new team with its first admin — created in THEIR name (`createdBy`),
- * so the admin of the website does not become a member and never sees the
- * team's documents. Off until switched on.
- */
+/** A new team with its first admin. Off until the admin switches it on. */
 export async function createTeam(actor: string, name: string, adminId: string): Promise<TeamResult> {
   if (!USER_ID_RE.test(adminId)) return { ok: false, error: "Vyber správce týmu." };
-  try {
-    const client = await clerkClient();
-    const org = await client.organizations.createOrganization({ name, createdBy: adminId, maxAllowedMemberships: MAX_TEAM_MEMBERS });
-    console.info("admin team", JSON.stringify({ actor, team: org.id, action: "create" }));
-    return { ok: true, team: await loadTeam(client, org.id) };
-  } catch (error) {
-    return failure(error, "create");
-  }
+  return change("create", null, async (db) => {
+    const team = await insertTeam(db, { name, adminId, createdBy: actor });
+    console.info("admin team", JSON.stringify({ actor, team: team.id, action: "create" }));
+    return { ok: true, team: await loadTeam(db, team.id) };
+  });
 }
 
-export async function changeTeam(actor: string, teamId: string, change: TeamChange): Promise<TeamResult> {
+export async function changeTeam(actor: string, teamId: string, what: TeamChange): Promise<TeamResult> {
   if (!ORG_ID_RE.test(teamId)) return { ok: false, error: "Neplatný tým." };
-  try {
-    const client = await clerkClient();
-    const org = await client.organizations.getOrganization({ organizationId: teamId });
-    await client.organizations.updateOrganizationMetadata(teamId, { publicMetadata: metadataPatch(org.publicMetadata, change) });
-    console.info("admin team", JSON.stringify({ actor, team: teamId, change }));
-    return { ok: true, team: await loadTeam(client, teamId) };
-  } catch (error) {
-    return failure(error, "change");
-  }
+  return change("change", null, async (db) => {
+    const team = await getTeam(db, teamId);
+    if (!team || !(await updateTeam(db, teamId, teamPatch(team.features, what)))) return { ok: false, error: NO_TEAM };
+    console.info("admin team", JSON.stringify({ actor, team: teamId, change: what }));
+    return { ok: true, team: await loadTeam(db, teamId) };
+  });
 }
 
 export async function renameTeam(actor: string, teamId: string, name: string): Promise<TeamResult> {
   if (!ORG_ID_RE.test(teamId)) return { ok: false, error: "Neplatný tým." };
-  try {
-    const client = await clerkClient();
-    await client.organizations.updateOrganization(teamId, { name });
+  return change("rename", null, async (db) => {
+    if (!(await updateTeam(db, teamId, { name }))) return { ok: false, error: NO_TEAM };
     console.info("admin team", JSON.stringify({ actor, team: teamId, action: "rename" }));
-    return { ok: true, team: await loadTeam(client, teamId) };
-  } catch (error) {
-    return failure(error, "rename");
-  }
+    return { ok: true, team: await loadTeam(db, teamId) };
+  });
 }
 
 /** Add a member, change a member's role, or (role null) remove them. The last admin stays. */
 export async function setTeamMember(actor: string, teamId: string, userId: string, role: TeamRole | null): Promise<TeamResult> {
   if (!ORG_ID_RE.test(teamId) || !USER_ID_RE.test(userId)) return { ok: false, error: "Neplatný tým nebo účet." };
-  try {
-    const client = await clerkClient();
-    const team = await loadTeam(client, teamId);
+  return change("member", null, async (db) => {
+    const team = await loadTeam(db, teamId);
+    if (!team) return { ok: false, error: NO_TEAM };
     const current = team.members.find((m) => m.userId === userId);
     if (current && role !== "admin" && isLastAdmin(team, userId)) {
       return { ok: false, error: "Tým musí mít aspoň jednoho správce. Nejdřív jmenuj jiného." };
     }
-    const params = { organizationId: teamId, userId };
-    if (role === null) {
-      if (current) await client.organizations.deleteOrganizationMembership(params);
-    } else if (current) {
-      if (current.role !== role) await client.organizations.updateOrganizationMembership({ ...params, role: clerkRole(role) });
-    } else {
-      await client.organizations.createOrganizationMembership({ ...params, role: clerkRole(role) });
-    }
+    if (role === null) await removeMember(db, teamId, userId);
+    else await setMember(db, teamId, userId, role);
     console.info("admin team", JSON.stringify({ actor, team: teamId, member: userId, role }));
-    return { ok: true, team: await loadTeam(client, teamId) };
-  } catch (error) {
-    return failure(error, "member");
-  }
+    return { ok: true, team: await loadTeam(db, teamId) };
+  });
 }
 
 /**
- * Delete the team. Clerk's `organization.deleted` webhook marks its library
- * for purge (app/api/webhooks/clerk); the daily cron also notices a team
- * that is gone.
+ * Delete the team: its members lose the shared library at once (within the
+ * minute the access is cached), and the library is marked for purge — the
+ * daily cron deletes its documents after PURGE_GRACE_DAYS.
  */
 export async function deleteTeam(actor: string, teamId: string): Promise<TeamResult> {
   if (!ORG_ID_RE.test(teamId)) return { ok: false, error: "Neplatný tým." };
-  try {
-    const client = await clerkClient();
-    await client.organizations.deleteOrganization(teamId);
+  return change("delete", teamId, async (db) => {
+    if (!(await removeTeam(db, teamId))) return { ok: false, error: NO_TEAM };
+    await markLibraryForPurge(db, teamId, new Date(Date.now() + PURGE_GRACE_DAYS * 86_400_000));
+    await audit(db, { libraryId: teamId, actor, action: "team.deleted", detail: { purgeInDays: PURGE_GRACE_DAYS } });
     console.info("admin team", JSON.stringify({ actor, team: teamId, action: "delete" }));
     return { ok: true, team: null };
-  } catch (error) {
-    return failure(error, "delete");
-  }
+  });
 }

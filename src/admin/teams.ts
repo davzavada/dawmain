@@ -1,21 +1,22 @@
 /**
  * Teams on the admin page (app/sprava/tymy): what a team looks like to an
- * admin. A team is a Clerk organization; its shared library of Vlastní
- * soubory has the organization's id (`org_…`). Pure, no server-only
- * imports, so client components can use the types.
+ * admin. A team is a row of the files database (`teams`, with its members
+ * in `team_members`; src/files/db/teams.ts) — not a Clerk organization, so
+ * it has as many members as it needs. Its shared library of Vlastní
+ * soubory has the team's id (`org_…`). Pure, no server-only imports, so
+ * client components can use the types.
  *
- * What an admin switches lives in the ORGANIZATION's `publicMetadata`, in
- * the very shape of an account's (src/admin/model.ts), where the access
- * code reads it (src/files/access.ts):
+ * What an admin switches has the very shape of an account's switches
+ * (src/admin/model.ts), where the access code reads it (src/files/access.ts):
  *
- *   pro       true = the team is on: its members share a library and get
- *             the team's features, with no Pro of their own;
+ *   pro       the team is on: its members share a library and get the
+ *             team's features, with no Pro of their own;
  *   features  { files, zotero } switch one off with `false`, { ukaz }
  *             switches UKAŽ on with `true`;
- *   filesQuota.pages  the shared library's own page quota.
+ *   quota     the shared library's own page quota.
  *
- * Roles are Clerk's: `org:admin` (manages every file of the team) and
- * `org:member` (uploads; renames and deletes what they uploaded).
+ * Roles: "admin" (manages every file of the team) and "member" (uploads;
+ * renames, moves and deletes what they uploaded).
  */
 
 import type { AdminFeature } from "./model";
@@ -24,20 +25,17 @@ export type TeamRole = "admin" | "member";
 
 export interface AdminTeamMember {
   userId: string;
-  name: string;
-  /** The member's identifier in Clerk (their e-mail). */
-  email: string;
   role: TeamRole;
 }
 
 export interface AdminTeam {
   id: string;
   name: string;
-  createdAt: number | null;
   pro: boolean;
   features: Record<AdminFeature, boolean>;
   /** The team library's own quota, or null when the default applies. */
   quotaPages: number | null;
+  /** Admins first. */
   members: AdminTeamMember[];
 }
 
@@ -56,52 +54,39 @@ export function cleanTeamName(raw: unknown): string | null {
   return name.length >= 2 && name.length <= TEAM_NAME_MAX ? name : null;
 }
 
-export function clerkRole(role: TeamRole): "org:admin" | "org:member" {
-  return role === "admin" ? "org:admin" : "org:member";
-}
-
-export function teamRole(role: unknown): TeamRole {
-  return role === "org:admin" ? "admin" : "member";
-}
-
-function record(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-}
-
-/** The subset of Clerk's Organization and OrganizationMembership a team is built from. */
-export interface ClerkOrgLike {
+/** The subset of a `teams` row and its `team_members` rows a team is built from. */
+export interface TeamRowLike {
   id: string;
-  name?: string | null;
-  createdAt?: number | null;
-  publicMetadata?: unknown;
-}
-export interface ClerkOrgMemberLike {
-  role?: string | null;
-  publicUserData?: { userId?: string; identifier?: string; firstName?: string | null; lastName?: string | null } | null;
+  name: string;
+  pro: boolean;
+  features: Record<string, unknown>;
+  quota_pages: number | null;
 }
 
-export function toAdminTeam(org: ClerkOrgLike, memberships: readonly ClerkOrgMemberLike[]): AdminTeam {
-  const meta = record(org.publicMetadata);
-  const features = record(meta.features);
-  const pages = record(meta.filesQuota).pages;
-  const members: AdminTeamMember[] = [];
-  for (const m of memberships) {
-    const u = m.publicUserData;
-    if (!u || typeof u.userId !== "string") continue;
-    const email = u.identifier ?? "";
-    members.push({ userId: u.userId, name: [u.firstName, u.lastName].filter(Boolean).join(" ") || email || u.userId, email, role: teamRole(m.role) });
-  }
-  // Admins first, then by name.
-  members.sort((a, b) => (a.role === b.role ? a.name.localeCompare(b.name, "cs") : a.role === "admin" ? -1 : 1));
+export function toAdminTeam(team: TeamRowLike, members: ReadonlyArray<{ user_id: string; role: TeamRole }>): AdminTeam {
+  const f = team.features ?? {};
   return {
-    id: org.id,
-    name: (org.name ?? "").trim() || org.id,
-    createdAt: org.createdAt ?? null,
-    pro: meta.pro === true,
-    features: { files: features.files !== false, zotero: features.zotero !== false, ukaz: features.ukaz === true },
-    quotaPages: typeof pages === "number" && Number.isFinite(pages) && pages >= 1 ? Math.floor(pages) : null,
-    members,
+    id: team.id,
+    name: team.name,
+    pro: team.pro,
+    features: { files: f.files !== false, zotero: f.zotero !== false, ukaz: f.ukaz === true },
+    quotaPages: team.quota_pages,
+    members: members
+      .map((m) => ({ userId: m.user_id, role: m.role }))
+      .sort((a, b) => (a.role === b.role ? 0 : a.role === "admin" ? -1 : 1)),
   };
+}
+
+/** The `teams` columns one change sets, given the team's current features. Pure. */
+export function teamPatch(features: Record<string, unknown>, change: TeamChange): { pro?: boolean; features?: Record<string, unknown>; quotaPages?: number | null } {
+  switch (change.kind) {
+    case "pro":
+      return { pro: change.on };
+    case "feature":
+      return { features: { ...features, [change.feature]: change.on } };
+    case "quota":
+      return { quotaPages: change.pages };
+  }
 }
 
 /** Is this the team's only admin? (Removing or demoting them would leave nobody to manage its files.) */
