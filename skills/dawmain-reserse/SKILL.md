@@ -1,6 +1,6 @@
 ---
 name: dawmain-reserse
-description: Conduct Czech and EU legal research through the Dawmain MCP connector (live queries into e-Sbírka, sněmovní tisky, NS, NSS, Ústavní soud, obecné soudy, SDEU, EUR-Lex and the UKAŽ literature catalogue) and deliver a memo — question, answer, argument — citing every authority in the running text. Use this for ANY question whose answer turns on Czech or EU law, including everyday practical ones that never name a statute or a court: "je možné / lze / smím / musím…", "je to platné", "co mi hrozí, když", "jak mám postupovat" about a smlouva, podpis (vlastnoruční, elektronický), plná moc, výpověď, lhůta, nájem, pracovní poměr, GDPR, dědictví, firma, úřad. Also the research phrasings: "právní rešerše", "co na to judikatura", "najdi judikaturu k § X", "jak to soudy vykládají", "platí ještě", "co říká zákon o", "co chtěl zákonodárce", "důvodová zpráva", "sněmovní tisk", "co na to doktrína", "najdi literaturu k". Requires the Dawmain connector; if its tools are absent, say so instead of guessing.
+description: Czech, Slovak and EU legal research through the Dawmain MCP connector (e-Sbírka, sněmovní tisky, NS, NSS, ÚS, obecné soudy, SDEU, EUR-Lex, literature; Slov-Lex: Zbierka zákonov SR, eLegislatíva, slovenské súdy) ending in a memo that cites every authority. Use it for ANY question whose answer turns on Czech, Slovak or EU law, even everyday ones naming no statute: "je možné / lze / smím / musím", "je to platné", "co mi hrozí, když", "jak postupovat" about smlouva, podpis, plná moc, výpověď, lhůta, nájem, pracovní poměr, GDPR, dědictví, firma, úřad. Also: "právní rešerše", "co na to judikatura", "najdi judikaturu k § X", "platí ještě", "co říká zákon o", "důvodová zpráva", "co na to doktrína"; any question about Slovakia ("na Slovensku", "slovenský zákon", "Z. z.", "NS SR", "dôvodová správa", CZ/SK comparison); and EU transposition ("který zákon transponuje / provádí směrnici 2004/48"). Requires the Dawmain connector; if its tools are absent, say so instead of guessing.
 ---
 
 # Rešerše přes Dawmain
@@ -566,6 +566,7 @@ default lane of a Czech rešerše.
 | Decisions of any Slovak court, newest first | `sk_judikatura_search {database: "sudy", query: "…", court: "ns"}` (also `case_number`, `date_from`) |
 | Curated judikatúra with právna veta | `sk_judikatura_search {database: "judikaty", query: "…"}` |
 | Full text of a decision | `sk_judikatura_get_decision {id: "…"}` (`find: "…"` locates a passage) |
+| Which SK act transposes an EU directive | `sk_predpis_search {query: "\"2004/48/ES\""}` (the number in quotes, Slovak form „/ES“ or „/EÚ“) |
 
 Rules:
 1. **Query in Slovak terms**, not Czech: *nájom*, *výpoveď*, *náhrada škody*,
@@ -584,6 +585,12 @@ Rules:
    (1993–2014); newer ÚS SR decisions are not covered — point the user to
    ustavnysud.sk. Cite acts as „§ 420 zákona č. 40/1964 Zb.“ (after 1993
    „… Z. z.“) and decisions with the URL the tool gives.
+6. **Transposition** („který zákon na Slovensku transponuje směrnici X“):
+   search the directive number in quotes — unquoted it matches thousands.
+   The hits are often amending acts (novely); name the amended principal act
+   and confirm in its text, usually the poznámka pod čiarou or the príloha
+   „Zoznam preberaných právne záväzných aktov Európskej únie“, read with
+   `sk_predpis_get_text`. Check the CELEX/title with `eurlex_search` first.
 
 ## Doktrína (literatura): pole
 
