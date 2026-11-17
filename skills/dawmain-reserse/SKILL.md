@@ -37,14 +37,23 @@ Turn the request into four slots and open the memo with them:
    pattern is not a query: split it into one legal issue per line ("může pronajímatel
    vypovědět nájem bez výpovědní doby pro neplacení?") and name the provision you
    expect to govern it. Broad but exactly defined beats vague.
-2. **Rozsah.** Which legal order (Czech, Slovak, EU — Slovak law has its own
-   lane, see Slovensko) and which courts (NS / NSS / ÚS / obecné soudy / SDEU; NS SR,
+2. **Rozsah.** Which legal order — **Czech by default** (with EU law as it applies in
+   Czechia); Slovak only when the user explicitly names Slovakia or Slovak law, or
+   asks for a CZ/SK comparison (see Slovensko) — and which courts (NS / NSS / ÚS / obecné soudy / SDEU; NS SR,
    NSS SR, ÚS SR, slovenské súdy) — and the user's role: žalobce or žalovaný, zaměstnavatel or zaměstnanec, správní orgán or
    účastník. The role decides which line of authority is worth citing at all.
 3. **Čas jako konkrétní data.** Never carry "loni", "nedávno", "po novele" into a
    search. Convert to ISO dates yourself and say which you used. Decide which
    *wording* governs: the facts date the applicable version of the act, not today.
 4. **Výstup.** Memo, five bullets, argumentation for a podání, citations only.
+5. **Hypotéza z paměti.** What you already know, written down before the first call:
+   the provision you expect to govern, the leading decisions you remember (sp. zn.,
+   court, year), the answer you expect. It costs no round and aims the first one —
+   a remembered sp. zn. goes in as `case_number`, a remembered § as `applies_act` +
+   `applies_provision`, a remembered term of art as a query variant. It is a
+   hypothesis, never a source: nothing from memory reaches the memo until a tool
+   returned it in this conversation and you read it. Where the search contradicts
+   it, the search wins — say so.
 
 **Ask only what changes the search.** At most two or three focused questions, and only
 when different answers send you to different provisions, courts or periods — which
@@ -565,9 +574,10 @@ normal, not a bug.
 
 ## Slovensko (slov-lex.sk)
 
-Slovak law has its own `sk_*` tools on slov-lex.sk. Use them only when the
-question is about Slovak law or the user wants a CZ/SK comparison — never as a
-default lane of a Czech rešerše.
+Slovak law has its own `sk_*` tools on slov-lex.sk. Use them only when the user
+explicitly names Slovakia or Slovak law, or asks for a CZ/SK comparison — a legal
+question is Czech by default, and the `sk_*` tools are never a default lane of a
+Czech rešerše.
 
 | Chci | Volání |
 |---|---|
@@ -857,8 +867,9 @@ never ask the user whether to go on. Only the whole text shows what an excerpt h
 that the passage restates a party's submission rather than the court's view, that the
 holding is limited by the facts or distinguished three pages later, which wording of
 the statute the court applied, and how the case actually ended (výrok). Read in
-parallel: page 1 of every decision you picked in one turn, then the further pages
-together.
+parallel: page 1 of every decision you picked in one turn; page 1 says how many pages
+each has ("page 1/M"), so the next turn asks for **all** the remaining pages of
+**all** of them at once (pages 2…M of each) — never one page per round.
 
 **Spend the reading where it decides.** Typically two to five decisions — the leading
 one, the most recent restatement, each side of a conflict. Screening and `find` keep
@@ -868,6 +879,12 @@ that number small; they do not replace the reading.
 `esbirka_get_text` (Slovak: `sk_predpis_get_text`) and `section`; read `doctrine_get_record` for the works you cite. The
 user's own documents are read in parts: `files_get_document` with the outline first,
 then the `section`, `mn` or `footnote` you cite — never cover to cover.
+
+**Before the memo: a reading check.** Go through what you will cite. Every decision
+read page 1 to M in this conversation; every provision read with `esbirka_get_text`
+(`section`, and `date` for past facts); every důvodová zpráva or EU text you quote read
+in the part you quote. Anything missing: read it now, in one parallel turn — or drop
+it from the authority and name it under **Co chybí**.
 
 **Never argue from a snippet.** A právní věta is a headline; the holding lives in the
 odůvodnění, together with the facts that limit it.
@@ -918,10 +935,15 @@ Stopping the search never shortens the reading: what you cite, you have read who
 
 ## Workflow
 
-1. **Write the brief.** Four slots above; state assumptions instead of asking, unless a
-   question would change where you search. A question about Slovak law follows rule 7
-   under Slovensko instead of steps 2–4.
-2. **Open wide, in one turn.** `caselaw_search` with variants and `read_top`, plus
+1. **Write the brief — from memory, no tool call.** Five slots above, the hypothesis
+   included; state assumptions instead of asking, unless a question would change where
+   you search. Only a question that explicitly names Slovak law follows rule 7 under
+   Slovensko instead of steps 2–4. (Where the client defers this connector's tools,
+   load all you will need in ONE tool-search call first — never one by one.)
+2. **Open wide, in one turn.** If you do not have this manual yet, `dawmain_guide` goes
+   into this same turn — not into a round of its own. Then `caselaw_search` with
+   variants (the user's terms, the court's terms, your remembered term of art) and
+   `read_top`; any sp. zn. you remember as a direct lookup; plus
    `esbirka_search` for the governing provision if wording matters. Add
    `justice_search` to the same turn when the question is about everyday practice
    rather than doctrine ("jak to soudy běžně řeší", "co dostanu za…"), or when you
@@ -941,12 +963,15 @@ Stopping the search never shortens the reading: what you cite, you have read who
    silently, and the memo then has no **Další zdroje**.
 3. **Screen and aim.** From the hit lines and previews pick the decisions that may
    decide the issue; `find` in the doubtful ones; a court-specific search where the
-   fan-out was too coarse.
+   fan-out was too coarse — with that court's reference (`dawmain_guide {topics: [...]}`)
+   in the same turn, if you have only the core manual.
 4. **Read the statute you cite.** `esbirka_get_text` with `section` — never paraphrase a
    provision you have not read. Historical matters: pass the reference `date`. When
    the purpose of the provision decides the point, read its důvodová zpráva too
    (`psp_search` → `psp_get_tisk` → `psp_get_text`).
-5. **Read whole the decisions you will cite.** Every page, in parallel, without asking.
+5. **Read whole the decisions you will cite.** Every page, in parallel, without asking:
+   page 1 of all of them in one turn, all remaining pages of all of them in the next.
+   Then the reading check (Reading, above).
 6. **Check it is still good law.** Section above.
 7. **Write the memo.**
 

@@ -7,14 +7,17 @@ import {
   SKILL_MAX_CHARS,
   SKILL_PATH,
   SKILL_URL,
+  TOPICS,
+  coreManual,
   loadSkill,
   registerGuide,
   resetSkillCache,
   skillBody,
   tailorManual,
+  topicSections,
   unavailableSources,
 } from "@/src/mcp/tools/guide";
-import { INSTRUCTIONS } from "@/src/mcp/server";
+import { INSTRUCTIONS, buildInstructions } from "@/src/mcp/server";
 
 /**
  * dawmain_guide (src/mcp/tools/guide.ts): the research manual served whole
@@ -67,16 +70,43 @@ describe("skillBody", () => {
 });
 
 describe("dawmain_guide", () => {
-  it("answers with the manual from the repository tree — whole when nothing is gated off", async () => {
+  it("answers with the core manual by default — the source references are listed, not served", async () => {
     expect(tailorManual(skillBody(SKILL), [])).toBe(skillBody(SKILL));
     // The shared access code: no Vlastní soubory, no Zotero, UKAŽ as before.
     const result = await guide().handler({}, SHARED_CTX);
     expect(result.isError).toBeUndefined();
     const text = result.content[0].text;
-    expect(text).toBe(tailorManual(skillBody(SKILL), ["files", "zotero"]));
-    // Every source's section travels along — the point of serving it whole.
-    for (const heading of ["## Tools", "## Poslanecká sněmovna", "## Nejvyšší soud", "## Obecné soudy", "## SDEU", "## Doktrína", "## The memo"]) {
+    expect(text).toBe(coreManual(tailorManual(skillBody(SKILL), ["files", "zotero"])));
+    for (const heading of ["## The brief", "## Ground rules", "## Tools", "## Query craft", "## Reading", "## Workflow", "## The memo"]) {
       expect(text).toContain(heading);
+    }
+    for (const { heading } of Object.values(TOPICS)) expect(text).not.toContain(`\n${heading}`);
+    expect(text).toContain("## Source references — dawmain_guide {topics: [...]}");
+    for (const topic of Object.keys(TOPICS)) expect(text).toContain(`- \`${topic}\` — `);
+    // Half the manual or less: the point of the split is a short first answer.
+    expect(text.length).toBeLessThan(skillBody(SKILL).length * 0.6);
+  });
+
+  it("serves the asked source references, in the manual's order, and the whole manual on all", async () => {
+    const body = skillBody(SKILL);
+    const { handler } = guide();
+    const two = (await handler({ topics: ["justice", "ns"] }, SHARED_CTX)).content[0].text;
+    expect(two).toBe(topicSections(body, ["ns", "justice"]));
+    expect(two.startsWith(TOPICS.ns.heading)).toBe(true);
+    expect(two).toContain(`\n\n${TOPICS.justice.heading}`);
+    expect(two).not.toContain("## The memo");
+    const all = (await handler({ topics: ["all"] }, SHARED_CTX)).content[0].text;
+    expect(all).toBe(tailorManual(body, ["files", "zotero"]));
+  });
+
+  it("every topic heading is in SKILL.md, and core + topics put the whole manual back together", () => {
+    const body = skillBody(SKILL);
+    for (const { heading } of Object.values(TOPICS)) expect(body).toContain(`\n${heading}`);
+    const core = coreManual(body);
+    for (const topic of Object.keys(TOPICS) as Array<keyof typeof TOPICS>) {
+      const section = topicSections(body, [topic]);
+      expect(section.length, topic).toBeGreaterThan(500);
+      expect(core).not.toContain(section.slice(0, 200));
     }
   });
 
@@ -92,11 +122,25 @@ describe("dawmain_guide", () => {
     expect(SKILL_URL).toBe("https://dawmain.davidzavada.cz/dawmain-reserse.md");
   });
 
-  it("is the first call of a research by the server instructions and its own description", () => {
-    expect(INSTRUCTIONS).toContain("MANUAL — at the start of every legal research call dawmain_guide ONCE");
+  it("is called with the first searches, not before them, by the server instructions and its own description", () => {
+    expect(INSTRUCTIONS).toContain("MANUAL — call dawmain_guide ONCE per legal research, in the SAME turn as your first wide searches");
     expect(INSTRUCTIONS).toContain('"najdi důvodovou zprávu"');
     expect(guide().description).toContain("Call it ONCE at the start of every legal research");
-    expect(guide().description).toContain("nothing needs to be installed");
+    expect(guide().description).toContain("in the SAME turn as your first searches");
+    expect(guide().description).toContain("Nothing needs to be installed");
+  });
+
+  it("the start-fast rules and the Czech default sit early in the instructions (clients cut long instructions)", () => {
+    for (const zotero of [false, true]) {
+      const text = buildInstructions(zotero);
+      const cut = text.slice(0, 2_600);
+      expect(cut).toContain("load every one you may need in ONE call");
+      expect(cut).toContain("Write the brief from what you already know");
+      expect(cut).toContain("MANUAL — call dawmain_guide ONCE");
+      expect(cut).toContain("a legal question is about Czech law");
+      expect(cut).toContain("never call sk_* tools");
+      expect(text.includes("zotero_search")).toBe(zotero);
+    }
   });
 });
 
@@ -175,7 +219,9 @@ describe("the manual is fitted to what the caller can use", () => {
   it("the tool answers a signed-in account without Pro with the short manual", async () => {
     __setAccessLoaderForTests(async () => emptyAccess(USER));
     const text = (await guide().handler({}, USER_CTX)).content[0].text;
-    expect(text).toBe(tailorManual(body, ["files", "zotero", "ukaz"]));
-    expect(text.length).toBeLessThan(body.length * 0.8);
+    expect(text).toBe(coreManual(tailorManual(body, ["files", "zotero", "ukaz"])));
+    // Sizes on record (characters): whole manual vs. the first answer an account without Pro reads.
+    console.info(`dawmain_guide: whole ${body.length}, core ${coreManual(body).length}, core without Pro ${text.length}`);
+    expect(text.length).toBeLessThan(body.length * 0.45);
   });
 });
