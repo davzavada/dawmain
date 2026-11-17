@@ -16,7 +16,7 @@
  */
 
 const GUIDE_FIRST =
-  "FIRST, once per conversation: call dawmain_guide (the research manual) before the first search; searching without it gives worse results. ";
+  "FIRST, once per conversation: call dawmain_guide (the research manual) in the same turn as your first searches — not as a separate step before them; searching without it gives worse results. ";
 
 /** Whether `name` is a tool that starts a search. */
 export function isSearchTool(name: string): boolean {

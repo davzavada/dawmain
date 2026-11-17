@@ -8,7 +8,7 @@ import { zoteroConfigured } from "@/src/zotero/config";
 import { callerFromCtx } from "../caller";
 
 /**
- * The research manual, served by the connector itself: the same
+ * The research manual, served by the connector itself (core first, source references on request — see TOPICS): the same
  * skills/dawmain-reserse/SKILL.md the home page offers for download, read
  * from the repository tree at call time (next.config.ts traces it into the
  * function; registration does no I/O). The server instructions tell the
@@ -93,6 +93,71 @@ export function tailorManual(body: string, off: GatedSource[]): string {
 }
 
 /**
+ * The source references of the manual: a section each, served apart as
+ * `dawmain_guide {topics: [...]}`. They are field tables and operators of one
+ * source — needed only once the model digs into that source, and half of the
+ * manual. Serving them up front made the first answer ~16k tokens the model
+ * read and weighed before its first search; the core alone is what every
+ * research needs. Headings are pinned to SKILL.md in tests/guide.test.ts.
+ */
+export const TOPICS = {
+  esbirka: { heading: "## e-Sbírka", label: "e-Sbírka — finding an act, its versions and wording" },
+  psp: { heading: "## Poslanecká sněmovna", label: "sněmovní tisky, důvodová zpráva, the legislative process" },
+  ns: { heading: "## Nejvyšší soud", label: "Nejvyšší soud — fields, categories and search operators" },
+  nss: { heading: "## NSS: pole", label: "NSS — fields, the applied-provision citator, rozšířený senát, krajské soudy" },
+  us: { heading: "## ÚS (NALUS)", label: "Ústavní soud — fields, nálezy, abstract review" },
+  justice: { heading: "## Obecné soudy", label: "obecné soudy (rozhodnuti.justice.cz) — fields, court codes, appeals" },
+  sdeu: { heading: "## SDEU (InfoCuria)", label: "SDEU — fields, languages, judgments vs opinions" },
+  sk: { heading: "## Slovensko", label: "Slovak law (slov-lex.sk) — only when the user names Slovakia" },
+} as const;
+export type Topic = keyof typeof TOPICS;
+const TOPIC_NAMES = Object.keys(TOPICS) as Topic[];
+
+/** Where the `## ` section starting with `heading` runs in `text`: [start, end), or null. Pure. */
+function sectionBounds(text: string, heading: string): [number, number] | null {
+  const start = text.indexOf(`\n${heading}`);
+  if (start < 0) return null;
+  const next = text.indexOf("\n## ", start + 1);
+  return [start, next < 0 ? text.length : next];
+}
+
+/**
+ * The core manual: everything but the source references, with an index of
+ * them where the first one stood. A heading that is not found is skipped.
+ * Pure.
+ */
+export function coreManual(body: string): string {
+  let text = body;
+  let at = -1;
+  for (const topic of TOPIC_NAMES) {
+    const bounds = sectionBounds(text, TOPICS[topic].heading);
+    if (!bounds) continue;
+    if (at < 0 || bounds[0] < at) at = bounds[0];
+    text = text.slice(0, bounds[0]) + text.slice(bounds[1]);
+  }
+  const index =
+    "\n## Source references — dawmain_guide {topics: [...]}\n\n" +
+    "Each source's fields, filters and operators are served apart, so this answer stays short. " +
+    "Ask for the ones you need IN THE SAME TURN as your first in-depth search of that source (e.g. `dawmain_guide {topics: [\"ns\", \"justice\"]}` next to `ns_search` and `justice_search`) — never as a round of its own. " +
+    "The tools' own descriptions carry their parameters too, so a first wide search needs none of these.\n\n" +
+    TOPIC_NAMES.map((topic) => `- \`${topic}\` — ${TOPICS[topic].label}`).join("\n") +
+    "\n";
+  if (at < 0) return text;
+  return text.slice(0, at) + index + text.slice(at);
+}
+
+/** The sections of `topics`, in the manual's order, each whole. Pure. */
+export function topicSections(body: string, topics: Topic[]): string {
+  const parts: string[] = [];
+  for (const topic of TOPIC_NAMES) {
+    if (!topics.includes(topic)) continue;
+    const bounds = sectionBounds(body, TOPICS[topic].heading);
+    if (bounds) parts.push(body.slice(bounds[0], bounds[1]).trim());
+  }
+  return parts.join("\n\n");
+}
+
+/**
  * Which gated sources the caller cannot use — by the same rules as the
  * tools' own gates (files: FILES_MODE, a personal sign-in, a Pro library;
  * zotero: the deployment offers it, a personal sign-in, Pro; UKAŽ: off for
@@ -129,8 +194,13 @@ export function registerGuide(server: McpServer): void {
     {
       title: "Research manual",
       description:
-        "The research manual for this connector (the dawmain-reserse skill), whole: how to write the brief, query craft in the courts' terms, each source's fields and filters (e-Sbírka, Poslanecká sněmovna, NS, NSS, ÚS, obecné soudy, SDEU, EUR-Lex, Slov-Lex for Slovak law, UKAŽ, Vlastní soubory, Zotero), how to screen, locate and read decisions whole, how to check a decision is still good law, when to stop, and the memo layout with its citation forms. Call it ONCE at the start of every legal research — whenever the user asks what the law, the courts or the doctrine say ('právní rešerše', 'rešerše k', 'co na to judikatura', 'najdi judikaturu k § X', 'jak to soudy vykládají', 'je na to nějaký rozsudek', 'platí ještě', 'co říká zákon o', 'najdi mi rozhodnutí', 'co na to doktrína', 'najdi důvodovou zprávu', 'co chtěl zákonodárce') or describes a legal problem expecting an answer grounded in statute, case law and literature, including everyday practical questions that name no statute ('je možné / lze / smím / musím…', 'je to platné' about a smlouva, podpis, výpověď, lhůta…), questions about Slovak law ('na Slovensku', 'slovenský zákon', 'Z. z.', 'NS SR', CZ/SK comparison) and EU transposition ('který zákon transponuje směrnici 2004/48') — before the first search. Takes no arguments; nothing needs to be installed.",
-      inputSchema: z.object({}),
+        "The research manual for this connector (the dawmain-reserse skill): how to write the brief, query craft in the courts' terms, the user's own sources (Vlastní soubory, Zotero, UKAŽ), how to screen, locate and read decisions whole, how to check a decision is still good law, when to stop, and the memo layout with its citation forms. Call it ONCE at the start of every legal research — whenever the user asks what the law, the courts or the doctrine say ('právní rešerše', 'rešerše k', 'co na to judikatura', 'najdi judikaturu k § X', 'jak to soudy vykládají', 'je na to nějaký rozsudek', 'platí ještě', 'co říká zákon o', 'najdi mi rozhodnutí', 'co na to doktrína', 'najdi důvodovou zprávu', 'co chtěl zákonodárce') or describes a legal problem expecting an answer grounded in statute, case law and literature, including everyday practical questions that name no statute ('je možné / lze / smím / musím…', 'je to platné' about a smlouva, podpis, výpověď, lhůta…), questions about Slovak law ('na Slovensku', 'slovenský zákon', 'Z. z.', 'NS SR', CZ/SK comparison) and EU transposition ('který zákon transponuje směrnici 2004/48') — in the SAME turn as your first searches, not as a step before them. Without arguments it returns the core manual; `topics` returns one source's field reference (esbirka, psp, ns, nss, us, justice, sdeu, sk — Slovak law only when the user names Slovakia) — ask for it in the same turn as your first in-depth search of that source; all returns the whole manual. Nothing needs to be installed.",
+      inputSchema: z.object({
+        topics: z
+          .array(z.enum(["all", ...TOPIC_NAMES]))
+          .optional()
+          .describe("Source references to return instead of the core manual: esbirka, psp, ns, nss, us, justice, sdeu, sk; or \"all\" for the whole manual."),
+      }),
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -138,10 +208,15 @@ export function registerGuide(server: McpServer): void {
         openWorldHint: false,
       },
     },
-    async (_args: unknown, ctx?: unknown) => {
+    async (args: unknown, ctx?: unknown) => {
       try {
+        const asked = ((args as { topics?: string[] } | undefined)?.topics ?? []).filter(Boolean);
         const [body, off] = await Promise.all([loadSkill(), unavailableSources(ctx)]);
-        return { content: [{ type: "text" as const, text: tailorManual(body, off) }] };
+        const manual = tailorManual(body, off);
+        if (asked.includes("all")) return { content: [{ type: "text" as const, text: manual }] };
+        const topics = TOPIC_NAMES.filter((topic) => asked.includes(topic));
+        const text = topics.length ? topicSections(manual, topics) : coreManual(manual);
+        return { content: [{ type: "text" as const, text }] };
       } catch (error) {
         return {
           isError: true as const,
