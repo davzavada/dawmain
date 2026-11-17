@@ -47,7 +47,7 @@ export default async function Home() {
       <section id="zdroje" className="sources">
         <h2>Zdroje</h2>
         {/* Client island: the status lights come from GET /api/status (static, checked hourly) after the page is up. */}
-        <SourceList />
+        <SourceList groups={["Judikatura", "Předpisy"]} />
         {/*
           Client island, the Pro group: Vlastní soubory (counts from GET /api/files/summary),
           Zotero (locked where the deployment cannot connect it — no OAuth app or CREDENTIALS_SECRET)
@@ -57,6 +57,8 @@ export default async function Home() {
           zotero={zoteroConfigured()}
           texts={{ files: texts["sources.files"], zotero: texts["sources.zotero"], ukaz: texts["sources.ukaz"] }}
         />
+        {/* Slovak law last, below Pro. */}
+        <SourceList groups={["Slovensko"]} />
       </section>
 
       <section id="pripojeni" className="connect">

@@ -172,11 +172,11 @@ function useMirrorCounts(): MirrorCounts | undefined {
  * courts the case-law mirror holds open Judikatura as "Interní databáze",
  * with how many decisions each holds; the rest show their status light.
  */
-export function SourceList() {
+export function SourceList({ groups = DATABASE_GROUPS }: { groups?: readonly DatabaseGroup[] } = {}) {
   const answers = useStatuses();
   const counts = useMirrorCounts();
   const rows = DATABASES.map((db) => toRow(db, answers[db.canaryId]));
-  return DATABASE_GROUPS.map((group) => {
+  return groups.map((group) => {
     const items = rows.filter((row) => row.group === group);
     const mirrored = items.filter((row) => row.mirror);
     const live = items.filter((row) => !row.mirror);

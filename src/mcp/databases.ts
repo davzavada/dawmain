@@ -23,7 +23,8 @@ export interface DatabaseStatus {
 
 /**
  * The headings the home page sorts the public databases under, in this order
- * (Slovensko = the slov-lex.sk sources, shown with the Slovak flag).
+ * (Slovensko = the slov-lex.sk sources, shown with the Slovak flag; the home
+ * page puts it last, below the Pro group).
  * A "Pro" database (UKAŽ, switched on per account) is listed in the Pro group
  * instead, beside Vlastní soubory and Zotero (app/_zdroje/own-sources.tsx).
  */
@@ -119,21 +120,21 @@ export const DATABASES: Array<{
   {
     label: "Zbierka zákonov SR",
     group: "Slovensko",
-    href: "https://www.slov-lex.sk/ezbierky",
+    href: "https://www.slov-lex.sk/ezbierky/vyhladavanie-pravnych-predpisov",
     source: "Slov-Lex (Zbierka zákonov SR)",
     canaryId: "slovlex-zbierka",
   },
   {
     label: "eLegislatíva",
     group: "Slovensko",
-    href: "https://www.slov-lex.sk/elegislativa",
+    href: "https://www.slov-lex.sk/elegislativa/legislativne-procesy",
     source: "Slov-Lex (eLegislatíva)",
     canaryId: "slovlex-lp",
   },
   {
     label: "Súdne rozhodnutia SR",
     group: "Slovensko",
-    href: "https://www.slov-lex.sk/sudne-rozhodnutia",
+    href: "https://www.slov-lex.sk/sudne-rozhodnutia/vseobecne-sudy-sr",
     source: "Slov-Lex (súdne rozhodnutia)",
     canaryId: "slovlex-sudy",
   },
