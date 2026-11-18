@@ -285,14 +285,14 @@ async function runMaintenance(started: number): Promise<Summary> {
   });
 
   await task("pending", async () => {
-    for (const lib of libraries.slice(0, SWEEP_PER_RUN)) {
+    for (const lib of rotate(libraries, SWEEP_PER_RUN, Math.floor(started / DAY_MS))) {
       if (late()) break;
       summary.pendingCleared += await withScope([lib.id], (db) => clearStalePending(db, lib.id, PENDING_KEEP_DAYS));
     }
   });
 
   await task("originals", async () => {
-    for (const lib of libraries.slice(0, SWEEP_PER_RUN)) {
+    for (const lib of rotate(libraries, SWEEP_PER_RUN, Math.floor(started / DAY_MS))) {
       if (late()) break;
       if (purgedNow.has(lib.id)) continue;
       summary.originalsAbandoned += await withScope([lib.id], (db) => abandonStaleOriginals(db, lib.id, ORIGINAL_UPLOAD_HOURS), {

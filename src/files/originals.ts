@@ -1,7 +1,7 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import { getAccess } from "./access";
-import { ORIGINAL_PART_BYTES, UUID_RE } from "./config";
+import { ORIGINAL_ALREADY_STORED, ORIGINAL_PART_BYTES, UUID_RE } from "./config";
 import { withScope } from "./db/client";
 import {
   deleteOriginalParts,
@@ -86,7 +86,8 @@ export function originalDisposition(fileName: string, kind: FileKind, inline: bo
     .trim();
   if (base.toLowerCase().endsWith(ext)) base = base.slice(0, -ext.length);
   base = base.replace(/^[\s.]+|[\s.]+$/g, "") || "dokument";
-  const utf8 = `${base.slice(0, 200)}${ext}`;
+  // Never split a surrogate pair (encodeURIComponent throws on a lone half).
+  const utf8 = `${base.slice(0, 200).replace(/[\uD800-\uDBFF]$/, "")}${ext}`;
   const ascii =
     base
       .normalize("NFD")
@@ -117,7 +118,7 @@ function assertUploader(info: OriginalInfo, userId: string, canUpload: boolean):
   if (info.uploaded_by !== userId) throw new FilesUserError(403, "Původní soubor může nahrát jen ten, kdo dokument nahrál.");
   if (!canUpload) throw new FilesUserError(403, "Do této knihovny nemůžete nahrávat.");
   if (info.original_status !== "uploading") {
-    throw new FilesUserError(409, info.original_status === "ready" ? "Původní soubor už je nahraný." : "Na původní soubor se u tohoto dokumentu nečeká.");
+    throw new FilesUserError(409, info.original_status === "ready" ? ORIGINAL_ALREADY_STORED : "Na původní soubor se u tohoto dokumentu nečeká.");
   }
   if (!info.file_bytes || info.file_bytes <= 0) throw new FilesUserError(409, "Na původní soubor se u tohoto dokumentu nečeká.");
 }

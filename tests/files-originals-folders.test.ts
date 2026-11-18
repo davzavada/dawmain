@@ -40,7 +40,7 @@ import { quotaMessage } from "@/src/files/upload";
 import { __setAccessLoaderForTests, buildAccess, type Access, type ClerkMembershipLike } from "@/src/files/access";
 import { ORIGINAL_PART_BYTES, TERMS_VERSION } from "@/src/files/config";
 import { setScopeRunner } from "@/src/files/db/client";
-import { freeName } from "@/src/files/db/folders";
+import { folderGone, freeName } from "@/src/files/db/folders";
 import { purgeLibraryContent } from "@/src/files/db/libraries";
 import { abandonStaleOriginals } from "@/src/files/db/originals";
 import { acceptTerms } from "@/src/files/db/usage";
@@ -557,6 +557,15 @@ describe("pure helpers", () => {
     expect(originalDisposition("Žaloba.pdf", "pdf", true)).toBe(`inline; filename="Zaloba.pdf"; filename*=UTF-8''%C5%BDaloba.pdf`);
     expect(originalDisposition('a"b\n.md', "md", false)).toBe(`attachment; filename="a-b.md"; filename*=UTF-8''a%20b.md`);
     expect(originalDisposition("", "txt", false)).toBe(`attachment; filename="dokument.txt"; filename*=UTF-8''dokument.txt`);
+    // A long name cut in the middle of a surrogate pair: the lone half goes (encodeURIComponent would throw).
+    expect(originalDisposition(`${"a".repeat(199)}😀b.pdf`, "pdf", false)).toMatch(/filename\*=UTF-8''a{199}\.pdf$/);
+  });
+
+  it("folderGone: only the foreign key of documents.folder_id (a folder deleted under a move or an upload)", () => {
+    expect(folderGone({ code: "23503", constraint: "documents_folder_fk" })).toBe(true);
+    expect(folderGone({ code: "23503", constraint: "doc_originals_doc_id_library_id_fkey" })).toBe(false);
+    expect(folderGone({ code: "23505", constraint: "documents_folder_fk" })).toBe(false);
+    expect(folderGone(null)).toBe(false);
   });
 
   it("renamedFileName keeps the old extension unless the new name has it", () => {

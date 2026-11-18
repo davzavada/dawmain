@@ -157,7 +157,7 @@ export async function setTeamLogo(actor: string, teamId: string, file: File | nu
   } catch (error) {
     const status = clerkStatus(error);
     if (status === 404) return { ok: false, error: "Tým už neexistuje." };
-    if (status === 400 || status === 422) return { ok: false, error: "Clerk obrázek nepřijal. Zkuste jiný soubor (PNG nebo JPG)." };
+    if (status === 400 || status === 422) return { ok: false, error: "Clerk obrázek nepřijal. Zkus jiný soubor (PNG nebo JPG)." };
     console.warn("admin team logo failed", status);
     return { ok: false, error: "Logo se nepodařilo uložit, Clerk neodpověděl. Zkus to za chvíli." };
   }

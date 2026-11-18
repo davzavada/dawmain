@@ -8,7 +8,7 @@ import { LIBRARY_ID_RE, LIMITS, PAGE_CHARS, TERMS_VERSION, UUID_RE, type FilesMo
 import { withScope, type Queryable } from "./db/client";
 import { confirmDocument, deleteDocument, getDocument, listDocuments, updateDocumentMeta, type DocumentRow } from "./db/documents";
 import { documentPreviewText, libraryDocCounts, mergeIdentKeys, metaContext } from "./db/documents-web";
-import { getFolder, listFolders, moveDocument, renameDocument } from "./db/folders";
+import { folderGone, getFolder, listFolders, moveDocument, renameDocument } from "./db/folders";
 import { forgetPages, libraryBytesUsed, releasePages } from "./db/libraries";
 import { loadReadDoc, loadText } from "./db/reading";
 import { acceptTerms, audit, bumpUsage, hasAcceptedTerms, usageSum } from "./db/usage";
@@ -428,6 +428,10 @@ async function organizeDocument(
     if (folderId && !(await getFolder(db, folderId, row.library_id))) throw new FilesUserError(422, "Vybraná složka neexistuje.");
     if (!(await moveDocument(db, row.id, row.library_id, folderId))) throw new FilesUserError(404, "Dokument nenalezen.");
     await audit(db, { libraryId: row.library_id, actor: userId, action: "document.move", docId: row.id, detail: { folder: folderId } });
+  }).catch((error: unknown) => {
+    // The folder was deleted between the check and the move.
+    if (folderGone(error)) throw new FilesUserError(422, "Vybraná složka neexistuje.");
+    throw error;
   });
   return detailFor(userId, id);
 }

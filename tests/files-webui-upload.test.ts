@@ -85,7 +85,7 @@ async function until(check: () => boolean, what: string) {
 type Call = { url: string; method: string; meta?: Record<string, unknown>; gz?: Blob; part?: Blob };
 
 /** The server: POST /api/files/documents answers `post(n)`, a part PUT answers `put`, the finish POST 200. */
-function stubServer(opts: { post?: (n: number) => Response | Promise<Response>; put?: () => Response } = {}) {
+function stubServer(opts: { post?: (n: number) => Response | Promise<Response>; put?: () => Response; finish?: () => Response } = {}) {
   const calls: Call[] = [];
   let posts = 0;
   vi.stubGlobal(
@@ -100,7 +100,7 @@ function stubServer(opts: { post?: (n: number) => Response | Promise<Response>; 
       }
       calls.push({ url, method, part: init.body instanceof Blob ? init.body : undefined });
       if (method === "PUT") return opts.put ? opts.put() : new Response(null, { status: 204 });
-      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      return opts.finish ? opts.finish() : new Response(JSON.stringify({ ok: true }), { status: 200 });
     }),
   );
   return calls;
@@ -230,7 +230,38 @@ describe("upload queue (useUploads)", () => {
     expect(log()).toEqual(["zakon.md: Text je nahraný a asistent v něm hledá, jen se neuložil originál. Originál je větší, než bylo ohlášeno."]);
   });
 
-  it("a part that fails on the server is tried once more", async () => {
+  it("sendWithRetry: 5xx and network errors are retried with the waits; the last 5xx speaks with the server's message", async () => {
+    const { sendWithRetry } = await import("@/app/_zdroje/upload-process");
+    const slept: number[] = [];
+    const sleep = async (ms: number) => void slept.push(ms);
+    const answers: Array<() => Promise<Response>> = [
+      () => Promise.reject(new TypeError("network")),
+      () => Promise.resolve(new Response(null, { status: 502 })),
+      () => Promise.resolve(new Response(null, { status: 204 })),
+    ];
+    let n = 0;
+    expect((await sendWithRetry(() => answers[n++](), [10, 20, 30], sleep)).status).toBe(204);
+    expect(slept).toEqual([10, 20]);
+    // A 4xx is an answer, not a reason to retry.
+    expect((await sendWithRetry(() => Promise.resolve(new Response(null, { status: 409 })), [10], sleep)).status).toBe(409);
+    const readonly = () => Promise.resolve(new Response(JSON.stringify({ error: "Vlastní soubory jsou teď jen pro čtení." }), { status: 503 }));
+    await expect(sendWithRetry(readonly, [1, 1], sleep)).rejects.toMatchObject({ name: "UploadStop", message: "Vlastní soubory jsou teď jen pro čtení." });
+    await expect(sendWithRetry(() => Promise.reject(new TypeError("network")), [1], sleep)).rejects.toMatchObject({ message: "Spojení se přerušilo při ukládání originálu." });
+  });
+
+  it("a finalize whose first answer got lost: the retry's 409 'already stored' counts as done", async () => {
+    let n = 0;
+    stubServer({
+      finish: () =>
+        ++n === 1 ? new Response(null, { status: 502 }) : new Response(JSON.stringify({ error: "Původní soubor už je nahraný." }), { status: 409 }),
+    });
+    const onUploaded = await upload([md(DOC, "zakon.md")]);
+    await until(() => onUploaded.mock.calls.length === 1 && hook.current === null, "the upload");
+    expect(n).toBe(2);
+    expect(log()).toEqual([]);
+  });
+
+  it("a part that fails on the server is tried again", async () => {
     let n = 0;
     const calls = stubServer({ put: () => (++n === 1 ? new Response(null, { status: 503 }) : new Response(null, { status: 204 })) });
     const onUploaded = await upload([md(DOC, "zakon.md")]);

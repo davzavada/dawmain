@@ -255,17 +255,22 @@ export async function lockDuePurge(db: Queryable, libraryId: string): Promise<bo
 /**
  * Bytes of originals per library — stored, or being uploaded (an upload
  * counts from its first byte, so parallel uploads cannot overshoot the
- * quota). Documents whose original is 'missing' (uploaded before originals
- * were kept, or an abandoned upload the cron dropped) and documents being
- * deleted do not count. Libraries without documents come back as 0.
+ * quota). A document never takes less than its text (char_count): one whose
+ * original is 'missing' (uploaded without one, or an abandoned upload the
+ * cron dropped) counts by its text alone, so the quota cannot be sidestepped
+ * by leaving the original out or declaring it tiny. Documents being deleted
+ * do not count. Libraries without documents come back as 0.
  */
 export async function libraryBytesUsed(db: Queryable, ids: string[]): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
   for (const id of ids) out[id] = 0;
   if (ids.length === 0) return out;
   const { rows } = await db.query(
-    `SELECT library_id, coalesce(sum(file_bytes), 0) AS bytes FROM documents
-      WHERE library_id = ANY($1::text[]) AND original_status <> 'missing' AND status <> 'deleting'
+    `SELECT library_id,
+            coalesce(sum(CASE WHEN original_status <> 'missing' THEN greatest(coalesce(file_bytes, 0), coalesce(char_count, 0))
+                              ELSE coalesce(char_count, 0) END), 0) AS bytes
+       FROM documents
+      WHERE library_id = ANY($1::text[]) AND status <> 'deleting'
       GROUP BY library_id`,
     [ids],
   );

@@ -233,8 +233,11 @@ describe("GET /api/files/summary", () => {
     expect(personal).toMatchObject({ id: "user_a", kind: "user", role: "owner", name: "Osobní" });
     expect(personal).not.toHaveProperty("memberCount");
     expect(personal.counts).toMatchObject({ total: 2, ready: 1, review: 1, searchable: 1 });
-    // Text-only uploads (no original) do not count against the storage quota.
-    expect(personal).toMatchObject({ handle: "osobni", logoUrl: null, quotaBytes: 100 * 1024 * 1024, bytesUsed: 0 });
+    // Text-only uploads (no original) count by their text alone.
+    expect(personal).toMatchObject({ handle: "osobni", logoUrl: null, quotaBytes: 100 * 1024 * 1024 });
+    const chars = (await t.owner.query<{ n: string }>("SELECT sum(char_count) AS n FROM documents WHERE library_id = 'user_a'")).rows[0].n;
+    expect(personal.bytesUsed).toBe(Number(chars));
+    expect(personal.bytesUsed).toBeGreaterThan(0);
     expect(body.maxFileBytes).toBe(100 * 1024 * 1024);
   });
 });

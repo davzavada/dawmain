@@ -23,6 +23,8 @@ export const PAGE_CHARS = 3_600;
  * enough for any proxy body limit, big enough to keep the requests few.
  */
 export const ORIGINAL_PART_BYTES = 8 * 1024 * 1024;
+/** The 409 of a finalize (or a part) for an original that is already 'ready'; the upload client reads a repeated finalize answering this as done. */
+export const ORIGINAL_ALREADY_STORED = "Původní soubor už je nahraný.";
 
 export type FilesMode = "on" | "readonly" | "off" | "unconfigured";
 

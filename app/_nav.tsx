@@ -112,6 +112,36 @@ function OwnSourcesNav({ pathname, zotero }: { pathname: string; zotero: boolean
   );
 }
 
+/** The same entries in the strip under the header, which replaces the sidebar on narrow screens. */
+function OwnSourcesTabs({ pathname, zotero }: { pathname: string; zotero: boolean }) {
+  const { auth, summary } = useZdroje();
+  if (auth !== "signed_in") return null;
+  const teams = summary?.state === "ok" ? summary.libraries.filter((l) => l.kind === "org") : [];
+  const current = (href: string) => (pathname === href ? { "aria-current": "page" as const } : {});
+  return (
+    <>
+      <span className="tab-sep" aria-hidden="true" />
+      <Link href="/soubory" className="tab-item" {...current("/soubory")}>
+        Soubory
+      </Link>
+      {teams.map((team) => {
+        const href = `/soubory/${encodeURIComponent(team.handle)}`;
+        return (
+          <Link key={team.id} href={href} className="tab-item" data-off={!team.pro || undefined} {...current(href)}>
+            <LibraryMark lib={team} size={16} />
+            {team.name}
+          </Link>
+        );
+      })}
+      {zotero ? (
+        <Link href="/zotero" className="tab-item" {...current("/zotero")}>
+          Zotero
+        </Link>
+      ) : null}
+    </>
+  );
+}
+
 export function SiteNav({ sourceCount, zotero = false }: { sourceCount: number; zotero?: boolean }) {
   const pathname = usePathname();
   const home = pathname === "/";
@@ -178,6 +208,7 @@ export function SiteNav({ sourceCount, zotero = false }: { sourceCount: number; 
               {short}
             </Link>
           ))}
+          <OwnSourcesTabs pathname={pathname} zotero={zotero} />
         </nav>
       </div>
     </>

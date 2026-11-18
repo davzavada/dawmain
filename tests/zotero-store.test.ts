@@ -412,6 +412,11 @@ describe("disabled libraries", () => {
     expect(await saveDisabledLibraries(USER, keyFingerprint(NEW_KEY), [])).toBe(false);
     expect(stored()?.disabled).toEqual(["personal", "99"]);
     await expect(saveDisabledLibraries(USER, keyFingerprint(KEY), ["x"])).rejects.toThrow(/disabled/);
+    // A function gets the list as stored now (a switch flipped elsewhere meanwhile is kept), and its result is checked too.
+    expect(await saveDisabledLibraries(USER, keyFingerprint(KEY), (current) => [...current.filter((r) => r !== "99"), "77"])).toBe(true);
+    expect(stored()?.disabled).toEqual(["personal", "77"]);
+    await expect(saveDisabledLibraries(USER, keyFingerprint(KEY), () => ["x"])).rejects.toThrow(/disabled/);
+    expect(stored()?.disabled).toEqual(["personal", "77"]);
     await deleteConnection(USER);
     expect(await saveDisabledLibraries(USER, keyFingerprint(KEY), [])).toBe(false);
   });

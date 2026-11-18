@@ -45,6 +45,9 @@ export function DocViewer({ doc, onClose, actions }: { doc: DocumentListItem; on
   const [pages, setPages] = useState(0);
   const [mainWidth, setMainWidth] = useState(800);
   const main = useRef<HTMLDivElement>(null);
+  const win = useRef<HTMLDivElement>(null);
+  /** Where the reading area was scrolled to (0–1) before the zoom changed, to stay on the same place after it. */
+  const keep = useRef<number | null>(null);
   const originalUrl = `/api/files/documents/${encodeURIComponent(doc.id)}/original`;
   const ext = (/\.([A-Za-z0-9]{1,8})$/.exec(doc.fileName)?.[1] ?? doc.fileKind).toLowerCase();
 
@@ -102,10 +105,36 @@ export function DocViewer({ doc, onClose, actions }: { doc: DocumentListItem; on
     };
   }, [doc.id, doc.original, doc.fileKind, doc.fileBytes, originalUrl]);
 
-  // ---- window: Escape, no page scroll behind, width of the reading area ----
+  const zoomTo = useCallback((next: (z: number) => number) => {
+    const el = main.current;
+    if (el && el.scrollHeight > 0) keep.current = el.scrollTop / el.scrollHeight;
+    setZoom(next);
+  }, []);
+  const zoomIn = useCallback(() => zoomTo((z) => ZOOMS.find((v) => v > z + 0.001) ?? z), [zoomTo]);
+  const zoomOut = useCallback(() => zoomTo((z) => [...ZOOMS].reverse().find((v) => v < z - 0.001) ?? z), [zoomTo]);
+
+  // ---- window: keys, focus, no page scroll behind, width of the reading area ----
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !document.querySelector(".fp-menu")) onClose();
+      if (document.querySelector(".fp-menu")) return;
+      const typing = (e.target as HTMLElement | null)?.closest?.("input, textarea, select");
+      if (e.key === "Escape") onClose();
+      else if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+      else if (e.key === "+" || e.key === "=") zoomIn();
+      else if (e.key === "-") zoomOut();
+      else if (e.key === "0") zoomTo(() => 1);
+      else if (e.key === "Tab") {
+        // The window is modal: Tab stays among its controls.
+        const box = win.current;
+        if (!box) return;
+        const stops = [...box.querySelectorAll<HTMLElement>("a[href], button:not(:disabled):not([tabindex='-1']), [tabindex='0']")].filter((el) => el.offsetParent !== null);
+        if (stops.length === 0) return;
+        const at = stops.indexOf(document.activeElement as HTMLElement);
+        if (!box.contains(document.activeElement) || (e.shiftKey ? at <= 0 : at === stops.length - 1)) {
+          e.preventDefault();
+          stops[e.shiftKey ? stops.length - 1 : 0].focus();
+        }
+      }
     };
     document.addEventListener("keydown", onKey);
     const overflow = document.body.style.overflow;
@@ -114,7 +143,15 @@ export function DocViewer({ doc, onClose, actions }: { doc: DocumentListItem; on
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = overflow;
     };
-  }, [onClose]);
+  }, [onClose, zoomIn, zoomOut, zoomTo]);
+  // The reading area takes the focus (arrows, Page Up/Down and Space scroll it); closing gives it back to the row.
+  useEffect(() => {
+    const before = document.activeElement as HTMLElement | null;
+    main.current?.focus({ preventScroll: true });
+    return () => {
+      if (before?.isConnected) before.focus({ preventScroll: true });
+    };
+  }, []);
   useLayoutEffect(() => {
     const el = main.current;
     if (!el) return;
@@ -128,6 +165,11 @@ export function DocViewer({ doc, onClose, actions }: { doc: DocumentListItem; on
   /** Page width at 100 %: the reading area minus its margins, at most a comfortable 900 px. */
   const fit = Math.max(240, Math.min(mainWidth - 64, 900));
   const pageWidth = Math.round(fit * zoom);
+  useLayoutEffect(() => {
+    const el = main.current;
+    if (el && keep.current !== null) el.scrollTop = keep.current * el.scrollHeight;
+    keep.current = null;
+  }, [pageWidth]);
 
   // ---- current page from the scroll position ----
   /** Top of a page inside the scrolled content (works with docx-preview's CSS zoom too). */
@@ -147,9 +189,6 @@ export function DocViewer({ doc, onClose, actions }: { doc: DocumentListItem; on
     const target = box?.querySelector<HTMLElement>(`[data-page="${n}"]`);
     if (target && box) box.scrollTo({ top: topOf(target, box) - 16, behavior: "smooth" });
   }, []);
-
-  const zoomIn = () => setZoom((z) => ZOOMS.find((v) => v > z + 0.001) ?? z);
-  const zoomOut = () => setZoom((z) => [...ZOOMS].reverse().find((v) => v < z - 0.001) ?? z);
 
   // ---- content ----
   let body: ReactNode;
@@ -177,7 +216,7 @@ export function DocViewer({ doc, onClose, actions }: { doc: DocumentListItem; on
       <PdfCanvas key={i} pdf={state.pdf} number={i + 1} width={pageWidth} aspect={state.aspect} root={main} className="dv-page" />
     ));
     thumbs = Array.from({ length: state.pages }, (_, i) => (
-      <button key={i} type="button" className="dv-thumb" aria-current={page === i + 1 ? "page" : undefined} onClick={() => goTo(i + 1)} aria-label={`Strana ${i + 1}`}>
+      <button key={i} type="button" className="dv-thumb" tabIndex={-1} aria-current={page === i + 1 ? "page" : undefined} onClick={() => goTo(i + 1)} aria-label={`Strana ${i + 1}`}>
         <PdfCanvas pdf={state.pdf} number={i + 1} width={THUMB_PX} aspect={state.aspect} root={null} className="dv-thumb-page" />
         <span className="dv-thumb-label">{i + 1}</span>
       </button>
@@ -211,7 +250,7 @@ export function DocViewer({ doc, onClose, actions }: { doc: DocumentListItem; on
   return (
     <div className="dv-layer" role="dialog" aria-modal="true" aria-label={doc.fileName}>
       <div className="dv-backdrop" onClick={onClose} />
-      <div className="dv-window">
+      <div className="dv-window" ref={win}>
         <header className="dv-head">
           <span className={`fp-doc fp-doc-${ext}`}>{ext.toUpperCase().slice(0, 4)}</span>
           <b className="dv-title" title={doc.fileName}>
@@ -232,7 +271,7 @@ export function DocViewer({ doc, onClose, actions }: { doc: DocumentListItem; on
         </header>
         <div className="dv-body">
           {state.kind === "docx" ? <DocxThumbs main={main} page={page} pages={pages} onPick={goTo} /> : thumbs ? <nav className="dv-thumbs" aria-label="Strany">{thumbs}</nav> : null}
-          <div className="dv-main" ref={main} onScroll={onScroll}>
+          <div className="dv-main" ref={main} onScroll={onScroll} tabIndex={0} aria-label="Obsah dokumentu">
             <div className="dv-pages">{body}</div>
           </div>
           {state.kind !== "loading" && state.kind !== "error" && state.kind !== "big" ? (
@@ -251,13 +290,13 @@ export function DocViewer({ doc, onClose, actions }: { doc: DocumentListItem; on
                 </span>
               ) : null}
               <span className="dv-pill">
-                <button type="button" aria-label="Zmenšit" disabled={zoom <= ZOOMS[0]} onClick={zoomOut}>
+                <button type="button" aria-label="Zmenšit" title="Zmenšit (−)" disabled={zoom <= ZOOMS[0]} onClick={zoomOut}>
                   −
                 </button>
-                <button type="button" className="dv-count" aria-label="Přizpůsobit šířce" onClick={() => setZoom(1)}>
+                <button type="button" className="dv-count" aria-label="Přizpůsobit šířce" title="Přizpůsobit šířce (0)" onClick={() => zoomTo(() => 1)}>
                   {Math.round(zoom * 100)} %
                 </button>
-                <button type="button" aria-label="Zvětšit" disabled={zoom >= ZOOMS[ZOOMS.length - 1]} onClick={zoomIn}>
+                <button type="button" aria-label="Zvětšit" title="Zvětšit (+)" disabled={zoom >= ZOOMS[ZOOMS.length - 1]} onClick={zoomIn}>
                   +
                 </button>
               </span>
@@ -271,8 +310,9 @@ export function DocViewer({ doc, onClose, actions }: { doc: DocumentListItem; on
 
 /**
  * One PDF page on a canvas at `width` CSS px (sharp on retina), drawn when it
- * comes near the visible part of `root` (or the window for thumbnails) and
- * drawn again when the width changes.
+ * comes near the visible part of `root` (or the window for thumbnails), drawn
+ * again when the width changes, and let go of when it scrolls far away (a
+ * book of hundreds of pages would otherwise keep every bitmap in memory).
  */
 function PdfCanvas({
   pdf,
@@ -297,17 +337,22 @@ function PdfCanvas({
 
   useEffect(() => {
     const el = box.current;
-    if (!el || near) return;
-    const io = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && setNear(true), {
+    if (!el) return;
+    const io = new IntersectionObserver((entries) => setNear(entries[entries.length - 1].isIntersecting), {
       root: root?.current ?? null,
-      rootMargin: "1200px 0px",
+      rootMargin: "2000px 0px",
     });
     io.observe(el);
     return () => io.disconnect();
-  }, [near, root]);
+  }, [root]);
 
   useEffect(() => {
-    if (!near) return;
+    const surface = canvas.current;
+    if (!near) {
+      // Out of reach: free the bitmap (the box keeps the page's size).
+      if (surface) surface.width = surface.height = 0;
+      return;
+    }
     let cancelled = false;
     let task: { cancel: () => void; promise: Promise<void> } | null = null;
     void (async () => {
@@ -432,6 +477,8 @@ function DocxThumbs({ main, page, pages, onPick }: { main: { current: HTMLElemen
       const button = document.createElement("button");
       button.type = "button";
       button.className = "dv-thumb";
+      // Thumbnails are a pointer shortcut; the keyboard has the page buttons.
+      button.tabIndex = -1;
       button.setAttribute("aria-label", `Strana ${i + 1}`);
       button.addEventListener("click", () => onPick(i + 1));
       const frame = document.createElement("div");

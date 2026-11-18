@@ -372,10 +372,10 @@ describe("page states (GET /api/zotero/status)", () => {
     await renderModal();
     const t = text();
     expect(host.querySelector(".zp-badge")?.textContent).toBe("Připojeno");
-    expect(t).toContain("jako jnovakova · čtení a ukládání");
-    // The numbers: items of the libraries that are on (the ones with a count), how many are on, since when.
-    const stats = Object.fromEntries([...host.querySelectorAll(".zp-stats div")].map((d) => [d.querySelector("dt")?.textContent, norm(d.querySelector("dd")?.textContent)]));
-    expect(stats).toEqual({ "položek k dispozici": "1 203", "knihovny zapnuté": "2 z 3", připojeno: "12. 9. 2026" });
+    expect(t).toContain("Účet jnovakova · čtení a ukládání");
+    // Beside the heading: who, the mode, since when. Above the list: how many are on and their items.
+    expect(t).toContain("připojeno od 12. 9. 2026");
+    expect(norm(host.querySelector(".zp-sum")?.textContent)).toBe("zapnuto 2 z 3 · 1 203 položek");
     for (const gone of ["Odpojení", "Co klíč smí", "zotero.org/settings/keys"]) expect(t, gone).not.toContain(gone);
     expect(t).toContain("Asistent může i rovnou do Zotera ukládat nalezené dokumenty. Změnit to jde opětovným připojením.");
     expect(t).toContain("Dawmain zapomene klíč ke knihovně. Ve vašem Zoteru se nic nesmaže.");
@@ -402,7 +402,7 @@ describe("page states (GET /api/zotero/status)", () => {
   it("connected read-only: „jen čtení“", async () => {
     status = { code: 200, body: CONNECTED_READ };
     await renderModal();
-    expect(text()).toContain("jako jnovakova · jen čtení");
+    expect(text()).toContain("Účet jnovakova · jen čtení");
     expect(text()).toContain("Asistent v knihovně hledá a čte. Nic v ní nezapíše, nezmění ani nesmaže. Změnit to jde opětovným připojením.");
   });
 
@@ -462,7 +462,7 @@ describe("page states (GET /api/zotero/status)", () => {
     await act(async () => button("Odpojit Zotero")!.click());
     await act(async () => host.querySelector<HTMLButtonElement>(".zd-confirm .zd-btn-danger")!.click());
     await settle();
-    expect(text()).toContain("jako jnovakova");
+    expect(text()).toContain("Účet jnovakova");
     expect(host.querySelector(".zd-zotero-disconnect [role=alert]")?.textContent).toBe("Odpojení se nepodařilo.");
     expect(document.activeElement).toBe(button("Odpojit Zotero"));
   });
@@ -470,7 +470,7 @@ describe("page states (GET /api/zotero/status)", () => {
   it("connected but Pro is gone: the connection stays visible and removable", async () => {
     status = { code: 200, body: { ...CONNECTED, pro: false } };
     await renderModal();
-    expect(text()).toContain("jako jnovakova");
+    expect(text()).toContain("Účet jnovakova");
     expect(text()).toContain("Režim Pro teď nemáte");
     expect(button("Odpojit Zotero")).toBeDefined();
     // The libraries are not asked for: the route refuses without Pro.

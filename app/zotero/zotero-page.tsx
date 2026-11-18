@@ -255,6 +255,8 @@ export function ZoteroPanel({ stav }: { stav: string | null }) {
 
   // "Připojeno" waits for the status: its sentence depends on the mode the connection got.
   const mode = status?.state === "ok" ? (status.connection?.mode ?? null) : null;
+  // The connection's state sits beside the heading: who, what the key may do, since when.
+  const conn = status?.state === "ok" ? status.connection : null;
   const shown = banner && (banner !== "pripojeno" || status) ? { tone: STAV_BANNER[banner].tone, text: bannerText(banner, mode) } : null;
   return (
     <div className="zp">
@@ -263,8 +265,23 @@ export function ZoteroPanel({ stav }: { stav: string | null }) {
           Z
         </span>
         <div className="zp-titles">
-          <h1>Zotero</h1>
-          <p>Vaše knihovna ze zotero.org, ve které asistent hledá, čte a případně ukládá.</p>
+          <h1>
+            Zotero
+            {conn ? (
+              <span className="zp-badge">
+                <ZIcon name="check" size={14} />
+                Připojeno
+              </span>
+            ) : null}
+          </h1>
+          {conn ? (
+            <p>
+              Účet <b className="zd-zotero-user">{conn.username}</b> · {modeText(conn.mode)}
+              {since(conn.connectedAt) ? ` · připojeno ${since(conn.connectedAt)}` : ""}
+            </p>
+          ) : (
+            <p>Vaše knihovna ze zotero.org, ve které asistent hledá, čte a případně ukládá.</p>
+          )}
         </div>
       </header>
       <div className="zd-zotero zp-panel" ref={panel} tabIndex={-1}>
@@ -456,58 +473,34 @@ function Connected({
   onChanged: () => void;
   onRevoked: () => void;
 }) {
-  const statusId = useId();
   const permId = useId();
   const offId = useId();
-  const from = since(connection.connectedAt);
-  const mode = modeText(connection.mode);
   // The library list needs a usable connection: configured and Pro (the route refuses otherwise).
   const libs = useLibraries(warning === null);
-  const on = libs.data?.libraries.filter((l) => l.on) ?? [];
-  const known = on.filter((l) => l.items !== null);
   return (
     <>
-      <section className="zd-zotero-section zp-sec" aria-labelledby={statusId}>
-        <h2 className="sr-only" id={statusId}>
-          Připojení
-        </h2>
-        <p className="zp-status">
-          <span className="zp-badge">
-            <ZIcon name="check" size={14} />
-            Připojeno
+      {warning ? (
+        <section className="zd-zotero-section zp-sec">
+          <p className="zd-banner">{warning}</p>
+        </section>
+      ) : (
+        <Libraries state={libs} mode={connection.mode} onRevoked={onRevoked} />
+      )}
+      <section className="zd-zotero-section zp-sec zp-rows">
+        <div className="zp-row" role="group" aria-labelledby={permId}>
+          <span className="zp-row-text">
+            <b id={permId}>Oprávnění</b>
+            <span>{modeLine(connection.mode)} Změnit to jde opětovným připojením.</span>
           </span>
-          <span>
-            jako <b className="zd-zotero-user">{connection.username}</b> · {mode}
+          <Reconnectable initial={connection.mode} label="Změnit oprávnění" />
+        </div>
+        <div className="zp-row" role="group" aria-labelledby={offId}>
+          <span className="zp-row-text">
+            <b id={offId}>Odpojit</b>
+            <span>Dawmain zapomene klíč ke knihovně. Ve vašem Zoteru se nic nesmaže.</span>
           </span>
-        </p>
-        {warning ? <p className="zd-banner">{warning}</p> : null}
-        {warning === null ? (
-          <dl className="zp-stats">
-            <div>
-              <dt>položek k dispozici</dt>
-              <dd>{libs.data ? (known.length ? formatCount(known.reduce((sum, l) => sum + (l.items ?? 0), 0)) : "–") : "…"}</dd>
-            </div>
-            <div>
-              <dt>{libs.data ? plural(libs.data.libraries.length, "knihovna zapnutá", "knihovny zapnuté", "knihoven zapnuto") : "knihovny"}</dt>
-              <dd>{libs.data ? `${on.length} z ${libs.data.libraries.length}` : "…"}</dd>
-            </div>
-            <div>
-              <dt>připojeno</dt>
-              <dd>{from ? from.replace(/^od /, "") : "–"}</dd>
-            </div>
-          </dl>
-        ) : null}
-      </section>
-      {warning === null ? <Libraries state={libs} mode={connection.mode} onRevoked={onRevoked} /> : null}
-      <section className="zd-zotero-section zp-sec" aria-labelledby={permId}>
-        <h3 id={permId}>Oprávnění</h3>
-        <p className="zp-hint">{modeLine(connection.mode)} Změnit to jde opětovným připojením.</p>
-        <Reconnectable initial={connection.mode} label="Změnit oprávnění" />
-      </section>
-      <section className="zd-zotero-section zp-sec" aria-labelledby={offId}>
-        <h3 id={offId}>Odpojit</h3>
-        <p className="zp-hint">Dawmain zapomene klíč ke knihovně. Ve vašem Zoteru se nic nesmaže.</p>
-        <Disconnect question="Odpojit Zotero? Asistent pak do vaší knihovny neuvidí. Připojit ji můžete kdykoli znovu." onDone={onChanged} />
+          <Disconnect question="Odpojit Zotero? Asistent pak do vaší knihovny neuvidí. Připojit ji můžete kdykoli znovu." onDone={onChanged} />
+        </div>
       </section>
     </>
   );
@@ -579,6 +572,7 @@ function Libraries({ state, mode, onRevoked }: { state: LibrariesState; mode: Zo
   const headingId = useId();
   const { data, error, busy, toggleError } = state;
   const onCount = data?.libraries.filter((l) => l.on).length ?? 0;
+  const known = data?.libraries.filter((l) => l.on && l.items !== null) ?? [];
   const personal = data?.libraries.find((l) => l.kind === "personal");
   let list: ReactNode;
   if (data) {
@@ -619,9 +613,17 @@ function Libraries({ state, mode, onRevoked }: { state: LibrariesState; mode: Zo
   }
   return (
     <section className="zd-zotero-section zp-sec" aria-labelledby={headingId}>
-      <h3 id={headingId}>Knihovny a skupiny</h3>
-      <p className="zp-hint">Asistent hledá jen v zapnutých. Vypnutím se v Zoteru nic nesmaže, jen ji Dawmain přestane používat.</p>
+      <div className="zp-sec-head">
+        <h3 id={headingId}>Knihovny a skupiny</h3>
+        {data ? (
+          <span className="zp-sum">
+            zapnuto {onCount} z {data.libraries.length}
+            {known.length ? ` · ${itemsText(known.reduce((sum, l) => sum + (l.items ?? 0), 0))}` : ""}
+          </span>
+        ) : null}
+      </div>
       {list}
+      <p className="zp-hint">Asistent hledá jen v zapnutých. Vypnutím se v Zoteru nic nesmaže, jen ji Dawmain přestane používat.</p>
       {data?.groupsFailed ? <p className="zd-banner">Skupiny se teď nepodařilo načíst ze Zotera. Přepínat půjde, až se načtou - zkuste stránku obnovit za chvíli.</p> : null}
       {mode === "write" && personal && !personal.on ? (
         <p className="zp-hint">Osobní knihovna je vypnutá, a tak do Zotera asistent nic neuloží. Nové položky ukládá jen do ní.</p>

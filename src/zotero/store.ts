@@ -336,17 +336,29 @@ export async function saveConnection(userId: string, input: NewConnection): Prom
  * Store which libraries are switched off for the key with fingerprint `fp`.
  * Re-reads Clerk (not the micro-cache) and writes only while that key is
  * still the stored, unrevoked one — a switch flipped on a page left open
- * across a reconnect or a disconnect changes nothing. Returns whether it
- * wrote. Throws on a malformed ref.
+ * across a reconnect or a disconnect changes nothing. `disabled` is the
+ * new list, or a function from the list just read to the new one — one
+ * flipped switch then applies to what is stored now, not to what the caller
+ * read before its own requests (a switch flipped in another tab is kept).
+ * Returns whether it wrote. Throws on a malformed ref (and what the function throws).
  */
-export async function saveDisabledLibraries(userId: string, fp: string, disabled: readonly string[]): Promise<boolean> {
+export async function saveDisabledLibraries(
+  userId: string,
+  fp: string,
+  disabled: readonly string[] | ((current: readonly string[]) => readonly string[]),
+): Promise<boolean> {
   assertUserId(userId);
-  if (!Array.isArray(disabled) || disabled.length > MAX_DISABLED || disabled.some((d) => typeof d !== "string" || !LIBRARY_REF_RE.test(d))) {
-    throw new Error("invalid disabled libraries");
-  }
+  const check = (list: readonly string[]) => {
+    if (!Array.isArray(list) || list.length > MAX_DISABLED || list.some((d) => typeof d !== "string" || !LIBRARY_REF_RE.test(d))) {
+      throw new Error("invalid disabled libraries");
+    }
+    return list;
+  };
+  if (typeof disabled !== "function") check(disabled);
   const stored = parseStored(await readRaw(userId));
   if (!stored || stored.sealed === null || stored.fp === null || stored.fp !== fp || stored.revokedAt !== null) return false;
-  await write(userId, { ...stored, disabled: parseDisabled(disabled) });
+  const next = typeof disabled === "function" ? check(disabled(stored.disabled)) : disabled;
+  await write(userId, { ...stored, disabled: parseDisabled(next) });
   return true;
 }
 
