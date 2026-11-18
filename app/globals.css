@@ -2704,7 +2704,7 @@ button.zd-file-row:hover .zd-file-title {
   background: var(--surface);
 }
 .zd-segmented-pill > button,
-.zd-layer .zd-segmented-pill > select {
+:is(.zd-layer, .fp-detail) .zd-segmented-pill > select {
   width: auto;
   padding: 5px 12px;
   border: 0;
@@ -2719,14 +2719,14 @@ button.zd-file-row:hover .zd-file-title {
 .zd-segmented-pill > button:hover {
   color: var(--text);
 }
-.zd-layer .zd-segmented-pill > select {
+:is(.zd-layer, .fp-detail) .zd-segmented-pill > select {
   min-height: 0;
   padding-right: 8px;
   line-height: inherit;
 }
 /* The selected one as on .tabs and Owl's .segment: lifted, lighter than the track in both themes. */
 .zd-segmented-pill > button[aria-checked="true"],
-.zd-layer .zd-segmented-pill > select[data-checked] {
+:is(.zd-layer, .fp-detail) .zd-segmented-pill > select[data-checked] {
   background: var(--raised);
   color: var(--text);
   box-shadow: var(--shadow-raised);
@@ -2923,11 +2923,11 @@ button.zd-file-row:hover .zd-file-title {
   font-weight: 500;
   color: var(--body);
 }
-.zd-layer input[type="text"],
-.zd-layer input[type="email"],
-.zd-layer input[type="number"],
-.zd-layer select,
-.zd-layer textarea,
+:is(.zd-layer, .fp-detail) input[type="text"],
+:is(.zd-layer, .fp-detail) input[type="email"],
+:is(.zd-layer, .fp-detail) input[type="number"],
+:is(.zd-layer, .fp-detail) select,
+:is(.zd-layer, .fp-detail) textarea,
 .zd-ops input[type="text"],
 .zd-ops select {
   width: 100%;
@@ -2940,13 +2940,13 @@ button.zd-file-row:hover .zd-file-title {
   font: inherit;
   font-size: 14px;
 }
-.zd-layer textarea {
+:is(.zd-layer, .fp-detail) textarea {
   resize: vertical;
   line-height: 1.45;
 }
-.zd-layer input:focus,
-.zd-layer select:focus,
-.zd-layer textarea:focus,
+:is(.zd-layer, .fp-detail) input:focus,
+:is(.zd-layer, .fp-detail) select:focus,
+:is(.zd-layer, .fp-detail) textarea:focus,
 .zd-ops input[type="text"]:focus,
 .zd-ops select:focus {
   outline: none;
