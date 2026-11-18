@@ -174,7 +174,7 @@ export const MAX_LOGO_BYTES = 512 * 1024;
 export function logoProblem(type: string, size: number): string | null {
   if (!LOGO_TYPES.includes(type)) return "Logo musí být obrázek PNG, JPG, WebP nebo GIF.";
   if (size <= 0) return "Soubor je prázdný.";
-  if (size > MAX_LOGO_BYTES) return `Logo má ${Math.ceil(size / 1024)} kB, nejvýš jde 512 kB. Zmenšete ho prosím.`;
+  if (size > MAX_LOGO_BYTES) return `Logo má ${Math.ceil(size / 1024)} kB, nejvýš jde 512 kB. Zmenši ho prosím.`;
   return null;
 }
 

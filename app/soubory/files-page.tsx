@@ -22,16 +22,20 @@ import { ACCEPT, useUploads } from "../_zdroje/upload";
  * and the open document ?dokument=<id>, so Back and a copied link work.
  *
  *   - "Nová složka" creates one and puts its name in edit mode at once;
- *     double-click, F2 or ⋯ → Přejmenovat renames inline (Enter saves,
- *     Escape cancels; a document keeps its extension).
+ *     F2 or ⋯ → Přejmenovat renames inline (Enter saves, Escape cancels;
+ *     a document keeps its extension).
  *   - Drag a row onto a folder or onto the breadcrumb to move it, or use
  *     ⋯ → Přesunout do…; a rename or a move can be undone from the toast.
- *   - Deleting a folder moves what was in it one level up; deleting a
- *     document asks first (it is gone for good).
+ *   - Deleting a folder moves what was in it one level up (a folder with
+ *     content asks first); deleting a document asks first (it is gone for
+ *     good).
  *   - Files dropped anywhere on the list (or picked with "Nahrát soubory")
  *     upload into the open folder: the text for the assistant, then the original.
- *   - Clicking a document opens the side panel: open or download the
- *     original, the text the assistant reads, and the metadata form.
+ *   - Clicking a document opens it in the large viewer (../_zdroje/doc-viewer.tsx);
+ *     a folder's arrow opens it in place, a click on its row goes into it.
+ *   - ⋯ on a row (and in the viewer) holds every action: the metadata form
+ *     in the side panel, download, rename, move, delete. The menu is
+ *     keyboard-operable (arrows, Escape returns the focus).
  *
  * Rights follow the API: folders are managed by anyone who may upload
  * there; a document is renamed, moved and deleted by its uploader or the
@@ -140,7 +144,7 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
   const [renaming, setRenaming] = useState<string | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<DocumentListItem | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Item | null>(null);
   /** The document whose metadata form is open in the side panel (⋯ → Upravit údaje); the viewer is ?dokument. */
   const [metaId, setMetaId] = useState<string | null>(null);
   /** Folders opened in place with their disclosure arrow (kept per library in this browser). */
@@ -169,6 +173,9 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
   const [fileDrag, setFileDrag] = useState(false);
   const dragKey = useRef<string | null>(null);
   const picker = useRef<HTMLInputElement>(null);
+  const menuBox = useRef<HTMLDivElement>(null);
+  /** The ⋯ button the menu was opened from: the focus returns to it on Escape. */
+  const menuOpener = useRef<HTMLElement | null>(null);
   const toastTimer = useRef<number | undefined>(undefined);
 
   const base = lib.kind === "user" ? "/soubory" : `/soubory/${encodeURIComponent(lib.handle)}`;
@@ -261,6 +268,7 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
     return counts;
   }, [folders, documents]);
 
+  const searching = q.trim() !== "";
   const rows: Array<{ item: Item; depth: number }> = useMemo(() => {
     const docs = documents ?? [];
     const byName = (a: string, b: string) => a.localeCompare(b, "cs", { numeric: true });
@@ -381,6 +389,7 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
 
   async function deleteFolder(folder: FolderItem) {
     const done = await call<unknown>(`/api/files/folders/${folder.id}`, "DELETE");
+    setConfirmDelete(null);
     if (done === null) return;
     const had = (childCount.get(folder.id) ?? 0) > 0;
     // The server moved its content one level up; read the library again.
@@ -405,6 +414,24 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
     reload();
     void refreshSummary();
     say(`„${doc.fileName}“ smazán.`);
+  }
+
+  /** Delete from the menu or the keyboard: an empty folder goes at once, anything else asks first. */
+  function askDelete(item: Item) {
+    if (item.kind === "folder" && (childCount.get(item.folder.id) ?? 0) === 0) void deleteFolder(item.folder);
+    else setConfirmDelete(item);
+  }
+
+  /** Rename in the list: the viewer closes and, if the row is not on screen, its folder opens. */
+  function startRename(item: Item) {
+    const key = keyOf(item);
+    setMenu(null);
+    if (!items.some((i) => keyOf(i) === key)) {
+      setQ("");
+      const parent = item.kind === "folder" ? item.folder.parentId : (item.doc.folderId ?? null);
+      go({ folder: parent && byId.has(parent) ? parent : null });
+    } else if (openId) select(null);
+    setRenaming(key);
   }
 
   // ---- drag & drop ----
@@ -456,7 +483,7 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
       e.preventDefault();
       if (item.kind === "folder") openFolder(item.folder.id);
       else select(item.doc.id);
-    } else if ((e.key === "ArrowRight" || e.key === "ArrowLeft") && item.kind === "folder" && !q) {
+    } else if ((e.key === "ArrowRight" || e.key === "ArrowLeft") && item.kind === "folder" && !searching) {
       e.preventDefault();
       if ((e.key === "ArrowRight") !== expanded.has(item.folder.id)) toggleExpanded(item.folder.id);
     } else if (e.key === "F2" && canManage(item)) {
@@ -464,8 +491,7 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
       setRenaming(keyOf(item));
     } else if ((e.key === "Delete" || (e.key === "Backspace" && e.metaKey)) && canManage(item)) {
       e.preventDefault();
-      if (item.kind === "folder") void deleteFolder(item.folder);
-      else setConfirmDelete(item.doc);
+      askDelete(item);
     }
   }
 
@@ -478,8 +504,34 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
       setMenu(null);
       return;
     }
-    const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    setMenu({ key, mode: "main", x: Math.max(8, Math.min(box.right - 230, window.innerWidth - 250)), y: Math.min(box.bottom + 4, window.innerHeight - 280) });
+    menuOpener.current = e.currentTarget as HTMLElement;
+    const box = menuOpener.current.getBoundingClientRect();
+    // .fp-menu is at most 340 px tall and 280 px wide (globals.css).
+    setMenu({ key, mode: "main", x: Math.max(8, Math.min(box.right - 230, window.innerWidth - 290)), y: Math.max(8, Math.min(box.bottom + 4, window.innerHeight - 350)) });
+  }
+  const menuFocusKey = menu ? `${menu.key}:${menu.mode}` : null;
+  useEffect(() => {
+    if (menuFocusKey) menuBox.current?.querySelector<HTMLElement>("[role=menuitem]:not(:disabled)")?.focus();
+  }, [menuFocusKey]);
+  function onMenuKey(e: KeyboardEvent) {
+    const list = [...(menuBox.current?.querySelectorAll<HTMLElement>("[role=menuitem]:not(:disabled)") ?? [])];
+    const at = list.indexOf(document.activeElement as HTMLElement);
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const step = e.key === "ArrowDown" ? 1 : -1;
+      list[(at + step + list.length) % list.length]?.focus();
+    } else if (e.key === "Home" || e.key === "End") {
+      e.preventDefault();
+      list[e.key === "Home" ? 0 : list.length - 1]?.focus();
+    } else if (e.key === "Escape") {
+      // Before the viewer's own Escape: only the menu closes, and the focus goes back to its ⋯.
+      e.preventDefault();
+      e.stopPropagation();
+      setMenu(null);
+      menuOpener.current?.focus();
+    } else if (e.key === "Tab") {
+      setMenu(null);
+    }
   }
   useEffect(() => {
     if (!menu) return;
@@ -553,7 +605,7 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
           <button
             type="button"
             className="fp-crumb"
-            aria-current={folderId === null && !q ? "page" : undefined}
+            aria-current={folderId === null && !searching ? "page" : undefined}
             data-drop={dropOver === "crumb:root" || undefined}
             onClick={() => openFolder(null)}
             {...dropProps(null, "crumb:root")}
@@ -568,7 +620,7 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
               <button
                 type="button"
                 className="fp-crumb"
-                aria-current={f.id === folderId && !q ? "page" : undefined}
+                aria-current={f.id === folderId && !searching ? "page" : undefined}
                 data-drop={dropOver === `crumb:${f.id}` || undefined}
                 onClick={() => openFolder(f.id)}
                 {...dropProps(f.id, `crumb:${f.id}`)}
@@ -666,9 +718,9 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
           ) : items.length === 0 ? (
             <div className="fp-empty">
               <FolderGlyph size={48} />
-              <strong>{q ? "Nic nenalezeno" : folderId ? "Složka je prázdná" : "Zatím tu nic není"}</strong>
+              <strong>{searching ? "Nic nenalezeno" : folderId ? "Složka je prázdná" : "Zatím tu nic není"}</strong>
               <span>
-                {q
+                {searching
                   ? "Hledá se v názvech souborů a složek v celé knihovně."
                   : writable && lib.canUpload
                     ? "Přetáhněte sem soubory, nebo je nahrajte tlačítkem nahoře. PDF, DOCX, TXT nebo MD."
@@ -685,7 +737,7 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
               const pending = doc ? PENDING.has(doc.status) || doc.status === "deleting" : false;
               const ext = doc ? extOf(doc.fileName) || doc.fileKind : "";
               const sub: string[] = [];
-              if (q) sub.push(where(isFolder ? item.folder.parentId : (doc!.folderId ?? null)));
+              if (searching) sub.push(where(isFolder ? item.folder.parentId : (doc!.folderId ?? null)));
               if (isFolder) sub.push(itemsLabel(childCount.get(item.folder.id) ?? 0));
               else if (doc) {
                 if (pending) sub.push(doc.status === "deleting" ? "Mažu…" : "Zpracovávám…");
@@ -704,8 +756,8 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
                   className="fp-row fp-item"
                   data-folder={isFolder || undefined}
                   aria-selected={doc ? doc.id === openId || doc.id === metaId : undefined}
-                  aria-level={q ? undefined : depth + 1}
-                  aria-expanded={isFolder && !q ? expanded.has(item.folder.id) : undefined}
+                  aria-level={searching ? undefined : depth + 1}
+                  aria-expanded={isFolder && !searching ? expanded.has(item.folder.id) : undefined}
                   data-drop={dropOver === key || undefined}
                   data-bad={doc?.status === "error" || undefined}
                   draggable={manage && renaming !== key && !pending}
@@ -724,13 +776,10 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
                     if (isFolder) openFolder(item.folder.id);
                     else select(doc!.id);
                   }}
-                  onDoubleClick={() => {
-                    if (!isFolder && manage) setRenaming(key);
-                  }}
                   onKeyDown={(e) => onRowKey(e, item)}
                 >
                   <span className="fp-name" style={depth ? { paddingLeft: depth * 22 } : undefined}>
-                    {isFolder && !q ? (
+                    {isFolder && !searching ? (
                       <button
                         type="button"
                         className="fp-disclosure"
@@ -746,7 +795,7 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
                           <path d="M3 1.5 7 5 3 8.5z" fill="currentColor" />
                         </svg>
                       </button>
-                    ) : !q ? (
+                    ) : !searching ? (
                       <span className="fp-disclosure-space" aria-hidden="true" />
                     ) : null}
                     {isFolder ? <FolderGlyph /> : <span className={`fp-doc fp-doc-${ext}`}>{(ext || kindLabel(doc!.fileKind)).toUpperCase().slice(0, 4)}</span>}
@@ -833,7 +882,7 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
       </p>
 
       {menu && menuItem ? (
-        <div className="fp-menu" role="menu" style={{ top: menu.y, left: menu.x }}>
+        <div className="fp-menu" role="menu" ref={menuBox} style={{ top: menu.y, left: menu.x }} onKeyDown={onMenuKey}>
           {menu.mode === "move" ? (
             <MoveMenu
               item={menuItem}
@@ -894,10 +943,7 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
                 role="menuitem"
                 className="fp-mi"
                 disabled={!canManage(menuItem)}
-                onClick={() => {
-                  setMenu(null);
-                  setRenaming(menu.key);
-                }}
+                onClick={() => startRename(menuItem)}
               >
                 <ZIcon name="edit" size={15} />
                 Přejmenovat
@@ -915,8 +961,7 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
                 disabled={!canManage(menuItem)}
                 onClick={() => {
                   setMenu(null);
-                  if (menuItem.kind === "folder") void deleteFolder(menuItem.folder);
-                  else setConfirmDelete(menuItem.doc);
+                  askDelete(menuItem);
                 }}
               >
                 <ZIcon name="trash" size={15} />
@@ -933,10 +978,18 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
       {confirmDelete ? (
         <div className="fp-confirm">
           <Confirm
-            question={<>Smazat „{confirmDelete.fileName}“? Originál, text i index se odstraní natrvalo.</>}
+            question={
+              confirmDelete.kind === "doc" ? (
+                <>Smazat „{confirmDelete.doc.fileName}“? Originál, text i index se odstraní natrvalo.</>
+              ) : (
+                <>
+                  Smazat složku „{confirmDelete.folder.name}“? Nic z ní se nesmaže, její obsah se přesune o úroveň výš.
+                </>
+              )
+            }
             confirmLabel="Smazat"
             busy={busy}
-            onConfirm={() => void deleteDocument(confirmDelete)}
+            onConfirm={() => void (confirmDelete.kind === "doc" ? deleteDocument(confirmDelete.doc) : deleteFolder(confirmDelete.folder))}
             onCancel={() => setConfirmDelete(null)}
           />
         </div>

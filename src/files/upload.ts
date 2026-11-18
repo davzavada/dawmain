@@ -6,7 +6,7 @@ import { LIBRARY_ID_RE, LIMITS, TERMS_VERSION, USER_ID_RE, UUID_RE } from "./con
 import { withScope, type Queryable } from "./db/client";
 import { insertUploadedDocument, isBlocked } from "./db/documents";
 import { formatBytes, zBefore } from "./bytes";
-import { getFolder } from "./db/folders";
+import { folderGone, getFolder } from "./db/folders";
 import { ensureLibrary, libraryBytesUsed, lockLibrary, NO_LIBRARY_PAGE_CAP, reservePages, reviveLibrary } from "./db/libraries";
 import { acceptTerms, audit, bumpUsage, hasAcceptedTerms, usageSum } from "./db/usage";
 import { billablePages } from "./dmd/billing";
@@ -54,9 +54,10 @@ import {
  *      text — what is stored (the browser sends normalized text, so for it
  *      both hashes agree);
  *   6. one transaction: blocked content (notice-and-action), library row,
- *      the target folder (same library), the storage quota when the
- *      original follows (library row locked, bytes of originals stored or
- *      uploading + this file ≤ quotaBytes → else 413), atomic page
+ *      the target folder (same library), the storage quota (library row
+ *      locked, bytes stored or uploading + what this upload takes —
+ *      chargedBytes: the original, never less than the text — ≤ quotaBytes
+ *      → else 413), atomic page
  *      reservation against the global cap, a library its
  *      owner uses again is revived (reviveLibrary), insert (duplicate
  *      content in the library → 409, reservation rolled back), the daily
@@ -213,6 +214,15 @@ export function parseUploadMeta(raw: string): UploadMeta | null {
     original: m.original === true,
     folderId: m.folderId ? m.folderId.toLowerCase() : null,
   };
+}
+
+/**
+ * What an upload takes from the library's storage quota: the original's
+ * declared size when one follows, but never less than the text stored — so
+ * an upload without an original (or with a tiny declared one) still counts. Pure.
+ */
+export function chargedBytes(original: boolean, fileBytes: number, textBytes: number): number {
+  return Math.max(original ? Math.max(0, fileBytes) : 0, Math.max(0, textBytes));
 }
 
 /** The byte-quota refusal: what the file needs, what is left, of how much. Pure. */
@@ -460,6 +470,8 @@ async function upload(request: Request, userId: string): Promise<UploadOutcome> 
   // text a different document — always the hash of the normalized text.
   const contentSha256 = cpu.run(() => createHash("sha256").update(text, "utf8").digest("hex"));
 
+  const charged = chargedBytes(meta.original === true, meta.file.bytes, Buffer.byteLength(text, "utf8"));
+
   // 6. One transaction: all or nothing.
   try {
     return await withScope([libraryId], async (db) => {
@@ -473,13 +485,11 @@ async function upload(request: Request, userId: string): Promise<UploadOutcome> 
       if (meta.folderId && !(await getFolder(db, meta.folderId, libraryId))) {
         return refuse(422, "Vybraná složka už neexistuje. Načtěte stránku znovu.");
       }
-      if (meta.original) {
-        // The row lock serializes the byte-quota checks of concurrent uploads into this library.
-        await lockLibrary(db, libraryId);
-        const used = (await libraryBytesUsed(db, [libraryId]))[libraryId] ?? 0;
-        if (used + meta.file.bytes > library.quotaBytes) {
-          return refuse(413, quotaMessage(meta.file.bytes, used, library.quotaBytes));
-        }
+      // The row lock serializes the byte-quota checks of concurrent uploads into this library.
+      await lockLibrary(db, libraryId);
+      const used = (await libraryBytesUsed(db, [libraryId]))[libraryId] ?? 0;
+      if (used + charged > library.quotaBytes) {
+        return refuse(413, quotaMessage(charged, used, library.quotaBytes));
       }
       // Pages are still reserved for the installation's global page cap; the library's own quota is in bytes.
       const reserved = await reservePages(db, libraryId, pages, NO_LIBRARY_PAGE_CAP, LIMITS.globalPages);
@@ -526,6 +536,8 @@ async function upload(request: Request, userId: string): Promise<UploadOutcome> 
     });
   } catch (error) {
     if (error instanceof Rollback) return error.outcome;
+    // The folder was deleted between the check and the insert.
+    if (folderGone(error)) return refuse(422, "Vybraná složka už neexistuje. Načtěte stránku znovu.");
     throw error;
   }
 }

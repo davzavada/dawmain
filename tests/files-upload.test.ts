@@ -8,6 +8,7 @@ import { acceptTerms } from "@/src/files/db/usage";
 import { parseDmd } from "@/src/files/dmd/parse";
 import { __resetGuardsForTests, MODE_OVERRIDE_KEY } from "@/src/files/guards";
 import {
+  chargedBytes,
   cleanFileName,
   gunzipCapped,
   handleDocumentUpload,
@@ -252,7 +253,21 @@ describe("handleDocumentUpload — quota and duplicates", () => {
     expect(await docCount()).toBe(1);
   });
 
-  it("documents without a stored original (legacy, text only) do not count against the quota", async () => {
+  it("an upload without an original, or with a tiny declared one, is charged its text (no way around the quota)", async () => {
+    // The library is nearly full: 1 048 000 of 1 048 576 bytes.
+    const filler = await upload("user_small", "user_small", paged(3, "plno"), { original: true, file: { name: "plno.pdf", bytes: 1_048_000, sha256: "e".repeat(64), kind: "pdf" } });
+    expect(filler.status).toBe(201);
+    const textOnly = await upload("user_small", "user_small", paged(3, "t"), { file: { name: "t.pdf", bytes: 5_000_000, sha256: "c".repeat(64), kind: "pdf" } });
+    expectRefusal(textOnly, 413, /v knihovně zbývá 576 B z 1 MB/);
+    const tiny = await upload("user_small", "user_small", paged(3, "u"), { original: true, file: { name: "u.pdf", bytes: 1, sha256: "d".repeat(64), kind: "pdf" } });
+    expectRefusal(tiny, 413, /v knihovně zbývá 576 B z 1 MB/);
+    expect(await docCount()).toBe(1);
+    expect(chargedBytes(false, 5_000_000, 1_200)).toBe(1_200);
+    expect(chargedBytes(true, 1, 1_200)).toBe(1_200);
+    expect(chargedBytes(true, 800_000, 1_200)).toBe(800_000);
+  });
+
+  it("a document without a stored original (legacy, text only) counts by its text, not by its file size", async () => {
     // A text-only upload of a big file: original 'missing', its bytes are not stored.
     const legacy = await upload("user_small", "user_small", paged(3, "old"), { file: { name: "old.pdf", bytes: 5_000_000, sha256: "c".repeat(64), kind: "pdf" } });
     expect(legacy.status).toBe(201);

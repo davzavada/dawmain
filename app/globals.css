@@ -257,6 +257,16 @@ main > footer a {
   font-size: 14px;
   color: var(--muted);
 }
+.tab-sep {
+  flex: none;
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--line);
+}
+.tab-item[data-off] {
+  opacity: 0.6;
+}
 .tab-item:hover {
   color: var(--text);
   background: var(--surface);
@@ -1782,6 +1792,13 @@ main > .fp {
   color: var(--text);
 }
 @media (max-width: 760px) {
+  .fp-crumbs {
+    flex-basis: 100%;
+  }
+  .fp-toolbar .fp-btn {
+    flex: 1;
+    justify-content: center;
+  }
   .fp-search {
     order: 3;
     width: 100%;
@@ -1879,11 +1896,8 @@ main > .fp {
 .fp-item {
   border-radius: 8px;
   border: 1px solid transparent;
-  cursor: default;
-  user-select: none;
-}
-.fp-item[data-folder] {
   cursor: pointer;
+  user-select: none;
 }
 .fp-item:hover {
   background: var(--well);
@@ -1989,6 +2003,7 @@ main > .fp {
   border-radius: 6px;
   font: inherit;
   color: var(--text);
+  background: var(--bg);
   outline: 0;
   box-shadow: 0 0 0 3px var(--accent-bg);
 }
@@ -2015,7 +2030,8 @@ main > .fp {
   display: grid;
   place-items: center;
   border-radius: 12px;
-  background: rgb(37 99 235 / 0.08);
+  background: var(--accent-bg);
+  backdrop-filter: blur(1px);
   border: 2px dashed var(--accent);
   color: var(--accent);
   font-weight: 600;
@@ -2055,7 +2071,12 @@ main > .fp {
   cursor: pointer;
   text-decoration: none;
 }
-.fp-mi:hover:not(:disabled) {
+.fp-mi:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.fp-mi:hover:not(:disabled),
+.fp-mi:focus-visible {
   background: var(--surface);
   color: var(--text);
   text-decoration: none;
@@ -2350,7 +2371,7 @@ main > .fp {
   padding: 0 6px;
   border-radius: 999px;
   background: var(--accent);
-  color: #ffffff;
+  color: var(--bg);
 }
 .dv-thumb-docx {
   max-height: 160px;
@@ -2369,6 +2390,7 @@ main > .fp {
   min-width: 0;
   overflow: auto;
   background: var(--surface);
+  outline: 0;
 }
 .dv-pages {
   display: flex;
@@ -3944,9 +3966,9 @@ button.zd-file-row:hover .zd-file-title {
   min-width: 0;
 }
 .zp-titles h1 {
-  font-size: 20px;
-  font-weight: 600;
+  font-size: 22px;
   letter-spacing: -0.01em;
+  line-height: 1.25;
   color: var(--text);
 }
 .zp-titles p {

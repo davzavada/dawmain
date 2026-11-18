@@ -9,6 +9,7 @@ import {
   getFolder,
   insertFolder,
   isSelfOrDescendant,
+  lockFolderTree,
   MAX_FOLDERS_PER_LIBRARY,
   siblingNameTaken,
   updateFolder,
@@ -123,6 +124,7 @@ export async function createFolderFor(userId: string, body: unknown): Promise<Fo
   assertManages(lib);
   const row = await guardDuplicate(() =>
     withScope([lib.id], async (db) => {
+      await lockFolderTree(db, lib.id);
       const parentId = await parentIn(db, lib.id, parsed.data.parentId ?? null);
       if ((await countFolders(db, lib.id)) >= MAX_FOLDERS_PER_LIBRARY) {
         throw new FilesUserError(422, `Knihovna může mít nejvýš ${MAX_FOLDERS_PER_LIBRARY} složek.`);
@@ -145,8 +147,19 @@ const patchSchema = z
   })
   .refine((v) => v.name !== undefined || v.parentId !== undefined);
 
-/** Find a folder in the caller's libraries (locked) with the library's access, or 404. */
+/**
+ * Find a folder in the caller's libraries (locked) with the library's access, or 404.
+ * The library's folder tree is locked first (lockFolderTree), so concurrent
+ * moves cannot build a cycle and a delete sees every child.
+ */
 async function findFolder(db: Queryable, libs: readonly LibraryAccess[], id: string): Promise<{ folder: FolderRow; lib: LibraryAccess }> {
+  const peek = await getFolder(
+    db,
+    id,
+    libs.map((l) => l.id),
+  );
+  if (!peek) throw new FilesUserError(404, NOT_FOUND);
+  await lockFolderTree(db, peek.library_id);
   const folder = await getFolder(
     db,
     id,

@@ -604,8 +604,10 @@ export async function toggleLibraryResponse(request: Request): Promise<Response>
     const before = await librariesFor(conn);
     if (before.groupsFailed) throw new LibrariesRefusal(503, LIBRARIES_UNAVAILABLE);
     const known = before.libraries.map((l) => l.id);
-    const disabled = nextDisabled(conn.disabled, known, input.library, input.on);
-    if (!(await saveDisabledLibraries(userId, conn.fp, disabled))) throw new LibrariesRefusal(409, STALE);
+    // The flip applies to the list as stored now (re-read by the store), not to `conn` from before the Zotero requests.
+    let disabled: string[] = [];
+    const flip = (current: readonly string[]) => (disabled = nextDisabled(current, known, input.library, input.on));
+    if (!(await saveDisabledLibraries(userId, conn.fp, flip))) throw new LibrariesRefusal(409, STALE);
     const off = new Set(disabled);
     return filesJson({ ...before, libraries: before.libraries.map((l) => ({ ...l, on: !off.has(l.id) })) } satisfies ZoteroLibrariesAnswer);
   } catch (error) {

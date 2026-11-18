@@ -35,6 +35,22 @@ function mapFolder(r: Record<string, unknown>): FolderRow {
   };
 }
 
+/**
+ * Serialize changes to the library's folder tree (create, rename, move,
+ * delete) until the transaction ends: the cycle check of a move and the
+ * moving-up of a delete then see each other's result. Taken before any
+ * folder row is locked.
+ */
+export async function lockFolderTree(db: Queryable, libraryId: string): Promise<void> {
+  await db.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`files-folders:${libraryId}`]);
+}
+
+/** pg foreign-key violation of documents.folder_id: the folder was deleted while a document was on its way into it. */
+export function folderGone(error: unknown): boolean {
+  const e = error as { code?: unknown; constraint?: unknown } | null;
+  return !!e && typeof e === "object" && e.code === "23503" && e.constraint === "documents_folder_fk";
+}
+
 /** Every folder of the library, by name. */
 export async function listFolders(db: Queryable, libraryId: string): Promise<FolderRow[]> {
   const { rows } = await db.query(

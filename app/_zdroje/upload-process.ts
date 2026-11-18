@@ -1,4 +1,4 @@
-import { LIMITS, ORIGINAL_PART_BYTES } from "@/src/files/config";
+import { LIMITS, ORIGINAL_ALREADY_STORED, ORIGINAL_PART_BYTES } from "@/src/files/config";
 import type { ConvertOptions, ConvertResult } from "@/src/files/convert/types";
 import { parseDmd } from "@/src/files/dmd/parse";
 import { DmdLimitError } from "@/src/files/dmd/types";
@@ -47,6 +47,38 @@ async function errorText(res: Response, fallback: string): Promise<string> {
   return typeof body?.error === "string" ? body.error : fallback;
 }
 
+/** Waits before the 2nd, 3rd and 4th attempt of one request of the original's upload. */
+export const ORIGINAL_RETRY_MS: readonly number[] = [500, 1_500, 4_000];
+
+const CONNECTION_LOST = "Spojení se přerušilo při ukládání originálu.";
+const ORIGINAL_FAILED = "Originál se nepodařilo uložit.";
+
+/**
+ * One request of the original's upload, tried again after a network error
+ * or a 5xx (the server stores a part idempotently and a finalize changes
+ * nothing until it succeeds). Resolves with the first response that is not
+ * a 5xx. Throws UploadStop: the server's own Czech message when its last
+ * answer was a 5xx, "the connection broke" when no answer came at all.
+ */
+export async function sendWithRetry(
+  send: () => Promise<Response>,
+  waits: readonly number[] = ORIGINAL_RETRY_MS,
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+): Promise<Response> {
+  let last: Response | null = null;
+  for (let attempt = 0; attempt <= waits.length; attempt++) {
+    if (attempt > 0) await sleep(waits[attempt - 1]);
+    try {
+      last = await send();
+    } catch {
+      last = null;
+      continue;
+    }
+    if (last.status < 500) return last;
+  }
+  throw new UploadStop(last ? await errorText(last, ORIGINAL_FAILED) : CONNECTION_LOST);
+}
+
 /** PUT an original's parts, then finish it. Throws UploadStop with a Czech message. */
 async function uploadOriginal(id: string, file: File, onProgress: (text: string) => void): Promise<void> {
   const base = `/api/files/documents/${encodeURIComponent(id)}/original`;
@@ -54,27 +86,17 @@ async function uploadOriginal(id: string, file: File, onProgress: (text: string)
   for (let n = 0; n < parts; n++) {
     const body = file.slice(n * ORIGINAL_PART_BYTES, Math.min(file.size, (n + 1) * ORIGINAL_PART_BYTES));
     onProgress(parts > 1 ? `Ukládám originál… ${Math.round((n / parts) * 100)} %` : "Ukládám originál…");
-    let done = false;
-    // One retry per part: the server stores a part idempotently.
-    for (let attempt = 0; attempt < 2 && !done; attempt++) {
-      let res: Response | null = null;
-      try {
-        res = await fetch(`${base}?part=${n}`, { method: "PUT", body, headers: { "Content-Type": "application/octet-stream" }, credentials: "same-origin" });
-      } catch {
-        res = null;
-      }
-      if (res?.ok) done = true;
-      else if (res && res.status < 500) throw new UploadStop(await errorText(res, "Originál se nepodařilo uložit."));
-    }
-    if (!done) throw new UploadStop("Spojení se přerušilo při ukládání originálu.");
+    const res = await sendWithRetry(() =>
+      fetch(`${base}?part=${n}`, { method: "PUT", body, headers: { "Content-Type": "application/octet-stream" }, credentials: "same-origin" }),
+    );
+    if (!res.ok) throw new UploadStop(await errorText(res, ORIGINAL_FAILED));
   }
-  let res: Response;
-  try {
-    res = await fetch(base, { method: "POST", credentials: "same-origin" });
-  } catch {
-    throw new UploadStop("Spojení se přerušilo při ukládání originálu.");
-  }
-  if (!res.ok) throw new UploadStop(await errorText(res, "Originál se nepodařilo uložit."));
+  const res = await sendWithRetry(() => fetch(base, { method: "POST", credentials: "same-origin" }));
+  if (res.ok) return;
+  const message = await errorText(res, ORIGINAL_FAILED);
+  // A finalize whose answer got lost did its work: the retry finds the original already stored.
+  if (res.status === 409 && message === ORIGINAL_ALREADY_STORED) return;
+  throw new UploadStop(message);
 }
 
 /**

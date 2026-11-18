@@ -333,12 +333,10 @@ describe("folders and renaming", () => {
     expect(writes()[0].body).toMatchObject({ parentId: null, name: "Nová složka (2)" });
   });
 
-  it("renaming a document: double-click, Enter sends PATCH {action: rename}; Vrátit renames it back", async () => {
+  it("renaming a document: F2, Enter sends PATCH {action: rename}; Vrátit renames it back", async () => {
     standard();
     await open();
-    await act(async () => {
-      row("zakon.pdf").dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
-    });
+    await key(row("zakon.pdf"), "F2");
     const input = renameInput()!;
     expect(input.value).toBe("zakon.pdf");
     // The extension stays out of the selection.
@@ -370,11 +368,34 @@ describe("folders and renaming", () => {
   it("an unchanged or blank name sends nothing", async () => {
     standard();
     await open();
-    await act(async () => row("zakon.pdf").dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
+    await key(row("zakon.pdf"), "F2");
     renameInput()!.value = "   ";
     await key(renameInput()!, "Enter");
     expect(writes()).toEqual([]);
     expect(names()).toContain("zakon.pdf");
+  });
+
+  it("deleting a folder: an empty one goes at once, one with content asks first", async () => {
+    standard();
+    await open();
+    await key(row("Smlouvy"), "Delete");
+    expect(writes()).toEqual([]);
+    expect(host.querySelector(".fp-confirm")?.textContent).toContain("Smazat složku „Smlouvy“? Nic z ní se nesmaže");
+    await act(async () => button("Zrušit")!.click());
+    expect(host.querySelector(".fp-confirm")).toBeNull();
+    await key(row("Vzory"), "Delete");
+    expect(writes().map((c) => c.method)).toEqual(["DELETE"]);
+  });
+
+  it("the menu takes the focus and moves it with the arrows; Escape closes it", async () => {
+    standard();
+    await open();
+    await openMenu("zakon.pdf");
+    expect(document.activeElement?.textContent).toContain("Upravit údaje");
+    await key(document.activeElement as HTMLElement, "ArrowUp");
+    expect(document.activeElement?.textContent).toContain("Smazat");
+    await key(document.activeElement as HTMLElement, "Escape");
+    expect(host.querySelector(".fp-menu")).toBeNull();
   });
 
   it("⋯ → Přesunout do… moves a document into the folder picked", async () => {
@@ -422,7 +443,7 @@ describe("rights", () => {
     for (const label of ["Přejmenovat", "Přesunout do", "Smazat"]) expect(menuItem(label)!.disabled, label).toBe(true);
     expect(host.querySelector(".fp-menu")?.textContent).toContain("Nahrál ho jiný člen týmu.");
     // No inline rename either.
-    await act(async () => row("cizi.pdf").dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
+    await key(row("cizi.pdf"), "F2");
     expect(renameInput()).toBeNull();
     await openMenu("cizi.pdf");
     await openMenu("moje.pdf");
