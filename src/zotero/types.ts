@@ -217,6 +217,12 @@ export type ConnectionState =
          * write to the personal library; a record from before modes is "read".
          */
         mode: ZoteroMode;
+        /**
+         * Libraries the user switched off for the assistant ("personal" or a
+         * group id): the tools neither search nor read them, and
+         * zotero_save does not write to a switched-off personal library.
+         */
+        disabled: readonly string[];
       };
     }
   /** Zotero rejected the key (revoked there); the sealed key is gone. */

@@ -8,7 +8,7 @@ import type { ZoteroStatus } from "@/src/zotero/web-types";
  * The Zotero row of the home page's "Pro" group (OwnSourcesGroup
  * in app/_zdroje/own-sources.tsx, with `zotero` only where the deployment
  * can connect Zotero): the connection state in one row, and the
- * way into the Zotero modal (?zotero=1) — or the sign-in for a visitor, who
+ * way to the /zotero page — or the sign-in for a visitor, who
  * never makes the status request.
  */
 
@@ -83,11 +83,14 @@ const PRO_SUMMARY = {
       pro: true,
       canUpload: true,
       canManageAll: true,
-      quotaPages: 1000,
-      pagesUsed: 10,
+      handle: "osobni",
+      logoUrl: null,
+      quotaBytes: 104_857_600,
+      bytesUsed: 10 * 1024 * 1024,
       counts: { total: 2, ready: 2, review: 0, processing: 0, error: 0, searchable: 2 },
     },
   ],
+  maxFileBytes: 104_857_600,
 };
 
 async function render(auth: "signed_in" | "signed_out" = "signed_in"): Promise<void> {
@@ -136,13 +139,12 @@ describe("the Zotero row on the home page", () => {
     expect(statusCalls()).toBe(0);
   });
 
-  it("offers to connect, and opens the Zotero modal (?zotero=1)", async () => {
+  it("offers to connect, with a link to the /zotero page", async () => {
     await render();
     const g = group()!;
     expect(g.locked).toBe(false);
     expect(g.textContent).toContain("Připojte svou knihovnu");
-    await act(async () => g.querySelector<HTMLButtonElement>("button")!.click());
-    expect(new URLSearchParams(window.location.search).get("zotero")).toBe("1");
+    expect(g.querySelector<HTMLAnchorElement>("a.source-title")?.getAttribute("href")).toBe("/zotero");
   });
 
   it("shows the connected account once, with the green light, not greyed out", async () => {
@@ -168,7 +170,7 @@ describe("the Zotero row on the home page", () => {
       }),
     );
     await render();
-    expect(host.textContent).toContain("2 dokumenty · 10 stran");
+    expect(host.textContent).toContain("2 dokumenty · 10 MB");
     expect(statusCalls()).toBe(1);
   });
 

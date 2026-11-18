@@ -61,6 +61,8 @@ export function libraryHandle(lib: LibraryAccess): string {
   if (lib.kind === "user") return "osobni";
   return lib.slug && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(lib.slug) ? lib.slug : lib.id;
 }
+// LibraryAccess.handle (access.ts) is built by the same rule; matchesLibrary
+// accepts it (the personal "osobni", a team's slug or its id).
 
 /** A plain name: letters, digits and light punctuation, short. */
 const SAFE_DISPLAY_NAME = /^[\p{L}\p{N}][\p{L}\p{N} .,&'()\-–]{0,39}$/u;

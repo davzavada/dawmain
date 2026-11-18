@@ -71,9 +71,15 @@ export interface DocumentRow {
   replaces: string | null;
   /** "zapnuto" — a disabled document is skipped by search. */
   enabled: boolean;
-  /** Size of the original file in bytes (display only). */
+  /** Size of the original file in bytes (client-asserted at upload; the original upload must match it). */
   file_bytes: number | null;
+  /** Folder of the document within its library; null = the root. */
+  folder_id: string | null;
+  /** Whether the original file is stored (doc_originals). */
+  original_status: OriginalStatus;
 }
+
+export type OriginalStatus = "missing" | "uploading" | "ready";
 
 /** Ingest attempts before failIngest gives up for good. */
 export const MAX_INGEST_ATTEMPTS = 3;
@@ -168,6 +174,8 @@ const ROW_COLUMNS = [
   "attempts",
   "replaces",
   "enabled",
+  "folder_id",
+  "original_status",
 ];
 
 /**
@@ -255,6 +263,8 @@ export function mapDocumentRow(r: Record<string, unknown>): DocumentRow {
     replaces: strOrNull(r.replaces),
     enabled: r.enabled !== false,
     file_bytes: numOrNull(r.file_bytes),
+    folder_id: strOrNull(r.folder_id),
+    original_status: r.original_status === "ready" || r.original_status === "uploading" ? r.original_status : "missing",
   };
 }
 
@@ -373,6 +383,10 @@ export async function insertUploadedDocument(
     quality: ConversionQuality;
     hints: UploadHints;
     injectionFlag: boolean;
+    /** The original follows (PUT …/original): original_status 'uploading'. */
+    original?: boolean;
+    /** A folder of the same library (the caller checked it). */
+    folderId?: string | null;
   },
 ): Promise<{ id: string } | { duplicate: { id: string; title: string | null } }> {
   const m = row.meta;
@@ -384,9 +398,9 @@ export async function insertUploadedDocument(
   const { rows } = await db.query<{ id: string }>(
     `INSERT INTO documents (library_id, status, uploaded_by, file_kind, file_name, file_bytes, file_sha256, content_sha256,
         converter, rights, physical_pages, billable_pages, char_count, page_label_source, quality, hints, pending_gz,
-        replaces, injection_flag, doc_type, proposed_meta)
+        replaces, injection_flag, doc_type, proposed_meta, original_status, folder_id)
      VALUES ($1, 'queued', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, $15::jsonb, $16,
-        (SELECT r.id FROM documents r WHERE r.id = $17::uuid AND r.library_id = $1), $18, $19, $20::jsonb)
+        (SELECT r.id FROM documents r WHERE r.id = $17::uuid AND r.library_id = $1), $18, $19, $20::jsonb, $21, $22::uuid)
      ON CONFLICT (library_id, content_sha256) WHERE status <> 'deleting' DO NOTHING
      RETURNING id`,
     [
@@ -410,6 +424,8 @@ export async function insertUploadedDocument(
       row.injectionFlag,
       hint,
       proposed ? jsonParam(proposed) : null,
+      row.original ? "uploading" : "missing",
+      row.folderId ?? null,
     ],
   );
   if (rows[0]) return { id: String(rows[0].id) };
@@ -859,7 +875,7 @@ const SORTS = {
 
 /**
  * One page of documents with the total. `q` matches (folded, substring)
- * title, subtitle, file name, authors and editors. limit 1–200.
+ * title, subtitle, file name, authors and editors. limit 1–200 (1–maxLimit).
  */
 export async function listDocuments(
   db: Queryable,
@@ -871,6 +887,8 @@ export async function listDocuments(
     limit: number;
     offset: number;
     sort?: "added" | "title" | "year";
+    /** Upper bound of `limit` (default 200; the web list of one library asks for up to 1,000). */
+    maxLimit?: number;
   },
 ): Promise<{ rows: DocumentRow[]; total: number }> {
   if (args.libraryIds.length === 0) return { rows: [], total: 0 };
@@ -895,7 +913,8 @@ export async function listDocuments(
     );
   }
   const whereSql = where.join(" AND ");
-  const limit = Math.min(200, Math.max(1, Math.floor(args.limit) || 1));
+  const maxLimit = Math.min(1_000, Math.max(1, Math.floor(args.maxLimit ?? 200)));
+  const limit = Math.min(maxLimit, Math.max(1, Math.floor(args.limit) || 1));
   const offset = Math.max(0, Math.floor(args.offset) || 0);
   const order = args.sort && Object.hasOwn(SORTS, args.sort) ? SORTS[args.sort] : SORTS.added;
   const total = await db.query(`SELECT count(*) AS n FROM documents d WHERE ${whereSql}`, params);

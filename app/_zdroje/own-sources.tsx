@@ -1,12 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import type { MouseEvent, ReactNode } from "react";
 import { Icon } from "@/app/_icons";
 import { UkazRow } from "@/app/_source-status";
 import type { SummaryResponse } from "@/src/files/web-types";
 import { FILES_DESC, filesRowView } from "./hint";
 import { ZIcon } from "./icons";
-import { openFiles, openZotero, requestSignIn, useZdroje } from "./store";
+import { requestSignIn, useZdroje } from "./store";
 import { DEFAULT_SOURCE_TEXTS, SourceTextsContext, useSourceTexts, type SourceTexts } from "./texts";
 import { useZoteroStatus } from "./zotero-status";
 
@@ -24,17 +25,16 @@ import { useZoteroStatus } from "./zotero-status";
  * decides in CSS which one shows, so the group never switches between them.
  */
 
-/** The stable entry point: /vlastni-zdroje redirects to /?soubory=1. */
-export const OWN_FILES_HREF = "/vlastni-zdroje";
+/** The Vlastní soubory page. */
+export const OWN_FILES_HREF = "/soubory";
 
-/** Open the modal instead of navigating — or sign-in for a visitor. Without Clerk (or before it loaded) the link navigates. */
+/** A visitor gets the sign-in instead of the page; everyone else follows the link. */
 function intercept(auth: string) {
   return (event: MouseEvent) => {
-    if (auth !== "signed_in" && auth !== "signed_out") return;
+    if (auth !== "signed_out") return;
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
     event.preventDefault();
-    if (auth === "signed_out") requestSignIn();
-    else openFiles();
+    requestSignIn();
   };
 }
 
@@ -158,9 +158,9 @@ function HintedFilesRow() {
 }
 
 /**
- * The Zotero row: what the user's connection is, and the way into the Zotero
- * modal (?zotero=1), which does the connecting and disconnecting. Visitors
- * get the sign-in and never ask for the status.
+ * The Zotero row: what the user's connection is, and the way to the /zotero
+ * page, which does the connecting, the libraries and the disconnecting.
+ * Visitors get the sign-in and never ask for the status.
  */
 function ZoteroRow({ signedIn }: { signedIn: boolean }) {
   const status = useZoteroStatus(signedIn);
@@ -195,7 +195,7 @@ function ZoteroRow({ signedIn }: { signedIn: boolean }) {
     desc = "Připojte svou knihovnu - asistent v ní bude hledat, číst, a když povolíte, i ukládat.";
   }
 
-  return <ZoteroRowView desc={desc === ZOTERO_DESC ? texts.zotero : desc} locked={locked} connected={connected} onClick={visitor ? requestSignIn : openZotero} />;
+  return <ZoteroRowView desc={desc === ZOTERO_DESC ? texts.zotero : desc} locked={locked} connected={connected} onClick={visitor ? requestSignIn : ZOTERO_PAGE} />;
 }
 
 /**
@@ -206,14 +206,22 @@ function ZoteroUnavailable({ signedIn }: { signedIn: boolean }) {
   return <ZoteroRowView desc={useSourceTexts().zotero} locked={signedIn} onClick={null} />;
 }
 
-/** The Zotero row itself; without a status yet (the hinted variant), a click opens the modal, which waits for Clerk. */
-function ZoteroRowView({ desc, locked = false, connected = false, onClick = openZotero }: { desc: string; locked?: boolean; connected?: boolean; onClick?: (() => void) | null }) {
+/** The row's link to the Zotero page (onClick: a URL is a link, a function a button, null nothing to click). */
+const ZOTERO_PAGE = "/zotero";
+
+/** The Zotero row itself; without a status yet (the hinted variant), a click opens the page, which waits for Clerk. */
+function ZoteroRowView({ desc, locked = false, connected = false, onClick = ZOTERO_PAGE }: { desc: string; locked?: boolean; connected?: boolean; onClick?: (() => void) | string | null }) {
   const lock = locked ? <ZIcon name="lock" size={13} /> : null;
   return (
     <li className={locked ? "source zd-own-row zd-row-locked" : "source zd-own-row"}>
       <Icon name="book" />
       <div className="source-name">
-        {onClick ? (
+        {typeof onClick === "string" ? (
+          <Link href={onClick} className="source-title zd-row-button">
+            Zotero
+            {lock}
+          </Link>
+        ) : onClick ? (
           <button type="button" className="source-title zd-row-button" onClick={onClick}>
             Zotero
             {lock}

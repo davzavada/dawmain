@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { formatDay } from "@/src/admin/model";
-import { cleanTeamName, MAX_TEAM_QUOTA_PAGES, membersLabel, validTeamQuota, type AdminTeam, type TeamChange, type TeamRole } from "@/src/admin/teams-model";
-import { formatCount, initials } from "../../_zdroje/format";
-import { changeTeamAction } from "./actions";
+import { cleanTeamName, LOGO_TYPES, logoProblem, MAX_TEAM_QUOTA_MB, membersLabel, validTeamQuota, type AdminTeam, type TeamChange, type TeamRole } from "@/src/admin/teams-model";
+import type { TeamResult } from "@/src/admin/teams";
+import { formatCount, formatStorageBytes as formatBytes, initials } from "../../_zdroje/format";
+import { changeTeamAction, teamLogoAction } from "./actions";
 
 /**
  * The interactive part of the Týmy tab: the team table on the left, the
@@ -30,13 +31,13 @@ export function TeamsConsole({
   teams: initial,
   people,
   statsAvailable,
-  defaultQuotaPages,
+  defaultQuotaMb,
 }: {
   teams: AdminTeam[];
   people: TeamPerson[];
   statsAvailable: boolean;
-  /** LIMITS.teamPages: the quota of a team without its own. */
-  defaultQuotaPages: number;
+  /** LIMITS.teamBytes in MB: the storage quota of a team without its own. */
+  defaultQuotaMb: number;
 }) {
   const [teams, setTeams] = useState(initial);
   const [selected, setSelected] = useState<string | null>(initial[0]?.id ?? null);
@@ -63,9 +64,13 @@ export function TeamsConsole({
   const num = (n: number) => (statsAvailable ? formatCount(n) : "—");
 
   function run(teamId: string | null, change: TeamChange, after?: () => void) {
+    runResult(() => changeTeamAction(teamId, change), after);
+  }
+
+  function runResult(action: () => Promise<TeamResult>, after?: () => void) {
     setMessage(null);
     startTransition(async () => {
-      const result = await changeTeamAction(teamId, change);
+      const result = await action();
       if (!result.ok) {
         setMessage(result.error);
         return;
@@ -93,7 +98,7 @@ export function TeamsConsole({
         <Stat label="Týmů" value={formatCount(teams.length)} note={`${teams.filter((t) => t.active).length} aktivních`} />
         <Stat label="Lidí v týmech" value={formatCount(memberIds.size)} note={`z ${formatCount(people.length)} účtů`} />
         <Stat label="Sdílených dokumentů" value={num(sum(teams.map((t) => t.library?.documents ?? 0)))} note="ve všech týmech" />
-        <Stat label="Sdílených stran" value={num(sum(teams.map((t) => t.library?.pages ?? 0)))} note={statsAvailable ? "normostran" : "počítadla nejsou dostupná"} />
+        <Stat label="Sdílená data" value={statsAvailable ? formatBytes(sum(teams.map((t) => t.library?.bytes ?? 0))) : "—"} note={statsAvailable ? "původní soubory" : "počítadla nejsou dostupná"} />
       </section>
 
       <div className="adm-grid">
@@ -124,7 +129,7 @@ export function TeamsConsole({
                   <th>Stav</th>
                   <th className="r">Členů</th>
                   <th className="r">Dokumentů</th>
-                  <th className="r">Stran</th>
+                  <th className="r">Data</th>
                 </tr>
               </thead>
               <tbody>
@@ -143,9 +148,7 @@ export function TeamsConsole({
                   >
                     <td>
                       <div className="adm-who">
-                        <span className="zd-avatar adm-team-avatar" aria-hidden="true">
-                          {initials(team.name)}
-                        </span>
+                        <TeamAvatar team={team} />
                         <div>
                           <div className="adm-who-name">{team.name}</div>
                           <div className="adm-who-mail">{memberPreview(team, byId)}</div>
@@ -155,7 +158,7 @@ export function TeamsConsole({
                     <td>{team.active ? <span className="adm-pill pro">Aktivní</span> : <span className="adm-pill off">Vypnutý</span>}</td>
                     <td className="r adm-mono">{team.members.length}</td>
                     <td className="r adm-mono">{team.library ? formatCount(team.library.documents) : "—"}</td>
-                    <td className="r adm-mono">{team.library ? formatCount(team.library.pages) : "—"}</td>
+                    <td className="r adm-mono">{team.library ? formatBytes(team.library.bytes) : "—"}</td>
                   </tr>
                 ))}
                 {visible.length === 0 ? (
@@ -177,10 +180,11 @@ export function TeamsConsole({
               team={current}
               people={people}
               byId={byId}
-              defaultQuotaPages={defaultQuotaPages}
+              defaultQuotaMb={defaultQuotaMb}
               pending={pending}
               message={message}
               onChange={(change) => run(current.id, change)}
+              onLogo={(form) => runResult(() => teamLogoAction(current.id, form))}
             />
           ) : (
             <>
@@ -237,43 +241,47 @@ function TeamDetail({
   team,
   people,
   byId,
-  defaultQuotaPages,
+  defaultQuotaMb,
   pending,
   message,
   onChange,
+  onLogo,
 }: {
   team: AdminTeam;
   people: TeamPerson[];
   byId: Map<string, TeamPerson>;
-  defaultQuotaPages: number;
+  defaultQuotaMb: number;
   pending: boolean;
   message: string | null;
   onChange: (change: TeamChange) => void;
+  onLogo: (form: FormData | null) => void;
 }) {
   const [name, setName] = useState(team.name);
-  const [quota, setQuota] = useState(String(team.quotaPages ?? defaultQuotaPages));
+  const [logoError, setLogoError] = useState<string | null>(null);
+  const logoPicker = useRef<HTMLInputElement>(null);
+  const [quota, setQuota] = useState(String(team.quotaMb ?? defaultQuotaMb));
   const [candidate, setCandidate] = useState("");
   const [role, setRole] = useState<TeamRole>("org:member");
   const [find, setFind] = useState("");
 
   const cleanName = cleanTeamName(name);
-  const quotaPages = /^\d{1,7}$/.test(quota.trim()) ? Number(quota.trim()) : NaN;
-  const quotaValid = validTeamQuota(quotaPages);
-  const currentQuota = team.quotaPages ?? defaultQuotaPages;
+  const quotaMb = /^\d{1,7}$/.test(quota.trim()) ? Number(quota.trim()) : NaN;
+  const quotaValid = validTeamQuota(quotaMb);
+  const currentQuota = team.quotaMb ?? defaultQuotaMb;
+  const currentQuotaBytes = currentQuota * 1024 * 1024;
+  const defaultLabel = formatBytes(defaultQuotaMb * 1024 * 1024);
   const inTeam = new Set(team.members.map((m) => m.userId));
   const q = find.trim().toLowerCase();
   const candidates = people.filter((p) => !inTeam.has(p.id) && (!q || `${p.name} ${p.email}`.toLowerCase().includes(q))).slice(0, 50);
   const managers = team.members.filter((m) => m.role === "org:admin").length;
-  const used = team.library?.pages ?? 0;
-  const share = currentQuota > 0 ? Math.min(100, Math.round((used / currentQuota) * 100)) : 0;
+  const used = team.library?.bytes ?? 0;
+  const share = currentQuotaBytes > 0 ? Math.min(100, Math.round((used / currentQuotaBytes) * 100)) : 0;
 
   return (
     <>
       <div className="adm-sec adm-detail-head">
         <div className="adm-who">
-          <span className="zd-avatar zd-avatar-lg adm-team-avatar" aria-hidden="true">
-            {initials(team.name)}
-          </span>
+          <TeamAvatar team={team} large />
           <div>
             <div className="adm-who-name">{team.name}</div>
             <div className="adm-who-mail">
@@ -289,6 +297,41 @@ function TeamDetail({
 
       <div className="adm-sec">
         <h3>Nastavení</h3>
+        <div className="adm-row adm-logo-row">
+          <div>
+            <b>Logo</b>
+            <span>
+              {logoError ?? (team.logoUrl ? "Členové ho vidí u týmu v postranním panelu a na stránce souborů" : "Bez loga se ukazují iniciály. PNG, JPG, WebP nebo GIF do 512 kB, nejlépe čtvercové")}
+            </span>
+          </div>
+          <div className="adm-quota-form">
+            <input
+              ref={logoPicker}
+              type="file"
+              accept={LOGO_TYPES.join(",")}
+              hidden
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (!file) return;
+                const problem = logoProblem(file.type, file.size);
+                setLogoError(problem);
+                if (problem) return;
+                const form = new FormData();
+                form.set("logo", file);
+                onLogo(form);
+              }}
+            />
+            <button type="button" className="zd-btn" disabled={pending} onClick={() => logoPicker.current?.click()}>
+              {team.logoUrl ? "Nahrát jiné" : "Nahrát logo"}
+            </button>
+            {team.logoUrl ? (
+              <button type="button" className="zd-btn zd-btn-secondary" disabled={pending} onClick={() => onLogo(null)}>
+                Odebrat
+              </button>
+            ) : null}
+          </div>
+        </div>
         <form
           className="adm-row adm-quota"
           onSubmit={(e) => {
@@ -326,23 +369,23 @@ function TeamDetail({
           className="adm-row adm-row-sub adm-quota"
           onSubmit={(e) => {
             e.preventDefault();
-            if (quotaValid && quotaPages !== currentQuota) onChange({ kind: "quota", pages: quotaPages });
+            if (quotaValid && quotaMb !== currentQuota) onChange({ kind: "quota", mb: quotaMb });
           }}
         >
           <div>
-            <b>Kvóta stran</b>
+            <b>Kvóta úložiště (MB)</b>
             <span>
-              {team.quotaPages === null ? `Výchozí: ${formatCount(defaultQuotaPages)} normostran` : `Vlastní kvóta (výchozí je ${formatCount(defaultQuotaPages)})`}
-              {quota.trim() !== "" && !quotaValid ? ` · zadej celé číslo 1 až ${formatCount(MAX_TEAM_QUOTA_PAGES)}` : ""}
+              {team.quotaMb === null ? `Výchozí: ${defaultLabel}` : `Vlastní kvóta (výchozí je ${defaultLabel})`}
+              {quota.trim() !== "" && !quotaValid ? ` · zadej celé číslo 1 až ${formatCount(MAX_TEAM_QUOTA_MB)}` : ""}
             </span>
           </div>
           <div className="adm-quota-form">
-            <input className="adm-quota-input" inputMode="numeric" value={quota} onChange={(e) => setQuota(e.target.value)} aria-label="Kvóta stran týmu" aria-invalid={!quotaValid} disabled={pending} />
-            <button type="submit" className="zd-btn" disabled={pending || !quotaValid || quotaPages === currentQuota}>
+            <input className="adm-quota-input" inputMode="numeric" value={quota} onChange={(e) => setQuota(e.target.value)} aria-label="Kvóta úložiště týmu v MB" aria-invalid={!quotaValid} disabled={pending} />
+            <button type="submit" className="zd-btn" disabled={pending || !quotaValid || quotaMb === currentQuota}>
               Uložit
             </button>
-            {team.quotaPages !== null ? (
-              <button type="button" className="zd-btn" disabled={pending} onClick={() => onChange({ kind: "quota", pages: null })}>
+            {team.quotaMb !== null ? (
+              <button type="button" className="zd-btn" disabled={pending} onClick={() => onChange({ kind: "quota", mb: null })}>
                 Výchozí
               </button>
             ) : null}
@@ -360,7 +403,7 @@ function TeamDetail({
               <i style={{ width: `${share}%` }} />
             </div>
             <p className="adm-note">
-              {formatCount(used)} z {formatCount(currentQuota)} normostran ({share} %)
+              {formatBytes(used)} z {formatBytes(currentQuotaBytes)} ({share} %)
             </p>
           </>
         ) : (
@@ -466,5 +509,18 @@ function TeamDetail({
         </div>
       </div>
     </>
+  );
+}
+
+/** The team's logo, or its initials when it has none. */
+function TeamAvatar({ team, large = false }: { team: AdminTeam; large?: boolean }) {
+  if (team.logoUrl) {
+    // eslint-disable-next-line @next/next/no-img-element -- Clerk-hosted image
+    return <img className={`zd-avatar ${large ? "zd-avatar-lg " : ""}adm-team-avatar adm-team-logo`} src={team.logoUrl} alt="" />;
+  }
+  return (
+    <span className={`zd-avatar ${large ? "zd-avatar-lg " : ""}adm-team-avatar`} aria-hidden="true">
+      {initials(team.name)}
+    </span>
   );
 }

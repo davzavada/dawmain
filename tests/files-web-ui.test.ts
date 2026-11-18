@@ -4,8 +4,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * Client behaviour of the Vlastní soubory modal in a DOM (happy-dom): the
- * list's status polling (only while the tab is visible, 4 s → 15 s
+ * Client behaviour of the Vlastní soubory pieces in a DOM (happy-dom): the
+ * document list's status polling (app/_zdroje/file-editor.tsx) (only while the tab is visible, 4 s → 15 s
  * backoff, stops when nothing is pending, reloads when something settles),
  * the dialog shell (Escape, backdrop, focus return) and the inline
  * confirmation. fetch is a fake; nothing touches Clerk or the network.
@@ -13,8 +13,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const { useDocumentList } = await import("@/app/_zdroje/files-modal");
+const { useDocumentList } = await import("@/app/_zdroje/file-editor");
 const { Dialog, Confirm } = await import("@/app/_zdroje/dialog");
+const { nextPollDelay, POLL_START_MS } = await import("@/app/_zdroje/file-editor");
 
 let host: HTMLDivElement;
 let root: Root;
@@ -45,6 +46,13 @@ function Probe() {
   const { documents } = useDocumentList("user_a");
   return createElement("output", null, (documents ?? []).map((d) => `${d.id}:${d.status}`).join(","));
 }
+
+function FolderProbe() {
+  const { documents, folders, total } = useDocumentList("user_a");
+  return createElement("output", null, documents === null ? "…" : `${folders.map((f) => `${f.name}<${f.parentId ?? "root"}`).join(",")}|${total}`);
+}
+
+const folder = (id: string, name: string, parentId: string | null) => ({ id, libraryId: "user_a", name, parentId, createdAt: "2026-09-01T00:00:00Z", mine: true });
 
 describe("document list polling", () => {
   it("polls pending documents only while visible, backs off, reloads when one settles, then stops", async () => {
@@ -89,6 +97,35 @@ describe("document list polling", () => {
     expect(host.textContent).toBe("d1:review,d2:ready");
     await act(async () => vi.advanceTimersByTimeAsync(120_000));
     expect(polls()).toBe(3);
+  });
+
+  it("the backoff grows by half up to 15 s and never starts below 4 s", () => {
+    expect(POLL_START_MS).toBe(4_000);
+    const seen = [POLL_START_MS];
+    for (let i = 0; i < 6; i++) seen.push(nextPollDelay(seen.at(-1)!));
+    expect(seen).toEqual([4_000, 6_000, 9_000, 13_500, 15_000, 15_000, 15_000]);
+    expect(nextPollDelay(0)).toBe(4_000);
+  });
+
+  it("returns the library's folders with the documents (an old answer without folders is none)", async () => {
+    let withFolders = true;
+    const fetchMock = vi.fn(async (input: string) => {
+      expect(input).toBe("/api/files/documents?lib=user_a");
+      return json(
+        withFolders
+          ? { libraryId: "user_a", documents: [listItem("d1", "ready")], folders: [folder("f1", "Smlouvy", null), folder("f2", "Vzory", "f1")], total: 1 }
+          : { libraryId: "user_a", documents: [], total: 0 },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await act(async () => root.render(createElement(FolderProbe)));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(host.textContent).toBe("Smlouvy<root,Vzory<f1|1");
+    withFolders = false;
+    await act(async () => root.render(createElement("div")));
+    await act(async () => root.render(createElement(FolderProbe)));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(host.textContent).toBe("|0");
   });
 
   it("never polls a list without pending documents", async () => {

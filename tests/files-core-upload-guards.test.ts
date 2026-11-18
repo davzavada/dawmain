@@ -98,10 +98,10 @@ const idOf = (o: UploadOutcome) => {
 let t: TestDb;
 const ENV = { ...process.env };
 /** Quota of user_q: set per test through the access loader. */
-let quotaQ = 3_000;
+let quotaQ = 100;
 
 const access = (userId: string): Access => {
-  if (userId === "user_q") return buildAccess({ id: "user_q", publicMetadata: { pro: true, filesQuota: { pages: quotaQ } } });
+  if (userId === "user_q") return buildAccess({ id: "user_q", publicMetadata: { pro: true, filesQuota: { mb: quotaQ } } });
   if (userId === "user_a" || userId === "user_back") return buildAccess({ id: userId, publicMetadata: { pro: true } });
   return buildAccess({ id: userId });
 };
@@ -126,7 +126,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   process.env = { ...ENV };
-  quotaQ = 3_000;
+  quotaQ = 100;
   for (const table of ["documents", "libraries", "usage_daily", "audit_log", "system_state", "terms_acceptance", "blocked_content"]) {
     await t.owner.query(`DELETE FROM ${table}`);
   }
@@ -235,12 +235,13 @@ describe("re-uploads are gone: a stale client's `replaces` earns no credit", () 
   it("the upload is judged in full against the quota, and the old document stays", async () => {
     const v1 = long(14, "v1");
     const v2 = long(14, "v2");
-    quotaQ = pagesOf(v1) + 1;
-    const old = idOf(await upload("user_q", "user_q", v1));
+    quotaQ = 1;
+    const file = (sha: string) => ({ name: "k.pdf", bytes: 700_000, sha256: sha.repeat(64), kind: "pdf" as const });
+    const old = idOf(await upload("user_q", "user_q", v1, { original: true, file: file("a") }));
     expect(await ingestDocument(old, "user_q")).toBe("done");
 
-    const refused = await upload("user_q", "user_q", v2, { replaces: old } as Partial<UploadMeta>);
-    expect(refused.status).toBe(403);
+    const refused = await upload("user_q", "user_q", v2, { replaces: old, original: true, file: file("b") } as Partial<UploadMeta>);
+    expect(refused.status).toBe(413);
     expect((refused as { error: string }).error).toMatch(/v knihovně zbývá/);
     expect(await libRow("user_q")).toMatchObject({ page_count: pagesOf(v1), pages_reserved: 0, doc_count: 1 });
   });

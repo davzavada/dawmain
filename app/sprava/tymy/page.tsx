@@ -49,11 +49,11 @@ export default async function TeamsPage() {
       {failed ? (
         <p className="zd-error">Týmy se nepodařilo načíst z Clerku. Zkontroluj, že jsou v Clerku zapnuté Organizations, a obnov stránku.</p>
       ) : (
-        <TeamsConsole teams={teams} people={people} statsAvailable={statsAvailable} defaultQuotaPages={LIMITS.teamPages} />
+        <TeamsConsole teams={teams} people={people} statsAvailable={statsAvailable} defaultQuotaMb={Math.round(LIMITS.teamBytes / (1024 * 1024))} />
       )}
       <p className="muted small adm-foot">
         Tým má jednu sdílenou knihovnu Vlastních souborů. Každý člen v ní hledá a nahrává do ní, své nahrané soubory upravuje a maže; správce týmu spravuje všechny.
-        Osobní soubory zůstávají každému zvlášť. Výchozí kvóta týmu se nastavuje proměnnou <code>FILES_TEAM_PAGES</code>.
+        Osobní soubory zůstávají každému zvlášť. Výchozí kvóta týmu se nastavuje proměnnou <code>FILES_TEAM_MB</code>.
       </p>
     </div>
   );

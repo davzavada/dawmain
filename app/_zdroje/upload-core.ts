@@ -18,6 +18,25 @@ export function uploadCost(
 }
 
 /**
+ * Does an original of `fileBytes` fit, before anything is converted? Refused
+ * when it is bigger than one upload may store (`reason: "file"`, `maxFileBytes`
+ * from the summary) or than what the library has left (`reason: "quota"`).
+ * `remaining` = quotaBytes − bytesUsed, never below zero. The server checks
+ * the same under a lock (src/files/upload.ts). Pure.
+ */
+export function storageCheck(
+  fileBytes: number,
+  quotaBytes: number,
+  bytesUsed: number,
+  maxFileBytes: number,
+): { fits: true } | { fits: false; reason: "file" | "quota"; remaining: number } {
+  const remaining = Math.max(0, quotaBytes - Math.max(0, bytesUsed));
+  if (fileBytes > maxFileBytes) return { fits: false, reason: "file", remaining };
+  if (fileBytes > remaining) return { fits: false, reason: "quota", remaining };
+  return { fits: true };
+}
+
+/**
  * What a browser lacks for converting and uploading here: gzip
  * (CompressionStream — Safari before 16.4), SHA-256 (crypto.subtle, a secure
  * context) and module Workers (pdf.js). Empty when everything is there.

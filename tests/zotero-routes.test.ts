@@ -39,6 +39,7 @@ vi.mock("@/src/zotero/store", async (importOriginal) => {
 import { GET as callbackGET } from "@/app/api/zotero/callback/route";
 import { POST as connectPOST } from "@/app/api/zotero/connect/route";
 import { POST as disconnectPOST } from "@/app/api/zotero/disconnect/route";
+import { GET as librariesGET, POST as librariesPOST } from "@/app/api/zotero/libraries/route";
 import { GET as statusGET } from "@/app/api/zotero/status/route";
 import { __setAccessLoaderForTests, buildAccess, type Access } from "@/src/files/access";
 import { __resetGuardsForTests } from "@/src/files/guards";
@@ -64,7 +65,7 @@ import {
   markRevoked,
   saveConnection,
 } from "@/src/zotero/store";
-import { ZOTERO_STAV, type ZoteroStatus } from "@/src/zotero/web-types";
+import { ZOTERO_STAV, type ZoteroLibrariesAnswer, type ZoteroStatus } from "@/src/zotero/web-types";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -144,7 +145,7 @@ interface Call {
 type Answer = () => Response | Promise<Response>;
 
 /** What each endpoint answers; tests replace entries. A factory, so every call gets a fresh body. */
-let zotero: { request: Answer; access: Answer; keyInfo: Answer; revoke: Answer; groups: Answer };
+let zotero: { request: Answer; access: Answer; keyInfo: Answer; revoke: Answer; groups: Answer; items: Answer };
 let calls: Call[];
 
 function defaultZotero(): typeof zotero {
@@ -154,6 +155,7 @@ function defaultZotero(): typeof zotero {
     keyInfo: () => json(fixture("keys-current.json")),
     revoke: () => new Response(null, { status: 204 }),
     groups: () => json(fixture("groups.json")),
+    items: () => new Response("[]", { status: 200, headers: { "content-type": "application/json", "total-results": "42", "last-modified-version": "7" } }),
   };
 }
 
@@ -162,6 +164,7 @@ function route(call: Call): Answer {
   if (call.url === OAUTH_ACCESS_URL && call.method === "POST") return zotero.access;
   if (call.url === `${API_ORIGIN}/keys/current`) return call.method === "DELETE" ? zotero.revoke : zotero.keyInfo;
   if (call.url.startsWith(`${API_ORIGIN}/users/${ZOTERO_USER}/groups`)) return zotero.groups;
+  if (call.url.startsWith(`${API_ORIGIN}/users/${ZOTERO_USER}/items`)) return zotero.items;
   throw new Error(`unexpected fetch: ${call.method} ${call.url}`);
 }
 
@@ -216,12 +219,12 @@ const stateCookieFor = (userId = USER, token = REQUEST_TOKEN, tokenSecret = REQU
 
 const APPROVED = { oauth_token: REQUEST_TOKEN, oauth_verifier: VERIFIER };
 
-/** The `stav` of a 303 back to the modal (the Location is relative: the browser stays on its origin). */
+/** The `stav` of a 303 back to the /zotero page (the Location is relative: the browser stays on its origin). */
 function stavOf(res: Response): string | null {
   expect(res.status).toBe(303);
   const location = res.headers.get("location") ?? "";
-  expect(location).toMatch(/^\/\?zotero=1&stav=[a-z]+$/);
-  const stav = new URLSearchParams(location.slice(2)).get("stav");
+  expect(location).toMatch(/^\/zotero\?stav=[a-z]+$/);
+  const stav = new URLSearchParams(location.slice("/zotero?".length)).get("stav");
   expect(ZOTERO_STAV).toContain(stav);
   return stav;
 }
@@ -941,10 +944,105 @@ describe("GET /api/zotero/status", () => {
 // ---------------------------------------------------------------------------
 // Static contract: what the routes may emit, log and how they are served
 
+describe("GET / POST /api/zotero/libraries", () => {
+  const toggle = (body: unknown, headers: Record<string, string> = SAME_ORIGIN_HEADERS) =>
+    librariesPOST(
+      new Request(`${ORIGIN}/api/zotero/libraries`, {
+        method: "POST",
+        headers: { ...headers, "content-type": "application/json" },
+        body: typeof body === "string" ? body : JSON.stringify(body),
+      }),
+    );
+  const answer = async (res: Response) => (await res.json()) as ZoteroLibrariesAnswer & { error?: string };
+  const onOff = (body: ZoteroLibrariesAnswer) => Object.fromEntries(body.libraries.map((l) => [l.id, l.on]));
+
+  it("lists the personal library and the readable groups, all on, with item counts", async () => {
+    await connected();
+    const res = await librariesGET();
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
+    const body = await answer(res);
+    expect(body).toEqual({
+      mode: "read",
+      groupsFailed: false,
+      libraries: [
+        { id: "personal", kind: "personal", name: "Moje knihovna", items: 42, on: true, saves: false },
+        { id: "111111", kind: "group", name: "Advokátní kancelář – judikatura", items: 1234, on: true, saves: false },
+        { id: "222222", kind: "group", name: "Seminář občanské právo", items: null, on: true, saves: false },
+      ],
+    });
+  });
+
+  it("refuses the signed out, the not connected and the accounts without Pro", async () => {
+    signedIn(null);
+    expect((await librariesGET()).status).toBe(401);
+    signedIn(USER);
+    expect((await librariesGET()).status).toBe(409);
+    signedIn(NO_PRO);
+    expect((await librariesGET()).status).toBe(403);
+    expect(calls).toEqual([]);
+  });
+
+  it("switches a library off and on again, stored with the connection", async () => {
+    await connected();
+    const off = await toggle({ library: "111111", on: false });
+    expect(off.status).toBe(200);
+    expect(onOff(await answer(off))).toEqual({ personal: true, "111111": false, "222222": true });
+    expect(storedRecord()?.disabled).toEqual(["111111"]);
+    const state = await loadConnection(USER);
+    expect(state.state === "ok" && state.conn.disabled).toEqual(["111111"]);
+    // The GET agrees.
+    expect(onOff(await answer(await librariesGET()))).toEqual({ personal: true, "111111": false, "222222": true });
+
+    const personalOff = await toggle({ library: "personal", on: false });
+    expect(onOff(await answer(personalOff))).toEqual({ personal: false, "111111": false, "222222": true });
+    expect(storedRecord()?.disabled).toEqual(["personal", "111111"]);
+
+    const back = await toggle({ library: "111111", on: true });
+    expect(onOff(await answer(back))).toEqual({ personal: false, "111111": true, "222222": true });
+    expect(storedRecord()?.disabled).toEqual(["personal"]);
+  });
+
+  it("keeps at least one library on", async () => {
+    await connected(API_KEY, "none");
+    const res = await toggle({ library: "personal", on: false });
+    expect(res.status).toBe(409);
+    expect((await answer(res)).error).toMatch(/Aspoň jedna knihovna/);
+    expect(storedRecord()?.disabled).toEqual([]);
+  });
+
+  it("refuses a library the key does not read, a malformed body and a cross-site request", async () => {
+    await connected(API_KEY, [111111]);
+    expect((await toggle({ library: "222222", on: false })).status).toBe(404);
+    expect((await toggle({ library: "../x", on: false })).status).toBe(400);
+    expect((await toggle({ library: "personal", on: "no" })).status).toBe(400);
+    expect((await toggle("{not json")).status).toBe(400);
+    expect((await toggle({ library: "personal", on: false }, { ...SAME_ORIGIN_HEADERS, origin: "https://evil.example", "sec-fetch-site": "cross-site" })).status).toBe(403);
+    expect(mocks.updateUserMetadata).not.toHaveBeenCalled();
+  });
+
+  it("does not switch while the groups cannot be listed", async () => {
+    await connected();
+    zotero.groups = () => new Response("down", { status: 500 });
+    const res = await toggle({ library: "personal", on: false });
+    expect(res.status).toBe(503);
+    expect(mocks.updateUserMetadata).not.toHaveBeenCalled();
+  });
+
+  it("a reconnect of the same Zotero account keeps the switches", async () => {
+    await connected(OLD_KEY);
+    await toggle({ library: "111111", on: false });
+    const res = await callbackGET(callbackRequest(APPROVED, stateCookieFor()));
+    expect(stavOf(res)).toBe("pripojeno");
+    const state = await loadConnection(USER);
+    expect(state.state === "ok" && state.conn.disabled).toEqual(["111111"]);
+  });
+});
+
 describe("the Zotero routes' contract", () => {
   const ROOT = path.resolve(import.meta.dirname, "..");
   const read = (file: string) => readFileSync(path.join(ROOT, file), "utf8");
-  const ROUTES = ["connect", "callback", "disconnect", "status"].map((name) => `app/api/zotero/${name}/route.ts`);
+  const ROUTES = ["connect", "callback", "disconnect", "status", "libraries"].map((name) => `app/api/zotero/${name}/route.ts`);
 
   it("every stav the server can send back is one the modal knows (ZOTERO_STAV)", () => {
     const source = read("src/zotero/web.ts");

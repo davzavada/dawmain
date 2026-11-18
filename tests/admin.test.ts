@@ -195,29 +195,30 @@ describe("UKAŽ switch and gate", () => {
   });
 });
 
-describe("per-account page quota (publicMetadata.filesQuota.pages)", () => {
+describe("per-account storage quota (publicMetadata.filesQuota.mb)", () => {
   it("an account without its own quota shows null; a valid one is read as the access code reads it", async () => {
     const { toAdminUser } = await import("@/src/admin/model");
     const { quotaFrom } = await import("@/src/files/access");
-    expect(toAdminUser({ id: "user_a" }, false).quotaPages).toBeNull();
-    expect(toAdminUser({ id: "user_a", publicMetadata: { filesQuota: { pages: 25000.7 } } }, false).quotaPages).toBe(25000);
-    for (const bad of [{ pages: "25000" }, { pages: 0 }, { pages: -5 }, { pages: Infinity }, null, 7]) {
-      expect(toAdminUser({ id: "user_a", publicMetadata: { filesQuota: bad } }, false).quotaPages).toBeNull();
+    expect(toAdminUser({ id: "user_a" }, false).quotaMb).toBeNull();
+    expect(toAdminUser({ id: "user_a", publicMetadata: { filesQuota: { mb: 250 } } }, false).quotaMb).toBe(250);
+    for (const bad of [{ mb: "250" }, { mb: 0 }, { mb: -5 }, { mb: Infinity }, { pages: 25000 }, null, 7]) {
+      expect(toAdminUser({ id: "user_a", publicMetadata: { filesQuota: bad } }, false).quotaMb).toBeNull();
       expect(quotaFrom({ filesQuota: bad }, 10_000)).toBe(10_000);
     }
-    expect(quotaFrom({ filesQuota: { pages: 25000.7 } }, 10_000)).toBe(25000);
+    expect(quotaFrom({ filesQuota: { mb: 250 } }, 10_000)).toBe(250 * 1024 * 1024);
   });
 
-  it("the patch sets the quota whole, and null removes it (Clerk drops a key set to null)", async () => {
+  it("the patch sets the quota in MB (dropping the former page quota), and null removes it", async () => {
     const { metadataPatch } = await import("@/src/admin/model");
-    expect(metadataPatch({ pro: true, filesQuota: { pages: 5 } }, { kind: "quota", pages: 40_000 })).toEqual({ filesQuota: { pages: 40_000 } });
-    expect(metadataPatch({ filesQuota: { pages: 5 } }, { kind: "quota", pages: null })).toEqual({ filesQuota: null });
+    expect(metadataPatch({ pro: true, filesQuota: { pages: 5 } }, { kind: "quota", mb: 400 })).toEqual({ filesQuota: { mb: 400, pages: null } });
+    expect(metadataPatch({ filesQuota: { mb: 5 } }, { kind: "quota", mb: null })).toEqual({ filesQuota: null });
   });
 
-  it("only whole numbers from 1 to the maximum are valid", async () => {
-    const { validQuotaPages, MAX_QUOTA_PAGES } = await import("@/src/admin/model");
-    for (const ok of [1, 10_000, MAX_QUOTA_PAGES]) expect(validQuotaPages(ok)).toBe(true);
-    for (const bad of [0, -1, 1.5, MAX_QUOTA_PAGES + 1, NaN, "100", null, undefined]) expect(validQuotaPages(bad)).toBe(false);
+  it("only whole numbers of MB from 1 to 100 000 are valid", async () => {
+    const { validQuotaMb, MAX_QUOTA_MB } = await import("@/src/admin/model");
+    expect(MAX_QUOTA_MB).toBe(100_000);
+    for (const ok of [1, 100, MAX_QUOTA_MB]) expect(validQuotaMb(ok)).toBe(true);
+    for (const bad of [0, -1, 1.5, MAX_QUOTA_MB + 1, NaN, "100", null, undefined]) expect(validQuotaMb(bad)).toBe(false);
   });
 });
 

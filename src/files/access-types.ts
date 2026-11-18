@@ -22,8 +22,12 @@ export interface LibraryAccess {
   canUpload: boolean;
   /** May edit/delete every document and change library settings (the owner; a team's org:admin). */
   canManageAll: boolean;
-  /** Page quota of the library (override: publicMetadata.filesQuota.pages). */
-  quotaPages: number;
+  /** Storage quota of the originals in bytes (override: publicMetadata.filesQuota.mb). */
+  quotaBytes: number;
+  /** URL segment / filter value: "osobni" for the personal library, the team's plain slug or its id (scope.ts libraryHandle). */
+  handle: string;
+  /** Team logo (organization image, only when one was uploaded); always null for the personal library. */
+  logoUrl: string | null;
 }
 
 export interface Access {

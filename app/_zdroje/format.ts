@@ -1,4 +1,12 @@
+import { formatBytes as formatStorageBytes, zBefore } from "@/src/files/bytes";
 import { DOC_TYPE_LABELS, type DocStatus, type DocType, type FileKind } from "@/src/files/types";
+
+/**
+ * Storage sizes (quotas, bytes used): binary units like the server's
+ * quotas — 100 MB = 100 × 1024² bytes — so a quota reads "100 MB", not
+ * "104,9 MB" as formatBytes (decimal) would show it.
+ */
+export { formatStorageBytes, zBefore };
 
 /**
  * Czech formatting for the Vlastní soubory UI: plurals, sizes, dates,
@@ -150,6 +158,13 @@ export function downloadFileName(disposition: string | null, fallback: string): 
 export function remainingLine(pagesUsed: number, quotaPages: number): string {
   const left = Math.max(0, quotaPages - Math.max(0, pagesUsed));
   return `${plural(left, "Zbývá", "Zbývají", "Zbývá")} ${formatCount(left)} z ${formatCount(quotaPages)} ${plural(quotaPages, "strany", "stran", "stran")}.`;
+}
+
+/** "Zbývá 87,6 MB ze 100 MB." — the storage left in a library (never below zero). */
+export function remainingBytesLine(bytesUsed: number, quotaBytes: number): string {
+  const left = Math.max(0, quotaBytes - Math.max(0, bytesUsed));
+  const quota = formatStorageBytes(quotaBytes);
+  return `Zbývá ${formatStorageBytes(left)} ${zBefore(quota)} ${quota}.`;
 }
 
 /** "Komentář", "Kapitola v knize" — the type label as a badge or a line starts with it. */

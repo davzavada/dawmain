@@ -376,12 +376,15 @@ describe("Czech cases and downloads (review web:Z4, export)", () => {
 
   it("the UI source has no fixed plural after a variable count", async () => {
     const { readFileSync } = await import("node:fs");
-    const modal = readFileSync("app/_zdroje/files-modal.tsx", "utf8");
     // "3 stran", "1 dokumentů": the plural must follow the number.
-    expect(modal).not.toMatch(/\} (stran|stránek|dokumentů|dokumenty)\b/);
-    const upload = readFileSync("app/_zdroje/upload.tsx", "utf8");
-    expect(upload).not.toMatch(/linkedPercent\}%/);
-    expect(upload).toContain("Dokument má ${countPagesAcc(cost.pages)}");
+    for (const file of ["app/soubory/files-page.tsx", "app/_zdroje/file-editor.tsx", "app/_zdroje/upload.tsx", "app/_zdroje/upload-process.ts"]) {
+      const src = readFileSync(file, "utf8");
+      expect(src, file).not.toMatch(/\} (stran|stránek|strany|dokumentů|dokumenty|položek|položky|souborů|soubory|složek|složky)\b/);
+      expect(src, file).not.toMatch(/linkedPercent\}%/);
+    }
+    // The storage check speaks in bytes, formatted.
+    const process = readFileSync("app/_zdroje/upload-process.ts", "utf8");
+    expect(process).toContain("Soubor má ${formatBytes(file.size)}");
   });
 
   it("names the download after Content-Disposition (UTF-8 first), never with a path", () => {

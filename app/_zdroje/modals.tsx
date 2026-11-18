@@ -1,47 +1,38 @@
 "use client";
 
-import dynamic from "next/dynamic";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect } from "react";
 import { UUID_RE } from "@/src/files/config";
-import { FILES_PARAM, setFilesOpen } from "./store";
+import { FILES_PARAM, LEGACY_FILES_PARAM } from "./store";
 
 /**
- * The Vlastní soubory modal and the Zotero modal, mounted once in the root
- * layout and driven by the URL: ?soubory=1 (+ &dokument=<id> for the row
- * opened in the list; ?zdroje=… is the old name and still opens it),
- * ?zotero=1 (+ &stav=<outcome> when the connect flow comes back). Deep
- * links and the old /vlastni-zdroje route (which redirects here) open
- * them; closing removes the parameter. At most one shows: files first.
- *
- * Only this reader is in every page's bundle: the modals themselves — the
- * list, the uploader with the DMD parser — load when a parameter asks for
- * them, never for a visitor who does not open one.
+ * Old links to what used to be modals, mounted once in the root layout:
+ * ?soubory=1 (+ &dokument=<id>; ?zdroje=… before that) leads to the
+ * Vlastní soubory page /soubory, ?zotero=1 to the /zotero page with &stav=
+ * (the connect flow's outcome) kept. Both are pages now; e-mails, bookmarks
+ * and assistants' answers still carry the parameters.
  */
 
-/** While a modal's code loads: the dimmed backdrop, so the click visibly did something. */
-function Loading() {
-  return (
-    <div className="zd-layer" aria-busy="true">
-      <div className="zd-backdrop" />
-    </div>
-  );
+/** Where ?zotero=1 leads now: the /zotero page, with the connect flow's outcome when there is one. */
+export function zoteroPageHref(stav: string | null): string {
+  return stav ? `/zotero?stav=${encodeURIComponent(stav)}` : "/zotero";
 }
 
-const FilesModal = dynamic(() => import("./files-modal").then((m) => m.FilesModal), { ssr: false, loading: Loading });
-const ZoteroModal = dynamic(() => import("./zotero-modal").then((m) => m.ZoteroModal), { ssr: false, loading: Loading });
+/** Where ?soubory=1 leads now: the personal library's page, with the document opened when the link named one. */
+export function filesPageHref(doc: string | null): string {
+  return doc && UUID_RE.test(doc) ? `/soubory?dokument=${doc.toLowerCase()}` : "/soubory";
+}
 
 export function ZdrojeModals() {
   const params = useSearchParams();
-  const files = params.get(FILES_PARAM) ?? params.get("zdroje");
+  const router = useRouter();
+  const files = params.get(FILES_PARAM) ?? params.get(LEGACY_FILES_PARAM);
   const doc = params.get("dokument");
   const zotero = params.get("zotero");
-  const open = files !== null && files !== "";
-  useEffect(() => setFilesOpen(open), [open]);
-  return (
-    <>
-      {open ? <FilesModal documentId={doc && UUID_RE.test(doc) ? doc.toLowerCase() : null} /> : null}
-      {zotero !== null && !open ? <ZoteroModal stav={params.get("stav")} /> : null}
-    </>
-  );
+  const stav = params.get("stav");
+  const target = files !== null && files !== "" ? filesPageHref(doc) : zotero !== null ? zoteroPageHref(stav) : null;
+  useEffect(() => {
+    if (target) router.replace(target);
+  }, [target, router]);
+  return null;
 }

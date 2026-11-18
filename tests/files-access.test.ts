@@ -61,9 +61,9 @@ describe("proFrom / quotaFrom", () => {
   });
 
   it("quota override only from a positive finite number", () => {
-    expect(quotaFrom({ filesQuota: { pages: 5000 } }, 3000)).toBe(5000);
-    expect(quotaFrom({ filesQuota: { pages: 12.9 } }, 3000)).toBe(12);
-    for (const meta of [{ filesQuota: { pages: 0 } }, { filesQuota: { pages: -5 } }, { filesQuota: { pages: "9000" } }, { filesQuota: { pages: Infinity } }, { filesQuota: { pages: NaN } }, { filesQuota: 9000 }, { filesQuota: null }, null, undefined]) {
+    expect(quotaFrom({ filesQuota: { mb: 500 } }, 3000)).toBe(500 * 1024 * 1024);
+    expect(quotaFrom({ filesQuota: { mb: 0.5 } }, 3000)).toBe(512 * 1024);
+    for (const meta of [{ filesQuota: { mb: 0 } }, { filesQuota: { mb: -5 } }, { filesQuota: { mb: "9000" } }, { filesQuota: { mb: Infinity } }, { filesQuota: { mb: NaN } }, { filesQuota: { pages: 5000 } }, { filesQuota: 9000 }, { filesQuota: null }, null, undefined]) {
       expect(quotaFrom(meta, 3000)).toBe(3000);
     }
   });
@@ -73,7 +73,7 @@ describe("buildAccess", () => {
   it("personal Pro library: owner uploads and manages all", () => {
     const a = buildAccess({ id: "user_a", publicMetadata: { pro: true } });
     expect(a.libraries).toEqual([
-      { id: "user_a", kind: "user", name: "Osobní", slug: null, role: "owner", pro: true, canUpload: true, canManageAll: true, quotaPages: LIMITS.personalPages },
+      { id: "user_a", kind: "user", name: "Osobní", slug: null, role: "owner", pro: true, canUpload: true, canManageAll: true, quotaBytes: LIMITS.personalBytes, handle: "osobni", logoUrl: null },
     ]);
     expect(a.all).toEqual(a.libraries);
   });
@@ -93,9 +93,9 @@ describe("buildAccess", () => {
   });
 
   it("only the personal library: one library, kind user, role owner", () => {
-    const a = buildAccess({ id: "user_a", publicMetadata: { pro: true, filesQuota: { pages: 5000 } } });
+    const a = buildAccess({ id: "user_a", publicMetadata: { pro: true, filesQuota: { mb: 5000 } } });
     expect(a.all).toHaveLength(1);
-    expect(a.all[0]).toMatchObject({ id: "user_a", kind: "user", role: "owner", quotaPages: 5000 });
+    expect(a.all[0]).toMatchObject({ id: "user_a", kind: "user", role: "owner", quotaBytes: 5000 * 1024 * 1024 });
   });
 });
 
@@ -204,7 +204,7 @@ describe("getAccess", () => {
 
 describe("canEditDocument", () => {
   const lib = (over: Partial<LibraryAccess>): LibraryAccess => ({
-    id: "user_a", kind: "user", name: "Osobní", slug: null, role: "owner", pro: true, canUpload: true, canManageAll: true, quotaPages: 1, ...over,
+    id: "user_a", kind: "user", name: "Osobní", slug: null, role: "owner", pro: true, canUpload: true, canManageAll: true, quotaBytes: 104_857_600, handle: "osobni", logoUrl: null, ...over,
   });
   it("the owner of a Pro library edits every document in it", () => {
     expect(canEditDocument(lib({}), "user_a", "user_a")).toBe(true);
@@ -221,7 +221,7 @@ describe("canEditDocument", () => {
 
 describe("canDeleteDocument", () => {
   const lib = (over: Partial<LibraryAccess>): LibraryAccess => ({
-    id: "user_a", kind: "user", name: "Osobní", slug: null, role: "owner", pro: false, canUpload: false, canManageAll: false, quotaPages: 1, ...over,
+    id: "user_a", kind: "user", name: "Osobní", slug: null, role: "owner", pro: false, canUpload: false, canManageAll: false, quotaBytes: 104_857_600, handle: "osobni", logoUrl: null, ...over,
   });
   it("ownership only, Pro not required: the uploader, or the owner", () => {
     expect(canDeleteDocument(lib({}), "user_a", "user_a")).toBe(true);
@@ -380,7 +380,7 @@ describe("team libraries", () => {
       team("org_b", "Bankovnictví", { pro: true }, "org:admin"),
     ]);
     expect(a.all.map((l) => l.id)).toEqual(["user_a", "org_b", "org_z"]);
-    expect(a.all[1]).toMatchObject({ kind: "org", role: "org:admin", pro: true, canUpload: true, canManageAll: true, quotaPages: LIMITS.teamPages });
+    expect(a.all[1]).toMatchObject({ kind: "org", role: "org:admin", pro: true, canUpload: true, canManageAll: true, quotaBytes: LIMITS.teamBytes, handle: "org_b", logoUrl: null });
     expect(a.all[2]).toMatchObject({ kind: "org", role: "org:member", pro: true, canUpload: true, canManageAll: false });
     expect(canEditDocument(a.all[2], "user_a", "user_a")).toBe(true);
     expect(canEditDocument(a.all[2], "user_other", "user_a")).toBe(false);
@@ -399,10 +399,10 @@ describe("team libraries", () => {
     expect(off.libraries).toHaveLength(0);
     const teamOff = buildAccess({ id: "user_a", publicMetadata: { pro: true } }, [
       team("org_t", "T", { pro: true, features: { files: false } }),
-      team("org_q", "Q", { pro: true, filesQuota: { pages: 777 } }),
+      team("org_q", "Q", { pro: true, filesQuota: { mb: 777 } }),
     ]);
     expect(teamOff.libraries.map((l) => l.id)).toEqual(["user_a", "org_q"]);
-    expect(teamOff.all.find((l) => l.id === "org_q")?.quotaPages).toBe(777);
+    expect(teamOff.all.find((l) => l.id === "org_q")?.quotaBytes).toBe(777 * 1024 * 1024);
   });
 
   it("drops malformed and duplicate organizations; a banned user gets nothing", () => {

@@ -18,8 +18,10 @@ const LIB: LibrarySummary = {
   pro: true,
   canUpload: true,
   canManageAll: true,
-  quotaPages: 3000,
-  pagesUsed: 3,
+  handle: "osobni",
+  logoUrl: null,
+  quotaBytes: 104_857_600,
+  bytesUsed: 3,
   counts: { total: 1, ready: 0, review: 0, processing: 1, error: 0, searchable: 0 },
 };
 const summary = (processing: number): SummaryResponse => ({
@@ -27,6 +29,7 @@ const summary = (processing: number): SummaryResponse => ({
   mode: "on",
   termsAccepted: true,
   libraries: [{ ...LIB, counts: { ...LIB.counts!, processing, ready: 1 - processing, searchable: 1 - processing } }],
+  maxFileBytes: 104_857_600,
 });
 
 afterEach(() => {

@@ -215,7 +215,7 @@ describe("GET /api/files/summary", () => {
     expect(body.state).toBe("ok");
     if (body.state !== "ok") return;
     expect(body.libraries).toHaveLength(1);
-    expect(body.libraries[0]).toMatchObject({ id: "user_none", pro: false, counts: null, pagesUsed: null });
+    expect(body.libraries[0]).toMatchObject({ id: "user_none", pro: false, counts: null, bytesUsed: null });
     expect(runner).not.toHaveBeenCalled();
   });
 
@@ -233,7 +233,9 @@ describe("GET /api/files/summary", () => {
     expect(personal).toMatchObject({ id: "user_a", kind: "user", role: "owner", name: "Osobní" });
     expect(personal).not.toHaveProperty("memberCount");
     expect(personal.counts).toMatchObject({ total: 2, ready: 1, review: 1, searchable: 1 });
-    expect(personal.pagesUsed).toBeGreaterThan(0);
+    // Text-only uploads (no original) do not count against the storage quota.
+    expect(personal).toMatchObject({ handle: "osobni", logoUrl: null, quotaBytes: 100 * 1024 * 1024, bytesUsed: 0 });
+    expect(body.maxFileBytes).toBe(100 * 1024 * 1024);
   });
 });
 
@@ -588,9 +590,8 @@ describe("GET /api/files/documents/[id]/export?lib=", () => {
   it("a daily budget per user across documents: a second full library in one day is refused", async () => {
     const ids = [await uploaded("user_a", "user_a", "a"), await uploaded("user_a", "user_a", "b")];
     const theirs = await uploaded("user_x", "user_x", "m");
-    // The budget is the larger of the personal and team quotas; shrink both to these two documents.
-    process.env.FILES_PERSONAL_PAGES = String(2 * exportPages(3));
-    process.env.FILES_TEAM_PAGES = String(2 * exportPages(3));
+    // Shrink the daily budget (FILES_EXPORT_PAGES_PER_DAY) to these two documents.
+    process.env.FILES_EXPORT_PAGES_PER_DAY = String(2 * exportPages(3));
     for (const id of ids) expect((await exportOf("user_a", id, "user_a")).status).toBe(200);
     for (const id of ids) {
       const capped = await exportOf("user_a", id, "user_a");

@@ -11,11 +11,13 @@
  *   pro         true = the team is active (its library is searched and
  *               uploaded into); false = deactivated (members still list,
  *               delete and export, and the purge starts: about a week, the same as a user who lost Pro);
- *   filesQuota  { pages } overrides LIMITS.teamPages.
+ *   filesQuota  { mb } overrides LIMITS.teamBytes (storage of the originals).
  *
  * Roles: org:admin = "správce týmu" (manages every document of the team),
  * org:member = "člen" (uploads, edits and deletes their own).
  */
+
+import { MAX_QUOTA_MB, ownQuotaMb, validQuotaMb } from "./model";
 
 export type TeamRole = "org:admin" | "org:member";
 export const TEAM_ROLES: readonly TeamRole[] = ["org:admin", "org:member"];
@@ -31,6 +33,8 @@ export interface TeamMember {
 export interface TeamLibraryStats {
   documents: number;
   pages: number;
+  /** Bytes of originals stored or being uploaded (what the quota counts). */
+  bytes: number;
   /** Deactivated and waiting for the purge (ISO), or null. */
   purgeAfter: string | null;
 }
@@ -42,25 +46,27 @@ export interface AdminTeam {
   createdAt: number | null;
   /** publicMetadata.pro === true: the library is searched and uploaded into. */
   active: boolean;
-  /** The team's own quota, or null for the installation's default (LIMITS.teamPages). */
-  quotaPages: number | null;
+  /** The team's own storage quota in MB, or null for the installation's default (LIMITS.teamBytes). */
+  quotaMb: number | null;
   members: TeamMember[];
   library: TeamLibraryStats | null;
+  /** The logo an admin uploaded (Clerk's organization image), or null: initials are shown instead. */
+  logoUrl: string | null;
 }
 
 export type TeamChange =
   | { kind: "create"; name: string }
   | { kind: "rename"; name: string }
   | { kind: "active"; on: boolean }
-  /** `pages: null` removes the team's own quota (back to the default). */
-  | { kind: "quota"; pages: number | null }
+  /** `mb: null` removes the team's own quota (back to the default). */
+  | { kind: "quota"; mb: number | null }
   | { kind: "addMember"; userId: string; role: TeamRole }
   | { kind: "setRole"; userId: string; role: TeamRole }
   | { kind: "removeMember"; userId: string }
   | { kind: "delete" };
 
-/** The largest per-team quota an admin can set (normostrany). Same cap as an account's. */
-export const MAX_TEAM_QUOTA_PAGES = 5_000_000;
+/** The largest per-team quota an admin can set, in MB. Same cap as an account's. */
+export const MAX_TEAM_QUOTA_MB = MAX_QUOTA_MB;
 
 const USER_ID = /^user_[A-Za-z0-9]+$/;
 export const TEAM_ID = /^org_[A-Za-z0-9]+$/;
@@ -76,7 +82,7 @@ export function cleanTeamName(raw: unknown): string | null {
 }
 
 export function validTeamQuota(value: unknown): value is number {
-  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= MAX_TEAM_QUOTA_PAGES;
+  return validQuotaMb(value);
 }
 
 function isRole(value: unknown): value is TeamRole {
@@ -99,7 +105,7 @@ export function cleanTeamChange(change: unknown): TeamChange | null {
     case "active":
       return typeof c.on === "boolean" ? { kind: "active", on: c.on } : null;
     case "quota":
-      return c.pages === null || validTeamQuota(c.pages) ? { kind: "quota", pages: c.pages as number | null } : null;
+      return c.mb === null || validTeamQuota(c.mb) ? { kind: "quota", mb: c.mb as number | null } : null;
     case "addMember":
     case "setRole":
       return typeof c.userId === "string" && USER_ID.test(c.userId) && isRole(c.role) ? { kind: c.kind, userId: c.userId, role: c.role } : null;
@@ -123,6 +129,9 @@ export interface ClerkOrgLike {
   slug?: string | null;
   createdAt?: number | null;
   publicMetadata?: unknown;
+  imageUrl?: string | null;
+  /** Clerk always has an imageUrl (a generated one); only hasImage says an admin uploaded a logo. */
+  hasImage?: boolean | null;
 }
 
 /** The subset of Clerk's OrganizationMembership the team needs. */
@@ -130,12 +139,6 @@ export interface ClerkOrgMembershipLike {
   role: string;
   createdAt?: number | null;
   publicUserData?: { userId?: string | null } | null;
-}
-
-/** Same rule as quotaFrom in src/files/access.ts: a finite number ≥ 1, floored; anything else is "no own quota". */
-function ownQuota(filesQuota: unknown): number | null {
-  const pages = record(filesQuota).pages;
-  return typeof pages === "number" && Number.isFinite(pages) && pages >= 1 ? Math.floor(pages) : null;
 }
 
 /** An AdminTeam from Clerk's organization and its memberships. Pure. Members with an unknown role count as members. */
@@ -155,15 +158,29 @@ export function toAdminTeam(org: ClerkOrgLike, memberships: readonly ClerkOrgMem
     slug: org.slug || null,
     createdAt: org.createdAt ?? null,
     active: meta.pro === true,
-    quotaPages: ownQuota(meta.filesQuota),
+    quotaMb: ownQuotaMb(meta.filesQuota),
     members,
     library,
+    logoUrl: org.hasImage === true && typeof org.imageUrl === "string" && org.imageUrl.startsWith("https://") ? org.imageUrl : null,
   };
+}
+
+/** Image types a team logo may be (what Clerk accepts for an organization image). */
+export const LOGO_TYPES: readonly string[] = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+/** Largest team logo, kept under the 1 MB body of a Server Function. */
+export const MAX_LOGO_BYTES = 512 * 1024;
+
+/** Why a picked file cannot be a team logo (Czech, for the admin), or null when it can. Pure. */
+export function logoProblem(type: string, size: number): string | null {
+  if (!LOGO_TYPES.includes(type)) return "Logo musí být obrázek PNG, JPG, WebP nebo GIF.";
+  if (size <= 0) return "Soubor je prázdný.";
+  if (size > MAX_LOGO_BYTES) return `Logo má ${Math.ceil(size / 1024)} kB, nejvýš jde 512 kB. Zmenšete ho prosím.`;
+  return null;
 }
 
 /** The organization publicMetadata to send for an "active" or "quota" change (Clerk merges it deeply and drops a key set to null). */
 export function teamMetadataPatch(change: Extract<TeamChange, { kind: "active" | "quota" }>): Record<string, unknown> {
-  return change.kind === "active" ? { pro: change.on } : { filesQuota: change.pages === null ? null : { pages: change.pages } };
+  return change.kind === "active" ? { pro: change.on } : { filesQuota: change.mb === null ? null : { mb: change.mb, pages: null } };
 }
 
 /** "3 členové", "1 člen", "5 členů". */

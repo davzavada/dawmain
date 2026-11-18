@@ -2,10 +2,10 @@ import "server-only";
 import { clerkClient } from "@clerk/nextjs/server";
 import { invalidateAccess } from "@/src/files/access";
 import { withScope } from "@/src/files/db/client";
-import { listAllLibraries } from "@/src/files/db/libraries";
+import { allLibraryBytes, listAllLibraries } from "@/src/files/db/libraries";
 import { clerkStatus } from "@/src/files/errors";
 import { effectiveMode } from "@/src/files/guards";
-import { TEAM_ID, teamMetadataPatch, toAdminTeam, type AdminTeam, type TeamChange, type TeamLibraryStats } from "./teams-model";
+import { logoProblem, TEAM_ID, teamMetadataPatch, toAdminTeam, type AdminTeam, type TeamChange, type TeamLibraryStats } from "./teams-model";
 
 /**
  * Server side of the Týmy tab: the team list with members and library use,
@@ -24,11 +24,11 @@ async function teamLibraryStats(): Promise<Map<string, TeamLibraryStats> | null>
   try {
     const mode = await effectiveMode();
     if (mode === "off" || mode === "unconfigured") return null;
-    const rows = await withScope([], (db) => listAllLibraries(db));
+    const { rows, bytes } = await withScope([], async (db) => ({ rows: await listAllLibraries(db), bytes: await allLibraryBytes(db) }));
     return new Map(
       rows
         .filter((r) => r.kind === "org")
-        .map((r) => [r.id, { documents: r.doc_count, pages: r.page_count, purgeAfter: r.purge_after }]),
+        .map((r) => [r.id, { documents: r.doc_count, pages: r.page_count, bytes: bytes.get(r.id) ?? 0, purgeAfter: r.purge_after }]),
     );
   } catch {
     return null;
@@ -40,7 +40,7 @@ async function loadTeam(client: Awaited<ReturnType<typeof clerkClient>>, orgId: 
     client.organizations.getOrganization({ organizationId: orgId }),
     client.organizations.getOrganizationMembershipList({ organizationId: orgId, limit: MAX_MEMBERS }),
   ]);
-  return toAdminTeam(org, memberships.data, stats ? (stats.get(orgId) ?? { documents: 0, pages: 0, purgeAfter: null }) : null);
+  return toAdminTeam(org, memberships.data, stats ? (stats.get(orgId) ?? { documents: 0, pages: 0, bytes: 0, purgeAfter: null }) : null);
 }
 
 /** Every team with its members and library use, by name. */
@@ -56,7 +56,7 @@ export async function listAdminTeams(): Promise<{ teams: AdminTeam[]; statsAvail
   const teams = await Promise.all(
     orgs.map(async (org) => {
       const memberships = await client.organizations.getOrganizationMembershipList({ organizationId: org.id, limit: MAX_MEMBERS });
-      return toAdminTeam(org, memberships.data, stats ? (stats.get(org.id) ?? { documents: 0, pages: 0, purgeAfter: null }) : null);
+      return toAdminTeam(org, memberships.data, stats ? (stats.get(org.id) ?? { documents: 0, pages: 0, bytes: 0, purgeAfter: null }) : null);
     }),
   );
   teams.sort((a, b) => a.name.localeCompare(b.name, "cs") || a.id.localeCompare(b.id));
@@ -130,5 +130,35 @@ export async function applyTeamChange(actor: string, teamId: string | null, chan
     }
     console.warn("admin team change failed", status);
     return { ok: false, error: "Změnu se nepodařilo uložit, Clerk neodpověděl. Zkus to za chvíli." };
+  }
+}
+
+/**
+ * Upload (a file) or remove (null) the team's logo, as `actor` (already
+ * verified as admin). The logo is the Clerk organization's image: members
+ * see it next to the team in the sidebar and on the team's files page.
+ */
+export async function setTeamLogo(actor: string, teamId: string, file: File | null): Promise<TeamResult> {
+  if (!TEAM_ID.test(teamId)) return { ok: false, error: "Neplatný tým." };
+  if (file) {
+    const problem = logoProblem(file.type, file.size);
+    if (problem) return { ok: false, error: problem };
+  }
+  try {
+    const client = await clerkClient();
+    if (file) await client.organizations.updateOrganizationLogo(teamId, { file, uploaderUserId: actor });
+    else await client.organizations.deleteOrganizationLogo(teamId);
+    const stats = await teamLibraryStats();
+    const team = await loadTeam(client, teamId, stats);
+    // Members see the logo in their sidebar: forget their cached access on this instance.
+    for (const m of team.members) invalidateAccess(m.userId);
+    console.info("admin team change", JSON.stringify({ actor, team: teamId, change: { kind: file ? "logo" : "logo.remove" } }));
+    return { ok: true, team };
+  } catch (error) {
+    const status = clerkStatus(error);
+    if (status === 404) return { ok: false, error: "Tým už neexistuje." };
+    if (status === 400 || status === 422) return { ok: false, error: "Clerk obrázek nepřijal. Zkuste jiný soubor (PNG nebo JPG)." };
+    console.warn("admin team logo failed", status);
+    return { ok: false, error: "Logo se nepodařilo uložit, Clerk neodpověděl. Zkus to za chvíli." };
   }
 }

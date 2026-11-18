@@ -72,7 +72,7 @@ export default async function AdminPage() {
           today={new Date().toISOString().slice(0, 10)}
           windowDays={WINDOW_DAYS}
           usageAvailable={usage !== null}
-          defaultQuotaPages={LIMITS.personalPages}
+          defaultQuotaMb={Math.round(LIMITS.personalBytes / (1024 * 1024))}
         />
       )}
       <p className="muted small adm-foot">

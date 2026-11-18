@@ -35,6 +35,9 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       { source: "/:path*", headers: everywhere },
+      { source: "/soubory", headers: privateArea },
+      { source: "/soubory/:path*", headers: privateArea },
+      { source: "/zotero", headers: privateArea },
       { source: "/vlastni-zdroje", headers: privateArea },
       { source: "/vlastni-zdroje/:path*", headers: privateArea },
       { source: "/api/files/:path*", headers: privateArea },

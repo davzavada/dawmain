@@ -24,7 +24,7 @@ const PERSONAL_PRO: LibraryAccess = {
   pro: true,
   canUpload: true,
   canManageAll: true,
-  quotaPages: 3000,
+  quotaBytes: 104_857_600, handle: "osobni", logoUrl: null,
 };
 const PERSONAL_FREE: LibraryAccess = { ...PERSONAL_PRO, pro: false, canUpload: false };
 

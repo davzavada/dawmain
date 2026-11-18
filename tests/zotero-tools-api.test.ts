@@ -85,7 +85,7 @@ import type { ConnectionState, Fulltext, Library, ZoteroItem, ZoteroSettings } f
 
 const USER = "user_zot1";
 const ZUSER = 475425;
-const CONNECT = "https://dawmain.davidzavada.cz/?zotero=1";
+const CONNECT = "https://dawmain.davidzavada.cz/zotero";
 
 const ENV: Record<string, string> = {
   ZOTERO_OAUTH_CLIENT_KEY: "consumer-key",
@@ -104,7 +104,7 @@ const PERSONAL_LIB: LibraryAccess = {
   pro: true,
   canUpload: true,
   canManageAll: true,
-  quotaPages: 3000,
+  quotaBytes: 104_857_600, handle: "osobni", logoUrl: null,
 };
 const PRO_ACCESS: Access = { userId: USER, banned: false, libraries: [PERSONAL_LIB], all: [PERSONAL_LIB], zotero: true };
 const NON_PRO_ACCESS: Access = { userId: USER, banned: false, libraries: [], all: [{ ...PERSONAL_LIB, pro: false, canUpload: false }], zotero: false };
@@ -114,7 +114,7 @@ const API_KEY = "AbCdEfGhIjKlMnOpQrStUvWx";
 function connection(groups: "all" | "none" | number[] = "none", notes = true): ConnectionState {
   return {
     state: "ok",
-    conn: { creds: { userID: ZUSER, key: API_KEY }, username: "zuser", notes, groups, connectedAt: "2026-09-01T10:00:00Z", fp: "fp-current", mode: "read" },
+    conn: { creds: { userID: ZUSER, key: API_KEY }, username: "zuser", notes, groups, connectedAt: "2026-09-01T10:00:00Z", fp: "fp-current", mode: "read", disabled: [] },
   };
 }
 

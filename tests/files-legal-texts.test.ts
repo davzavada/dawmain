@@ -25,7 +25,7 @@ const { PrivacyPage, TermsPage } = await import("@/app/_legal-pages");
 const { DEFAULT_TEXTS } = await import("@/src/content/texts");
 const { SiteNav } = await import("@/app/_nav");
 const { CONTACT, EFFECTIVE } = await import("@/app/_legal");
-const { PAGE_CHARS } = await import("@/src/files/config");
+const { LIMITS } = await import("@/src/files/config");
 const { USAGE_KEEP_DAYS } = await import("@/src/files/db/usage");
 
 /** Rendered page as plain text, whitespace collapsed (JSX line breaks vary). */
@@ -137,9 +137,11 @@ describe("terms of use (/podminky)", () => {
     expect(privacy).toContain("do týdne po vypnutí nebo zrušení týmu je smažu");
   });
 
-  it("bills pages by the same character count as the code", () => {
-    const formatted = PAGE_CHARS.toLocaleString("cs-CZ").replace(/\s/g, " ");
-    expect(terms.replace(/\s/g, " ")).toContain(`${formatted} znaků`);
+  it("states the storage quotas the code defaults to (originals, MB)", () => {
+    expect(LIMITS.personalBytes).toBe(100 * 1024 * 1024);
+    expect(LIMITS.teamBytes).toBe(1024 * 1024 * 1024);
+    expect(LIMITS.maxFileBytes).toBe(100 * 1024 * 1024);
+    expect(terms).toContain("osobní knihovna má 100 MB, týmová 1 GB a jeden soubor může mít nejvýš 100 MB");
   });
 
   it("asks the uploader to keep the section's rules", () => {
@@ -168,8 +170,10 @@ describe("terms of use (/podminky)", () => {
     expect(paragraph).toContain("česky nebo anglicky");
   });
 
-  it("names the text export next to the no-backup rule", () => {
-    expect(terms).toContain("„Stáhnout text“ u dokumentu v seznamu souborů");
+  it("says originals are stored, not backed up, and can be downloaded with the text", () => {
+    expect(terms).toContain("Server ukládá nahraný soubor i jeho převedený text");
+    expect(terms).toContain("Originál i text si můžete kdykoli stáhnout na stránce souborů");
+    expect(privacy).toContain("soubory, které nahrajete (originál i převedený text)");
   });
 });
 

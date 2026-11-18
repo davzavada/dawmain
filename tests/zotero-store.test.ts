@@ -26,7 +26,9 @@ import {
   keyFingerprint,
   loadConnection,
   markRevoked,
+  parseDisabled,
   saveConnection,
+  saveDisabledLibraries,
   type NewConnection,
 } from "@/src/zotero/store";
 
@@ -35,7 +37,7 @@ const OTHER = "user_2zyxWVU987";
 const KEY = "P9NiFoyLeZu2bZNvvuQPDWsd";
 const NEW_KEY = "Q8MjGpzKfYa3cYOwwvRQEXte";
 const SECRET = "a-test-secret-of-sufficient-length";
-const FIELDS = ["connectedAt", "fp", "groups", "keyWrite", "mode", "notes", "revokedAt", "sealed", "userID", "username", "v"];
+const FIELDS = ["connectedAt", "disabled", "fp", "groups", "keyWrite", "mode", "notes", "revokedAt", "sealed", "userID", "username", "v"];
 
 const clerkError = (status: number) => Object.assign(new Error(`Clerk ${status}`), { code: "api_response_error", status });
 
@@ -114,6 +116,7 @@ describe("saveConnection / loadConnection", () => {
         connectedAt: expect.any(String),
         fp: keyFingerprint(KEY),
         mode: "read",
+        disabled: [],
       },
     });
     expect(keyFingerprint(KEY)).toMatch(/^[0-9a-f]{16}$/);
@@ -362,6 +365,55 @@ describe("markRevoked", () => {
     expect(await markRevoked(USER, keyFingerprint(KEY))).toBe(false);
     expect(clerk.updateUserMetadata.mock.calls.length).toBe(writes);
     await expect(markRevoked("nobody", "0123456789abcdef")).rejects.toThrow(/user id/);
+  });
+});
+
+describe("disabled libraries", () => {
+  it("parseDisabled keeps valid refs only, deduplicated, personal first", () => {
+    expect(parseDisabled(undefined)).toEqual([]);
+    expect(parseDisabled("personal")).toEqual([]);
+    expect(parseDisabled(["222", "personal", "111", "222", "", "group:1", 5, "0", "-3", "1".repeat(13), null])).toEqual(["personal", "111", "222"]);
+  });
+
+  it("reads a record from before the switches (no disabled) as none off", async () => {
+    await saveConnection(USER, connection());
+    const record = stored()!;
+    delete record.disabled;
+    __resetZoteroStoreForTests();
+    const state = await loadConnection(USER);
+    expect(state.state === "ok" && state.conn.disabled).toEqual([]);
+  });
+
+  it("drops malformed entries of a stored record instead of failing the connection", async () => {
+    await saveConnection(USER, connection());
+    stored()!.disabled = ["personal", "nope", 42];
+    __resetZoteroStoreForTests();
+    const state = await loadConnection(USER);
+    expect(state.state === "ok" && state.conn.disabled).toEqual(["personal"]);
+  });
+
+  it("saveConnection stores the given switches (validated) and none by default", async () => {
+    await saveConnection(USER, connection({ disabled: ["123", "personal"] }));
+    expect(stored()?.disabled).toEqual(["personal", "123"]);
+    await expect(saveConnection(USER, connection({ disabled: ["group:1"] }))).rejects.toThrow(/disabled/);
+    await saveConnection(USER, connection());
+    expect(stored()?.disabled).toEqual([]);
+  });
+
+  it("saveDisabledLibraries writes for the current key only, keeping everything else", async () => {
+    await saveConnection(USER, connection());
+    const before = { ...stored() };
+    expect(await saveDisabledLibraries(USER, keyFingerprint(KEY), ["99", "personal"])).toBe(true);
+    expect(stored()).toEqual({ ...before, disabled: ["personal", "99"] });
+    const state = await loadConnection(USER);
+    expect(state.state === "ok" && state.conn.disabled).toEqual(["personal", "99"]);
+    expect(Object.isFrozen(state.state === "ok" && state.conn.disabled)).toBe(true);
+    // A page left open across a reconnect: another key's fingerprint changes nothing.
+    expect(await saveDisabledLibraries(USER, keyFingerprint(NEW_KEY), [])).toBe(false);
+    expect(stored()?.disabled).toEqual(["personal", "99"]);
+    await expect(saveDisabledLibraries(USER, keyFingerprint(KEY), ["x"])).rejects.toThrow(/disabled/);
+    await deleteConnection(USER);
+    expect(await saveDisabledLibraries(USER, keyFingerprint(KEY), [])).toBe(false);
   });
 });
 

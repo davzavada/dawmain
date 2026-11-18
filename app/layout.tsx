@@ -5,6 +5,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
 import { Suspense, type ReactNode } from "react";
 import { clerkConfigured } from "@/src/mcp/config";
+import { zoteroConfigured } from "@/src/zotero/config";
 import { DATABASES } from "@/src/mcp/databases";
 import { SiteHeader } from "./_header";
 import { SiteNav } from "./_nav";
@@ -48,7 +49,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       {clerk ? <ClerkBridge /> : <NoClerk />}
       <SiteHeader />
       <div className="shell">
-        <SiteNav sourceCount={DATABASES.length} />
+        <SiteNav sourceCount={DATABASES.length} zotero={clerk && zoteroConfigured()} />
         <main>
           {children}
           <footer>

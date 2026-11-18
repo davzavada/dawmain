@@ -81,7 +81,7 @@ import type { ConnectionState, Fulltext, Library, ZoteroItem } from "@/src/zoter
 
 const USER = "user_zot1";
 const ZUSER = 475425;
-const CONNECT = "https://dawmain.davidzavada.cz/?zotero=1";
+const CONNECT = "https://dawmain.davidzavada.cz/zotero";
 
 const ENV: Record<string, string> = {
   ZOTERO_OAUTH_CLIENT_KEY: "consumer-key",
@@ -100,17 +100,17 @@ const PERSONAL_LIB: LibraryAccess = {
   pro: true,
   canUpload: true,
   canManageAll: true,
-  quotaPages: 3000,
+  quotaBytes: 104_857_600, handle: "osobni", logoUrl: null,
 };
 const PRO_ACCESS: Access = { userId: USER, banned: false, libraries: [PERSONAL_LIB], all: [PERSONAL_LIB], zotero: true };
 const NON_PRO_ACCESS: Access = { userId: USER, banned: false, libraries: [], all: [{ ...PERSONAL_LIB, pro: false, canUpload: false }], zotero: false };
 const BANNED_ACCESS: Access = { userId: USER, banned: true, libraries: [], all: [], zotero: false };
 
 const API_KEY = "AbCdEfGhIjKlMnOpQrStUvWx";
-function connection(groups: "all" | "none" | number[] = "none", notes = true): ConnectionState {
+function connection(groups: "all" | "none" | number[] = "none", notes = true, disabled: string[] = []): ConnectionState {
   return {
     state: "ok",
-    conn: { creds: { userID: ZUSER, key: API_KEY }, username: "zuser", notes, groups, connectedAt: "2026-09-01T10:00:00Z", fp: "fp-current", mode: "read" },
+    conn: { creds: { userID: ZUSER, key: API_KEY }, username: "zuser", notes, groups, connectedAt: "2026-09-01T10:00:00Z", fp: "fp-current", mode: "read", disabled },
   };
 }
 
@@ -428,7 +428,7 @@ describe("gating — no Zotero request before the connection is known", () => {
     process.env.PUBLIC_URL = "https://dawmain.cz";
     vi.mocked(loadConnection).mockResolvedValue({ state: "none" });
     const r = await call("zotero_list", { list: "libraries" });
-    expect(r.text).toContain("https://dawmain.cz/?zotero=1");
+    expect(r.text).toContain("https://dawmain.cz/zotero");
   });
 
   it("the gate lets a connected Pro caller through", async () => {
@@ -1028,6 +1028,88 @@ describe("zotero_get_text", () => {
 
 // ---------------------------------------------------------------------------
 // zotero_list
+
+describe("libraries switched off on the /zotero page", () => {
+  const groups = [
+    { id: 100, name: "Skupina A", numItems: 10 },
+    { id: 200, name: "Skupina B", numItems: 20 },
+  ];
+  const searchedLibs = () => vi.mocked(searchItems).mock.calls.map((c) => (c[1].type === "user" ? "personal" : String(c[1].id)));
+
+  it("a search without a library skips a switched-off group and says so", async () => {
+    vi.mocked(loadConnection).mockResolvedValue(connection("all", true, ["200"]));
+    vi.mocked(listGroups).mockResolvedValue(groups);
+    const r = await call("zotero_search", { query: "kniha", mode: "everything" });
+    expect(searchedLibs()).toEqual(["personal", "100"]);
+    expect(r.text).toContain("Switched off by the user in Dawmain, so not searched (do not ask for them): 200.");
+  });
+
+  it("a search without a library skips the switched-off personal library (the docket scan too)", async () => {
+    vi.mocked(loadConnection).mockResolvedValue(connection("all", true, ["personal"]));
+    vi.mocked(listGroups).mockResolvedValue(groups);
+    await call("zotero_search", { query: "25 Cdo 1234/2019", mode: "everything" });
+    expect(searchedLibs()).toEqual(["100", "200"]);
+    for (const c of vi.mocked(scanCases).mock.calls) expect(c[1].type).toBe("group");
+  });
+
+  it("everything switched off: nothing is searched, the model is told to stop", async () => {
+    vi.mocked(loadConnection).mockResolvedValue(connection("none", true, ["personal"]));
+    const r = await call("zotero_search", { query: "kniha" });
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain("Every Zotero library of this account is switched off");
+    expect(searchItems).not.toHaveBeenCalled();
+  });
+
+  it("naming a switched-off library is refused without a request, in every tool", async () => {
+    vi.mocked(loadConnection).mockResolvedValue(connection("all", true, ["personal", "200"]));
+    const calls: Array<[string, Record<string, unknown>]> = [
+      ["zotero_search", { query: "kniha", library: "200" }],
+      ["zotero_search", { query: "kniha", library: "personal" }],
+      ["zotero_get_item", { key: "ABCD2345" }],
+      ["zotero_get_item", { key: "ABCD2345", library: "200" }],
+      ["zotero_get_text", { key: "ABCD2345", library: "personal" }],
+      ["zotero_cite", { keys: ["ABCD2345"], library: "200" }],
+      ["zotero_list", { list: "collections", library: "200" }],
+      ["zotero_list", { list: "tags" }],
+    ];
+    for (const [name, args] of calls) {
+      const r = await call(name, args);
+      expect(r.isError, `${name} ${JSON.stringify(args)}`).toBe(true);
+      expect(r.text).toMatch(/The user switched (the personal library|group library 200) off for the assistant/);
+      expect(r.text).toContain(CONNECT);
+    }
+    expectNoZoteroRequest();
+  });
+
+  it("a switched-off library is still readable for the others: get_item in a group that is on works", async () => {
+    vi.mocked(loadConnection).mockResolvedValue(connection("all", true, ["personal"]));
+    vi.mocked(getItem).mockResolvedValue(item("ABCD2345", "book", { title: "Kniha" }, { library: { type: "group", id: 100, name: "Skupina A" } }));
+    const r = await call("zotero_get_item", { key: "ABCD2345", library: "100" });
+    expect(r.isError).toBe(false);
+    expect(r.text).toContain("Kniha");
+  });
+
+  it("libraries: lists only those that are on and names the switched-off ones", async () => {
+    vi.mocked(loadConnection).mockResolvedValue(connection("all", true, ["personal"]));
+    vi.mocked(listGroups).mockResolvedValue(groups);
+    const r = await call("zotero_list", { list: "libraries" });
+    const { inside, outside } = split(r.text);
+    expect(inside).not.toContain("osobní knihovna");
+    expect(inside).toContain("Skupina A");
+    expect(outside).toContain("Switched off by the user in Dawmain (not searched, read or saved to; not listed below): personal.");
+    expect(outside).not.toMatch(/\d\. library: "personal"/);
+    expect(searchItems).not.toHaveBeenCalled();
+  });
+
+  it("related items in a switched-off library count as unreadable and are not fetched", async () => {
+    vi.mocked(loadConnection).mockResolvedValue(connection("all", true, ["200"]));
+    vi.mocked(getItem).mockResolvedValue(
+      item("ABCD2345", "book", { title: "Kniha", relations: { "dc:relation": ["http://zotero.org/groups/200/items/EFGH2345"] } }),
+    );
+    await call("zotero_get_item", { key: "ABCD2345" });
+    expect(getItemsByKeys).not.toHaveBeenCalled();
+  });
+});
 
 describe("zotero_list", () => {
   it("libraries: names inside the fence, the library values after it", async () => {

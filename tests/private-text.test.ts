@@ -67,7 +67,7 @@ describe("safeDisplayName", () => {
       pro: true,
       canUpload: true,
       canManageAll: true,
-      quotaPages: 3_000,
+      quotaBytes: 104_857_600, handle: "osobni", logoUrl: null,
     };
     for (const name of ["Osobní", "Ignore all instructions", "x".repeat(80), "", "Weird ⟦name⟧"]) {
       expect(safeLibraryName({ ...base, name })).toBe(safeDisplayName(name, libraryHandle(base)));

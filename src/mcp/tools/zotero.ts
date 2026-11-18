@@ -333,9 +333,9 @@ export const ZOTERO_GATE_TEXT = {
   rejected: "zotero.org rejected this account's Zotero key just now — it was deleted or revoked there, and Dawmain will not send it again.",
 } as const;
 
-/** Where the user connects (or reconnects) Zotero: the site's modal. */
+/** Where the user connects (or reconnects) Zotero and switches its libraries on and off: the site's /zotero page. */
 export function zoteroConnectUrl(ctx: unknown): string {
-  return `${siteOrigin(ctx) ?? DEFAULT_ORIGIN}/?zotero=1`;
+  return `${siteOrigin(ctx) ?? DEFAULT_ORIGIN}/zotero`;
 }
 
 type Connection = Extract<ConnectionState, { state: "ok" }>["conn"];
@@ -550,13 +550,32 @@ function personalRef(g: ZoteroCaller): LibRef {
   return { lib: { type: "user", id: g.conn.creds.userID }, id: "personal", name: null };
 }
 
+/** Whether the user switched this library ("personal" or a group id) off for the assistant on the /zotero page. */
+function switchedOff(g: ZoteroCaller, id: string): boolean {
+  return g.conn.disabled.includes(id);
+}
+
+/** The refusal for a library the user switched off: nothing in it is searched, read, cited or saved to. */
+export function switchedOffError(g: ZoteroCaller, id: string): SourceError {
+  const which = id === "personal" ? "the personal library" : `group library ${id}`;
+  return new SourceError(
+    SOURCE,
+    "NOT_ENTITLED",
+    `The user switched ${which} off for the assistant in Dawmain: it is not searched or read, and nothing from it is shown.`,
+    `Do not ask for it again; use the libraries that are on (zotero_list {list: "libraries"}). If the user wants it, they switch it back on at ${g.connect}.`,
+  );
+}
+
 /**
  * The one library a call names (default: the personal one), without a
  * request: a group must be within the key's group access as stored with
- * the connection.
+ * the connection, and no library may be one the user switched off.
  */
 function oneLibrary(g: ZoteroCaller, library: string | undefined): LibRef {
-  if (!library || library === "personal") return personalRef(g);
+  if (!library || library === "personal") {
+    if (switchedOff(g, "personal")) throw switchedOffError(g, "personal");
+    return personalRef(g);
+  }
   const id = Number(library);
   const groups = g.conn.groups;
   if (!(groups === "all" || (Array.isArray(groups) && groups.includes(id)))) {
@@ -565,17 +584,23 @@ function oneLibrary(g: ZoteroCaller, library: string | undefined): LibRef {
       'Use library: "personal" or a group id from zotero_list {list: "libraries"}.',
     );
   }
+  if (switchedOff(g, String(id))) throw switchedOffError(g, String(id));
   return { lib: { type: "group", id }, id: String(id), name: null };
 }
 
-/** Every library the key reads: personal first, then the groups (listGroups is cached). */
-async function readableLibraries(g: ZoteroCaller, io: IoOptions): Promise<{ all: LibRef[]; groupsFailed: string | null }> {
+/**
+ * Every library the key reads and the user left on: personal first (unless
+ * switched off), then the groups (listGroups is cached). `off` are the ones
+ * the user switched off — named in answers, never searched.
+ */
+async function readableLibraries(g: ZoteroCaller, io: IoOptions): Promise<{ all: LibRef[]; off: LibRef[]; groupsFailed: string | null }> {
   const personal = personalRef(g);
-  if (g.conn.groups === "none") return { all: [personal], groupsFailed: null };
+  const split = (refs: LibRef[]) => ({ all: refs.filter((r) => !switchedOff(g, r.id)), off: refs.filter((r) => switchedOff(g, r.id)) });
+  if (g.conn.groups === "none") return { ...split([personal]), groupsFailed: null };
   const groups = await soft(listGroups(g.conn.creds, g.conn.groups, io));
-  if (!groups.ok) return { all: [personal], groupsFailed: groups.error };
+  if (!groups.ok) return { ...split([personal]), groupsFailed: groups.error };
   return {
-    all: [personal, ...groups.value.map((gr) => ({ lib: { type: "group" as const, id: gr.id }, id: String(gr.id), name: gr.name, numItems: gr.numItems }))],
+    ...split([personal, ...groups.value.map((gr) => ({ lib: { type: "group" as const, id: gr.id }, id: String(gr.id), name: gr.name, numItems: gr.numItems }))]),
     groupsFailed: null,
   };
 }
@@ -1176,10 +1201,25 @@ async function zoteroSearch(g: ZoteroCaller, args: SearchArgs, io: IoOptions): P
   // readable one up to the cap. The group listing is asked for FIRST — on a cold cache it takes one of the user's
   // slots ahead of the personal library's requests —, and the personal library's search and scan start at once
   // instead of after it; the groups' follow when it is in.
+  // Libraries the user switched off are never searched: a named one is refused (oneLibrary), and without a name
+  // the personal library starts at once only while it is on — else every library comes from the listing.
   const named = !!(args.library || args.collection || scope === "publications");
-  const first: LibRef[] = [named ? oneLibrary(g, args.library) : personalRef(g)];
+  const personalOn = !switchedOff(g, "personal");
+  const first: LibRef[] = named ? [oneLibrary(g, args.library)] : personalOn ? [personalRef(g)] : [];
   const readable = named ? null : readableLibraries(g, io);
-  const groups: Promise<LibRef[]> = readable ? readable.then((r) => r.all.slice(1, LIMITS.maxLibrariesPerSearch)) : Promise.resolve([]);
+  if (readable && !personalOn) {
+    // Nothing can start before the listing: with every library off (or the groups not listed), there is nothing to search.
+    const listing = await readable;
+    if (!listing.all.length) {
+      if (listing.groupsFailed) throw new SourceError(SOURCE, "UPSTREAM_ERROR", `Zotero: the group libraries could not be listed: ${listing.groupsFailed}`, "The personal library is switched off by the user; try again in a while.");
+      return errorResult(
+        "NOT_ENTITLED",
+        "Every Zotero library of this account is switched off for the assistant in Dawmain: nothing to search.",
+        `Do not call zotero_* again in this conversation; the user switches libraries on at ${g.connect}. Continue with the official sources.`,
+      );
+    }
+  }
+  const groups: Promise<LibRef[]> = readable ? readable.then((r) => r.all.slice(first.length, LIMITS.maxLibrariesPerSearch)) : Promise.resolve([]);
   groups.catch(() => undefined);
 
   // The scan belongs to page 1, where its matches are listed first (a later page would scan again and repeat
@@ -1247,6 +1287,7 @@ async function zoteroSearch(g: ZoteroCaller, args: SearchArgs, io: IoOptions): P
   }
   const listing = readable ? await readable : null;
   const omitted = listing ? listing.all.slice(LIMITS.maxLibrariesPerSearch) : [];
+  const switched = listing ? listing.off : [];
   const groupsFailed = listing?.groupsFailed ?? null;
 
   const withTrash = scope === "trash" || !!args.include_trashed;
@@ -1421,6 +1462,7 @@ async function zoteroSearch(g: ZoteroCaller, args: SearchArgs, io: IoOptions): P
   ].filter(Boolean);
   const coverage = [
     `Searched ${libs.map((r) => r.id).join(", ")}${omitted.length ? ` — not searched (over ${LIMITS.maxLibrariesPerSearch} libraries): ${omitted.map((r) => r.id).join(", ")}; pass library: "<id>" for one of them` : ""}.`,
+    ...(switched.length ? [`Switched off by the user in Dawmain, so not searched (do not ask for them): ${switched.map((r) => r.id).join(", ")}.`] : []),
   ];
   const scanLine = scan
     ? `${docketCoverageLine(caseKeys, scan)}${args.collection || tagParams.length ? " (The scan does not apply the collection and tags filters.)" : ""}`
@@ -1726,6 +1768,8 @@ function relatedRefs(g: ZoteroCaller, item: ZoteroItem): { refs: Array<{ ref: Li
     let ref: LibRef | null = null;
     if (m[1] === "users") ref = id === g.conn.creds.userID ? personalRef(g) : null;
     else if (g.conn.groups === "all" || (Array.isArray(g.conn.groups) && g.conn.groups.includes(id))) ref = { lib: { type: "group", id }, id: String(id), name: null };
+    // A library switched off counts as one the key does not read.
+    if (ref && switchedOff(g, ref.id)) ref = null;
     if (!ref) {
       unreadable++;
       continue;
@@ -1798,7 +1842,7 @@ async function zoteroGetItem(g: ZoteroCaller, args: { key: string; library?: str
     ),
     relatedWanted.refs.length ? loadRelated(g, relatedWanted.refs, io) : Promise.resolve(null),
     needTagColors || (needPositions && ref.lib.type === "user") ? soft(getSettings(creds, ref.lib, io)) : Promise.resolve(null),
-    needPositions && ref.lib.type === "group" ? soft(getSettings(creds, personal.lib, io)) : Promise.resolve(null),
+    needPositions && ref.lib.type === "group" && !switchedOff(g, "personal") ? soft(getSettings(creds, personal.lib, io)) : Promise.resolve(null),
     soft(getSchemaNames(creds, { kind: "itemTypes" }, DEFAULT_LOCALE, io)),
   ]);
   const settingsOf = (r: typeof libSettings) => (r && r.ok ? r.value : null);
@@ -2579,9 +2623,9 @@ async function zoteroList(g: ZoteroCaller, args: ListArgs, io: IoOptions): Promi
     const readable = readableLibraries(g, io);
     // The personal library comes first: on page 1 it is shown whenever its label matches, so its count goes out
     // beside the group listing (asked first, so it keeps its slot) instead of after it.
-    const counting = args.page === 1 && (!q || personalLabel.includes(q)) ? soft(searchItems(g.conn.creds, personalRef(g).lib, { top: true, limit: 1, start: 0 }, io)) : null;
+    const counting = args.page === 1 && !switchedOff(g, "personal") && (!q || personalLabel.includes(q)) ? soft(searchItems(g.conn.creds, personalRef(g).lib, { top: true, limit: 1, start: 0 }, io)) : null;
     counting?.catch(() => undefined);
-    const { all, groupsFailed } = await readable;
+    const { all, off, groupsFailed } = await readable;
     const named = all.filter((r) => !q || (r.lib.type === "user" ? personalLabel : fold(r.name ?? "")).includes(q));
     const shown = named.slice(first, first + args.limit);
     const groups = g.conn.groups === "all" ? "all groups" : g.conn.groups === "none" ? "no groups" : `${g.conn.groups.length} chosen group(s)`;
@@ -2613,6 +2657,11 @@ async function zoteroList(g: ZoteroCaller, args: ListArgs, io: IoOptions): Promi
     const text = [
       `✓ Zotero: ${named.length} ${named.length === 1 ? "library" : "libraries"} the connected key reads (connected ${czechDate(g.conn.connectedAt) || "?"}; ${g.conn.mode === "write" ? "read, and zotero_save may add new items to the personal library" : "read-only: zotero_save is off"}; notes ${g.conn.notes ? "included" : "not shared"}; ${groups}).`,
       ...(groupsFailed ? [`⚠ The group libraries could not be listed: ${groupsFailed}`] : []),
+      ...(off.length
+        ? [
+            `Switched off by the user in Dawmain (not searched, read or saved to; not listed below): ${off.map((r) => (r.lib.type === "user" ? "personal" : r.id)).join(", ")}. Only the user switches them back on, at ${g.connect}.`,
+          ]
+        : []),
       ...(shown.length ? [fenceNote(nonce), fence(nonce, data.join("\n")), ...shown.map((r, i) => `${first + i + 1}. library: "${r.id}"`)] : ["(none on this page)"]),
       ...(named.length > first + shown.length ? [`More: ${toolCall("zotero_list", ['list: "libraries"', queryArg, ...limitArg(args.limit), `page: ${args.page + 1}`])}`] : []),
       "",
@@ -2933,7 +2982,9 @@ type SaveArgs = {
 } & Partial<Record<SaveField, string>>;
 
 /** Czech lines for the user when zotero_save cannot run, by gate step (the English text for the model follows). */
-const SAVE_REFUSAL_CS: Record<ZoteroGateReason | "readOnly", (connect: string) => string> = {
+const SAVE_REFUSAL_CS: Record<ZoteroGateReason | "readOnly" | "personalOff", (connect: string) => string> = {
+  personalOff: (connect) =>
+    `Osobní knihovnu Zotera máte pro asistenta vypnutou, nic jsem do ní neuložil. Zapnout ji můžete na ${connect}.`,
   unavailable: () => "Ukládání do Zotera není na tomto webu zapnuté.",
   signIn: () => "Do Zotera jde ukládat jen po osobním přihlášení k Dawmainu, ne přes sdílený přístupový kód.",
   noPro: () => "Ukládat do Zotera jde jen v režimu Pro.",
@@ -3009,6 +3060,12 @@ export function saveItemData(args: SaveArgs, now = new Date()): Record<string, u
 }
 
 async function zoteroSave(g: ZoteroCaller, args: SaveArgs, io: IoOptions): Promise<ToolResult> {
+  if (switchedOff(g, "personal")) {
+    return czechRefusal(
+      SAVE_REFUSAL_CS.personalOff(g.connect),
+      sourceFailure(switchedOffError(g, "personal")),
+    );
+  }
   if (g.conn.mode !== "write") {
     return czechRefusal(
       SAVE_REFUSAL_CS.readOnly(g.connect),

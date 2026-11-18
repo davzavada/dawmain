@@ -130,11 +130,11 @@ V režimu Pro si na webu nahrajete vlastní dokumenty a váš asistent v nich pa
 
 Nahráním dokumentu potvrzujete, že pravidla v tomto oddílu dodržíte - web na ně upozorňuje přímo u nahrávání.
 
-**Kvóty.** Místo se počítá ve stranách: jedna strana je 3 600 znaků převedeného textu včetně poznámek pod čarou. Kolik stran dokument zabere a kolik vám zbývá, uvidíte před nahráním. Kvóty můžu podle kapacity měnit, už nahrané dokumenty kvůli tomu ale nemažu. Když se blíží technické limity, které pro ně mám nastavené, přepnou se samy do režimu jen pro čtení (hledat, číst a mazat jde, nahrávat ne), případně se na čas vypnou.
+**Kvóty.** Místo se počítá podle velikosti nahraných souborů: osobní knihovna má 100 MB, týmová 1 GB a jeden soubor může mít nejvýš 100 MB. Kolik místa vám zbývá, vidíte na stránce souborů. Kvóty můžu podle kapacity měnit, už nahrané dokumenty kvůli tomu ale nemažu. Když se blíží technické limity, které pro ně mám nastavené, přepnou se samy do režimu jen pro čtení (hledat, číst a mazat jde, nahrávat ne), případně se na čas vypnou.
 
 **AI a citace.** Typ dokumentu (komentář, článek, kniha…), název, autory a další metadata navrhne server podle začátku dokumentu a asistent v dokumentu hledá hned po zpracování. Návrh se může splést: po rozkliknutí dokumentu v seznamu souborů ho kdykoli opravíte.
 
-**Záloha není.** Originály si nechte u sebe: server je nikdy nedostane, takže vám je ani nemůže vrátit. Uložený text a metadata nezálohuji a za jejich ztrátu, třeba při výpadku nebo ukončení služby, neručím. Text svých dokumentů si ale můžete stáhnout odkazem „Stáhnout text“ u dokumentu v seznamu souborů (s denním limitem).
+**Záloha není.** Server ukládá nahraný soubor i jeho převedený text, ve kterém asistent hledá. Nic z toho nezálohuji a za ztrátu, třeba při výpadku nebo ukončení služby, neručím, takže si originály nechte i u sebe. Originál i text si můžete kdykoli stáhnout na stránce souborů (text s denním limitem).
 
 **Týmy.** Na požádání vás zařadím do týmu. Tým má vlastní sdílenou knihovnu: dokumenty nahrané do ní vidí a prohledávají všichni jeho členové a jejich asistenti, správce týmu je může upravit i smazat. Do týmu nahrávejte jen to, co smějí vidět všichni jeho členové. Osobní soubory zůstávají jen vaše. Členy týmů přiděluji a měním já.
 
@@ -174,7 +174,7 @@ E-mail: ${MAIL}
 
 - **Údaje o účtu** - e-mailová adresa, jméno a identifikátor účtu (při přihlášení účtem Google je předá Google).
 - **Provozní záznamy a přehled o používání** - čas požadavku, volaný nástroj, výsledek a IP adresa; počty volání u účtu, ze kterých vidím, kdo službu používá, jak často a které nástroje.
-- **Vlastní soubory (Pro)** - text dokumentů, které nahrajete, jejich metadata (název, autoři, rok, typ, název souboru) a záznam o tom, kdy jste je nahráli, upravili, stáhli nebo smazali. Dokumenty mohou obsahovat i osobní údaje jiných lidí, například jména autorů.
+- **Vlastní soubory (Pro)** - soubory, které nahrajete (originál i převedený text), jejich metadata (název, autoři, rok, typ, název souboru a složky) a záznam o tom, kdy jste je nahráli, upravili, stáhli nebo smazali. Dokumenty mohou obsahovat i osobní údaje jiných lidí, například jména autorů.
 - **Zotero (Pro)** - zašifrovaný klíč k vaší knihovně a vaše uživatelské jméno a identifikátor v Zoteru.
 
 Údaje o účtu jsou pro poskytování služby nezbytné; bez nich účet nelze vytvořit. Provozní záznamy vznikají automaticky při každém použití služby. Nahrávání dokumentů a připojení Zotera jsou dobrovolné. Obsah rešerší si neukládám a s vaším účtem ho nespojuji.
@@ -190,7 +190,7 @@ E-mail: ${MAIL}
 
 - Údaje o účtu - dokud účet trvá; o jeho smazání můžete kdykoli požádat e-mailem.
 - Provozní záznamy serveru - jen po dobu potřebnou k řešení chyb a ochraně služby; počty volání u účtu nejdéle 12 měsíců.
-- Vlastní soubory a záznamy o práci s nimi - dokud dokument nesmažete, nejdéle však do zrušení účtu nebo odebrání Pro. Pak knihovnu do týdne smažu (do té doby si po odebrání Pro můžete stáhnout text svých dokumentů). Dokumenty v týmové knihovně zůstávají týmu i po vašem odchodu z něj a do týdne po vypnutí nebo zrušení týmu je smažu. Databázi zatím pravidelně nezálohuji; smazaný dokument může zůstat nejvýš v dočasném snímku serveru, který pořizuji před údržbou databáze, a to dokud ten snímek nesmažu. Po výmazu knihovny si ponechám jen záznam o výmazu (identifikátor knihovny, datum a počet smazaných dokumentů), dokud může být potřeba výmaz doložit.
+- Vlastní soubory a záznamy o práci s nimi - dokud dokument nesmažete, nejdéle však do zrušení účtu nebo odebrání Pro. Pak knihovnu do týdne smažu (do té doby si po odebrání Pro můžete stáhnout své soubory). Dokumenty v týmové knihovně zůstávají týmu i po vašem odchodu z něj a do týdne po vypnutí nebo zrušení týmu je smažu. Databázi zatím pravidelně nezálohuji; smazaný dokument může zůstat nejvýš v dočasném snímku serveru, který pořizuji před údržbou databáze, a to dokud ten snímek nesmažu. Po výmazu knihovny si ponechám jen záznam o výmazu (identifikátor knihovny, datum a počet smazaných dokumentů), dokud může být potřeba výmaz doložit.
 - Klíč k Zoteru, uživatelské jméno a identifikátor - dokud Zotero neodpojíte nebo nezrušíte účet. Přestane-li klíč platit, smažu ho a do opětovného připojení, odpojení nebo zrušení účtu si ponechám jen uživatelské jméno a čas, kdy klíč přestal platit.
 
 ## 5. Komu údaje předávám

@@ -1,166 +1,24 @@
 "use client";
 
-import dynamic from "next/dynamic";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "@/app/_icons";
-import { CONTACT } from "@/app/_legal";
 import { DOC_TYPES, type DocStatus, type DocType } from "@/src/files/types";
-import type { DocumentDetail, DocumentListItem, DocumentListResponse, LibrarySummary } from "@/src/files/web-types";
+import type { DocumentDetail, DocumentListItem, DocumentListResponse, FolderItem } from "@/src/files/web-types";
 import { api, NETWORK_ERROR } from "./api";
-import { Confirm, Dialog } from "./dialog";
-import { downloadFileName, fileLine, remainingLine, statusBadge, typeLabel } from "./format";
-import { ZIcon } from "./icons";
+import { Confirm } from "./dialog";
+import { downloadFileName, typeLabel } from "./format";
 import { compactFields, formFromMeta, lineToList, listToLine, MAIN_DOC_TYPES, payloadFromForm, type FieldDef, type FieldWidth, type FormValues } from "./meta-form";
-import { closeFiles, refreshSummary, requestSignIn, showFile, useZdroje } from "./store";
+import { refreshSummary } from "./store";
 
 /**
- * The Vlastní soubory modal (wireframe 04, 05), opened by ZdrojeModals
- * (./modals.tsx) from ?soubory=1. The user's own library and, when an
- * admin put them in teams, one tab per team (a team's files are shared by
- * all its members): the drop zone on top, the list of files under it. A new file is converted in the
- * browser and posted; the server converts it further and proposes its
- * type and metadata — the row just spins ("Zpracovávám…") until the
- * type badge appears. Clicking a row opens it in place (&dokument=<id>):
- * the type switch (Komentář / Článek / Kniha, the rest under "Jiný typ"),
- * saved at once, and a short form per type saved with Uložit; Smazat
- * dokument and Stáhnout text sit at its end.
- *
- * The uploader — and with it the DMD parser — loads only where someone may
- * upload.
+ * The pieces of a library the Vlastní soubory page (app/soubory) is built
+ * from: the document list of one library with its folders (polling while a
+ * file is processed), and the metadata form of one document (type switch
+ * saved at once, a short form per type saved with Uložit, Stáhnout text and
+ * Smazat dokument at its end).
  */
 
-const Uploader = dynamic(() => import("./upload").then((m) => m.Uploader), {
-  ssr: false,
-  loading: () => (
-    <p className="zd-progress" role="status">
-      <span className="zd-spinner" aria-hidden="true" />
-      Načítám nahrávání…
-    </p>
-  ),
-});
-
-const MAIL_PRO = `mailto:${CONTACT}?subject=${encodeURIComponent("Dawmain - Vlastní soubory (Pro)")}`;
-const SUBTITLE = "Dokumenty, ve kterých asistent hledá vedle oficiálních databází.";
-
-export function FilesModal({ documentId }: { documentId: string | null }) {
-  const { auth, summary, failed } = useZdroje();
-  const [libraryId, setLibraryId] = useState<string | null>(null);
-  const libraries = summary?.state === "ok" ? summary.libraries : [];
-  const library = libraries.find((l) => l.id === libraryId) ?? libraries.find((l) => l.kind === "user") ?? null;
-  const mode = summary?.state === "ok" ? summary.mode : "off";
-  const subtitle =
-    library?.pro && library.pagesUsed !== null ? `${SUBTITLE} ${remainingLine(library.pagesUsed, library.quotaPages)}` : SUBTITLE;
-
-  let body: ReactNode;
-  if (auth === "none") {
-    body = <Notice title="Vlastní soubory tu nejsou k dispozici" text="Na tomto nasazení není zapnuté přihlašování." />;
-  } else if (auth === "signed_out") {
-    body = (
-      <Notice title="Přihlaste se" text="Vlastní soubory patří k vašemu účtu. Po přihlášení je uvidíte tady.">
-        <button type="button" className="zd-btn zd-btn-primary" onClick={requestSignIn}>
-          Přihlásit se
-        </button>
-      </Notice>
-    );
-  } else if (!summary) {
-    body = failed ? (
-      <Notice title="Vlastní soubory se nepodařilo načíst" text="Zkuste to prosím za chvíli.">
-        <button type="button" className="zd-btn zd-btn-secondary" onClick={() => void refreshSummary()}>
-          Zkusit znovu
-        </button>
-      </Notice>
-    ) : (
-      <Loading text="Načítám…" />
-    );
-  } else if (summary.state === "unavailable") {
-    body = <Notice title="Vlastní soubory jsou teď vypnuté" text="Oficiální databáze fungují dál. Zkuste to prosím později." />;
-  } else if (summary.state === "signed_out" || !library) {
-    body = <Notice title="Přihlaste se" text="Vlastní soubory patří k vašemu účtu." />;
-  } else {
-    body = (
-      <>
-        {libraries.length > 1 ? (
-          <LibraryTabs
-            libraries={libraries}
-            active={library.id}
-            onPick={(id) => {
-              if (id === library.id) return;
-              showFile(null);
-              setLibraryId(id);
-            }}
-          />
-        ) : null}
-        <Library key={library.id} lib={library} mode={mode} openId={documentId} />
-      </>
-    );
-  }
-
-  return (
-    <Dialog
-      title="Vlastní soubory"
-      subtitle={subtitle}
-      size="medium"
-      onClose={closeFiles}
-      footer={
-        <button type="button" className="zd-btn zd-btn-primary zd-done" onClick={closeFiles}>
-          Hotovo
-        </button>
-      }
-    >
-      {body}
-    </Dialog>
-  );
-}
-
-/** Osobní | Tým A | Tým B — shown only when the user belongs to a team. */
-function LibraryTabs({ libraries, active, onPick }: { libraries: LibrarySummary[]; active: string; onPick: (id: string) => void }) {
-  return (
-    <div className="zd-lib-tabs" role="tablist" aria-label="Knihovna">
-      {libraries.map((lib) => (
-        <button
-          key={lib.id}
-          type="button"
-          role="tab"
-          aria-selected={lib.id === active}
-          className="zd-lib-tab"
-          data-off={!lib.pro || undefined}
-          onClick={() => onPick(lib.id)}
-        >
-          <ZIcon name={lib.kind === "org" ? "users" : "library"} size={14} />
-          <span>{lib.kind === "org" ? lib.name : "Osobní"}</span>
-          {lib.counts ? <span className="zd-lib-tab-count">{lib.counts.total}</span> : null}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function Notice({ title, text, children }: { title: string; text: string; children?: ReactNode }) {
-  return (
-    <div className="zd-locked">
-      <span className="zd-locked-icon" aria-hidden="true">
-        <ZIcon name="lock" size={18} />
-      </span>
-      <h3>{title}</h3>
-      <p>{text}</p>
-      {children}
-    </div>
-  );
-}
-
-function Loading({ text }: { text: string }) {
-  return (
-    <p className="zd-progress zd-pad" role="status">
-      <span className="zd-spinner" aria-hidden="true" />
-      {text}
-    </p>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// The library: upload on top, the files under it
-
-const PENDING: ReadonlySet<DocStatus> = new Set(["queued", "processing"]);
+export const PENDING: ReadonlySet<DocStatus> = new Set(["queued", "processing"]);
 export const POLL_START_MS = 4_000;
 const POLL_MAX_MS = 15_000;
 
@@ -176,6 +34,7 @@ export function nextPollDelay(previous: number): number {
  */
 export function useDocumentList(libraryId: string) {
   const [documents, setDocuments] = useState<DocumentListItem[] | null>(null);
+  const [folders, setFolders] = useState<FolderItem[]>([]);
   const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
@@ -188,6 +47,7 @@ export function useDocumentList(libraryId: string) {
         const res = await api<DocumentListResponse>(`/api/files/documents?lib=${encodeURIComponent(libraryId)}`, { signal: ctrl.signal });
         if (res.ok) {
           setDocuments(res.data.documents);
+          setFolders(res.data.folders ?? []);
           setTotal(res.data.total);
           setError(null);
         } else setError(res.error);
@@ -243,216 +103,28 @@ export function useDocumentList(libraryId: string) {
     };
   }, [pendingKey, libraryId, reload]);
 
-  return { documents, setDocuments, total, error, reload };
-}
-
-function Library({ lib, mode, openId }: { lib: LibrarySummary; mode: string; openId: string | null }) {
-  const { documents, setDocuments, total, error, reload } = useDocumentList(lib.id);
-  const readonly = mode !== "on";
-  const hasDocs = (documents?.length ?? 0) > 0;
-
-  const team = lib.kind === "org";
-  if (!lib.pro && !hasDocs) {
-    if (documents === null && !error) return <Loading text="Načítám…" />;
-    if (team) {
-      return <Notice title={`Tým ${lib.name} je teď vypnutý`} text="Sdílené soubory týmu zapíná a vypíná správce. Své osobní soubory máte dál pod záložkou Osobní." />;
-    }
-    return (
-      <Notice
-        title="Vlastní soubory přiděluji ručně a zdarma"
-        text="Nahrajete knihy, články, komentáře a vzory; převedou se na text přímo ve vašem prohlížeči. Asistent v nich pak hledá vedle oficiálních databází."
-      >
-        <a className="zd-btn zd-btn-primary" href={MAIL_PRO}>
-          Napsat o přístup
-        </a>
-      </Notice>
-    );
-  }
-
-  return (
-    <div className="zd-files">
-      {team && lib.pro ? (
-        <p className="zd-banner zd-banner-team">
-          Sdílené s týmem {lib.name}: soubory tady vidí všichni jeho členové a asistent v nich hledá i pro ně.{" "}
-          {lib.canManageAll ? "Jako správce týmu můžete upravit a smazat kterýkoli z nich." : "Upravit a smazat můžete ty, které jste nahráli vy."}
-        </p>
-      ) : null}
-      {!lib.pro ? (
-        <p className="zd-banner">
-          {team
-            ? `Tým ${lib.name} je teď vypnutý. Své soubory z něj můžete smazat nebo si stáhnout jejich text, nové nahrát nejde.`
-            : "Režim Pro tu už není aktivní. Soubory můžete smazat nebo si stáhnout jejich text, nové nahrát nejde."}
-        </p>
-      ) : mode === "readonly" ? (
-        <p className="zd-banner">Vlastní soubory jsou teď jen pro čtení: hledat, číst a mazat jde, nahrávat ne. Zkuste to později.</p>
-      ) : mode === "off" ? (
-        <p className="zd-banner">Vlastní soubory jsou teď dočasně vypnuté. Mazat soubory jde dál.</p>
-      ) : null}
-      {lib.pro && lib.canUpload && mode === "on" ? (
-        <Uploader
-          library={lib}
-          onUploaded={() => {
-            reload();
-            void refreshSummary();
-          }}
-        />
-      ) : null}
-      {error ? (
-        <p className="zd-error" role="alert">
-          {error}
-        </p>
-      ) : documents ? (
-        <FileList
-          documents={documents}
-          total={total}
-          openId={openId}
-          readonly={readonly}
-          onChanged={reload}
-          onDeleted={(id) => {
-            setDocuments((list) => list?.filter((d) => d.id !== id) ?? list);
-            if (openId === id) showFile(null);
-            reload();
-            void refreshSummary();
-          }}
-          onSaved={(detail) => setDocuments((list) => list?.map((d) => (d.id === detail.id ? { ...d, ...pickListFields(detail) } : d)) ?? list)}
-        />
-      ) : (
-        <Loading text="Načítám soubory…" />
-      )}
-    </div>
-  );
-}
-
-/** The list fields of a saved detail, so the row shows the new title and type at once. */
-function pickListFields(d: DocumentDetail): Partial<DocumentListItem> {
-  return { title: d.title, docType: d.docType, publication: d.publication, status: d.status, statusDetail: d.statusDetail };
+  return { documents, setDocuments, folders, setFolders, total, error, reload };
 }
 
 // ---------------------------------------------------------------------------
-// The list
-
-function FileList({
-  documents,
-  total,
-  openId,
-  readonly,
-  onChanged,
-  onDeleted,
-  onSaved,
-}: {
-  documents: DocumentListItem[];
-  total: number;
-  openId: string | null;
-  readonly: boolean;
-  onChanged: () => void;
-  onDeleted: (id: string) => void;
-  onSaved: (detail: DocumentDetail) => void;
-}) {
-  return (
-    <section className="zd-files-list" aria-label="Soubory">
-      <div className="zd-files-head">
-        <span>Soubory</span>
-        <span className="zd-files-count">{total}</span>
-      </div>
-      {documents.length === 0 ? <p className="zd-empty">Zatím tu nic není.</p> : null}
-      <ul>
-        {documents.map((doc) => (
-          <FileRow
-            key={doc.id}
-            doc={doc}
-            open={openId === doc.id}
-            readonly={readonly}
-            onChanged={onChanged}
-            onDeleted={() => onDeleted(doc.id)}
-            onSaved={onSaved}
-          />
-        ))}
-      </ul>
-    </section>
-  );
-}
-
-/** Badge colours per type (wireframe 04): komentář indigo, článek teal, kniha amber, the rest neutral. */
-const TYPE_TONE: Partial<Record<DocType, string>> = { komentar: "indigo", clanek: "teal", kniha: "amber" };
-
-function FileRow({
-  doc,
-  open,
-  readonly,
-  onChanged,
-  onDeleted,
-  onSaved,
-}: {
-  doc: DocumentListItem;
-  open: boolean;
-  readonly: boolean;
-  onChanged: () => void;
-  onDeleted: () => void;
-  onSaved: (detail: DocumentDetail) => void;
-}) {
-  const pending = PENDING.has(doc.status) || doc.status === "deleting";
-  if (pending) {
-    return (
-      <li className="zd-file" data-pending="true">
-        <div className="zd-file-row">
-          <Icon name="book" />
-          <span className="zd-file-text">
-            <span className="zd-file-title">{doc.title}</span>
-            <span className="zd-file-line">{doc.status === "deleting" ? "Mažu…" : "Zpracovávám…"}</span>
-          </span>
-          <span className="zd-spinner zd-file-spinner" role="status" aria-label="Zpracovávám" />
-        </div>
-      </li>
-    );
-  }
-  const failed = doc.status === "error";
-  return (
-    <li className="zd-file" data-open={open || undefined}>
-      <button type="button" className="zd-file-row" aria-expanded={open} onClick={() => showFile(open ? null : doc.id)}>
-        <Icon name="book" />
-        <span className="zd-file-text">
-          <span className="zd-file-title">{doc.title}</span>
-          {failed ? (
-            <span className="zd-file-line zd-file-line-bad">
-              {statusBadge(doc.status, doc.statusDetail).label}
-              {doc.statusDetail ? ` · ${doc.statusDetail}` : ""}
-            </span>
-          ) : (
-            <span className="zd-file-line">
-              {fileLine(doc, open ? doc.uploadedAt : undefined)}
-              {doc.libraryId.startsWith("org_") && !doc.mine ? " · nahrál kolega" : ""}
-            </span>
-          )}
-        </span>
-        {failed ? null : (
-          <span className="zd-type-badge" data-tone={TYPE_TONE[doc.docType] ?? "neutral"}>
-            {typeLabel(doc.docType)}
-          </span>
-        )}
-        <ZIcon name="chevron" className="zd-file-chevron" />
-      </button>
-      {open ? <FileEditor doc={doc} readonly={readonly} onChanged={onChanged} onDeleted={onDeleted} onSaved={onSaved} /> : null}
-    </li>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// The open row: type, metadata, delete
+// The detail panel's form: type, metadata, delete
 
 const WIDTH_CLASS: Record<FieldWidth, string> = { full: "w-full", wide: "w-wide", half: "w-half", mid: "w-mid", narrow: "w-narrow" };
 
-function FileEditor({
+export function FileEditor({
   doc: item,
   readonly,
   onChanged,
   onDeleted,
   onSaved,
+  onClose,
 }: {
   doc: DocumentListItem;
   readonly: boolean;
   onChanged: () => void;
   onDeleted: () => void;
   onSaved: (detail: DocumentDetail) => void;
+  onClose: () => void;
 }) {
   const [doc, setDoc] = useState<DocumentDetail | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -701,7 +373,7 @@ function FileEditor({
                 setValues(formFromMeta(doc.meta));
                 setFieldErrors({});
                 setMessage(null);
-                showFile(null);
+                onClose();
               }}
             >
               Zrušit
@@ -725,7 +397,7 @@ function FileEditor({
       </div>
       {confirmDelete ? (
         <Confirm
-          question={<>Smazat „{doc.title}“? Text i index se odstraní natrvalo.</>}
+          question={<>Smazat „{doc.fileName}“? Originál, text i index se odstraní natrvalo.</>}
           confirmLabel="Smazat"
           busy={busy === "delete"}
           onConfirm={() => void remove()}

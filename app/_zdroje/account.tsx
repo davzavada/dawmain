@@ -6,7 +6,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboard
 import { initials } from "./format";
 import { avatarSrc, hasPro } from "./hint";
 import { ZIcon } from "./icons";
-import { manageAccount, openZotero, rememberAccount, requestSignIn, signOut, useHintImage, useHintInitials, useZdroje } from "./store";
+import { manageAccount, rememberAccount, requestSignIn, signOut, useHintImage, useHintInitials, useZdroje } from "./store";
 
 /**
  * The account control at the right end of the header (wireframe 01, 02),
@@ -14,9 +14,9 @@ import { manageAccount, openZotero, rememberAccount, requestSignIn, signOut, use
  * in: the avatar — the account's picture from Clerk (a photo, or Clerk's
  * default) as Owl's Clerk button shows it, the initials while there is
  * none, and a crown badge with Pro — opening a menu: name with the Pro tag
- * and e-mail, Zotero (only where the deployment has it configured —
- * `zotero`), Spravovat účet, and apart Odhlásit se. Vlastní soubory are
- * reached from the home page's source list. A menu button in the WAI-ARIA sense: arrow
+ * and e-mail, Vlastní soubory, Zotero (only where the deployment has it
+ * configured — `zotero`), Spravovat účet, and apart Odhlásit se (on a phone
+ * there is no sidebar, so this is the way to both pages). A menu button in the WAI-ARIA sense: arrow
  * keys move between items, Escape and a click outside close it. Nothing
  * at all on a deployment without Clerk.
  *
@@ -198,11 +198,15 @@ function AccountMenu({ zotero }: { zotero: boolean }) {
             </span>
           </div>
           <div className="zd-menu-items">
+            <Link href="/soubory" role="menuitem" className="zd-menu-item" onClick={() => setOpen(false)}>
+              <ZIcon name="file" />
+              <span>Vlastní soubory</span>
+            </Link>
             {zotero ? (
-              <button type="button" role="menuitem" className="zd-menu-item" onClick={choose(openZotero)}>
+              <Link href="/zotero" role="menuitem" className="zd-menu-item" onClick={() => setOpen(false)}>
                 <ZIcon name="library" />
                 <span>Zotero</span>
-              </button>
+              </Link>
             ) : null}
             {operator ? (
               <Link href="/sprava" role="menuitem" className="zd-menu-item" onClick={() => setOpen(false)}>

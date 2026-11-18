@@ -1,5 +1,5 @@
 import type { LibraryDocCounts, LibrarySummary, SummaryResponse } from "@/src/files/web-types";
-import { countDocuments, countPages } from "./format";
+import { countDocuments, formatStorageBytes } from "./format";
 
 /**
  * The sign-in hint: the last account state this browser saw, kept in a
@@ -71,6 +71,8 @@ const COUNT_KEYS = ["total", "ready", "review", "processing", "error", "searchab
 
 const isInt = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 1e9;
 const isStr = (v: unknown, max: number): v is string => typeof v === "string" && v.length <= max;
+/** Byte counts go past isInt's 1e9 (a team quota is 1 GiB and more). */
+const isBytes = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
 
 function counts(v: unknown): LibraryDocCounts | null | undefined {
   if (v === null) return null;
@@ -96,8 +98,10 @@ function library(v: unknown): LibrarySummary | null {
     typeof o.pro !== "boolean" ||
     typeof o.canUpload !== "boolean" ||
     typeof o.canManageAll !== "boolean" ||
-    !isInt(o.quotaPages) ||
-    !(o.pagesUsed === null || isInt(o.pagesUsed)) ||
+    !isStr(o.handle, 80) ||
+    !(o.logoUrl === null || (isStr(o.logoUrl, 1_000) && o.logoUrl.startsWith("https://"))) ||
+    !isBytes(o.quotaBytes) ||
+    !(o.bytesUsed === null || isBytes(o.bytesUsed)) ||
     c === undefined
   ) {
     return null;
@@ -110,8 +114,10 @@ function library(v: unknown): LibrarySummary | null {
     pro: o.pro,
     canUpload: o.canUpload,
     canManageAll: o.canManageAll,
-    quotaPages: o.quotaPages,
-    pagesUsed: o.pagesUsed as number | null,
+    handle: o.handle,
+    logoUrl: o.logoUrl as string | null,
+    quotaBytes: o.quotaBytes,
+    bytesUsed: o.bytesUsed as number | null,
     counts: c,
   };
 }
@@ -120,10 +126,19 @@ function summary(v: unknown): SummaryResponse | null {
   if (!v || typeof v !== "object") return null;
   const o = v as Record<string, unknown>;
   if (o.state === "unavailable" && MODES.has(o.mode as string)) return { state: "unavailable", mode: o.mode as "on" };
-  if (o.state !== "ok" || !MODES.has(o.mode as string) || typeof o.termsAccepted !== "boolean" || !Array.isArray(o.libraries) || o.libraries.length > 20) return null;
+  if (
+    o.state !== "ok" ||
+    !MODES.has(o.mode as string) ||
+    typeof o.termsAccepted !== "boolean" ||
+    !Array.isArray(o.libraries) ||
+    o.libraries.length > 20 ||
+    !isBytes(o.maxFileBytes)
+  ) {
+    return null;
+  }
   const libraries = o.libraries.map(library);
   if (libraries.some((l) => l === null)) return null;
-  return { state: "ok", mode: o.mode as "on", termsAccepted: o.termsAccepted, libraries: libraries as LibrarySummary[] };
+  return { state: "ok", mode: o.mode as "on", termsAccepted: o.termsAccepted, libraries: libraries as LibrarySummary[], maxFileBytes: o.maxFileBytes };
 }
 
 /** The cookie value → a hint, or null for anything that is not exactly one. */
@@ -195,10 +210,10 @@ export function filesRowView(summary: SummaryResponse | null): FilesRowView {
   const pro = libraries.filter((l) => l.pro);
   if (pro.length === 0) return { desc: FILES_DESC, locked: true };
   const total = pro.reduce((n, l) => n + (l.counts?.total ?? 0), 0);
-  const pages = pro.reduce((n, l) => n + (l.pagesUsed ?? 0), 0);
+  const bytes = pro.reduce((n, l) => n + (l.bytesUsed ?? 0), 0);
   const teams = pro.filter((l) => l.kind === "org").length;
   const teamNote = teams === 0 ? "" : teams === 1 ? " · včetně týmu" : ` · včetně ${teams} týmů`;
-  if (total > 0) return { desc: `${countDocuments(total)} · ${countPages(pages)}${teamNote}`, locked: false };
+  if (total > 0) return { desc: bytes > 0 ? `${countDocuments(total)} · ${formatStorageBytes(bytes)}${teamNote}` : `${countDocuments(total)}${teamNote}`, locked: false };
   return { desc: "Zatím žádné dokumenty", locked: false };
 }
 

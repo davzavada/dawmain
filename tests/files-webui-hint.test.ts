@@ -33,11 +33,13 @@ const LIB: LibrarySummary = {
   pro: true,
   canUpload: true,
   canManageAll: true,
-  quotaPages: 3000,
-  pagesUsed: 12,
+  handle: "osobni",
+  logoUrl: null,
+  quotaBytes: 104_857_600,
+  bytesUsed: 12 * 1024 * 1024,
   counts: { total: 2, ready: 2, review: 0, processing: 0, error: 0, searchable: 2 },
 };
-const SUMMARY: SummaryResponse = { state: "ok", mode: "on", termsAccepted: true, libraries: [LIB] };
+const SUMMARY: SummaryResponse = { state: "ok", mode: "on", termsAccepted: true, libraries: [LIB], maxFileBytes: 104_857_600 };
 /** An account picture as Clerk serves it (user.imageUrl). */
 const IMAGE = "https://img.clerk.com/eyJ0eXBlIjoicHJveHkiLCJzcmMiOiJodHRwczovL2ltYWdlcy5jbGVyay5kZXYvb2F1dGhfZ29vZ2xlL2ltZ18yZGZaIn0";
 
@@ -125,7 +127,7 @@ function cssVar(doc: Document, name: string): string {
 
 describe("the cookie keeps what the hint shows", () => {
   it("the view: crown with Pro, the files line, the lock without Pro", () => {
-    expect(hintView(SUMMARY)).toEqual({ pro: true, files: { desc: "2 dokumenty · 12 stran", locked: false } });
+    expect(hintView(SUMMARY)).toEqual({ pro: true, files: { desc: "2 dokumenty · 12 MB", locked: false } });
     const noPro = { ...SUMMARY, libraries: [{ ...LIB, pro: false }] };
     expect(hintView(noPro)).toEqual({ pro: false, files: { desc: FILES_DESC, locked: true } });
     expect(filesRowView(null)).toEqual({ desc: "Načítám…", locked: false });
@@ -135,10 +137,10 @@ describe("the cookie keeps what the hint shows", () => {
   });
 
   it("the files line counts the user's teams too; a team unlocks the row without personal Pro", () => {
-    const team: LibrarySummary = { ...LIB, id: "org_t", kind: "org", name: "Spory", role: "org:member", canManageAll: false, pagesUsed: 30, counts: { ...LIB.counts!, total: 3 } };
-    expect(filesRowView({ ...SUMMARY, libraries: [LIB, team] })).toEqual({ desc: "5 dokumentů · 42 stran · včetně týmu", locked: false });
-    const teamOnly = { ...SUMMARY, libraries: [{ ...LIB, pro: false, canUpload: false, counts: null, pagesUsed: null }, team] };
-    expect(filesRowView(teamOnly)).toEqual({ desc: "3 dokumenty · 30 stran · včetně týmu", locked: false });
+    const team: LibrarySummary = { ...LIB, id: "org_t", kind: "org", name: "Spory", role: "org:member", canManageAll: false, bytesUsed: 30 * 1024 * 1024, counts: { ...LIB.counts!, total: 3 } };
+    expect(filesRowView({ ...SUMMARY, libraries: [LIB, team] })).toEqual({ desc: "5 dokumentů · 42 MB · včetně týmu", locked: false });
+    const teamOnly = { ...SUMMARY, libraries: [{ ...LIB, pro: false, canUpload: false, counts: null, bytesUsed: null }, team] };
+    expect(filesRowView(teamOnly)).toEqual({ desc: "3 dokumenty · 30 MB · včetně týmu", locked: false });
     expect(filesRowView({ ...SUMMARY, libraries: [{ ...LIB, pro: false }, { ...team, pro: false }] }).locked).toBe(true);
   });
 
@@ -159,7 +161,7 @@ describe("before the first paint (applyHint, HINT_SCRIPT)", () => {
     expect(root.hasAttribute("data-hint-pro")).toBe(true);
     expect(root.hasAttribute("data-hint-files-locked")).toBe(false);
     expect(cssVar(doc, "--hint-initials")).toBe('"DZ"');
-    expect(cssVar(doc, "--hint-files")).toBe('"2 dokumenty · 12 stran"');
+    expect(cssVar(doc, "--hint-files")).toBe('"2 dokumenty · 12 MB"');
   });
 
   it("without Pro: no crown, the lock and its line", () => {
