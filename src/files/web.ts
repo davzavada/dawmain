@@ -424,7 +424,7 @@ export const EXPORTS_PER_DOC_PER_DAY = 10;
  * counters).
  */
 export function exportPagesPerUserPerDay(): number {
-  return LIMITS.personalPages;
+  return Math.max(LIMITS.personalPages, LIMITS.teamPages);
 }
 
 export interface DocumentExport {

@@ -42,7 +42,7 @@ import { allowToolCall, cachedMode, effectiveMode, envOnlyMode } from "@/src/fil
 import { actName, resolveAct, zakId } from "@/src/files/index/acts";
 import { bestWindow, findMatches } from "@/src/files/index/highlight";
 import { euActId, pinpointOnly, queryIdentKeys, stripIdentifiers } from "@/src/files/index/identifiers";
-import { readScope, safeLibraryName, type Scope } from "@/src/files/scope";
+import { libraryHandle, readScope, safeLibraryName, type Scope } from "@/src/files/scope";
 import { buildTsQuery, MAX_QUERY_CHARS } from "@/src/files/text/analyze";
 import { DOC_TYPES, DOC_TYPE_LABELS, type AnchorLabel, type DocType, type PageLabelSource } from "@/src/files/types";
 import { SourceError, toToolError, type SourceErrorKind } from "@/src/sources/shared/errors";
@@ -856,10 +856,21 @@ function libraryOf(access: Access, id: string): LibraryAccess | undefined {
   return access.libraries.find((l) => l.id === id) ?? access.all.find((l) => l.id === id);
 }
 
-/** The caller's Pro library — the only one there is (no shared libraries). */
-function scopeFor(access: Access): Scope {
-  return readScope(access);
+/**
+ * The caller's Pro libraries — personal and every team they belong to —
+ * optionally narrowed by the tool's `library` filter ("osobni", a team's
+ * slug or id).
+ */
+function scopeFor(access: Access, library?: string | null): Scope {
+  return readScope(access, library);
 }
+
+const librarySchema = z
+  .string()
+  .min(1)
+  .max(80)
+  .optional()
+  .describe('Only this library: "osobni" (the personal one) or a team\'s name handle / id as files_list prints it. Omit to search all of them (personal + teams).');
 
 function libraryName(access: Access, id: string): string {
   const lib = libraryOf(access, id);
@@ -1705,7 +1716,7 @@ export function registerFiles(server: McpServer): void {
     {
       title: "Vlastní zdroje: search the user's own documents",
       description:
-        "SEARCH the user's OWN uploaded documents (Vlastní zdroje — books, commentaries, articles, templates; Pro, personal OAuth sign-in only): Czech full text with stemming (inflected forms and words typed without diacritics match), identifiers (spisová značka incl. short years, ECLI, § with its act, ISBN, DOI) and the documents' metadata. A query that is only an act (\"GDPR\", \"OZ\") searches for that act. 'queries' runs up to 3 variants and merges them round-robin. Filters: doc_type, act (\"OZ\", \"89/2012\", \"GDPR\" — commentaries on it or passages citing it; with a § in the query, passages citing that §; a § asked without its act over commentaries on several acts comes grouped by act), section (\"§ 2913\" — only passages inside that §), case_number (only passages citing that decision; a query then ranks them), in_footnotes (true: footnotes only; false: without footnotes), year_from/year_to; doc (an id) ranks the passages INSIDE one document. Each hit: the reference line, the section path, a pinpoint computed from the match itself (\"§ 2913, m. č. 14, s. 1245\", \"s. 245, pozn. 12\"), an excerpt, which channel matched (and / or-fallback / identifiers / metadata), 'oficiální text: ns_search {case_number: …}' for every spisová značka the passage cites, and the files_get_document call that reads it. Own documents have no public URL: cite them as „vlastní dokument“ with the pinpoint, quote only from a files_get_document read, and cite a decision found in them from its official text. If the answer says the account has no library, do not call files_* again.",
+        "SEARCH the user's OWN uploaded documents (Vlastní zdroje — books, commentaries, articles, templates; Pro, personal OAuth sign-in only): Czech full text with stemming (inflected forms and words typed without diacritics match), identifiers (spisová značka incl. short years, ECLI, § with its act, ISBN, DOI) and the documents' metadata. A query that is only an act (\"GDPR\", \"OZ\") searches for that act. 'queries' runs up to 3 variants and merges them round-robin. Filters: doc_type, act (\"OZ\", \"89/2012\", \"GDPR\" — commentaries on it or passages citing it; with a § in the query, passages citing that §; a § asked without its act over commentaries on several acts comes grouped by act), section (\"§ 2913\" — only passages inside that §), case_number (only passages citing that decision; a query then ranks them), in_footnotes (true: footnotes only; false: without footnotes), year_from/year_to, library (\"osobni\" or one team; default: personal + all teams); doc (an id) ranks the passages INSIDE one document. Each hit: the reference line, the section path, a pinpoint computed from the match itself (\"§ 2913, m. č. 14, s. 1245\", \"s. 245, pozn. 12\"), an excerpt, which channel matched (and / or-fallback / identifiers / metadata), 'oficiální text: ns_search {case_number: …}' for every spisová značka the passage cites, and the files_get_document call that reads it. Own documents have no public URL: cite them as „vlastní dokument“ with the pinpoint, quote only from a files_get_document read, and cite a decision found in them from its official text. If the answer says the account has no library, do not call files_* again.",
       inputSchema: z.object({
         query: z.string().min(2).optional().describe("Czech words, a § (\"§ 2913 OZ\") or a spisová značka; \"quoted words\" are a phrase."),
         queries: z
@@ -1723,6 +1734,7 @@ export function registerFiles(server: McpServer): void {
         year_to: z.number().int().min(1800).max(2100).optional().describe("Publication year to (inclusive)."),
         limit: z.number().int().min(1).max(20).default(10).describe("Documents per page (with doc: passages per page), max 20. A page of long hits may come shorter to fit the answer size — its header then names the call for the rest."),
         page: z.number().int().min(1).default(1).describe("1-based page."),
+        library: librarySchema,
       }),
       annotations: PRIVATE_READ_ONLY,
     },
@@ -1772,7 +1784,7 @@ export function registerFiles(server: McpServer): void {
     {
       title: "Vlastní zdroje: libraries and documents",
       description:
-        "LIST the user's own libraries (Vlastní soubory, Pro) with their document counts — připraveno (searched), ke kontrole (awaiting the user's confirmation on the website), zpracovává se — and page usage, and the documents themselves: type, title, authors, year, status and id. Filters: doc_type, status, query (words of the title or authors), sort (added/title/year); limit up to 50, page. Only documents marked připraveno are searched and readable (files_search, files_get_document {id}).",
+        "LIST the user's own libraries (Vlastní soubory, Pro: the personal one and every team the user belongs to — a team's documents are shared by its members) with their document counts — připraveno (searched), ke kontrole (awaiting the user's confirmation on the website), zpracovává se — and page usage, and the documents themselves: type, title, authors, year, status and id. Filters: library (\"osobni\" or a team), doc_type, status, query (words of the title or authors), sort (added/title/year); limit up to 50, page. Only documents marked připraveno are searched and readable (files_search, files_get_document {id}).",
       inputSchema: z.object({
         doc_type: z.array(docTypeSchema).max(7).optional().describe("Only these document types."),
         status: z.enum(["ready", "review", "processing", "error"]).optional().describe("Only documents in this state."),
@@ -1780,6 +1792,7 @@ export function registerFiles(server: McpServer): void {
         sort: z.enum(["added", "title", "year"]).default("added").describe("Order: newest upload first, by title, or by year."),
         limit: z.number().int().min(1).max(50).default(20).describe("Documents per page (max 50)."),
         page: z.number().int().min(1).default(1).describe("1-based page."),
+        library: librarySchema,
       }),
       annotations: PRIVATE_READ_ONLY,
     },
@@ -1815,9 +1828,10 @@ async function filesSearch(
     year_to?: number;
     limit: number;
     page: number;
+    library?: string;
   },
 ): Promise<ToolResult> {
-  const scope = scopeFor(g.access);
+  const scope = scopeFor(g.access, args.library);
   const libs = [...scope.libraryIds];
   // Parsed as far as buildTsQuery reads: identifier parsing of a longer string is wasted work.
   const variants = uniqueQueries(args.query, args.queries).map((v) => v.slice(0, MAX_QUERY_CHARS));
@@ -2388,9 +2402,17 @@ const STATUS_FILTER: Record<"ready" | "review" | "processing" | "error", Array<"
 
 async function filesList(
   g: Gated,
-  args: { doc_type?: DocType[]; status?: "ready" | "review" | "processing" | "error"; query?: string; sort: "added" | "title" | "year"; limit: number; page: number },
+  args: {
+    doc_type?: DocType[];
+    status?: "ready" | "review" | "processing" | "error";
+    query?: string;
+    sort: "added" | "title" | "year";
+    limit: number;
+    page: number;
+    library?: string;
+  },
 ): Promise<ToolResult> {
-  const scope = scopeFor(g.access);
+  const scope = scopeFor(g.access, args.library);
   const libs = [...scope.libraryIds];
   const { counts, libRows, list } = await withScope(libs, async (db) => ({
     counts: await pendingCounts(db, libs),
@@ -2408,7 +2430,9 @@ async function filesList(
   const pagesUsed = new Map(libRows.map((l) => [l.id, l.page_count]));
   const libLines = scope.libraries.map((l) => {
     const c = counts[l.id] ?? { review: 0, processing: 0, ready: 0 };
-    return `- „${safeLibraryName(l)}“ — ${c.ready} připraveno · ${c.review} ke kontrole · ${c.processing} zpracovává se · ${formatCount(pagesUsed.get(l.id) ?? 0)} / ${formatCount(l.quotaPages)} stran`;
+    // Handles only once there is something to choose between (a team).
+    const kind = g.access.all.length < 2 ? "" : l.kind === "org" ? ` (tým, library: "${libraryHandle(l)}")` : ` (osobní, library: "osobni")`;
+    return `- „${safeLibraryName(l)}“${kind} — ${c.ready} připraveno · ${c.review} ke kontrole · ${c.processing} zpracovává se · ${formatCount(pagesUsed.get(l.id) ?? 0)} / ${formatCount(l.quotaPages)} stran`;
   });
   const first = (args.page - 1) * args.limit;
   const nonce = newNonce();

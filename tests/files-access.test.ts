@@ -12,7 +12,6 @@ const clerk = vi.hoisted(() => ({
   getOrganization: vi.fn(),
 }));
 
-// The membership / organization calls are mocked only to prove they are never made (no teams).
 vi.mock("@clerk/nextjs/server", () => ({
   clerkClient: async () => ({
     users: { getUser: clerk.getUser, getOrganizationMembershipList: clerk.getOrganizationMembershipList },
@@ -137,12 +136,15 @@ describe("feature switches (publicMetadata.features)", () => {
 });
 
 describe("getAccess", () => {
-  it("loads from Clerk (getUser only — no memberships) and freezes the result", async () => {
+  it("loads the user and their team memberships from Clerk and freezes the result", async () => {
     clerk.getUser.mockResolvedValue({ id: "user_a", banned: false, locked: false, publicMetadata: { pro: true } });
+    clerk.getOrganizationMembershipList.mockResolvedValue({
+      data: [{ role: "org:member", organization: { id: "org_t", name: "Spory", slug: "spory", publicMetadata: { pro: true } } }],
+    });
     const a = await getAccess("user_a");
     expect(clerk.getUser).toHaveBeenCalledWith("user_a");
-    expect(clerk.getOrganizationMembershipList).not.toHaveBeenCalled();
-    expect(a.libraries.map((l) => l.id)).toEqual(["user_a"]);
+    expect(clerk.getOrganizationMembershipList).toHaveBeenCalledWith({ userId: "user_a", limit: 100 });
+    expect(a.libraries.map((l) => l.id)).toEqual(["user_a", "org_t"]);
     expect(Object.isFrozen(a)).toBe(true);
     expect(Object.isFrozen(a.libraries)).toBe(true);
     expect(Object.isFrozen(a.libraries[0])).toBe(true);
@@ -152,6 +154,7 @@ describe("getAccess", () => {
   });
 
   it("a user Clerk does not know (404) has no libraries; other Clerk errors throw and are not cached", async () => {
+    clerk.getOrganizationMembershipList.mockResolvedValue({ data: [] });
     clerk.getUser.mockRejectedValue(clerkError(404));
     expect(await getAccess("user_gone")).toMatchObject({ libraries: [], all: [] });
 
@@ -240,9 +243,14 @@ describe("libraryOwnerState", () => {
     await expect(libraryOwnerState("user_a")).rejects.toThrow();
   });
 
-  it("a team library left over from before teams were removed is 'not_pro' without asking Clerk", async () => {
+  it("a team library follows its organization: active, deactivated, deleted", async () => {
+    clerk.getOrganization.mockResolvedValueOnce({ id: "org_b", publicMetadata: { pro: true } });
+    expect(await libraryOwnerState("org_b")).toBe("pro");
+    clerk.getOrganization.mockResolvedValueOnce({ id: "org_b", publicMetadata: { pro: false } });
     expect(await libraryOwnerState("org_b")).toBe("not_pro");
-    expect(clerk.getOrganization).not.toHaveBeenCalled();
+    clerk.getOrganization.mockRejectedValueOnce(clerkError(404));
+    expect(await libraryOwnerState("org_b")).toBe("gone");
+    expect(clerk.getOrganization).toHaveBeenCalledWith({ organizationId: "org_b" });
     expect(clerk.getUser).not.toHaveBeenCalled();
   });
 });
@@ -357,5 +365,65 @@ describe("ownedScope", () => {
       }
     }
     expect(ownedScope({ ...access, banned: true }).libraryIds).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Teams
+
+describe("team libraries", () => {
+  const team = (id: string, name: string, meta: unknown, role = "org:member") => ({ role, organization: { id, name, slug: name.toLowerCase(), publicMetadata: meta } });
+
+  it("personal first, then every team by name; members upload, the team manager manages all", () => {
+    const a = buildAccess({ id: "user_a", publicMetadata: { pro: true } }, [
+      team("org_z", "Žaloby", { pro: true }),
+      team("org_b", "Bankovnictví", { pro: true }, "org:admin"),
+    ]);
+    expect(a.all.map((l) => l.id)).toEqual(["user_a", "org_b", "org_z"]);
+    expect(a.all[1]).toMatchObject({ kind: "org", role: "org:admin", pro: true, canUpload: true, canManageAll: true, quotaPages: LIMITS.teamPages });
+    expect(a.all[2]).toMatchObject({ kind: "org", role: "org:member", pro: true, canUpload: true, canManageAll: false });
+    expect(canEditDocument(a.all[2], "user_a", "user_a")).toBe(true);
+    expect(canEditDocument(a.all[2], "user_other", "user_a")).toBe(false);
+    expect(canDeleteDocument(a.all[1], "user_other", "user_a")).toBe(true);
+  });
+
+  it("a team works without personal Pro; a deactivated team is listed but not searched", () => {
+    const a = buildAccess({ id: "user_a", publicMetadata: {} }, [team("org_t", "Tým", { pro: true }), team("org_off", "Archiv", {})]);
+    expect(a.libraries.map((l) => l.id)).toEqual(["org_t"]);
+    expect(a.all.map((l) => l.id)).toEqual(["user_a", "org_off", "org_t"]);
+    expect(a.zotero).toBe(false);
+  });
+
+  it("the user's files switch holds in their teams too; the team's own switch and quota apply to the team", () => {
+    const off = buildAccess({ id: "user_a", publicMetadata: { pro: true, features: { files: false } } }, [team("org_t", "T", { pro: true })]);
+    expect(off.libraries).toHaveLength(0);
+    const teamOff = buildAccess({ id: "user_a", publicMetadata: { pro: true } }, [
+      team("org_t", "T", { pro: true, features: { files: false } }),
+      team("org_q", "Q", { pro: true, filesQuota: { pages: 777 } }),
+    ]);
+    expect(teamOff.libraries.map((l) => l.id)).toEqual(["user_a", "org_q"]);
+    expect(teamOff.all.find((l) => l.id === "org_q")?.quotaPages).toBe(777);
+  });
+
+  it("drops malformed and duplicate organizations; a banned user gets nothing", () => {
+    const a = buildAccess({ id: "user_a", publicMetadata: { pro: true } }, [
+      team("org_t", "T", { pro: true }),
+      team("org_t", "T again", { pro: true }),
+      team("org_bad id", "X", { pro: true }),
+      { role: "org:member", organization: null } as never,
+    ]);
+    expect(a.all.map((l) => l.id)).toEqual(["user_a", "org_t"]);
+    expect(buildAccess({ id: "user_a", banned: true, publicMetadata: { pro: true } }, [team("org_t", "T", { pro: true })]).all).toEqual([]);
+  });
+
+  it("scopes: search spans personal + teams, the filter narrows to one team, a foreign team is not found", () => {
+    const a = buildAccess({ id: "user_a", publicMetadata: { pro: true } }, [team("org_t", "Spory", { pro: true })]);
+    expect(readScope(a).libraryIds).toEqual(["user_a", "org_t"]);
+    expect(readScope(a, "spory").libraryIds).toEqual(["org_t"]);
+    expect(readScope(a, "osobni").libraryIds).toEqual(["user_a"]);
+    expect(() => readScope(a, "org_cizi")).toThrow(SourceError);
+    expect(writeScope(a, "org_t").library.id).toBe("org_t");
+    expect(() => writeScope(a, "org_cizi")).toThrow(FilesUserError);
+    expect(ownedScope(a, "org_t").libraryIds).toEqual(["org_t"]);
   });
 });

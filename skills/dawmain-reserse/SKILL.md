@@ -698,11 +698,13 @@ when the argument needs the text itself, say so and point the user to the record
 
 With Pro and a personal sign-in (the OAuth login, not the shared access code) the user
 uploads their own books, commentaries, journal articles and templates on the Dawmain
-website into their personal library — nobody else sees it. On upload an AI files each
+website into their personal library — nobody else sees it — or into a team library an
+admin put them in, shared with that team's members. On upload an AI files each
 document under a type (komentář, článek, kniha, kapitola, vzor, rozhodnutí, jiné) and
 proposes its metadata; the user can change both on the website. `files_search` searches
 the documents next to the official sources, `files_get_document` reads them,
-`files_list` lists them.
+`files_list` lists them. Searching covers the personal library and every team at once;
+`library` ("osobni" or the team handle `files_list` prints) narrows it to one.
 
 | Chci | Volání |
 |---|---|

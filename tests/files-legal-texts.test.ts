@@ -130,8 +130,11 @@ describe("terms of use (/podminky)", () => {
     expect(terms).toContain(`Účinné od ${EFFECTIVE}`);
   });
 
-  it("knows no teams any more", () => {
-    for (const page of [terms, privacy]) expect(page).not.toMatch(/[Tt]ým(?!ž)|týmov/);
+  it("says who sees team files and how long they are kept", () => {
+    expect(terms).toContain("dokumenty nahrané do ní vidí a prohledávají všichni jeho členové");
+    expect(terms).toContain("Členy týmů přiděluji a měním já.");
+    expect(privacy).toContain("Dokumenty nahrané do týmové knihovny vidí členové toho týmu.");
+    expect(privacy).toContain("do týdne po vypnutí nebo zrušení týmu je smažu");
   });
 
   it("bills pages by the same character count as the code", () => {

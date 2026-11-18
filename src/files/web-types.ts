@@ -23,9 +23,10 @@ export interface LibraryDocCounts {
 /** One library as the modal, the home page and the nav see it. */
 export interface LibrarySummary {
   id: string;
-  kind: "user";
+  kind: "user" | "org";
   name: string;
-  role: "owner";
+  /** owner of the personal library; manager (org:admin) or member of a team. */
+  role: "owner" | "org:admin" | "org:member";
   pro: boolean;
   canUpload: boolean;
   canManageAll: boolean;
@@ -45,7 +46,7 @@ export type SummaryResponse =
       /** Effective mode: "on", "readonly" (search, read, delete — no uploads) or "off". */
       mode: FilesMode;
       termsAccepted: boolean;
-      /** The personal library (Pro or not); empty for a banned account. */
+      /** The personal library (Pro or not), then the user's teams by name; empty for a banned account. */
       libraries: LibrarySummary[];
       /** UKAŽ (the doctrine tools) is switched on for this account; the home page shows the row greyed out without it. Absent in older hints: off. */
       ukaz?: boolean;
@@ -64,9 +65,9 @@ export interface DocumentListItem {
   statusDetail: string | null;
   uploadedAt: string;
   mine: boolean;
-  /** May edit metadata: a Pro library and its owner. */
+  /** May edit metadata: a Pro library, and the uploader or the owner / team manager. */
   canEdit: boolean;
-  /** May delete and export the text: the owner — Pro not required. */
+  /** May delete and export the text: the uploader or the owner / team manager — Pro not required. */
   canDelete: boolean;
   docType: DocType;
   /** Where an article appeared ("Právník 2/2024"); null for other types. */

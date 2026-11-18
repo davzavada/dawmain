@@ -15,8 +15,9 @@ import { closeFiles, refreshSummary, requestSignIn, showFile, useZdroje } from "
 
 /**
  * The Vlastní soubory modal (wireframe 04, 05), opened by ZdrojeModals
- * (./modals.tsx) from ?soubory=1. One library, the user's own: the drop
- * zone on top, the list of files under it. A new file is converted in the
+ * (./modals.tsx) from ?soubory=1. The user's own library and, when an
+ * admin put them in teams, one tab per team (a team's files are shared by
+ * all its members): the drop zone on top, the list of files under it. A new file is converted in the
  * browser and posted; the server converts it further and proposes its
  * type and metadata — the row just spins ("Zpracovávám…") until the
  * type badge appears. Clicking a row opens it in place (&dokument=<id>):
@@ -43,7 +44,9 @@ const SUBTITLE = "Dokumenty, ve kterých asistent hledá vedle oficiálních dat
 
 export function FilesModal({ documentId }: { documentId: string | null }) {
   const { auth, summary, failed } = useZdroje();
-  const library = summary?.state === "ok" ? (summary.libraries.find((l) => l.kind === "user") ?? null) : null;
+  const [libraryId, setLibraryId] = useState<string | null>(null);
+  const libraries = summary?.state === "ok" ? summary.libraries : [];
+  const library = libraries.find((l) => l.id === libraryId) ?? libraries.find((l) => l.kind === "user") ?? null;
   const mode = summary?.state === "ok" ? summary.mode : "off";
   const subtitle =
     library?.pro && library.pagesUsed !== null ? `${SUBTITLE} ${remainingLine(library.pagesUsed, library.quotaPages)}` : SUBTITLE;
@@ -74,7 +77,22 @@ export function FilesModal({ documentId }: { documentId: string | null }) {
   } else if (summary.state === "signed_out" || !library) {
     body = <Notice title="Přihlaste se" text="Vlastní soubory patří k vašemu účtu." />;
   } else {
-    body = <Library key={library.id} lib={library} mode={mode} openId={documentId} />;
+    body = (
+      <>
+        {libraries.length > 1 ? (
+          <LibraryTabs
+            libraries={libraries}
+            active={library.id}
+            onPick={(id) => {
+              if (id === library.id) return;
+              showFile(null);
+              setLibraryId(id);
+            }}
+          />
+        ) : null}
+        <Library key={library.id} lib={library} mode={mode} openId={documentId} />
+      </>
+    );
   }
 
   return (
@@ -91,6 +109,29 @@ export function FilesModal({ documentId }: { documentId: string | null }) {
     >
       {body}
     </Dialog>
+  );
+}
+
+/** Osobní | Tým A | Tým B — shown only when the user belongs to a team. */
+function LibraryTabs({ libraries, active, onPick }: { libraries: LibrarySummary[]; active: string; onPick: (id: string) => void }) {
+  return (
+    <div className="zd-lib-tabs" role="tablist" aria-label="Knihovna">
+      {libraries.map((lib) => (
+        <button
+          key={lib.id}
+          type="button"
+          role="tab"
+          aria-selected={lib.id === active}
+          className="zd-lib-tab"
+          data-off={!lib.pro || undefined}
+          onClick={() => onPick(lib.id)}
+        >
+          <ZIcon name={lib.kind === "org" ? "users" : "library"} size={14} />
+          <span>{lib.kind === "org" ? lib.name : "Osobní"}</span>
+          {lib.counts ? <span className="zd-lib-tab-count">{lib.counts.total}</span> : null}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -210,8 +251,12 @@ function Library({ lib, mode, openId }: { lib: LibrarySummary; mode: string; ope
   const readonly = mode !== "on";
   const hasDocs = (documents?.length ?? 0) > 0;
 
+  const team = lib.kind === "org";
   if (!lib.pro && !hasDocs) {
     if (documents === null && !error) return <Loading text="Načítám…" />;
+    if (team) {
+      return <Notice title={`Tým ${lib.name} je teď vypnutý`} text="Sdílené soubory týmu zapíná a vypíná správce. Své osobní soubory máte dál pod záložkou Osobní." />;
+    }
     return (
       <Notice
         title="Vlastní soubory přiděluji ručně a zdarma"
@@ -226,8 +271,18 @@ function Library({ lib, mode, openId }: { lib: LibrarySummary; mode: string; ope
 
   return (
     <div className="zd-files">
+      {team && lib.pro ? (
+        <p className="zd-banner zd-banner-team">
+          Sdílené s týmem {lib.name}: soubory tady vidí všichni jeho členové a asistent v nich hledá i pro ně.{" "}
+          {lib.canManageAll ? "Jako správce týmu můžete upravit a smazat kterýkoli z nich." : "Upravit a smazat můžete ty, které jste nahráli vy."}
+        </p>
+      ) : null}
       {!lib.pro ? (
-        <p className="zd-banner">Režim Pro tu už není aktivní. Soubory můžete smazat nebo si stáhnout jejich text, nové nahrát nejde.</p>
+        <p className="zd-banner">
+          {team
+            ? `Tým ${lib.name} je teď vypnutý. Své soubory z něj můžete smazat nebo si stáhnout jejich text, nové nahrát nejde.`
+            : "Režim Pro tu už není aktivní. Soubory můžete smazat nebo si stáhnout jejich text, nové nahrát nejde."}
+        </p>
       ) : mode === "readonly" ? (
         <p className="zd-banner">Vlastní soubory jsou teď jen pro čtení: hledat, číst a mazat jde, nahrávat ne. Zkuste to později.</p>
       ) : mode === "off" ? (
@@ -363,7 +418,10 @@ function FileRow({
               {doc.statusDetail ? ` · ${doc.statusDetail}` : ""}
             </span>
           ) : (
-            <span className="zd-file-line">{fileLine(doc, open ? doc.uploadedAt : undefined)}</span>
+            <span className="zd-file-line">
+              {fileLine(doc, open ? doc.uploadedAt : undefined)}
+              {doc.libraryId.startsWith("org_") && !doc.mine ? " · nahrál kolega" : ""}
+            </span>
           )}
         </span>
         {failed ? null : (
