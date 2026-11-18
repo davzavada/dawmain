@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "dawmain": {
+      "type": "http",
+      "url": "https://dawmain.davidzavada.cz/api/mcp"
+    }
+  }
+}

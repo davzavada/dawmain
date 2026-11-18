@@ -1,0 +1,16 @@
+{
+  "name": "dawmain",
+  "displayName": "Dawmain",
+  "version": "1.0.0",
+  "description": "Czech and EU legal research with live queries into the official databases: e-Sbírka, sněmovní tisky, NS, NSS, Ústavní soud, obecné soudy, SDEU, EUR-Lex and the UKAŽ catalogue. Every hit carries a public link to cite.",
+  "author": { "name": "David Závada", "url": "https://dawmain.davidzavada.cz" },
+  "homepage": "https://dawmain.davidzavada.cz",
+  "repository": "https://github.com/davzavada/dawmain",
+  "license": "MIT",
+  "keywords": ["law", "legal research", "czech", "eu", "judikatura", "e-sbirka", "eur-lex", "mcp"],
+  "icon": "./logo.png",
+  "documentationUrl": "https://github.com/davzavada/dawmain#readme",
+  "supportUrl": "https://dawmain.davidzavada.cz/#pripojeni",
+  "privacyPolicyUrl": "https://dawmain.davidzavada.cz/soukromi",
+  "termsOfServiceUrl": "https://dawmain.davidzavada.cz/podminky"
+}
