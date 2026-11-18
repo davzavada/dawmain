@@ -36,7 +36,7 @@ const LIB_ACCESS: LibraryAccess = {
   pro: true,
   canUpload: true,
   canManageAll: true,
-  quotaPages: 3000,
+  quotaBytes: 104_857_600, handle: "osobni", logoUrl: null,
 };
 const ACCESS: Access = { userId: LIB, banned: false, libraries: [LIB_ACCESS], all: [LIB_ACCESS], zotero: false };
 const CTX = { http: { authInfo: { token: "t", clientId: "c", scopes: [], extra: { userId: LIB } } } };

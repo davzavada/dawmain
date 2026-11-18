@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { applyChange, requireAdmin, type ChangeResult } from "@/src/admin/server";
-import { ADMIN_FEATURES, validQuotaPages, type AdminChange } from "@/src/admin/model";
+import { ADMIN_FEATURES, validQuotaMb, type AdminChange } from "@/src/admin/model";
 
 /**
  * Server Function of the admin page: one change to one account. It
@@ -17,7 +17,7 @@ function validChange(change: unknown): change is AdminChange {
   if (c.kind === "role") return typeof c.admin === "boolean";
   if (c.kind === "pro") return typeof c.on === "boolean";
   if (c.kind === "feature") return typeof c.on === "boolean" && ADMIN_FEATURES.includes(c.feature as never);
-  if (c.kind === "quota") return c.pages === null || validQuotaPages(c.pages);
+  if (c.kind === "quota") return c.mb === null || validQuotaMb(c.mb);
   return false;
 }
 
@@ -32,7 +32,7 @@ export async function changeUserAction(targetId: string, change: AdminChange): P
       : change.kind === "pro"
         ? { kind: "pro", on: change.on }
         : change.kind === "quota"
-          ? { kind: "quota", pages: change.pages }
+          ? { kind: "quota", mb: change.mb }
           : { kind: "feature", feature: change.feature, on: change.on };
   const result = await applyChange(actor, targetId, clean);
   if (result.ok) revalidatePath("/sprava");

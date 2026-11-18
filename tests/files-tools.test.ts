@@ -80,7 +80,7 @@ const PERSONAL_LIB: LibraryAccess = {
   pro: true,
   canUpload: true,
   canManageAll: true,
-  quotaPages: 3000,
+  quotaBytes: 104_857_600, handle: "osobni", logoUrl: null,
 };
 const EMPTY_LIB: LibraryAccess = { ...PERSONAL_LIB, id: EMPTY };
 
@@ -827,7 +827,7 @@ describe("files_list", () => {
   it("lists libraries with counts and documents with fenced titles", async () => {
     const r = await call("files_list", {});
     expect(r.text).toContain("✓ Vlastní zdroje: 1 library");
-    expect(r.text).toMatch(/- „Osobní“ — 5 připraveno · 1 ke kontrole · 0 zpracovává se · \d+ \/ 3 000 stran/);
+    expect(r.text).toMatch(/- „Osobní“ — 5 připraveno · 1 ke kontrole · 0 zpracovává se · \d+ stran$/m);
     expect(r.text).not.toContain("library:");
     expect(r.text).not.toContain("osobní,");
     const { inside, outside } = split(r.text);

@@ -4,26 +4,31 @@ import path from "node:path";
 import { act, createElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { ZOTERO_STAV, type ZoteroStatus } from "@/src/zotero/web-types";
+import { ZOTERO_STAV, type ZoteroLibrariesAnswer, type ZoteroStatus } from "@/src/zotero/web-types";
 
 /**
- * The Zotero modal (app/_zdroje/zotero-modal.tsx) and its deep link: ?zotero=1
- * opens it through the same URL-driven machinery as the Vlastní soubory
- * modal (app/_zdroje/store.ts, modals.tsx) — with Next's history patch
- * installed as in tests/files-webui-history.test.ts, so every open, close and
- * the dropped &stav reach the router. Then each state the status route can
- * answer (src/zotero/web-types.ts), rendered against a stubbed fetch, and the
- * banner for every connect outcome.
+ * The /zotero page (app/zotero/zotero-page.tsx), which replaced the Zotero
+ * modal: the old deep link ?zotero=1 leads to it (app/_zdroje/modals.tsx),
+ * the account menu links to it, and the dropped &stav reaches the router
+ * (Next's history patch installed as in tests/files-webui-history.test.ts).
+ * Then each state the status route can answer (src/zotero/web-types.ts),
+ * rendered against a stubbed fetch, the library switches
+ * (/api/zotero/libraries), and the banner for every connect outcome.
  */
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let search = "";
-vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams(search), usePathname: () => "/" }));
+const routerReplace = vi.fn();
+vi.mock("next/navigation", () => ({
+  useSearchParams: () => new URLSearchParams(search),
+  usePathname: () => "/",
+  useRouter: () => ({ replace: routerReplace, push: vi.fn() }),
+}));
 vi.mock("next/link", () => ({
   default: ({ href, children, ...rest }: { href: string; children?: ReactNode }) => createElement("a", { href, ...rest }, children),
 }));
-// The modal bodies are lazy chunks; here only which one ZdrojeModals asks for matters (told apart by their props).
+// Nothing in the layout's reader is lazy any more; a lazy chunk would show up here.
 vi.mock("next/dynamic", () => ({
   default: () =>
     function Lazy(props: Record<string, unknown>) {
@@ -38,7 +43,7 @@ vi.mock("@clerk/nextjs", () => ({
 const store = await import("@/app/_zdroje/store");
 const { ZdrojeModals } = await import("@/app/_zdroje/modals");
 const { AccountControl } = await import("@/app/_zdroje/account");
-const { ZoteroModal, STAV_BANNER, PRIPOJENO_READ, bannerText } = await import("@/app/_zdroje/zotero-modal");
+const { ZoteroPanel, STAV_BANNER, PRIPOJENO_READ, bannerText } = await import("@/app/zotero/zotero-page");
 
 /** URLs the router saw (Next's applyUrlFromHistoryPushReplace), with the call that carried them. */
 let routed: { kind: "push" | "replace"; url: string }[] = [];
@@ -87,7 +92,19 @@ const CONNECTED: ZoteroStatus = {
 };
 const CONNECTED_READ: ZoteroStatus = { ...CONNECTED, connection: { ...CONNECTED.connection!, mode: "read" } };
 
+const LIBRARIES: ZoteroLibrariesAnswer = {
+  mode: "write",
+  groupsFailed: false,
+  libraries: [
+    { id: "personal", kind: "personal", name: "Moje knihovna", items: 1200, on: true, saves: true },
+    { id: "111", kind: "group", name: "Katedra obchodního práva", items: 3, on: true, saves: false },
+    { id: "222", kind: "group", name: "Seminář", items: null, on: false, saves: false },
+  ],
+};
+
 let status: { code: number; body: unknown } = { code: 200, body: NOT_CONNECTED };
+let libraries: { code: number; body: unknown } = { code: 200, body: LIBRARIES };
+let posted: unknown[] = [];
 let calls: { url: string; method: string }[] = [];
 
 function json(body: unknown, code = 200): Response {
@@ -99,6 +116,9 @@ beforeEach(() => {
   landOn("/");
   store.registerUnsavedWork(null);
   status = { code: 200, body: NOT_CONNECTED };
+  libraries = { code: 200, body: LIBRARIES };
+  posted = [];
+  routerReplace.mockReset();
   calls = [];
   vi.stubGlobal(
     "fetch",
@@ -106,6 +126,14 @@ beforeEach(() => {
       const url = String(input);
       calls.push({ url, method: init?.method ?? "GET" });
       if (url === "/api/zotero/status") return json(status.body, status.code);
+      if (url === "/api/zotero/libraries" && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { library: string; on: boolean };
+        posted.push(body);
+        const current = libraries.body as ZoteroLibrariesAnswer;
+        libraries = { code: 200, body: { ...current, libraries: current.libraries.map((l) => (l.id === body.library ? { ...l, on: body.on } : l)) } };
+        return json(libraries.body);
+      }
+      if (url === "/api/zotero/libraries") return json(libraries.body, libraries.code);
       if (url === "/api/zotero/disconnect") {
         status = { code: 200, body: NOT_CONNECTED };
         return json({ ok: true });
@@ -140,13 +168,16 @@ async function settle(): Promise<void> {
   for (let i = 0; i < 5; i++) await act(async () => new Promise((r) => setTimeout(r, 0)));
 }
 
-/** The modal for a signed-in user (Clerk loaded), unless the test said otherwise. */
+/** The page for a signed-in user (Clerk loaded), unless the test said otherwise. */
 async function renderModal(stav: string | null = null): Promise<void> {
   if (!signedOut) store.setAuth("signed_in");
-  await act(async () => root.render(createElement(ZoteroModal, { stav })));
+  await act(async () => root.render(createElement(ZoteroPanel, { stav })));
   await settle();
 }
 let signedOut = false;
+
+/** Zotero counts come with narrow no-break spaces ("1 234"): compared with plain ones. */
+const norm = (s: string | null | undefined) => s?.replace(/\s+/g, " ");
 
 function text(): string {
   return (host.textContent ?? "").replace(/\s+/g, " ");
@@ -175,99 +206,62 @@ function modes(): { cards: Record<string, boolean>; posted: string | null } {
 
 // ---------------------------------------------------------------------------
 
-describe("?zotero=1 deep link", () => {
-  it("renders the Zotero modal, and never together with the files modal", async () => {
+describe("?zotero=1 leads to the /zotero page", () => {
+  it("replaces the URL with /zotero (keeping stav), and the files page still wins", async () => {
     const lazies = () => [...host.querySelectorAll("[data-lazy]")].map((e) => e.getAttribute("data-lazy"));
     search = "zotero=1";
     await act(async () => root.render(createElement(ZdrojeModals)));
-    expect(lazies()).toEqual(["zotero"]);
+    expect(lazies()).toEqual([]);
+    expect(routerReplace).toHaveBeenLastCalledWith("/zotero");
 
     search = "zotero=1&stav=pripojeno";
     await act(async () => root.render(createElement(ZdrojeModals)));
-    expect(lazies()).toEqual(["zotero"]);
-    expect(host.querySelector("[data-lazy]")?.getAttribute("data-stav")).toBe("pripojeno");
+    expect(routerReplace).toHaveBeenLastCalledWith("/zotero?stav=pripojeno");
 
+    routerReplace.mockReset();
     search = "zotero=1&soubory=1";
     await act(async () => root.render(createElement(ZdrojeModals)));
-    expect(lazies()).toEqual(["soubory"]);
+    expect(routerReplace).toHaveBeenCalledTimes(1);
+    expect(routerReplace).toHaveBeenLastCalledWith("/soubory");
 
     // ?zdroje=… is the files modal's old name, never Zotero.
+    routerReplace.mockReset();
     search = "zdroje=zotero";
     await act(async () => root.render(createElement(ZdrojeModals)));
-    expect(lazies()).toEqual(["soubory"]);
+    expect(routerReplace).toHaveBeenCalledTimes(1);
+    expect(routerReplace).toHaveBeenLastCalledWith("/soubory");
 
+    routerReplace.mockReset();
     search = "";
     await act(async () => root.render(createElement(ZdrojeModals)));
     expect(lazies()).toEqual([]);
+    expect(routerReplace).not.toHaveBeenCalled();
   });
 
-  it("the modal stays a lazy chunk: modals.tsx imports it only dynamically", () => {
+  it("the root layout's reader no longer pulls in any Zotero UI", () => {
     const src = readFileSync(path.resolve(import.meta.dirname, "../app/_zdroje/modals.tsx"), "utf8");
-    expect(src).toMatch(/import\(\s*["']\.\/zotero-modal["']\s*\)/);
-    expect(src).not.toMatch(/from\s+["']\.\/zotero-modal["']/);
-  });
-});
-
-describe("openZotero / closeZotero", () => {
-  it("openZotero pushes ?zotero=1; closing pops that entry", () => {
-    store.openZotero();
-    expect(routed).toEqual([{ kind: "push", url: "/?zotero=1" }]);
-    expect(window.location.search).toBe("?zotero=1");
-    const back = vi.spyOn(window.history, "back").mockImplementation(() => undefined);
-    store.closeZotero();
-    expect(back).toHaveBeenCalledTimes(1);
-    expect(skipped).toEqual([]);
-  });
-
-  it("closing a deep-linked modal (the connect flow's return) removes zotero and stav, keeps the rest", () => {
-    landOn("/?zotero=1&stav=chyba&x=1#konec");
-    const back = vi.spyOn(window.history, "back");
-    store.closeZotero();
-    expect(back).not.toHaveBeenCalled();
-    expect(routed).toEqual([{ kind: "replace", url: "/?x=1#konec" }]);
-    expect(skipped).toEqual([]);
-  });
-
-  it("from the files modal it replaces that one; opening the files drops zotero and stav", () => {
-    landOn("/?soubory=1&dokument=11111111-1111-4111-8111-111111111111");
-    store.openZotero();
-    expect(routed).toEqual([{ kind: "replace", url: "/?zotero=1" }]);
-
-    landOn("/?zdroje=moje");
-    store.openZotero();
-    expect(routed.at(-1)?.url).toBe("/?zotero=1");
-
-    landOn("/?zotero=1&stav=pripojeno");
-    store.openFiles();
-    expect(routed.at(-1)?.url).toBe("/?soubory=1");
-  });
-
-  it("a conversion in progress in the files modal is asked about first", () => {
-    landOn("/?soubory=1");
-    store.registerUnsavedWork(() => true);
-    vi.spyOn(window, "confirm").mockReturnValue(false);
-    store.openZotero();
-    expect(routed).toEqual([]);
-    expect(window.location.search).toBe("?soubory=1");
+    expect(src).not.toMatch(/zotero-modal|zotero-page/);
   });
 
   it("dropZoteroStav replaces the entry without &stav", () => {
-    landOn("/?zotero=1&stav=chyba");
+    landOn("/zotero?stav=chyba");
     store.dropZoteroStav();
-    expect(routed).toEqual([{ kind: "replace", url: "/?zotero=1" }]);
+    expect(routed).toEqual([{ kind: "replace", url: "/zotero" }]);
     store.dropZoteroStav();
     expect(routed).toHaveLength(1);
   });
 
-  it("the account menu has Zotero first, before Spravovat účet, and it opens the modal", async () => {
+  it("the account menu leads to Vlastní soubory and Zotero, before Spravovat účet, as links", async () => {
     store.setAuth("signed_in");
     await act(async () => root.render(createElement(AccountControl, { zotero: true })));
     await act(async () => host.querySelector<HTMLButtonElement>(".zd-avatar-button")!.click());
     const items = [...host.querySelectorAll('[role="menuitem"]')].map((e) => e.textContent?.trim());
-    expect(items.slice(0, 2)).toEqual(["Zotero", "Spravovat účet"]);
-    routed = [];
-    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((e) => e.textContent?.trim() === "Zotero")!.click());
-    expect(routed).toEqual([{ kind: "push", url: "/?zotero=1" }]);
+    expect(items.slice(0, 3)).toEqual(["Vlastní soubory", "Zotero", "Spravovat účet"]);
+    const files = [...host.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((e) => e.textContent?.trim() === "Vlastní soubory")!;
+    expect(files.getAttribute("href")).toBe("/soubory");
+    const zotero = [...host.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((e) => e.textContent?.trim() === "Zotero")!;
+    expect(zotero.getAttribute("href")).toBe("/zotero");
+    await act(async () => zotero.click());
     // The menu closed behind it.
     expect(host.querySelector('[role="menu"]')).toBeNull();
     store.setAuth("loading");
@@ -286,11 +280,11 @@ describe("account menu without Zotero configured", () => {
   });
 });
 
-describe("modal states (GET /api/zotero/status)", () => {
+describe("page states (GET /api/zotero/status)", () => {
   it("signed out: an explanation and Přihlásit se, no connect form", async () => {
     status = { code: 200, body: { state: "signed_out" } };
     await renderModal();
-    expect(host.querySelector('[role="dialog"] h2')?.textContent).toBe("Zotero");
+    expect(host.querySelector(".zp-head h1")?.textContent).toBe("Zotero");
     expect(text()).toContain("Přihlaste se");
     expect(text()).toContain("když mu to povolíte, ukládá do ní nalezené dokumenty");
     expect(button("Přihlásit se")?.type).toBe("button");
@@ -340,7 +334,7 @@ describe("modal states (GET /api/zotero/status)", () => {
   it("not connected: the heading, two mode cards (Číst a ukládat preselected), and a real form POST to /api/zotero/connect", async () => {
     await renderModal();
     expect(calls).toContainEqual({ url: "/api/zotero/status", method: "GET" });
-    expect(host.querySelector('[role="dialog"]')?.textContent).toContain("Vaše knihovna ze zotero.org, ve které asistent hledá, čte a případně ukládá.");
+    expect(host.querySelector(".zp-head")?.textContent).toContain("Vaše knihovna ze zotero.org, ve které asistent hledá, čte a případně ukládá.");
     expect(host.querySelector(".zd-zotero h3")?.textContent).toBe("Připojte svou knihovnu Zotero");
     const t = text();
     expect(t).toContain("včetně skupin, kterých jste členem – vedle oficiálních databází.");
@@ -373,21 +367,24 @@ describe("modal states (GET /api/zotero/status)", () => {
     expect(calls.length).toBe(before);
   });
 
-  it("connected: the username, since when and the mode, Připojit znovu and Odpojit behind a confirmation", async () => {
+  it("connected: the username and the mode, the numbers, Změnit oprávnění and Odpojit behind a confirmation", async () => {
     status = { code: 200, body: CONNECTED };
     await renderModal();
-    expect(host.querySelector("h3")?.textContent).toBe("Připojeno jako jnovakova");
     const t = text();
-    expect(t).toContain("od 12. 9. 2026 · čtení a ukládání");
-    // The old scope table, the Odpojení heading and its texts are gone.
-    expect(host.querySelector("dl")).toBeNull();
+    expect(host.querySelector(".zp-badge")?.textContent).toBe("Připojeno");
+    expect(t).toContain("jako jnovakova · čtení a ukládání");
+    // The numbers: items of the libraries that are on (the ones with a count), how many are on, since when.
+    const stats = Object.fromEntries([...host.querySelectorAll(".zp-stats div")].map((d) => [d.querySelector("dt")?.textContent, norm(d.querySelector("dd")?.textContent)]));
+    expect(stats).toEqual({ "položek k dispozici": "1 203", "knihovny zapnuté": "2 z 3", připojeno: "12. 9. 2026" });
     for (const gone of ["Odpojení", "Co klíč smí", "zotero.org/settings/keys"]) expect(t, gone).not.toContain(gone);
+    expect(t).toContain("Asistent může i rovnou do Zotera ukládat nalezené dokumenty. Změnit to jde opětovným připojením.");
+    expect(t).toContain("Dawmain zapomene klíč ke knihovně. Ve vašem Zoteru se nic nesmaže.");
     expect(connectForm()).toBeNull();
-    expect(button("Připojit znovu")).toBeDefined();
+    expect(button("Změnit oprávnění")).toBeDefined();
 
     const changed = vi.fn();
     window.addEventListener("dz-zotero-changed", changed);
-    await act(async () => button("Odpojit")!.click());
+    await act(async () => button("Odpojit Zotero")!.click());
     expect(host.querySelector('[role="alertdialog"]')?.textContent).toContain("Odpojit Zotero?");
     expect(calls.some((c) => c.url === "/api/zotero/disconnect")).toBe(false);
     await act(async () => host.querySelector<HTMLButtonElement>(".zd-confirm .zd-btn-danger")!.click());
@@ -399,38 +396,37 @@ describe("modal states (GET /api/zotero/status)", () => {
     // The status is loaded again: now not connected.
     expect(calls.filter((c) => c.url === "/api/zotero/status")).toHaveLength(2);
     expect(connectForm()).not.toBeNull();
-    expect(text()).not.toContain("Připojeno jako");
+    expect(host.querySelector(".zp-badge")).toBeNull();
   });
 
   it("connected read-only: „jen čtení“", async () => {
     status = { code: 200, body: CONNECTED_READ };
     await renderModal();
-    expect(text()).toContain("od 12. 9. 2026 · jen čtení");
+    expect(text()).toContain("jako jnovakova · jen čtení");
+    expect(text()).toContain("Asistent v knihovně hledá a čte. Nic v ní nezapíše, nezmění ani nesmaže. Změnit to jde opětovným připojením.");
   });
 
-  it("Připojit znovu shows the mode choice (the current mode chosen); Zrušit brings the buttons back", async () => {
+  it("Změnit oprávnění shows the mode choice (the current mode chosen); Zrušit brings the button back", async () => {
     status = { code: 200, body: CONNECTED_READ };
     await renderModal();
-    await act(async () => button("Připojit znovu")!.click());
+    await act(async () => button("Změnit oprávnění")!.click());
     expect(modes()).toEqual({ cards: { "Jen číst": true, "Číst a ukládat": false }, posted: "read" });
     expect(document.activeElement).toBe(host.querySelector('.zd-zotero-mode input[value="read"]'));
     expect(connectForm()!.querySelector('button[type="submit"]')?.textContent).toBe("Připojit znovu");
     expect(text()).toContain("Volbu změníte kdykoli tak, že Zotero připojíte znovu.");
-    expect(button("Odpojit")).toBeUndefined();
     await act(async () => button("Zrušit")!.click());
     expect(connectForm()).toBeNull();
-    expect(document.activeElement).toBe(button("Připojit znovu"));
-    expect(button("Odpojit")).toBeDefined();
+    expect(document.activeElement).toBe(button("Změnit oprávnění"));
   });
 
-  it("Odpojit: Zrušit returns focus to Odpojit; after success focus stays inside the modal", async () => {
+  it("Odpojit: Zrušit returns focus to Odpojit; after success focus stays inside the page", async () => {
     status = { code: 200, body: CONNECTED };
     await renderModal();
-    await act(async () => button("Odpojit")!.click());
+    await act(async () => button("Odpojit Zotero")!.click());
     await act(async () => button("Zrušit")!.click());
     expect(host.querySelector('[role="alertdialog"]')).toBeNull();
-    expect(document.activeElement).toBe(button("Odpojit"));
-    await act(async () => button("Odpojit")!.click());
+    expect(document.activeElement).toBe(button("Odpojit Zotero"));
+    await act(async () => button("Odpojit Zotero")!.click());
     await act(async () => host.querySelector<HTMLButtonElement>(".zd-confirm .zd-btn-danger")!.click());
     await settle();
     expect(host.contains(document.activeElement)).toBe(true);
@@ -439,7 +435,7 @@ describe("modal states (GET /api/zotero/status)", () => {
   it("Odpojit succeeded but the status reload fails: the old connection is not shown again", async () => {
     status = { code: 200, body: CONNECTED };
     await renderModal();
-    await act(async () => button("Odpojit")!.click());
+    await act(async () => button("Odpojit Zotero")!.click());
     // The stub empties the status on disconnect; make the reload fail instead.
     const fetchMock = vi.mocked(fetch);
     const inner = fetchMock.getMockImplementation()!;
@@ -450,7 +446,7 @@ describe("modal states (GET /api/zotero/status)", () => {
     });
     await act(async () => host.querySelector<HTMLButtonElement>(".zd-confirm .zd-btn-danger")!.click());
     await settle();
-    expect(text()).not.toContain("Připojeno jako");
+    expect(host.querySelector(".zp-badge")).toBeNull();
     expect(host.querySelector('[role="alert"]')?.textContent).toBe("Server teď neodpovídá.");
     expect(button("Zkusit znovu")).toBeDefined();
   });
@@ -463,20 +459,23 @@ describe("modal states (GET /api/zotero/status)", () => {
     fetchMock.mockImplementation(async (input, init) =>
       String(input) === "/api/zotero/disconnect" ? json({ error: "Odpojení se nepodařilo." }, 502) : inner(input, init),
     );
-    await act(async () => button("Odpojit")!.click());
+    await act(async () => button("Odpojit Zotero")!.click());
     await act(async () => host.querySelector<HTMLButtonElement>(".zd-confirm .zd-btn-danger")!.click());
     await settle();
-    expect(text()).toContain("Připojeno jako jnovakova");
+    expect(text()).toContain("jako jnovakova");
     expect(host.querySelector(".zd-zotero-disconnect [role=alert]")?.textContent).toBe("Odpojení se nepodařilo.");
-    expect(document.activeElement).toBe(button("Odpojit"));
+    expect(document.activeElement).toBe(button("Odpojit Zotero"));
   });
 
   it("connected but Pro is gone: the connection stays visible and removable", async () => {
     status = { code: 200, body: { ...CONNECTED, pro: false } };
     await renderModal();
-    expect(text()).toContain("Připojeno jako jnovakova");
+    expect(text()).toContain("jako jnovakova");
     expect(text()).toContain("Režim Pro teď nemáte");
-    expect(button("Odpojit")).toBeDefined();
+    expect(button("Odpojit Zotero")).toBeDefined();
+    // The libraries are not asked for: the route refuses without Pro.
+    expect(calls.some((c) => c.url === "/api/zotero/libraries")).toBe(false);
+    expect(host.querySelector(".zp-libs")).toBeNull();
   });
 
   it("revoked: the key stopped working; ONE Připojit znovu, which leads to the mode choice", async () => {
@@ -500,7 +499,7 @@ describe("modal states (GET /api/zotero/status)", () => {
     expect(text()).toContain("Připojte Zotero znovu");
     expect(text()).toContain("Starý klíč pak smažte v nastavení Zotera");
     expect(button("Připojit znovu")).toBeDefined();
-    expect(button("Odpojit")).toBeUndefined();
+    expect(button("Odpojit Zotero")).toBeUndefined();
   });
 
   it("the status route fails: the error and Zkusit znovu, which asks again", async () => {
@@ -557,7 +556,7 @@ describe("the ?stav= banner", () => {
     expect(STAV_BANNER.chyba.text).toContain("čtení knihovny");
   });
 
-  it("the modal makes no promise about keys, files or privacy beyond the mode cards", async () => {
+  it("the page makes no promise about keys, files or privacy beyond the mode cards", async () => {
     await renderModal();
     const t = text();
     expect(connectForm()?.querySelector('button[type="submit"]')?.textContent).toBe("Připojit Zotero");
@@ -566,7 +565,7 @@ describe("the ?stav= banner", () => {
 
   for (const stav of ZOTERO_STAV) {
     it(`stav=${stav}: shown in a live region, then dropped from the URL`, async () => {
-      landOn(`/?zotero=1&stav=${stav}`);
+      landOn(`/zotero?stav=${stav}`);
       await renderModal(stav);
       const live = host.querySelector('[aria-live="polite"]');
       const banner = live?.querySelector(".zd-zotero-banner");
@@ -574,9 +573,9 @@ describe("the ?stav= banner", () => {
       const expected = bannerText(stav, null);
       expect(banner?.textContent).toBe(expected);
       expect(banner?.getAttribute("data-tone")).toBe(STAV_BANNER[stav].tone);
-      expect(routed).toEqual([{ kind: "replace", url: "/?zotero=1" }]);
+      expect(routed).toEqual([{ kind: "replace", url: "/zotero" }]);
       // The URL no longer has it; the banner stays.
-      await act(async () => root.render(createElement(ZoteroModal, { stav: null })));
+      await act(async () => root.render(createElement(ZoteroPanel, { stav: null })));
       expect(host.querySelector(".zd-zotero-banner")?.textContent).toBe(expected);
     });
   }
@@ -593,21 +592,110 @@ describe("the ?stav= banner", () => {
   });
 
   it("an unknown stav shows nothing but is dropped too", async () => {
-    landOn("/?zotero=1&stav=%3Cscript%3E");
+    landOn("/zotero?stav=%3Cscript%3E");
     await renderModal("<script>");
     expect(host.querySelector(".zd-zotero-banner")).toBeNull();
     expect(host.querySelector('[aria-live="polite"]')).not.toBeNull();
-    expect(routed).toEqual([{ kind: "replace", url: "/?zotero=1" }]);
+    expect(routed).toEqual([{ kind: "replace", url: "/zotero" }]);
   });
 
   it("after Odpojit the old outcome disappears", async () => {
-    landOn("/?zotero=1&stav=pripojeno");
+    landOn("/zotero?stav=pripojeno");
     status = { code: 200, body: CONNECTED };
     await renderModal("pripojeno");
     expect(host.querySelector(".zd-zotero-banner")).not.toBeNull();
-    await act(async () => button("Odpojit")!.click());
+    await act(async () => button("Odpojit Zotero")!.click());
     await act(async () => host.querySelector<HTMLButtonElement>(".zd-confirm .zd-btn-danger")!.click());
     await settle();
     expect(host.querySelector(".zd-zotero-banner")).toBeNull();
+  });
+});
+
+describe("Knihovny a skupiny (/api/zotero/libraries)", () => {
+  const rows = () =>
+    [...host.querySelectorAll<HTMLLIElement>(".zp-lib")].map((li) => ({
+      name: li.querySelector("b")?.textContent,
+      sub: norm(li.querySelector(".zp-lib-text > span")?.textContent),
+      on: li.querySelector('[role="switch"]')?.getAttribute("aria-checked"),
+      disabled: li.querySelector<HTMLButtonElement>('[role="switch"]')?.disabled,
+    }));
+  const toggle = (name: string) => host.querySelector<HTMLButtonElement>(`[role="switch"][aria-label="Používat ${name}"]`)!;
+
+  it("lists every library with its switch; in write mode the personal one is where new items go", async () => {
+    status = { code: 200, body: CONNECTED };
+    await renderModal();
+    expect(text()).toContain("Asistent hledá jen v zapnutých. Vypnutím se v Zoteru nic nesmaže, jen ji Dawmain přestane používat.");
+    expect(rows()).toEqual([
+      { name: "Moje knihovna", sub: "osobní knihovna · 1 200 položek · sem asistent ukládá nové položky", on: "true", disabled: false },
+      { name: "Katedra obchodního práva", sub: "skupina · 3 položky · jen čtení", on: "true", disabled: false },
+      { name: "Seminář", sub: "skupina · jen čtení", on: "false", disabled: false },
+    ]);
+    // No select of a save target: zotero_save writes to the personal library only.
+    expect(host.querySelector("select")).toBeNull();
+  });
+
+  it("read-only: no word about saving", async () => {
+    status = { code: 200, body: CONNECTED_READ };
+    libraries = { code: 200, body: { ...LIBRARIES, mode: "read" } };
+    await renderModal();
+    expect(rows()[0].sub).toBe("osobní knihovna · 1 200 položek");
+  });
+
+  it("a switch posts { library, on } and shows the answer; the last one on cannot be switched off", async () => {
+    status = { code: 200, body: CONNECTED };
+    await renderModal();
+    await act(async () => toggle("Seminář").click());
+    await settle();
+    expect(posted).toEqual([{ library: "222", on: true }]);
+    expect(rows().map((r) => r.on)).toEqual(["true", "true", "true"]);
+    await act(async () => toggle("Katedra obchodního práva").click());
+    await settle();
+    await act(async () => toggle("Seminář").click());
+    await settle();
+    expect(rows().map((r) => [r.on, r.disabled])).toEqual([
+      ["true", true],
+      ["false", false],
+      ["false", false],
+    ]);
+    expect(toggle("Moje knihovna").title).toBe("Aspoň jedna knihovna musí zůstat zapnutá.");
+    // The personal library off in write mode: said plainly.
+    await act(async () => toggle("Seminář").click());
+    await settle();
+    await act(async () => toggle("Moje knihovna").click());
+    await settle();
+    expect(text()).toContain("Osobní knihovna je vypnutá, a tak do Zotera asistent nic neuloží.");
+  });
+
+  it("a switch the server refuses keeps the list and says why", async () => {
+    status = { code: 200, body: CONNECTED };
+    await renderModal();
+    const fetchMock = vi.mocked(fetch);
+    const inner = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) =>
+      String(input) === "/api/zotero/libraries" && init?.method === "POST" ? json({ error: "Změnu se teď nepodařilo uložit." }, 503) : inner(input, init),
+    );
+    await act(async () => toggle("Katedra obchodního práva").click());
+    await settle();
+    expect(rows()[1].on).toBe("true");
+    expect(host.querySelector(".zp-sec [role=alert]")?.textContent).toBe("Změnu se teď nepodařilo uložit.");
+  });
+
+  it("groups that did not list: a warning, and nothing can be switched", async () => {
+    status = { code: 200, body: CONNECTED };
+    libraries = { code: 200, body: { ...LIBRARIES, groupsFailed: true, libraries: [LIBRARIES.libraries[0]] } };
+    await renderModal();
+    expect(text()).toContain("Skupiny se teď nepodařilo načíst ze Zotera.");
+    expect(rows().map((r) => r.disabled)).toEqual([true]);
+  });
+
+  it("the list fails to load: the error and Zkusit znovu", async () => {
+    status = { code: 200, body: CONNECTED };
+    libraries = { code: 503, body: { error: "Knihovny Zotera se teď nepodařilo načíst." } };
+    await renderModal();
+    expect(text()).toContain("Knihovny Zotera se teď nepodařilo načíst.");
+    libraries = { code: 200, body: LIBRARIES };
+    await act(async () => button("Zkusit znovu")!.click());
+    await settle();
+    expect(rows()).toHaveLength(3);
   });
 });

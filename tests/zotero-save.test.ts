@@ -34,7 +34,7 @@ import { SourceError } from "@/src/sources/shared/errors";
 
 const USER = "user_zot1";
 const ZUSER = 475425;
-const CONNECT = "https://dawmain.davidzavada.cz/?zotero=1";
+const CONNECT = "https://dawmain.davidzavada.cz/zotero";
 const API_KEY = "AbCdEfGhIjKlMnOpQrStUvWx";
 
 const ENV: Record<string, string> = {
@@ -45,14 +45,14 @@ const ENV: Record<string, string> = {
   CLERK_SECRET_KEY: "sk_test_zotero",
 };
 
-const LIB: LibraryAccess = { id: USER, kind: "user", name: "Osobní", slug: null, role: "owner", pro: true, canUpload: true, canManageAll: true, quotaPages: 3000 };
+const LIB: LibraryAccess = { id: USER, kind: "user", name: "Osobní", slug: null, role: "owner", pro: true, canUpload: true, canManageAll: true, quotaBytes: 104_857_600, handle: "osobni", logoUrl: null };
 const PRO: Access = { userId: USER, banned: false, libraries: [LIB], all: [LIB], zotero: true };
 const NON_PRO: Access = { userId: USER, banned: false, libraries: [], all: [{ ...LIB, pro: false, canUpload: false }], zotero: false };
 
-function connection(mode: "read" | "write" = "write"): ConnectionState {
+function connection(mode: "read" | "write" = "write", disabled: string[] = []): ConnectionState {
   return {
     state: "ok",
-    conn: { creds: { userID: ZUSER, key: API_KEY }, username: "zuser", notes: true, groups: "all", connectedAt: "2026-09-01T10:00:00Z", fp: "fp-current", mode },
+    conn: { creds: { userID: ZUSER, key: API_KEY }, username: "zuser", notes: true, groups: "all", connectedAt: "2026-09-01T10:00:00Z", fp: "fp-current", mode, disabled },
   };
 }
 
@@ -267,6 +267,19 @@ describe("zotero_save — refusals (Czech for the user, nothing sent to Zotero)"
     expect(vi.mocked(client.createItem)).not.toHaveBeenCalled();
     return r.text;
   }
+
+  it("the personal library switched off on the /zotero page: refused, nothing written", async () => {
+    vi.mocked(loadConnection).mockResolvedValue(connection("write", ["personal"]));
+    const text = await expectRefused(USER_CTX, "Osobní knihovnu Zotera máte pro asistenta vypnutou");
+    expect(text).toContain(CONNECT);
+    expect(otherClientCalls()).toEqual([]);
+  });
+
+  it("a switched-off group does not stop saving to the personal library", async () => {
+    vi.mocked(loadConnection).mockResolvedValue(connection("write", ["111"]));
+    expect((await save(CASE)).isError).toBe(false);
+    expect(vi.mocked(client.createItem)).toHaveBeenCalledTimes(1);
+  });
 
   it("connected read-only: refused, names the reconnect with „Číst a ukládat“", async () => {
     vi.mocked(loadConnection).mockResolvedValue(connection("read"));

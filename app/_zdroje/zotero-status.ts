@@ -5,9 +5,9 @@ import type { ZoteroStatus } from "@/src/zotero/web-types";
 import { api } from "./api";
 
 /**
- * The Zotero connection status for client components: the modal
- * (./zotero-modal.tsx) and the home page row (./own-sources.tsx). Both read
- * GET /api/zotero/status (contract: src/zotero/web-types.ts); the modal
+ * The Zotero connection status for client components: the /zotero page
+ * (app/zotero/zotero-page.tsx) and the home page row (./own-sources.tsx). Both read
+ * GET /api/zotero/status (contract: src/zotero/web-types.ts); the page
  * announces a change it made (Odpojit) so the row does not keep showing a
  * connection that is gone.
  */

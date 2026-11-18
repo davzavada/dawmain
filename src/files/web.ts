@@ -8,17 +8,19 @@ import { LIBRARY_ID_RE, LIMITS, PAGE_CHARS, TERMS_VERSION, UUID_RE, type FilesMo
 import { withScope, type Queryable } from "./db/client";
 import { confirmDocument, deleteDocument, getDocument, listDocuments, updateDocumentMeta, type DocumentRow } from "./db/documents";
 import { documentPreviewText, libraryDocCounts, mergeIdentKeys, metaContext } from "./db/documents-web";
-import { forgetPages, getLibraries, releasePages } from "./db/libraries";
+import { getFolder, listFolders, moveDocument, renameDocument } from "./db/folders";
+import { forgetPages, libraryBytesUsed, releasePages } from "./db/libraries";
 import { loadReadDoc, loadText } from "./db/reading";
 import { acceptTerms, audit, bumpUsage, hasAcceptedTerms, usageSum } from "./db/usage";
 import { sanitizeLine } from "./dmd/normalize";
 import { filesError, filesJson, FilesUserError, logFilesError, MESSAGES } from "./errors";
 import { buildMetaTsv, metaIdentKeys } from "./index/derive";
 import { bibMetaBaseSchema, bibMetaSchema } from "./meta/schema";
+import { cleanName, folderItem } from "./folders";
 import { reindexDocument } from "./reindex";
 import { ownedScope } from "./scope";
 import type { BibMeta } from "./types";
-import type { DocumentDetail, DocumentListItem, LibrarySummary, SummaryResponse } from "./web-types";
+import type { DocumentDetail, DocumentListItem, DocumentListResponse, LibrarySummary, SummaryResponse } from "./web-types";
 
 /**
  * The web API of the Vlastní zdroje modal — the logic behind the thin
@@ -42,8 +44,8 @@ import type { DocumentDetail, DocumentListItem, LibrarySummary, SummaryResponse 
  * "off"/"unconfigured" answers 503 before anything else.
  */
 
-/** Documents one list request returns (the modal shows a library at once). */
-const LIST_LIMIT = 200;
+/** Documents one list request returns (the page shows a whole library at once). */
+const LIST_LIMIT = 1_000;
 /** JSON bodies of the mutating routes; the metadata form is far below this. */
 const MAX_BODY_BYTES = 64 * 1024;
 /** First characters of the text shown in the detail panel. */
@@ -154,6 +156,8 @@ export function listItem(row: DocumentRow, lib: LibraryAccess, userId: string): 
     physicalPages: row.physical_pages,
     billablePages: row.billable_pages,
     flags: documentFlags(row),
+    folderId: row.folder_id,
+    original: row.original_status,
   };
 }
 
@@ -192,7 +196,7 @@ export async function summaryFor(userId: string, opts: { fresh?: boolean } = {})
   let mode: FilesMode = env;
   let termsAccepted = false;
   let counts: Record<string, LibrarySummary["counts"]> = {};
-  let pages: Record<string, number> = {};
+  let bytesUsed: Record<string, number> = {};
   let loadedCounts = false;
   if (pro.length > 0) mode = await effectiveMode();
   // While the guards have the feature off (compute hours; cached until the
@@ -201,11 +205,11 @@ export async function summaryFor(userId: string, opts: { fresh?: boolean } = {})
     loadedCounts = true;
     const loaded = await withScope(pro, async (db) => ({
       counts: await libraryDocCounts(db, pro),
-      rows: await getLibraries(db, pro),
+      bytes: await libraryBytesUsed(db, pro),
       terms: await hasAcceptedTerms(db, userId, TERMS_VERSION),
     }));
     counts = loaded.counts;
-    pages = Object.fromEntries(loaded.rows.map((r) => [r.id, r.page_count + r.pages_reserved]));
+    bytesUsed = loaded.bytes;
     termsAccepted = loaded.terms;
   }
   const libraries = access.all.map(
@@ -217,31 +221,39 @@ export async function summaryFor(userId: string, opts: { fresh?: boolean } = {})
       pro: lib.pro,
       canUpload: lib.canUpload,
       canManageAll: lib.canManageAll,
-      quotaPages: lib.quotaPages,
-      pagesUsed: lib.pro && loadedCounts ? (pages[lib.id] ?? 0) : null,
+      handle: lib.handle,
+      logoUrl: lib.logoUrl,
+      quotaBytes: lib.quotaBytes,
+      bytesUsed: lib.pro && loadedCounts ? (bytesUsed[lib.id] ?? 0) : null,
       counts: lib.pro && loadedCounts ? (counts[lib.id] ?? null) : null,
     }),
   );
-  return { state: "ok", mode, termsAccepted, libraries, ukaz: access.ukaz === true };
+  return { state: "ok", mode, termsAccepted, libraries, ukaz: access.ukaz === true, maxFileBytes: LIMITS.maxFileBytes };
 }
 
 // ---------------------------------------------------------------------------
 // GET /api/files/documents?lib=
 
 /**
- * The documents of the caller's library — Pro or not
+ * The documents and folders of the caller's library — Pro or not
  * (ownedScope: a user who lost Pro can still see and delete what they
- * stored). Newest first, at most 200.
+ * stored). Newest first, at most 1,000 documents.
  */
-export async function listFor(userId: string, libraryId: string): Promise<{ libraryId: string; documents: DocumentListItem[]; total: number }> {
+export async function listFor(userId: string, libraryId: string): Promise<DocumentListResponse> {
   if (!LIBRARY_ID_RE.test(libraryId)) throw new FilesUserError(404, "Knihovna nenalezena.");
   const access = await getAccess(userId);
   const scope = ownedScope(access, libraryId);
   const lib = scope.libraries[0];
-  const { rows, total } = await withScope(scope.libraryIds, (db) =>
-    listDocuments(db, { libraryIds: [...scope.libraryIds], limit: LIST_LIMIT, offset: 0, sort: "added" }),
-  );
-  return { libraryId: lib.id, documents: rows.map((r) => listItem(r, lib, userId)), total };
+  const { rows, total, folders } = await withScope(scope.libraryIds, async (db) => ({
+    ...(await listDocuments(db, { libraryIds: [...scope.libraryIds], limit: LIST_LIMIT, maxLimit: LIST_LIMIT, offset: 0, sort: "added" })),
+    folders: await listFolders(db, lib.id),
+  }));
+  return {
+    libraryId: lib.id,
+    documents: rows.map((r) => listItem(r, lib, userId)),
+    folders: folders.map((f) => folderItem(f, userId)),
+    total,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -276,7 +288,27 @@ export async function detailFor(userId: string, id: string): Promise<DocumentDet
 const patchSchema = z.discriminatedUnion("action", [
   z.strictObject({ action: z.literal("confirm"), version: z.number().int().min(0), meta: z.unknown() }),
   z.strictObject({ action: z.literal("save"), version: z.number().int().min(0), meta: z.unknown() }),
+  z.strictObject({ action: z.literal("rename"), name: z.string().max(1_000) }),
+  z.strictObject({ action: z.literal("move"), folderId: z.string().regex(UUID_RE).nullable() }),
 ]);
+
+/**
+ * The new file name of a rename: the name sanitized like a folder name
+ * (1–255 characters), keeping the extension of the current name when the
+ * new one lacks it ("Smlouva" → "Smlouva.pdf"). Returns the name or a Czech
+ * message. Pure.
+ */
+export function renamedFileName(raw: string, current: string): { name: string } | { error: string } {
+  const ext = /(\.[A-Za-z0-9]{1,5})$/.exec(current)?.[1] ?? "";
+  const cleaned = cleanName(raw, 255);
+  if ("error" in cleaned) return cleaned;
+  let name = cleaned.name;
+  if (ext && !name.toLowerCase().endsWith(ext.toLowerCase())) {
+    if (name.length + ext.length > 255) return { error: "Název může mít nejvýš 255 znaků." };
+    name += ext;
+  }
+  return { name };
+}
 
 /** Validation errors of the metadata form: field path → Czech message (first per field). */
 export class MetaValidationError extends FilesUserError {
@@ -320,6 +352,7 @@ export async function patchFor(userId: string, id: string, body: unknown): Promi
   if (mode === "readonly") throw new FilesUserError(503, MESSAGES.readonly);
   if (mode !== "on") throw new FilesUserError(503, MESSAGES.off);
   const input = parsed.data;
+  if (input.action === "rename" || input.action === "move") return organizeDocument(userId, id, input);
   const meta = parseMetaForm(input.meta, input.action === "confirm");
 
   const access = await getAccess(userId, { fresh: true });
@@ -363,6 +396,39 @@ export async function patchFor(userId: string, id: string, body: unknown): Promi
       await reindexDocument(docId, libraryId);
     });
   }
+  return detailFor(userId, id);
+}
+
+/**
+ * PATCH {action:"rename", name} / {action:"move", folderId}: the file name
+ * (the extension stays) or the folder of a document (one of the same
+ * library; null = the root). Rights: canDeleteDocument (the uploader or the
+ * owner / team manager) in a Pro library; mode "on" (checked by patchFor).
+ */
+async function organizeDocument(
+  userId: string,
+  id: string,
+  input: { action: "rename"; name: string } | { action: "move"; folderId: string | null },
+): Promise<DocumentDetail> {
+  const access = await getAccess(userId, { fresh: true });
+  const ids = libraryIdsOf(access);
+  if (ids.length === 0) throw new FilesUserError(404, "Dokument nenalezen.");
+  await withScope(ids, async (db) => {
+    const { row, lib } = await findDocument(db, access, id);
+    if (!canDeleteDocument(lib, row.uploaded_by, userId)) throw new FilesUserError(403, "Tento dokument může upravit jen jeho vlastník.");
+    if (!lib.pro) throw new FilesUserError(403, NO_PRO_EDIT);
+    if (input.action === "rename") {
+      const next = renamedFileName(input.name, row.file_name);
+      if ("error" in next) throw new FilesUserError(422, next.error);
+      if (!(await renameDocument(db, row.id, row.library_id, next.name))) throw new FilesUserError(404, "Dokument nenalezen.");
+      await audit(db, { libraryId: row.library_id, actor: userId, action: "document.rename", docId: row.id });
+      return;
+    }
+    const folderId = input.folderId ? input.folderId.toLowerCase() : null;
+    if (folderId && !(await getFolder(db, folderId, row.library_id))) throw new FilesUserError(422, "Vybraná složka neexistuje.");
+    if (!(await moveDocument(db, row.id, row.library_id, folderId))) throw new FilesUserError(404, "Dokument nenalezen.");
+    await audit(db, { libraryId: row.library_id, actor: userId, action: "document.move", docId: row.id, detail: { folder: folderId } });
+  });
   return detailFor(userId, id);
 }
 
@@ -417,14 +483,14 @@ export const EXPORTS_PER_DOC_PER_DAY = 10;
 
 /**
  * Pages (PAGE_CHARS of stored text, rounded up per document) one user may
- * export per UTC day, over all documents: one library's quota — a whole
- * library fits in a day, a second copy of it waits for the next.
+ * export per UTC day, over all documents (LIMITS.exportPagesPerDay,
+ * FILES_EXPORT_PAGES_PER_DAY — about one big library a day).
  * Counted in `pages` under `read:<user>:export` (same retention and
  * erasure as above; never a document id, so no clash with the per-document
  * counters).
  */
 export function exportPagesPerUserPerDay(): number {
-  return Math.max(LIMITS.personalPages, LIMITS.teamPages);
+  return LIMITS.exportPagesPerDay;
 }
 
 export interface DocumentExport {

@@ -15,8 +15,8 @@ export type { Access, LibraryAccess } from "./access-types";
  *   - personal library `user_…`: Pro when `user.publicMetadata.pro === true`
  *     (strictly true — "true", 1 or {} are not Pro); the owner uploads and
  *     manages everything;
- *   - quota: `publicMetadata.filesQuota.pages` (a positive number) on the
- *     user overrides LIMITS.personalPages;
+ *   - quota: `publicMetadata.filesQuota.mb` (a positive number, MB of
+ *     originals) on the user overrides LIMITS.personalBytes;
  *   - banned or locked users get no library at all;
  *   - feature switches: `publicMetadata.features` on the user, e.g.
  *     `{ "pro": true, "features": { "zotero": false } }`. Pro switches
@@ -38,7 +38,7 @@ export type { Access, LibraryAccess } from "./access-types";
  * `features.files: false` switches the feature off for them everywhere,
  * their teams included; the organization's `features.files: false` only
  * for that team. Zotero and UKAŽ stay personal (a team grants neither).
- * Quota: the organization's `filesQuota.pages`, else LIMITS.teamPages.
+ * Quota: the organization's `filesQuota.mb`, else LIMITS.teamBytes.
  *
  * `libraries` holds the Pro libraries (search, read, upload), personal
  * first, then teams by name; `all` every library the user owns or belongs
@@ -146,11 +146,30 @@ export function canDeleteDocument(lib: LibraryAccess, uploadedBy: string, userId
 // ---------------------------------------------------------------------------
 // Clerk
 
-/** `publicMetadata.filesQuota.pages` when it is a positive finite number, else the default. */
+/**
+ * Storage quota in bytes: `publicMetadata.filesQuota.mb` when it is a
+ * positive finite number (MB × 1024², floored), else `fallback` (bytes).
+ */
 export function quotaFrom(metadata: unknown, fallback: number): number {
-  const quota = (metadata as { filesQuota?: { pages?: unknown } } | null | undefined)?.filesQuota;
-  const pages = quota && typeof quota === "object" ? quota.pages : undefined;
-  return typeof pages === "number" && Number.isFinite(pages) && pages >= 1 ? Math.floor(pages) : fallback;
+  const quota = (metadata as { filesQuota?: { mb?: unknown } } | null | undefined)?.filesQuota;
+  const mb = quota && typeof quota === "object" ? quota.mb : undefined;
+  return typeof mb === "number" && Number.isFinite(mb) && mb > 0 ? Math.floor(mb * 1024 * 1024) : fallback;
+}
+
+/** A team's handle: its slug when that is a plain URL segment, else the org id (same rule as scope.ts libraryHandle). Pure. */
+export function teamHandle(orgId: string, slug: string | null): string {
+  return slug && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(slug) ? slug : orgId;
+}
+
+/** The organization's logo URL, only when the admin uploaded one (Clerk's default image is skipped) and it is https. Pure. */
+export function logoFrom(org: { imageUrl?: unknown; hasImage?: unknown }): string | null {
+  if (org.hasImage !== true || typeof org.imageUrl !== "string") return null;
+  try {
+    const url = new URL(org.imageUrl);
+    return url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Strict Pro flag: only the boolean `true` counts. */
@@ -192,7 +211,14 @@ export interface ClerkUserLike {
 
 export interface ClerkMembershipLike {
   role: string;
-  organization: { id: string; name?: string | null; slug?: string | null; publicMetadata?: unknown };
+  organization: {
+    id: string;
+    name?: string | null;
+    slug?: string | null;
+    publicMetadata?: unknown;
+    imageUrl?: string | null;
+    hasImage?: boolean;
+  };
 }
 
 /**
@@ -217,7 +243,9 @@ export function buildAccess(user: ClerkUserLike, memberships: readonly ClerkMemb
     pro,
     canUpload: pro,
     canManageAll: true,
-    quotaPages: quotaFrom(user.publicMetadata, LIMITS.personalPages),
+    quotaBytes: quotaFrom(user.publicMetadata, LIMITS.personalBytes),
+    handle: "osobni",
+    logoUrl: null,
   };
   const teams: LibraryAccess[] = [];
   const seen = new Set<string>();
@@ -237,7 +265,9 @@ export function buildAccess(user: ClerkUserLike, memberships: readonly ClerkMemb
       pro: teamPro,
       canUpload: teamPro,
       canManageAll: manager,
-      quotaPages: quotaFrom(org.publicMetadata, LIMITS.teamPages),
+      quotaBytes: quotaFrom(org.publicMetadata, LIMITS.teamBytes),
+      handle: teamHandle(org.id, slug || null),
+      logoUrl: logoFrom(org),
     });
   }
   teams.sort((a, b) => a.name.localeCompare(b.name, "cs") || a.id.localeCompare(b.id));

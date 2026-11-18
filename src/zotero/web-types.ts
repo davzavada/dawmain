@@ -1,6 +1,6 @@
 /**
  * The contract between the Zotero web routes (app/api/zotero/*) and the
- * Zotero modal (app/_zdroje/zotero-modal.tsx). Types only: safe to import
+ * /zotero page (app/_zdroje/zotero-modal.tsx, mounted by app/zotero/page.tsx). Types only: safe to import
  * from client components.
  *
  *   GET  /api/zotero/status      → ZoteroStatus (JSON; signed out is a normal answer)
@@ -8,12 +8,14 @@
  *                                   mode=read|write; anything else is read),
  *                                   always 303:
  *                                   to zotero.org's authorize page, or back to
- *                                   /?zotero=1&stav=<ZoteroStav> on refusal
- *   GET  /api/zotero/callback    → 303 to /?zotero=1&stav=<ZoteroStav>
+ *                                   /zotero?stav=<ZoteroStav> on refusal
+ *   GET  /api/zotero/callback    → 303 to /zotero?stav=<ZoteroStav>
  *   POST /api/zotero/disconnect  → { ok: true } (JSON, fetch with same-origin credentials)
+ *   GET  /api/zotero/libraries   → ZoteroLibrariesAnswer (JSON; 401/403/404/409 { error } when not usable)
+ *   POST /api/zotero/libraries   { library, on } (JSON) → ZoteroLibrariesAnswer after the change
  */
 
-/** Outcome of a connect attempt, carried back in `?stav=` to the modal's banner. */
+/** Outcome of a connect attempt, carried back in `?stav=` to the page's banner. */
 export type ZoteroStav =
   | "pripojeno" // connected
   | "zamitnuto" // the user declined on zotero.org
@@ -70,3 +72,25 @@ export type ZoteroStatus =
       /** The stored key no longer opens (server secret rotated); reconnect. */
       unreadable: { username: string } | null;
     };
+
+/** One library the key reads, with its switch on the /zotero page. */
+export interface ZoteroLibraryView {
+  /** As the tools name it: "personal" or the group id. */
+  id: string;
+  kind: "personal" | "group";
+  /** "Moje knihovna", or the group's name. */
+  name: string;
+  /** Items in it, best effort (null: not known). */
+  items: number | null;
+  /** On: the assistant searches and reads it. */
+  on: boolean;
+  /** New items are saved here (only the personal library, in write mode). */
+  saves: boolean;
+}
+
+export interface ZoteroLibrariesAnswer {
+  libraries: ZoteroLibraryView[];
+  /** The groups could not be listed right now: only the personal library is in `libraries`. */
+  groupsFailed: boolean;
+  mode: ZoteroModeView;
+}

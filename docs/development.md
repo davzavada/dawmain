@@ -159,7 +159,8 @@ src/files/dmd/              DMD (Dawmain Markdown), jediný zdroj pravdy o textu
                             normalizace, striktní parser, bloky, render s plotem,
                             pinpointy a citace; izomorfní (prohlížeč i server)
 src/files/convert/          PDF (pdf.js) / DOCX (mammoth) / TXT / MD → DMD
-                            v prohlížeči — originál nikdy neopustí počítač
+                            v prohlížeči; originál se pak nahraje zvlášť
+                            (po 8 MB částech, jen ke stažení, asistent ho nečte)
 src/files/text/             český stemmer (vendorovaný Snowball 3.1.1), tokeny,
                             stavba tsquery jen ze sanitizovaných slov
 src/files/index/            chunky, tsvector, identifikátory a zkratky předpisů,
@@ -445,7 +446,9 @@ běží v aplikaci), navrhne metadata (heuristiky, text dokumentu neodchází k 
 poskytovateli AI) a hned po zpracování v
 nich hledají nástroje `files_*` (metadata uživatel opraví v detailu
 dokumentu; krok kontroly před hledáním zapne knihovně
-`settings.autoConfirm = false`). Originály se nikam neukládají. Pojistky
+`settings.autoConfirm = false`). Originál souboru se ukládá vedle textu
+(`doc_originals`, po 8MB částech) jen pro uživatele: ke stažení a otevření na
+stránce `/soubory`, nástroje MCP pracují jen s textem. Pojistky
 níže vznikly pro bezplatné plány Vercelu a Neonu (jejich překročení
 pozastavilo celý tým, resp. zablokovalo zápisy) a zatím platí beze změny.
 Bez nastavení je funkce vypnutá (`FILES_MODE` chybí → `off`, chybí
@@ -475,6 +478,7 @@ co čeká. Už aplikovaný soubor se nemění — oprava = nový soubor.
 | `0005_search_filters.sql` | přetížení obou funkcí: filtry `case_number` a `section` (§ i s vnořenými oddíly) přímo v SQL před stropem shod na dokument, strop na dokument až 200 (hledání uvnitř dokumentu), knihovna u každé shody, ISBN/DOI z metadat dokumentu; podpisy z `0004` zůstávají, dokud je volá nasazená verze |
 | `0006_always_enabled.sql` | přepínač zapnuto/vypnuto u dokumentu zmizel z webu i API: zapne zpět všechny dříve vypnuté dokumenty (sloupec `enabled` zůstává) |
 | `0007_drop_ai_usage.sql` | odstraní sloupce `usage_daily.ai_calls` a `ai_microusd`, zbylé po zrušeném AI návrhu metadat |
+| `0008_originals_folders.sql` | původní soubory (`doc_originals` po částech, `documents.original_status`), složky (`folders`, `documents.folder_id`), RLS a granty pro obě nové tabulky, `files_library_bytes()` pro Správu |
 
 **Tahle verze potřebuje `0003` až `0006`** — pusť `--dry-run`, pak
 migraci, a teprve potom nasazuj. `0003`–`0005` přidávají jen sloupce `IF NOT
@@ -507,8 +511,10 @@ až novým buildem, `deploy.sh`).
 | `FILES_DATABASE_URL` | URL role `dawmain_app`; bez ní `unconfigured` | — |
 | `DATABASE_URL_UNPOOLED` | vlastnické připojení (`files_owner`), jen pro `scripts/db-migrate.mjs` z terminálu; aplikace ho nečte | — |
 | `FILES_GLOBAL_MAX_PAGES` | strop stran pro celou instalaci | 30 000 |
-| `FILES_PERSONAL_PAGES` | kvóta osobní knihovny (stran) | 10 000 |
-| `FILES_TEAM_PAGES` | výchozí kvóta týmové knihovny (stran) | 10 000 |
+| `FILES_PERSONAL_MB` | kvóta osobní knihovny (MB původních souborů) | 100 |
+| `FILES_TEAM_MB` | výchozí kvóta týmové knihovny (MB původních souborů) | 1024 |
+| `FILES_MAX_FILE_MB` | největší jeden nahrávaný soubor (MB) | 100 |
+| `FILES_EXPORT_PAGES_PER_DAY` | kolik stran textu si jeden uživatel za den exportuje | 10 000 |
 | `FILES_OPERATOR_IDS` | Clerk `user_…` oddělená čárkou — provozovatelé Vlastních zdrojů (`src/files/operator.ts`) a zároveň správci na `/sprava` | — |
 | `ADMIN_USER_IDS` | Clerk `user_…` oddělená čárkou — správci na `/sprava` bez ohledu na Clerk: první správce a cesta zpět. Další správce se povyšují na stránce Správa (`publicMetadata.role = "admin"`) | — |
 | `FILES_GLOBAL_UPLOADS_PER_DAY` | nahrání za den ve všech knihovnách dohromady | 200 |
@@ -520,9 +526,11 @@ až novým buildem, `deploy.sh`).
 | `ZOTERO_OAUTH_CLIENT_SECRET` | Zotero: Client Secret téže aplikace | — (Zotero vypnuté) |
 | `CREDENTIALS_SECRET` | Zotero: klíč pečetění uložených klíčů (AES-256-GCM přes HKDF), ≥ 32 znaků, `openssl rand -base64 32`; změna = všichni připojí Zotero znovu | — (Zotero vypnuté) |
 
-Strana = 3 600 znaků převedeného textu včetně poznámek (`PAGE_CHARS`); cenu
-ve stranách vidí uživatel před nahráním. Kvóta jednoho uživatele jde
-přepsat v Clerku (níže).
+Kvóta knihovny se počítá z velikosti uložených původních souborů (dokumenty
+nahrané dřív, u nichž se originál neukládal, se nepočítají); vlastní kvótu
+účtu nebo týmu v MB nastaví správce na `/sprava`. Strana = 3 600 znaků
+převedeného textu včetně poznámek (`PAGE_CHARS`) — zůstává jen pro globální
+strop `FILES_GLOBAL_MAX_PAGES` a denní stropy.
 
 ### Clerk
 
@@ -541,7 +549,7 @@ přepsat v Clerku (níže).
    Vypnutí týmu = jako odebrání Pro: cron knihovnu do týdne smaže, pokud ho
    nezapneš znovu. Smazání týmu = webhook `organization.deleted` (nebo denní
    kontrola) označí knihovnu k výmazu. Výchozí kvóta týmu je
-   `FILES_TEAM_PAGES` (10 000), vlastní kvóta se nastaví v detailu týmu.
+   `FILES_TEAM_MB` (1 GB), vlastní kvóta (MB) se nastaví v detailu týmu.
 
    Role: **správce týmu** (`org:admin`) upravuje a maže všechny dokumenty
    týmu, **člen** (`org:member`) jen své; nahrávat smějí všichni členové
@@ -552,7 +560,7 @@ přepsat v Clerku (níže).
 
 3. **Pro se přiděluje v public metadata** (*Users → uživatel → Metadata*,
    u týmu to za tebe nastaví `/sprava/tymy`): `{ "pro": true }` — přesně
-   boolean `true`. Vlastní kvóta: `{ "pro": true, "filesQuota": { "pages": 5000 } }`.
+   boolean `true`. Vlastní kvóta úložiště v MB: `{ "pro": true, "filesQuota": { "mb": 500 } }`.
    Projeví se do minuty (přístup se cachuje 60 s).
 4. **Vypnutí jednotlivých funkcí** (tamtéž, public metadata uživatele nebo
    týmu): Pro zapíná všechno, jednotlivou funkci vypne `false` pod
@@ -711,8 +719,7 @@ DMD s hlavičkou metadat (název, autoři, rok, typ, původní soubor, knihovna,
 data). Pro není potřeba — tak si uživatel text stáhne i po odebrání Pro
 než se knihovna smaže, a plní se právo na přenositelnost; nejde jen při `FILES_MODE=off`. Stropy: jeden
 dokument nejvýš 10× za den (`EXPORTS_PER_DOC_PER_DAY`) a jeden uživatel za den
-tolik stran, kolik má největší kvóta knihovny (`max(FILES_PERSONAL_PAGES,
-FILES_TEAM_PAGES)`) — jinak 429. Počítadla `read:<uživatel>:…` maže cron po 2
+nejvýš `FILES_EXPORT_PAGES_PER_DAY` stran (10 000) — jinak 429. Počítadla `read:<uživatel>:…` maže cron po 2
 dnech, každé stažení zapíše audit `document.export` (délka, ne text). Když
 export nejde a uživatel napíše (zásady slibují pomoc), zapni funkci aspoň
 v režimu `readonly` — export v něm běží — a dej mu vědět.

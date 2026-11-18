@@ -3,13 +3,14 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
- * What every page loads: the root layout's static import graph. The
- * Vlastní soubory and Zotero modals mount in the layout, but their bodies — and above
- * all the uploader with the DMD parser, the outline slicer, pdf.js and
- * mammoth — must stay behind dynamic imports, so a visitor of /podminky
- * downloads none of it (review web:Z8, ops:FT-8; plan §2: conversion code
- * loads only for Vlastní zdroje). Static `import … from` edges are followed;
- * `import()` and next/dynamic are the lazy boundary.
+ * What every page loads: the root layout's static import graph. Only the
+ * reader of old modal links (app/_zdroje/modals.tsx) mounts in the layout;
+ * the Vlastní soubory page (app/soubory) and the Zotero page are routes of
+ * their own, and the uploader's processing with the DMD parser, the outline
+ * slicer, pdf.js and mammoth stays behind a dynamic import even on the files
+ * page, so a visitor of /podminky — or of /soubory who uploads nothing —
+ * downloads none of it (review web:Z8, ops:FT-8). Static `import … from`
+ * edges are followed; `import()` and next/dynamic are the lazy boundary.
  */
 
 const ROOT = path.resolve(import.meta.dirname, "..");
@@ -61,39 +62,51 @@ function graph(entry: string): { files: Set<string>; packages: Set<string> } {
 
 const rel = (f: string) => path.relative(ROOT, f).split(path.sep).join("/");
 
+const CONVERSION = [
+  "app/_zdroje/upload-process.ts",
+  "src/files/dmd/parse.ts",
+  "src/files/convert/slice.ts",
+  "src/files/convert/index.ts",
+];
+
 describe("first-load JS of every page (review web:Z8, ops:FT-8)", () => {
   const { files, packages } = graph("app/layout.tsx");
   const loaded = [...files].map(rel);
 
-  it("the layout reaches the modal reader, not the modals", () => {
-    // The walker really walks: the header's account menu and the modal reader are in every page.
+  it("the layout reaches the old-link reader, not the pages", () => {
+    // The walker really walks: the header's account menu and the old-link reader are in every page.
     expect(loaded).toContain("app/_zdroje/store.ts");
     expect(loaded).toContain("app/_zdroje/modals.tsx");
-    for (const lazy of ["app/_zdroje/files-modal.tsx", "app/_zdroje/zotero-modal.tsx", "app/_zdroje/meta-form.ts"]) {
-      expect(loaded, lazy).not.toContain(lazy);
+    for (const page of ["app/soubory/files-page.tsx", "app/_zdroje/file-editor.tsx", "app/zotero/zotero-page.tsx", "app/_zdroje/meta-form.ts"]) {
+      expect(loaded, page).not.toContain(page);
     }
   });
 
   it("no uploader, DMD parser, slicer or converter in the layout's graph", () => {
-    for (const lazy of [
-      "app/_zdroje/upload.tsx",
-      "app/_zdroje/upload-core.ts",
-      "src/files/dmd/parse.ts",
-      "src/files/dmd/billing.ts",
-      "src/files/convert/slice.ts",
-      "src/files/convert/index.ts",
-    ]) {
+    for (const lazy of ["app/_zdroje/upload.tsx", "app/_zdroje/upload-core.ts", "src/files/dmd/billing.ts", ...CONVERSION]) {
       expect(loaded, lazy).not.toContain(lazy);
     }
     expect(loaded.filter((f) => f.startsWith("src/files/convert/"))).toEqual([]);
     for (const pkg of packages) expect(pkg).not.toMatch(/^(pdfjs-dist|mammoth)/);
   });
 
-  it("inside the modal the uploader is lazy too (only Pro users with upload rights load it)", () => {
-    const modal = graph("app/_zdroje/files-modal.tsx").files;
-    const inModal = [...modal].map(rel);
-    expect(inModal).not.toContain("app/_zdroje/upload.tsx");
-    expect(inModal).not.toContain("src/files/dmd/parse.ts");
-    expect(readFileSync(path.join(ROOT, "app/_zdroje/files-modal.tsx"), "utf8")).toMatch(/dynamic\(\(\) => import\("\.\/upload"\)/);
+  it("the files page loads the upload queue, but the processing only through a dynamic import", () => {
+    const page = graph("app/soubory/[[...knihovna]]/page.tsx");
+    const onPage = [...page.files].map(rel);
+    expect(onPage).toContain("app/soubory/files-page.tsx");
+    expect(onPage).toContain("app/_zdroje/upload.tsx");
+    for (const lazy of CONVERSION) expect(onPage, lazy).not.toContain(lazy);
+    expect(onPage.filter((f) => f.startsWith("src/files/convert/"))).toEqual([]);
+    for (const pkg of page.packages) expect(pkg).not.toMatch(/^(pdfjs-dist|mammoth)/);
+    // The one way in: import("./upload-process") inside the queue, and nobody else names it.
+    const upload = readFileSync(path.join(ROOT, "app/_zdroje/upload.tsx"), "utf8");
+    expect(upload).toMatch(/await import\("\.\/upload-process"\)/);
+    for (const file of page.files) {
+      if (rel(file) === "app/_zdroje/upload.tsx") continue;
+      expect(readFileSync(file, "utf8"), rel(file)).not.toContain("upload-process");
+    }
+    // The processing itself does reach the parser and the converters (so the checks above mean something).
+    expect([...graph("app/_zdroje/upload-process.ts").files].map(rel)).toContain("src/files/dmd/parse.ts");
+    expect(readFileSync(path.join(ROOT, "app/_zdroje/upload-process.ts"), "utf8")).toMatch(/import\("@\/src\/files\/convert\/index"\)/);
   });
 });

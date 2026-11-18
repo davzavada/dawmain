@@ -85,7 +85,7 @@ const ACCESS: Record<string, Access> = {
   user_a: buildAccess({ id: "user_a", publicMetadata: { pro: true } }),
   user_m: buildAccess({ id: "user_m", publicMetadata: { pro: true } }),
   user_nopro: buildAccess({ id: "user_nopro", publicMetadata: { pro: "yes" } }),
-  user_small: buildAccess({ id: "user_small", publicMetadata: { pro: true, filesQuota: { pages: 2 } } }),
+  user_small: buildAccess({ id: "user_small", publicMetadata: { pro: true, filesQuota: { mb: 1 } } }),
   user_banned: buildAccess({ id: "user_banned", banned: true, publicMetadata: { pro: true } }),
 };
 
@@ -107,7 +107,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   process.env = { ...ENV };
-  for (const table of ["documents", "libraries", "usage_daily", "audit_log", "system_state", "terms_acceptance", "blocked_content"]) {
+  for (const table of ["documents", "folders", "libraries", "usage_daily", "audit_log", "system_state", "terms_acceptance", "blocked_content"]) {
     await t.owner.query(`DELETE FROM ${table}`);
   }
 });
@@ -240,11 +240,46 @@ describe("handleDocumentUpload — who may upload where", () => {
 });
 
 describe("handleDocumentUpload — quota and duplicates", () => {
-  it("library quota → 403 with the pages, nothing reserved", async () => {
-    const outcome = await upload("user_small", "user_small", long(12));
-    expectRefusal(outcome, 403, /normostran, v knihovně zbývá 2 z 2/);
-    expect(await libRow("user_small")).toMatchObject({ pages_reserved: 0 });
+  it("storage quota (bytes of originals) → 413 naming the sizes; nothing reserved, nothing stored", async () => {
+    const first = await upload("user_small", "user_small", paged(3, "a"), { original: true, file: { name: "a.pdf", bytes: 800_000, sha256: "a".repeat(64), kind: "pdf" } });
+    expect(first.status).toBe(201);
+    const row = (await t.owner.query<{ original_status: string }>("SELECT original_status FROM documents WHERE id = $1", [(first as { id: string }).id])).rows[0];
+    expect(row.original_status).toBe("uploading");
+    const reserved = (await libRow("user_small")).pages_reserved;
+    const second = await upload("user_small", "user_small", paged(3, "b"), { original: true, file: { name: "b.pdf", bytes: 400_000, sha256: "b".repeat(64), kind: "pdf" } });
+    expectRefusal(second, 413, /^Soubor má 391 kB, v knihovně zbývá 243 kB z 1 MB\. Smažte některý dokument\.$/);
+    expect((await libRow("user_small")).pages_reserved).toBe(reserved);
+    expect(await docCount()).toBe(1);
+  });
+
+  it("documents without a stored original (legacy, text only) do not count against the quota", async () => {
+    // A text-only upload of a big file: original 'missing', its bytes are not stored.
+    const legacy = await upload("user_small", "user_small", paged(3, "old"), { file: { name: "old.pdf", bytes: 5_000_000, sha256: "c".repeat(64), kind: "pdf" } });
+    expect(legacy.status).toBe(201);
+    const row = (await t.owner.query<{ original_status: string }>("SELECT original_status FROM documents WHERE id = $1", [(legacy as { id: string }).id])).rows[0];
+    expect(row.original_status).toBe("missing");
+    const fresh = await upload("user_small", "user_small", paged(3, "new"), { original: true, file: { name: "new.pdf", bytes: 1_000_000, sha256: "d".repeat(64), kind: "pdf" } });
+    expect(fresh.status).toBe(201);
+  });
+
+  it("an original over FILES_MAX_FILE_MB → 413 before anything is read from the database", async () => {
+    process.env.FILES_MAX_FILE_MB = "2";
+    const outcome = await upload("user_a", "user_a", paged(3), { original: true, file: { name: "big.pdf", bytes: 3 * 1024 * 1024, sha256: "a".repeat(64), kind: "pdf" } });
+    expectRefusal(outcome, 413, /^Soubor má 3 MB, nahrát jde nejvýš 2 MB\.$/);
+    expect(LIMITS.maxFileBytes).toBe(2 * 1024 * 1024);
+  });
+
+  it("folderId: a folder of the same library is kept; a foreign or unknown one → 422", async () => {
+    await t.owner.query("INSERT INTO libraries (id) VALUES ('user_a'), ('user_m') ON CONFLICT DO NOTHING");
+    const mine = (await t.owner.query<{ id: string }>("INSERT INTO folders (library_id, name, created_by) VALUES ('user_a', 'Smlouvy', 'user_a') RETURNING id")).rows[0].id;
+    const theirs = (await t.owner.query<{ id: string }>("INSERT INTO folders (library_id, name, created_by) VALUES ('user_m', 'Cizí', 'user_m') RETURNING id")).rows[0].id;
+    expectRefusal(await upload("user_a", "user_a", paged(3, "x"), { folderId: theirs }), 422, /složka/i);
     expect(await docCount()).toBe(0);
+    const ok = (await upload("user_a", "user_a", paged(3, "y"), { folderId: mine })) as { id: string };
+    const row = (await t.owner.query<{ folder_id: string }>("SELECT folder_id FROM documents WHERE id = $1", [ok.id])).rows[0];
+    expect(row.folder_id).toBe(mine);
+    await t.owner.query("DELETE FROM documents");
+    await t.owner.query("DELETE FROM folders");
   });
 
   it("global cap → 403", async () => {

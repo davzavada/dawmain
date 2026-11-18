@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/src/admin/server";
-import { applyTeamChange, type TeamResult } from "@/src/admin/teams";
+import { applyTeamChange, setTeamLogo, type TeamResult } from "@/src/admin/teams";
 import { cleanTeamChange } from "@/src/admin/teams-model";
 
 /**
@@ -20,6 +20,22 @@ export async function changeTeamAction(teamId: string | null, change: unknown): 
     return { ok: false, error: naming ? "Název týmu: 2 až 60 znaků, písmena, číslice a běžná interpunkce." : "Neplatná změna." };
   }
   const result = await applyTeamChange(actor, typeof teamId === "string" ? teamId : null, clean);
+  if (result.ok) revalidatePath("/sprava/tymy");
+  return result;
+}
+
+/** Upload the team's logo (FormData field "logo") or, with `remove`, take it away. Admin re-checked here. */
+export async function teamLogoAction(teamId: string, form: FormData | null): Promise<TeamResult> {
+  const actor = await requireAdmin();
+  if (!actor) return { ok: false, error: "Nemáš oprávnění správce." };
+  if (typeof teamId !== "string") return { ok: false, error: "Neplatný tým." };
+  let file: File | null = null;
+  if (form) {
+    const picked = form.get("logo");
+    if (!(picked instanceof File)) return { ok: false, error: "Vyber obrázek s logem." };
+    file = picked;
+  }
+  const result = await setTeamLogo(actor, teamId, file);
   if (result.ok) revalidatePath("/sprava/tymy");
   return result;
 }

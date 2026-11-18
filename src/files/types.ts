@@ -138,4 +138,13 @@ export interface UploadMeta {
   hints: UploadHints;
   rights: Rights;
   doc_type_hint?: DocType;
+  /**
+   * The original file follows (PUT /api/files/documents/[id]/original?part=N,
+   * then POST to finalize): the document starts with original 'uploading'
+   * and counts against the library's storage quota at once. Absent/false =
+   * text only (original 'missing').
+   */
+  original?: boolean;
+  /** A folder of the same library (uuid); null or absent = the root. */
+  folderId?: string | null;
 }

@@ -17,6 +17,13 @@ export const TERMS_VERSION = "2026-10";
  * because the file kind and the page markers are client-asserted. */
 export const PAGE_CHARS = 3_600;
 
+/**
+ * Originals are uploaded in parts of exactly this many bytes (the last part
+ * may be shorter): PUT /api/files/documents/[id]/original?part=N. Small
+ * enough for any proxy body limit, big enough to keep the requests few.
+ */
+export const ORIGINAL_PART_BYTES = 8 * 1024 * 1024;
+
 export type FilesMode = "on" | "readonly" | "off" | "unconfigured";
 
 /**
@@ -49,12 +56,24 @@ function intEnv(name: string, fallback: number): number {
  * are kept as they are until they are reviewed for the own server.
  */
 export const LIMITS = {
-  get personalPages() {
-    return intEnv("FILES_PERSONAL_PAGES", 10_000);
+  /** Storage quota of the personal library, bytes of originals (FILES_PERSONAL_MB; override: user.publicMetadata.filesQuota.mb). */
+  get personalBytes() {
+    return intEnv("FILES_PERSONAL_MB", 100) * 1024 * 1024;
   },
-  /** Default quota of a team library (override: organization.publicMetadata.filesQuota.pages). */
-  get teamPages() {
-    return intEnv("FILES_TEAM_PAGES", 10_000);
+  /** Default storage quota of a team library (FILES_TEAM_MB; override: organization.publicMetadata.filesQuota.mb). */
+  get teamBytes() {
+    return intEnv("FILES_TEAM_MB", 1024) * 1024 * 1024;
+  },
+  /** Largest original file one upload may store (FILES_MAX_FILE_MB). */
+  get maxFileBytes() {
+    return intEnv("FILES_MAX_FILE_MB", 100) * 1024 * 1024;
+  },
+  /**
+   * Billed pages of stored text one user may export per UTC day, over all
+   * documents (FILES_EXPORT_PAGES_PER_DAY) — about one big library a day.
+   */
+  get exportPagesPerDay() {
+    return intEnv("FILES_EXPORT_PAGES_PER_DAY", 10_000);
   },
   get globalPages() {
     return intEnv("FILES_GLOBAL_MAX_PAGES", 30_000);

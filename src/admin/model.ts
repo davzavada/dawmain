@@ -35,28 +35,34 @@ export interface AdminUser {
   /** What the account may use now: files and zotero are on unless switched off, ukaz only when switched on. */
   features: Record<AdminFeature, boolean>;
   /**
-   * The account's own page quota for Vlastní soubory
-   * (`publicMetadata.filesQuota.pages`, read by src/files/access.ts), or null
+   * The account's own storage quota for Vlastní soubory in MB
+   * (`publicMetadata.filesQuota.mb`, read by src/files/access.ts), or null
    * when it has none and the installation's default applies.
    */
-  quotaPages: number | null;
+  quotaMb: number | null;
   banned: boolean;
 }
 
-/** The largest per-account quota an admin can set (normostrany). */
-export const MAX_QUOTA_PAGES = 5_000_000;
+/** The largest storage quota an admin can set, in MB (an account's or a team's). */
+export const MAX_QUOTA_MB = 100_000;
 
-/** A valid per-account quota: a whole number of pages from 1 to MAX_QUOTA_PAGES. */
-export function validQuotaPages(value: unknown): value is number {
-  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= MAX_QUOTA_PAGES;
+/** A valid storage quota: a whole number of MB from 1 to MAX_QUOTA_MB. */
+export function validQuotaMb(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= MAX_QUOTA_MB;
+}
+
+/** `filesQuota.mb` as the admin sees it: a positive finite number, else null ("no own quota" — same rule as quotaFrom in src/files/access.ts). */
+export function ownQuotaMb(filesQuota: unknown): number | null {
+  const q = filesQuota !== null && typeof filesQuota === "object" && !Array.isArray(filesQuota) ? (filesQuota as Record<string, unknown>) : {};
+  return typeof q.mb === "number" && Number.isFinite(q.mb) && q.mb > 0 ? q.mb : null;
 }
 
 export type AdminChange =
   | { kind: "role"; admin: boolean }
   | { kind: "pro"; on: boolean }
   | { kind: "feature"; feature: AdminFeature; on: boolean }
-  /** `pages: null` removes the account's own quota (back to the default). */
-  | { kind: "quota"; pages: number | null };
+  /** `mb: null` removes the account's own quota (back to the default). */
+  | { kind: "quota"; mb: number | null };
 
 function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -83,12 +89,6 @@ export interface ClerkAdminUserLike {
   publicMetadata?: unknown;
 }
 
-/** Same rule as quotaFrom in src/files/access.ts: a finite number ≥ 1, floored; anything else is "no own quota". */
-function ownQuota(filesQuota: unknown): number | null {
-  const pages = record(filesQuota).pages;
-  return typeof pages === "number" && Number.isFinite(pages) && pages >= 1 ? Math.floor(pages) : null;
-}
-
 export function toAdminUser(user: ClerkAdminUserLike, envAdmin: boolean): AdminUser {
   const meta = record(user.publicMetadata);
   const features = record(meta.features);
@@ -106,7 +106,7 @@ export function toAdminUser(user: ClerkAdminUserLike, envAdmin: boolean): AdminU
     envAdmin,
     pro: meta.pro === true,
     features: { files: features.files !== false, zotero: features.zotero !== false, ukaz: features.ukaz === true },
-    quotaPages: ownQuota(meta.filesQuota),
+    quotaMb: ownQuotaMb(meta.filesQuota),
     banned: user.banned === true || user.locked === true,
   };
 }
@@ -126,7 +126,8 @@ export function metadataPatch(current: unknown, change: AdminChange): Record<str
       return { features: { ...record(record(current).features), [change.feature]: change.on } };
     case "quota":
       // Clerk merges metadata deeply and drops a key set to null.
-      return { filesQuota: change.pages === null ? null : { pages: change.pages } };
+      // The former page quota (`pages`) goes with it.
+      return { filesQuota: change.mb === null ? null : { mb: change.mb, pages: null } };
   }
 }
 

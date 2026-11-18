@@ -9,7 +9,8 @@ type Ctx = { params: Promise<{ id: string }> };
 /**
  * One document of a library the caller belongs to (src/files/web.ts):
  *   GET     detail + the first ~1,500 characters as plain text
- *   PATCH   { action: "confirm" | "save", version, meta } or { action: "enable", enabled }
+ *   PATCH   { action: "confirm" | "save", version, meta }, { action: "rename", name }
+ *           or { action: "move", folderId: string | null }
  *   DELETE  delete (allowed in read-only mode)
  * A document in a library the caller does not belong to is 404, like one
  * that does not exist.

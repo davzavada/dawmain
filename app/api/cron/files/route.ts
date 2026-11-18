@@ -26,6 +26,7 @@ import { errorCode, filesJson } from "@/src/files/errors";
 import { effectiveMode, GUARDS_STATE_KEY, measureGuards } from "@/src/files/guards";
 import { ingestDocument } from "@/src/files/ingest";
 import { reindexRequested } from "@/src/files/reindex";
+import { abandonStaleOriginals } from "@/src/files/db/originals";
 import { tokenMatches } from "@/src/mcp/config";
 
 export const runtime = "nodejs";
@@ -42,6 +43,8 @@ const OWNER_CHECKS_PER_RUN = 50;
 const REVOKED_PURGE_DAYS = 6;
 /** Failed uploads keep their text this long (for an operator requeue), then it is dropped. */
 const PENDING_KEEP_DAYS = 7;
+/** An original still 'uploading' after this long was abandoned: its parts go and it stops counting against the quota. */
+const ORIGINAL_UPLOAD_HOURS = 24;
 /** Libraries whose failed uploads are swept per run. */
 const SWEEP_PER_RUN = 200;
 /** Ingests this run may start in mode "on" (plus any number of over-attempt fast fails). */
@@ -74,7 +77,9 @@ const DAY_MS = 86_400_000;
  *   4. ingest queue: documents over their attempts are failed (reservation
  *      released) in any mode; waiting ones are ingested when the mode is "on";
  *   5. re-derivations deferred by the libraries' daily budget (mode "on");
- *   6. drop the stored text of uploads that failed more than 7 days ago;
+ *   6. drop the stored text of uploads that failed more than 7 days ago,
+ *      and the parts of originals still 'uploading' after 24 h (the
+ *      original becomes 'missing' and stops counting against the quota);
  *   7. recount every library's page and document counters from its
  *      documents (a takedown or a crash never leaves them drifting);
  *   8. retention (/soukromi): usage counters after 12 months (per-document
@@ -110,6 +115,7 @@ interface Summary {
   ingestsFailed: number;
   ingestsRun: number;
   pendingCleared: number;
+  originalsAbandoned: number;
   reindexed: number;
   countersFixed: number;
   usagePruned: number;
@@ -131,6 +137,7 @@ async function runMaintenance(started: number): Promise<Summary> {
     ingestsFailed: 0,
     ingestsRun: 0,
     pendingCleared: 0,
+    originalsAbandoned: 0,
     reindexed: 0,
     countersFixed: 0,
     usagePruned: 0,
@@ -281,6 +288,16 @@ async function runMaintenance(started: number): Promise<Summary> {
     for (const lib of libraries.slice(0, SWEEP_PER_RUN)) {
       if (late()) break;
       summary.pendingCleared += await withScope([lib.id], (db) => clearStalePending(db, lib.id, PENDING_KEEP_DAYS));
+    }
+  });
+
+  await task("originals", async () => {
+    for (const lib of libraries.slice(0, SWEEP_PER_RUN)) {
+      if (late()) break;
+      if (purgedNow.has(lib.id)) continue;
+      summary.originalsAbandoned += await withScope([lib.id], (db) => abandonStaleOriginals(db, lib.id, ORIGINAL_UPLOAD_HOURS), {
+        statementTimeoutMs: 60_000,
+      });
     }
   });
 

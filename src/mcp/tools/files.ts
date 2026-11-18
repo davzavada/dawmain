@@ -2432,7 +2432,7 @@ async function filesList(
     const c = counts[l.id] ?? { review: 0, processing: 0, ready: 0 };
     // Handles only once there is something to choose between (a team).
     const kind = g.access.all.length < 2 ? "" : l.kind === "org" ? ` (tým, library: "${libraryHandle(l)}")` : ` (osobní, library: "osobni")`;
-    return `- „${safeLibraryName(l)}“${kind} — ${c.ready} připraveno · ${c.review} ke kontrole · ${c.processing} zpracovává se · ${formatCount(pagesUsed.get(l.id) ?? 0)} / ${formatCount(l.quotaPages)} stran`;
+    return `- „${safeLibraryName(l)}“${kind} — ${c.ready} připraveno · ${c.review} ke kontrole · ${c.processing} zpracovává se · ${formatCount(pagesUsed.get(l.id) ?? 0)} stran`;
   });
   const first = (args.page - 1) * args.limit;
   const nonce = newNonce();

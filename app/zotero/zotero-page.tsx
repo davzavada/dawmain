@@ -1,34 +1,48 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { CONTACT } from "@/app/_legal";
-import { ZOTERO_STAV, type ZoteroConnectionView, type ZoteroModeView, type ZoteroStatus, type ZoteroStav } from "@/src/zotero/web-types";
-import { api } from "./api";
-import { Confirm, Dialog } from "./dialog";
-import { formatDate } from "./format";
-import { ZIcon, type ZIconName } from "./icons";
-import { closeZotero, dropZoteroStav, requestSignIn, useZdroje } from "./store";
-import { asStatus, notifyZoteroChanged, STATUS_URL } from "./zotero-status";
+import { api } from "@/app/_zdroje/api";
+import { Confirm } from "@/app/_zdroje/dialog";
+import { formatCount, formatDate, plural } from "@/app/_zdroje/format";
+import { ZIcon, type ZIconName } from "@/app/_zdroje/icons";
+import { dropZoteroStav, requestSignIn, useZdroje } from "@/app/_zdroje/store";
+import { asStatus, notifyZoteroChanged, STATUS_URL } from "@/app/_zdroje/zotero-status";
+import {
+  ZOTERO_STAV,
+  type ZoteroConnectionView,
+  type ZoteroLibrariesAnswer,
+  type ZoteroLibraryView,
+  type ZoteroModeView,
+  type ZoteroStatus,
+  type ZoteroStav,
+} from "@/src/zotero/web-types";
 
 /**
- * The Zotero modal, opened by ZdrojeModals (./modals.tsx) from ?zotero=1:
- * connect the user's zotero.org library — choosing first what Dawmain may do
- * there ("Jen číst" or "Číst a ukládat") — or see, reconnect and remove the
- * connection. The routes are the contract in src/zotero/web-types.ts:
+ * The /zotero page (app/zotero/page.tsx): connect the user's zotero.org
+ * library — choosing first what Dawmain may do there ("Jen číst" or "Číst a
+ * ukládat") — or see the connection, switch its libraries on and off for
+ * the assistant, change the permission (a reconnect) and remove it. It was
+ * a modal (?zotero=1, which now leads here). The routes are the contract in
+ * src/zotero/web-types.ts:
  *
- *   status      GET, JSON — loaded when the modal opens and after Odpojit
+ *   status      GET, JSON — loaded on arrival and after Odpojit
+ *   libraries   GET, JSON — the personal library and the readable groups
+ *               with their switches; POST { library, on } flips one
  *   connect     a real HTML form POST (mode=read|write from the radio
  *               cards), not fetch: the server answers 303 to zotero.org's
  *               consent page, and the whole tab goes there
  *   disconnect  POST via api() (JSON)
  *
- * zotero.org and our callback send the user back to /?zotero=1&stav=<outcome>;
- * the modal keeps the outcome in a banner and drops &stav from the URL, so
+ * zotero.org and our callback send the user back to /zotero?stav=<outcome>;
+ * the page keeps the outcome in a banner and drops &stav from the URL, so
  * a reload or a copied link does not announce it again.
  */
 
 const CONNECT_URL = "/api/zotero/connect";
 const DISCONNECT_URL = "/api/zotero/disconnect";
+const LIBRARIES_URL = "/api/zotero/libraries";
 const MAIL_ZOTERO = `mailto:${CONTACT}?subject=${encodeURIComponent("Dawmain - Zotero (Pro)")}`;
 
 const BAD_ANSWER = "Server odpověděl nečekaně. Zkuste to prosím za chvíli.";
@@ -97,7 +111,13 @@ function since(iso: string): string {
   return date ? `od ${date}` : "";
 }
 
-export function ZoteroModal({ stav }: { stav: string | null }) {
+/** The page, reading `stav` (the connect flow's outcome) from the URL. */
+export function ZoteroPage() {
+  const stav = useSearchParams().get("stav");
+  return <ZoteroPanel stav={stav} />;
+}
+
+export function ZoteroPanel({ stav }: { stav: string | null }) {
   const { auth } = useZdroje();
   const [status, setStatus] = useState<ZoteroStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -118,7 +138,7 @@ export function ZoteroModal({ stav }: { stav: string | null }) {
     setStatus(null);
     setError(null);
     setReload((r) => r + 1);
-    // The home page row (./own-sources.tsx) must not keep showing the old connection.
+    // The home page row (app/_zdroje/own-sources.tsx) must not keep showing the old connection.
     notifyZoteroChanged();
   }, []);
 
@@ -131,7 +151,7 @@ export function ZoteroModal({ stav }: { stav: string | null }) {
 
   // Signed out (known from Clerk) or no Clerk at all: nothing to ask the server. Until Clerk has
   // loaded, wait ("Načítám…"): the page is static, so only Clerk brings the session cookie up to
-  // date (./clerk-bridge.tsx), and asking with a stale one would read as signed out.
+  // date (app/_zdroje/clerk-bridge.tsx), and asking with a stale one would read as signed out.
   const authKey = auth === "signed_in" ? "in" : auth === "signed_out" ? "out" : auth === "none" ? "none" : "wait";
   useEffect(() => {
     if (authKey !== "in") return;
@@ -194,6 +214,7 @@ export function ZoteroModal({ stav }: { stav: string | null }) {
               ? "Režim Pro teď nemáte, asistent do knihovny nevidí. Odpojit Zotero můžete dál."
               : null
         }
+        onRevoked={changed}
         onChanged={changed}
       />
     );
@@ -236,18 +257,17 @@ export function ZoteroModal({ stav }: { stav: string | null }) {
   const mode = status?.state === "ok" ? (status.connection?.mode ?? null) : null;
   const shown = banner && (banner !== "pripojeno" || status) ? { tone: STAV_BANNER[banner].tone, text: bannerText(banner, mode) } : null;
   return (
-    <Dialog
-      title="Zotero"
-      subtitle="Vaše knihovna ze zotero.org, ve které asistent hledá, čte a případně ukládá."
-      size="narrow"
-      onClose={closeZotero}
-      footer={
-        <button type="button" className="zd-btn zd-btn-primary zd-done" onClick={closeZotero}>
-          Hotovo
-        </button>
-      }
-    >
-      <div className="zd-zotero" ref={panel} tabIndex={-1}>
+    <div className="zp">
+      <header className="zp-head">
+        <span className="zp-logo" aria-hidden="true">
+          Z
+        </span>
+        <div className="zp-titles">
+          <h1>Zotero</h1>
+          <p>Vaše knihovna ze zotero.org, ve které asistent hledá, čte a případně ukládá.</p>
+        </div>
+      </header>
+      <div className="zd-zotero zp-panel" ref={panel} tabIndex={-1}>
         {/* Always in the DOM, so screen readers announce the banner when it appears. */}
         <div className="zd-zotero-live" aria-live="polite" aria-atomic="true">
           {shown ? (
@@ -264,7 +284,7 @@ export function ZoteroModal({ stav }: { stav: string | null }) {
         ) : null}
         {body}
       </div>
-    </Dialog>
+    </div>
   );
 }
 
@@ -369,11 +389,11 @@ function ConnectChoice({
 }
 
 /**
- * "Připojit znovu": the button, or — once clicked — the mode choice in its
- * place (Zrušit brings the button back, focused). `children` are the other
- * actions of the row (Odpojit), hidden while choosing.
+ * "Změnit oprávnění" / "Připojit znovu": the button, or — once clicked —
+ * the mode choice in its place (Zrušit brings the button back, focused).
+ * `children` are the other actions of the row, hidden while choosing.
  */
-function Reconnectable({ initial, children }: { initial: ZoteroModeView; children?: ReactNode }) {
+function Reconnectable({ initial, label = "Připojit znovu", children }: { initial: ZoteroModeView; label?: string; children?: ReactNode }) {
   const [choosing, setChoosing] = useState(false);
   const [refocus, setRefocus] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -396,9 +416,9 @@ function Reconnectable({ initial, children }: { initial: ZoteroModeView; childre
     );
   }
   return (
-    <div className="zd-zotero-actions zd-zotero-divided">
+    <div className="zd-zotero-actions">
       <button ref={trigger} type="button" className="zd-btn zd-btn-tall" onClick={() => setChoosing(true)}>
-        Připojit znovu
+        {label}
       </button>
       {children}
     </div>
@@ -420,30 +440,228 @@ function NotConnected() {
   );
 }
 
-function Connected({ connection, warning, onChanged }: { connection: ZoteroConnectionView; warning: string | null; onChanged: () => void }) {
-  const headingId = useId();
+/** What the mode lets the assistant do, as the Oprávnění section says it. */
+function modeLine(mode: ZoteroModeView): string {
+  return MODES.find((m) => m.value === mode)!.text;
+}
+
+function Connected({
+  connection,
+  warning,
+  onChanged,
+  onRevoked,
+}: {
+  connection: ZoteroConnectionView;
+  warning: string | null;
+  onChanged: () => void;
+  onRevoked: () => void;
+}) {
+  const statusId = useId();
+  const permId = useId();
+  const offId = useId();
   const from = since(connection.connectedAt);
   const mode = modeText(connection.mode);
+  // The library list needs a usable connection: configured and Pro (the route refuses otherwise).
+  const libs = useLibraries(warning === null);
+  const on = libs.data?.libraries.filter((l) => l.on) ?? [];
+  const known = on.filter((l) => l.items !== null);
   return (
     <>
-      <section className="zd-zotero-section" aria-labelledby={headingId}>
-        <div className="zd-zotero-who">
-          <span className="zd-zotero-mark" aria-hidden="true">
-            <ZIcon name="library" size={18} />
+      <section className="zd-zotero-section zp-sec" aria-labelledby={statusId}>
+        <h2 className="sr-only" id={statusId}>
+          Připojení
+        </h2>
+        <p className="zp-status">
+          <span className="zp-badge">
+            <ZIcon name="check" size={14} />
+            Připojeno
           </span>
-          <div className="zd-zotero-who-text">
-            <h3 id={headingId}>
-              Připojeno jako <span className="zd-zotero-user">{connection.username}</span>
-            </h3>
-            <p className="zd-zotero-sub">{from ? `${from} · ${mode}` : mode}</p>
-          </div>
-        </div>
+          <span>
+            jako <b className="zd-zotero-user">{connection.username}</b> · {mode}
+          </span>
+        </p>
+        {warning ? <p className="zd-banner">{warning}</p> : null}
+        {warning === null ? (
+          <dl className="zp-stats">
+            <div>
+              <dt>položek k dispozici</dt>
+              <dd>{libs.data ? (known.length ? formatCount(known.reduce((sum, l) => sum + (l.items ?? 0), 0)) : "–") : "…"}</dd>
+            </div>
+            <div>
+              <dt>{libs.data ? plural(libs.data.libraries.length, "knihovna zapnutá", "knihovny zapnuté", "knihoven zapnuto") : "knihovny"}</dt>
+              <dd>{libs.data ? `${on.length} z ${libs.data.libraries.length}` : "…"}</dd>
+            </div>
+            <div>
+              <dt>připojeno</dt>
+              <dd>{from ? from.replace(/^od /, "") : "–"}</dd>
+            </div>
+          </dl>
+        ) : null}
       </section>
-      {warning ? <p className="zd-banner">{warning}</p> : null}
-      <Reconnectable initial={connection.mode}>
+      {warning === null ? <Libraries state={libs} mode={connection.mode} onRevoked={onRevoked} /> : null}
+      <section className="zd-zotero-section zp-sec" aria-labelledby={permId}>
+        <h3 id={permId}>Oprávnění</h3>
+        <p className="zp-hint">{modeLine(connection.mode)} Změnit to jde opětovným připojením.</p>
+        <Reconnectable initial={connection.mode} label="Změnit oprávnění" />
+      </section>
+      <section className="zd-zotero-section zp-sec" aria-labelledby={offId}>
+        <h3 id={offId}>Odpojit</h3>
+        <p className="zp-hint">Dawmain zapomene klíč ke knihovně. Ve vašem Zoteru se nic nesmaže.</p>
         <Disconnect question="Odpojit Zotero? Asistent pak do vaší knihovny neuvidí. Připojit ji můžete kdykoli znovu." onDone={onChanged} />
-      </Reconnectable>
+      </section>
     </>
+  );
+}
+
+interface LibrariesState {
+  data: ZoteroLibrariesAnswer | null;
+  /** Loading failed (with the server's message), and whether it said the connection is gone (409). */
+  error: { text: string; gone: boolean } | null;
+  /** The library whose switch is being stored. */
+  busy: string | null;
+  /** A switch that could not be stored: the message, shown under the list. */
+  toggleError: string | null;
+  reload: () => void;
+  toggle: (library: string, on: boolean) => void;
+}
+
+/** GET /api/zotero/libraries while `enabled`, and POST for a switch; the answer of a POST replaces the list. */
+function useLibraries(enabled: boolean): LibrariesState {
+  const [data, setData] = useState<ZoteroLibrariesAnswer | null>(null);
+  const [error, setError] = useState<{ text: string; gone: boolean } | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [toggleError, setToggleError] = useState<string | null>(null);
+  const [version, setVersion] = useState(0);
+  const reload = useCallback(() => {
+    setError(null);
+    setVersion((v) => v + 1);
+  }, []);
+
+  useEffect(() => {
+    if (!enabled) return;
+    const ctrl = new AbortController();
+    void (async () => {
+      try {
+        const res = await api<ZoteroLibrariesAnswer>(LIBRARIES_URL, { signal: ctrl.signal });
+        if (ctrl.signal.aborted) return;
+        if (res.ok && Array.isArray(res.data?.libraries)) {
+          setData(res.data);
+          setError(null);
+        } else setError({ text: res.ok ? BAD_ANSWER : res.error, gone: !res.ok && res.status === 409 });
+      } catch {
+        // aborted
+      }
+    })();
+    return () => ctrl.abort();
+  }, [enabled, version]);
+
+  const toggle = useCallback((library: string, on: boolean) => {
+    setBusy(library);
+    setToggleError(null);
+    void (async () => {
+      const res = await api<ZoteroLibrariesAnswer>(LIBRARIES_URL, { method: "POST", json: { library, on } });
+      setBusy(null);
+      if (res.ok && Array.isArray(res.data?.libraries)) setData(res.data);
+      else setToggleError(res.ok ? BAD_ANSWER : res.error);
+    })();
+  }, []);
+
+  return { data, error, busy, toggleError, reload, toggle };
+}
+
+/** "1 234 položek" — the count when Zotero gave one. */
+function itemsText(items: number | null): string | null {
+  return items === null ? null : `${formatCount(items)} ${plural(items, "položka", "položky", "položek")}`;
+}
+
+/** "Knihovny a skupiny": every library the key reads, each with its switch; the last one on cannot be switched off. */
+function Libraries({ state, mode, onRevoked }: { state: LibrariesState; mode: ZoteroModeView; onRevoked: () => void }) {
+  const headingId = useId();
+  const { data, error, busy, toggleError } = state;
+  const onCount = data?.libraries.filter((l) => l.on).length ?? 0;
+  const personal = data?.libraries.find((l) => l.kind === "personal");
+  let list: ReactNode;
+  if (data) {
+    list = (
+      <ul className="zp-libs">
+        {data.libraries.map((lib) => (
+          <LibraryRow
+            key={lib.id}
+            lib={lib}
+            mode={mode}
+            busy={busy === lib.id}
+            // Nothing switches while another switch is being stored, or while the groups are not known
+            // (the server counts "at least one on" over all of them); the last one on stays on.
+            locked={busy !== null || data.groupsFailed || (lib.on && onCount <= 1)}
+            onToggle={() => state.toggle(lib.id, !lib.on)}
+          />
+        ))}
+      </ul>
+    );
+  } else if (error) {
+    list = (
+      <div className="zd-zotero-retry">
+        <p className="zd-error" role="alert">
+          {error.text}
+        </p>
+        <button type="button" className="zd-btn" onClick={error.gone ? onRevoked : state.reload}>
+          {error.gone ? "Načíst znovu" : "Zkusit znovu"}
+        </button>
+      </div>
+    );
+  } else {
+    list = (
+      <p className="zd-progress" role="status">
+        <span className="zd-spinner" aria-hidden="true" />
+        Načítám knihovny…
+      </p>
+    );
+  }
+  return (
+    <section className="zd-zotero-section zp-sec" aria-labelledby={headingId}>
+      <h3 id={headingId}>Knihovny a skupiny</h3>
+      <p className="zp-hint">Asistent hledá jen v zapnutých. Vypnutím se v Zoteru nic nesmaže, jen ji Dawmain přestane používat.</p>
+      {list}
+      {data?.groupsFailed ? <p className="zd-banner">Skupiny se teď nepodařilo načíst ze Zotera. Přepínat půjde, až se načtou - zkuste stránku obnovit za chvíli.</p> : null}
+      {mode === "write" && personal && !personal.on ? (
+        <p className="zp-hint">Osobní knihovna je vypnutá, a tak do Zotera asistent nic neuloží. Nové položky ukládá jen do ní.</p>
+      ) : null}
+      {toggleError ? (
+        <p className="zd-error" role="alert">
+          {toggleError}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+function LibraryRow({ lib, mode, busy, locked, onToggle }: { lib: ZoteroLibraryView; mode: ZoteroModeView; busy: boolean; locked: boolean; onToggle: () => void }) {
+  const bits = [
+    lib.kind === "personal" ? "osobní knihovna" : "skupina",
+    itemsText(lib.items),
+    mode === "write" ? (lib.kind === "personal" ? "sem asistent ukládá nové položky" : "jen čtení") : null,
+  ].filter(Boolean);
+  const last = lib.on && locked && !busy;
+  return (
+    <li className="zp-lib" data-off={lib.on ? undefined : "true"} aria-busy={busy || undefined}>
+      <span className="zp-lib-icon" aria-hidden="true">
+        <ZIcon name={lib.kind === "personal" ? "library" : "users"} size={18} />
+      </span>
+      <span className="zp-lib-text">
+        <b>{lib.name}</b>
+        <span>{bits.join(" · ")}</span>
+      </span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={lib.on}
+        aria-label={`Používat ${lib.name}`}
+        title={last ? "Aspoň jedna knihovna musí zůstat zapnutá." : undefined}
+        className="adm-switch"
+        disabled={locked || busy}
+        onClick={onToggle}
+      />
+    </li>
   );
 }
 
@@ -506,8 +724,8 @@ function Disconnect({ question, onDone }: { question: string; onDone: () => void
       {confirming ? (
         <Confirm question={question} confirmLabel="Odpojit" busy={busy} onConfirm={() => void disconnect()} onCancel={cancel} />
       ) : (
-        <button ref={trigger} type="button" className="zd-btn zd-btn-tall" onClick={() => setConfirming(true)}>
-          Odpojit
+        <button ref={trigger} type="button" className="zd-btn zd-btn-tall zp-danger" onClick={() => setConfirming(true)}>
+          Odpojit Zotero
         </button>
       )}
       {error ? (

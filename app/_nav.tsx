@@ -5,6 +5,8 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState, type MouseEvent } from "react";
 import { Icon, type IconName } from "./_icons";
 import { setPlatform, usePlatform, type PlatformId } from "./_platform";
+import { LibraryMark } from "./_zdroje/library-mark";
+import { useZdroje } from "./_zdroje/store";
 
 /**
  * Site navigation: a sticky sidebar on wide screens, a sticky tab strip on
@@ -60,7 +62,57 @@ function useActiveSection(enabled: boolean): string | null {
   return enabled ? active : null;
 }
 
-export function SiteNav({ sourceCount }: { sourceCount: number }) {
+/**
+ * "Moje zdroje": the signed-in user's own sources, each a page of its own —
+ * Osobní soubory (/soubory), Zotero (/zotero, where the deployment can
+ * connect it) and, under "Týmy", one entry per team library the user is a
+ * member of (/soubory/<handle>, with the team's logo or initials).
+ */
+function OwnSourcesNav({ pathname, zotero }: { pathname: string; zotero: boolean }) {
+  const { auth, summary } = useZdroje();
+  if (auth !== "signed_in") return null;
+  const libraries = summary?.state === "ok" ? summary.libraries : [];
+  const personal = libraries.find((l) => l.kind === "user");
+  const teams = libraries.filter((l) => l.kind === "org");
+  const current = (href: string) => (pathname === href ? { "aria-current": "page" as const } : {});
+  return (
+    <>
+      <div className="nav-group">
+        <span className="nav-heading">Moje zdroje</span>
+        <Link href="/soubory" className="nav-item" {...current("/soubory")}>
+          <Icon name="book" />
+          <span>Osobní soubory</span>
+          {personal?.counts ? <span className="nav-count">{personal.counts.total}</span> : null}
+        </Link>
+        {zotero ? (
+          <Link href="/zotero" className="nav-item" {...current("/zotero")}>
+            <span className="nav-zotero" aria-hidden="true">
+              Z
+            </span>
+            <span>Zotero</span>
+          </Link>
+        ) : null}
+      </div>
+      {teams.length > 0 ? (
+        <div className="nav-group">
+          <span className="nav-heading">Týmy</span>
+          {teams.map((team) => {
+            const href = `/soubory/${encodeURIComponent(team.handle)}`;
+            return (
+              <Link key={team.id} href={href} className="nav-item" data-off={!team.pro || undefined} {...current(href)}>
+                <LibraryMark lib={team} size={18} />
+                <span className="nav-label">{team.name}</span>
+                {team.counts ? <span className="nav-count">{team.counts.total}</span> : null}
+              </Link>
+            );
+          })}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+export function SiteNav({ sourceCount, zotero = false }: { sourceCount: number; zotero?: boolean }) {
   const pathname = usePathname();
   const home = pathname === "/";
   const active = useActiveSection(home);
@@ -90,6 +142,8 @@ export function SiteNav({ sourceCount }: { sourceCount: number }) {
             </Link>
           ))}
         </div>
+
+        <OwnSourcesNav pathname={pathname} zotero={zotero} />
 
         <div className="nav-group">
           <span className="nav-heading">Návod pro</span>

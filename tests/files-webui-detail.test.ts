@@ -1,26 +1,23 @@
 // @vitest-environment happy-dom
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { LibrarySummary, SummaryResponse } from "@/src/files/web-types";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import type { DocumentDetail, DocumentListItem, LibrarySummary, SummaryResponse } from "@/src/files/web-types";
 
 /**
- * A file's open row in the Vlastní soubory modal (&dokument=<id>) in a DOM
+ * The metadata form of one document (FileEditor, app/_zdroje/file-editor.tsx,
+ * the detail panel's "Údaje" on the Vlastní soubory page) in a DOM
  * (happy-dom), fetch faked: "Stáhnout text" downloads GET
  * /api/files/documents/{id}/export?lib=<library> for whoever may delete the
  * document (the export route's own rule), also after Pro was withdrawn
  * (canEdit false), and shows the server's Czech refusal in place; the type
- * switch saves at once, Uložit confirms the short form; a file still being
- * processed only spins and does not open.
+ * switch saves at once, Uložit confirms the short form, Zrušit closes.
  */
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-// The uploader is a lazy chunk, not under test here.
-vi.mock("next/dynamic", () => ({ default: () => () => null }));
-
 const store = await import("@/app/_zdroje/store");
-const { FilesModal } = await import("@/app/_zdroje/files-modal");
+const { FileEditor } = await import("@/app/_zdroje/file-editor");
 
 const ID = "11111111-1111-4111-8111-111111111111";
 
@@ -33,8 +30,10 @@ function library(pro: boolean): LibrarySummary {
     pro,
     canUpload: pro,
     canManageAll: true,
-    quotaPages: 3000,
-    pagesUsed: pro ? 3 : null,
+    handle: "osobni",
+    logoUrl: null,
+    quotaBytes: 104_857_600,
+    bytesUsed: pro ? 3 : null,
     counts: pro ? { total: 1, ready: 1, review: 0, processing: 0, error: 0, searchable: 1 } : null,
   };
 }
@@ -82,7 +81,6 @@ beforeEach(() => {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
-  window.history.replaceState(null, "", `/?soubory=1&dokument=${ID}`);
 });
 afterEach(async () => {
   await act(async () => root.unmount());
@@ -94,9 +92,11 @@ afterEach(async () => {
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
-/** Fake the API: summary, the list (the document as its list item), its detail, PATCH and the export. */
-async function setup(doc: ReturnType<typeof detail>, opts: { pro?: boolean; exportResponse?: () => Response } = {}) {
-  const summary: SummaryResponse = { state: "ok", mode: "on", termsAccepted: true, libraries: [library(opts.pro ?? true)] };
+let handlers: { onChanged: Mock<() => void>; onDeleted: Mock<() => void>; onSaved: Mock<(detail: DocumentDetail) => void>; onClose: Mock<() => void> };
+
+/** Fake the API (summary, the detail, PATCH, DELETE and the export) and render the form for the document's list item. */
+async function setup(doc: ReturnType<typeof detail>, opts: { pro?: boolean; readonly?: boolean; exportResponse?: () => Response } = {}) {
+  const summary: SummaryResponse = { state: "ok", mode: "on", termsAccepted: true, libraries: [library(opts.pro ?? true)], maxFileBytes: 104_857_600 };
   let current = doc;
   vi.stubGlobal(
     "fetch",
@@ -106,6 +106,7 @@ async function setup(doc: ReturnType<typeof detail>, opts: { pro?: boolean; expo
       calls.push({ url, method, body });
       if (url.startsWith("/api/files/summary")) return json(summary);
       if (url.startsWith("/api/files/documents?")) return json({ libraryId: "user_a", documents: [current], total: 1 });
+      if (method === "DELETE") return new Response(null, { status: 204 });
       if (url.includes("/export")) return (opts.exportResponse ?? (() => new Response("", { status: 500 })))();
       if (method === "PATCH") {
         const meta = (body as { meta: { doc_type: string } }).meta;
@@ -119,8 +120,10 @@ async function setup(doc: ReturnType<typeof detail>, opts: { pro?: boolean; expo
   await act(async () => {
     await store.refreshSummary();
   });
-  await act(async () => root.render(createElement(FilesModal, { documentId: ID })));
-  await waitFor(() => host.querySelector(".zd-file-open .zd-file-actions") !== null || host.querySelector('[data-pending="true"]') !== null);
+  handlers = { onChanged: vi.fn<() => void>(), onDeleted: vi.fn<() => void>(), onSaved: vi.fn<(detail: DocumentDetail) => void>(), onClose: vi.fn<() => void>() };
+  const item = { ...doc, folderId: null, original: "ready" as const } as unknown as DocumentListItem;
+  await act(async () => root.render(createElement(FileEditor, { doc: item, readonly: opts.readonly ?? false, ...handlers })));
+  await waitFor(() => host.querySelector(".zd-file-open .zd-file-actions") !== null);
 }
 
 async function waitFor(done: () => boolean): Promise<void> {
@@ -133,7 +136,7 @@ async function waitFor(done: () => boolean): Promise<void> {
 
 const button = (text: string) => [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === text) as HTMLButtonElement | undefined;
 
-describe("a file's open row", () => {
+describe("a document's metadata form (FileEditor)", () => {
   it("downloads the text of a file whose library lost Pro (named by the server); no editing", async () => {
     let downloaded: string | null = null;
     const created = vi.fn(() => "blob:x");
@@ -160,7 +163,7 @@ describe("a file's open row", () => {
     expect(downloaded).toBe("Komentář.md");
   });
 
-  it("a refusal shows the server's message in the row", async () => {
+  it("a refusal shows the server's message in the form", async () => {
     await setup(detail(), {
       exportResponse: () => json({ error: "Dnes už jste si text tohoto dokumentu stáhli několikrát. Zkuste to zítra." }, 429),
     });
@@ -194,11 +197,30 @@ describe("a file's open row", () => {
     expect(host.querySelector(".zd-ok-line")?.textContent).toBe("Uloženo.");
   });
 
-  it("a file still being processed only spins: no row to open", async () => {
-    await setup(detail({ status: "processing" }));
-    const pending = host.querySelector('[data-pending="true"]');
-    expect(pending?.textContent).toContain("Zpracovávám…");
-    expect(pending?.querySelector("button")).toBeNull();
-    expect(host.querySelector(".zd-file-open")).toBeNull();
+  it("the saved detail goes to onSaved; Zrušit drops the edits and closes", async () => {
+    await setup(detail({ canEdit: true, docType: "jine" }));
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((b) => b.textContent === "Kniha")!.click());
+    await waitFor(() => handlers.onSaved.mock.calls.length === 1);
+    expect(handlers.onSaved.mock.calls[0][0]).toMatchObject({ id: ID, docType: "kniha", metaVersion: 2 });
+    await act(async () => button("Zrušit")!.click());
+    expect(handlers.onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("read-only mode: the fields are locked and there is no Uložit, the text still downloads", async () => {
+    await setup(detail({ canEdit: true }), { readonly: true });
+    expect(host.textContent).toContain("jen pro čtení");
+    expect(button("Uložit")).toBeUndefined();
+    expect((host.querySelector(".zd-file-fields") as HTMLFieldSetElement).disabled).toBe(true);
+    expect(button("Stáhnout text")).toBeDefined();
+  });
+
+  it("Smazat dokument asks first, then DELETEs and reports onDeleted", async () => {
+    await setup(detail({ canEdit: true }));
+    await act(async () => button("Smazat dokument")!.click());
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+    expect(host.textContent).toContain("Smazat „k.pdf“?");
+    await act(async () => button("Smazat")!.click());
+    await waitFor(() => handlers.onDeleted.mock.calls.length === 1);
+    expect(calls.find((c) => c.method === "DELETE")?.url).toBe(`/api/files/documents/${ID}`);
   });
 });

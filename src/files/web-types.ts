@@ -30,9 +30,14 @@ export interface LibrarySummary {
   pro: boolean;
   canUpload: boolean;
   canManageAll: boolean;
-  quotaPages: number;
-  /** Stored + reserved (in flight) pages; null when not loaded (library without Pro, or the feature is off — no database wake). */
-  pagesUsed: number | null;
+  /** URL segment of the library page: "osobni" for the personal library, the team's slug (or id) otherwise. */
+  handle: string;
+  /** Team logo (Clerk organization image the admin uploaded); null = show initials. Always null for the personal library. */
+  logoUrl: string | null;
+  /** Storage quota in bytes (originals of the documents). */
+  quotaBytes: number;
+  /** Bytes of the originals stored or being uploaded; null when not loaded (library without Pro, or the feature is off — no database wake). */
+  bytesUsed: number | null;
   /** Null when not loaded (library without Pro, or the feature is off — its list loads when opened). */
   counts: LibraryDocCounts | null;
 }
@@ -50,6 +55,8 @@ export type SummaryResponse =
       libraries: LibrarySummary[];
       /** UKAŽ (the doctrine tools) is switched on for this account; the home page shows the row greyed out without it. Absent in older hints: off. */
       ukaz?: boolean;
+      /** Largest original one upload may store (LIMITS.maxFileBytes); a bigger file is refused before conversion. */
+      maxFileBytes: number;
     };
 
 /** One row of the modal's document list. */
@@ -77,11 +84,33 @@ export interface DocumentListItem {
   billablePages: number;
   /** Conversion flags worth a badge: footnotes unsure, OCR/plain, lost numbering, instruction-like text. */
   flags: string[];
+  /** The folder the document sits in; null = the library's root. */
+  folderId: string | null;
+  /**
+   * The original file: "ready" can be downloaded (GET …/original), "uploading"
+   * is on its way (or was abandoned mid-way), "missing" was never stored
+   * (documents uploaded before originals were kept: only the text exists).
+   */
+  original: OriginalState;
+}
+
+export type OriginalState = "missing" | "uploading" | "ready";
+
+/** A folder of a library. Folders nest; a name is unique among its siblings (case-insensitive). */
+export interface FolderItem {
+  id: string;
+  libraryId: string;
+  /** null = in the library's root. */
+  parentId: string | null;
+  name: string;
+  createdAt: string;
+  mine: boolean;
 }
 
 export interface DocumentListResponse {
   libraryId: string;
   documents: DocumentListItem[];
+  folders: FolderItem[];
   total: number;
 }
 

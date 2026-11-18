@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { dayBefore, formatDay, MAX_QUOTA_PAGES, validQuotaPages, type AdminFeature, type AdminUser } from "@/src/admin/model";
-import { formatCount, initials } from "../_zdroje/format";
+import { dayBefore, formatDay, MAX_QUOTA_MB, validQuotaMb, type AdminFeature, type AdminUser } from "@/src/admin/model";
+import { formatCount, formatStorageBytes as formatBytes, initials } from "../_zdroje/format";
 import { changeUserAction } from "./actions";
 
 /**
@@ -41,15 +41,15 @@ export function AdminConsole({
   today,
   windowDays,
   usageAvailable,
-  defaultQuotaPages,
+  defaultQuotaMb,
 }: {
   rows: AdminRow[];
   me: string;
   today: string;
   windowDays: number;
   usageAvailable: boolean;
-  /** The installation's page quota for an account without its own (LIMITS.personalPages). */
-  defaultQuotaPages: number;
+  /** The installation's storage quota in MB for an account without its own (LIMITS.personalBytes). */
+  defaultQuotaMb: number;
 }) {
   const [rows, setRows] = useState(initial);
   const [filter, setFilter] = useState<Filter>("all");
@@ -163,7 +163,7 @@ export function AdminConsole({
 
         <aside className="adm-panel adm-detail" aria-live="polite">
           {current ? (
-            <Detail row={current} me={me} today={today} windowDays={windowDays} usageAvailable={usageAvailable} defaultQuotaPages={defaultQuotaPages} pending={pending} message={message} onChange={change} />
+            <Detail row={current} me={me} today={today} windowDays={windowDays} usageAvailable={usageAvailable} defaultQuotaMb={defaultQuotaMb} pending={pending} message={message} onChange={change} />
           ) : (
             <p className="adm-empty">Vyber účet v tabulce.</p>
           )}
@@ -246,39 +246,40 @@ function Chart({ data, today }: { data: number[]; today: string }) {
 }
 
 /**
- * The account's page quota for Vlastní soubory: its own number, or the
- * installation's default. One page = a normostrana (3 600 characters).
+ * The account's storage quota for Vlastní soubory (originals), in MB: its
+ * own number, or the installation's default.
  */
 function Quota({
   user,
-  defaultPages,
+  defaultMb,
   pending,
   onChange,
 }: {
   user: AdminUser;
-  defaultPages: number;
+  defaultMb: number;
   pending: boolean;
   onChange: (user: AdminUser, change: Parameters<typeof changeUserAction>[1]) => void;
 }) {
-  const current = user.quotaPages ?? defaultPages;
+  const current = user.quotaMb ?? defaultMb;
   const [text, setText] = useState(String(current));
-  const pages = /^\d{1,7}$/.test(text.trim()) ? Number(text.trim()) : NaN;
-  const valid = validQuotaPages(pages);
-  const changed = valid && pages !== current;
+  const mb = /^\d{1,7}$/.test(text.trim()) ? Number(text.trim()) : NaN;
+  const valid = validQuotaMb(mb);
+  const changed = valid && mb !== current;
+  const defaultLabel = formatBytes(defaultMb * 1024 * 1024);
   return (
     <div className="adm-row adm-row-sub adm-quota">
       <div>
-        <b>Kvóta stran</b>
+        <b>Kvóta úložiště (MB)</b>
         <span>
-          {user.quotaPages === null ? `Výchozí: ${formatCount(defaultPages)} normostran` : `Vlastní kvóta (výchozí je ${formatCount(defaultPages)})`}
-          {text.trim() !== "" && !valid ? ` · zadej celé číslo 1 až ${formatCount(MAX_QUOTA_PAGES)}` : ""}
+          {user.quotaMb === null ? `Výchozí: ${defaultLabel}` : `Vlastní kvóta (výchozí je ${defaultLabel})`}
+          {text.trim() !== "" && !valid ? ` · zadej celé číslo 1 až ${formatCount(MAX_QUOTA_MB)}` : ""}
         </span>
       </div>
       <form
         className="adm-quota-form"
         onSubmit={(e) => {
           e.preventDefault();
-          if (changed) onChange(user, { kind: "quota", pages });
+          if (changed) onChange(user, { kind: "quota", mb });
         }}
       >
         <input
@@ -286,15 +287,15 @@ function Quota({
           inputMode="numeric"
           value={text}
           onChange={(e) => setText(e.target.value)}
-          aria-label={`Kvóta stran pro ${user.name}`}
+          aria-label={`Kvóta úložiště v MB pro ${user.name}`}
           aria-invalid={text.trim() !== "" && !valid}
           disabled={pending}
         />
         <button type="submit" className="zd-btn" disabled={pending || !changed}>
           Uložit
         </button>
-        {user.quotaPages !== null ? (
-          <button type="button" className="zd-btn" disabled={pending} onClick={() => onChange(user, { kind: "quota", pages: null })}>
+        {user.quotaMb !== null ? (
+          <button type="button" className="zd-btn" disabled={pending} onClick={() => onChange(user, { kind: "quota", mb: null })}>
             Výchozí
           </button>
         ) : null}
@@ -313,7 +314,7 @@ function Detail({
   today,
   windowDays,
   usageAvailable,
-  defaultQuotaPages,
+  defaultQuotaMb,
   pending,
   message,
   onChange,
@@ -323,7 +324,7 @@ function Detail({
   today: string;
   windowDays: number;
   usageAvailable: boolean;
-  defaultQuotaPages: number;
+  defaultQuotaMb: number;
   pending: boolean;
   message: string | null;
   onChange: (user: AdminUser, change: Parameters<typeof changeUserAction>[1]) => void;
@@ -382,7 +383,7 @@ function Detail({
           );
         })}
         {user.pro && user.features.files ? (
-          <Quota key={`${user.id}:${user.quotaPages ?? "default"}`} user={user} defaultPages={defaultQuotaPages} pending={pending} onChange={onChange} />
+          <Quota key={`${user.id}:${user.quotaMb ?? "default"}`} user={user} defaultMb={defaultQuotaMb} pending={pending} onChange={onChange} />
         ) : null}
         {message ? (
           <p className="zd-error" role="alert">

@@ -16,7 +16,7 @@ import type { ConnectionState } from "./types";
  *
  * Stored shape (v1), written whole on every save:
  *
- *   { v: 1, userID, username, sealed, fp, notes, groups, connectedAt, revokedAt, mode, keyWrite }
+ *   { v: 1, userID, username, sealed, fp, notes, groups, connectedAt, revokedAt, mode, keyWrite, disabled }
  *
  * `mode` and `keyWrite` came later and stay optional on read: a record
  * without them (connected while the integration was read-only) is "read".
@@ -30,6 +30,11 @@ import type { ConnectionState } from "./types";
  * to, at any depth: `zotero: null` removes the connection, and the null
  * fields of a record (sealed, fp, revokedAt) read back as absent.
  *
+ * `disabled` came later still: the libraries the user switched off for the
+ * assistant on the /zotero page, as the tools name them — "personal" or a
+ * group id in decimal ("12345"). Missing (or not an array) reads as none
+ * off; entries of any other shape are dropped, duplicates collapsed.
+ *
  * `fp` (a short hash of the key) lets markRevoked clear exactly the key that
  * Zotero rejected, and not a newer one the user connected in the meantime.
  *
@@ -42,6 +47,10 @@ import type { ConnectionState } from "./types";
 
 const METADATA_KEY = "zotero";
 const MAX_USERNAME_CHARS = 255;
+/** More than any account's libraries: a bound on what a record may carry. */
+const MAX_DISABLED = 500;
+/** A library as the tools and the /zotero page name it: "personal" or a group id. */
+export const LIBRARY_REF_RE = /^(?:personal|[1-9]\d{0,11})$/;
 const NONE: ConnectionState = Object.freeze({ state: "none" });
 
 type Groups = "all" | "none" | number[];
@@ -58,6 +67,7 @@ interface StoredConnection {
   revokedAt: string | null;
   mode: ZoteroMode;
   keyWrite: boolean;
+  disabled: string[];
 }
 
 /** What the OAuth callback hands over after checking the key. */
@@ -71,6 +81,8 @@ export interface NewConnection {
   mode: ZoteroMode;
   /** Whether the key may write to the personal library (whatever the mode). */
   keyWrite: boolean;
+  /** Libraries switched off (kept across a reconnect of the same Zotero account); default none. */
+  disabled?: readonly string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -91,6 +103,21 @@ function isPositiveId(value: unknown): value is number {
 
 function isGroups(value: unknown): value is Groups {
   return value === "all" || value === "none" || (Array.isArray(value) && value.every(isPositiveId));
+}
+
+/**
+ * The switched-off libraries of a stored value: valid refs only, deduplicated
+ * and sorted ("personal" first), at most MAX_DISABLED. Anything that is not
+ * an array — a record from before the switches — is none. Pure.
+ */
+export function parseDisabled(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const refs = new Set<string>();
+  for (const v of value) {
+    if (typeof v === "string" && LIBRARY_REF_RE.test(v)) refs.add(v);
+    if (refs.size >= MAX_DISABLED) break;
+  }
+  return [...refs].sort((a, b) => (a === "personal" ? -1 : b === "personal" ? 1 : Number(a) - Number(b)));
 }
 
 function isTimestamp(value: unknown): value is string {
@@ -129,6 +156,7 @@ function parseStored(raw: unknown): StoredConnection | null {
     revokedAt,
     mode,
     keyWrite,
+    disabled: parseDisabled(r.disabled),
   };
 }
 
@@ -164,6 +192,7 @@ function toState(userId: string, raw: unknown): ConnectionState {
       connectedAt: stored.connectedAt,
       fp,
       mode: stored.mode,
+      disabled: stored.disabled,
     },
   };
 }
@@ -173,6 +202,7 @@ function freezeState(state: ConnectionState): ConnectionState {
   if (state.state === "ok") {
     Object.freeze(state.conn.creds);
     if (Array.isArray(state.conn.groups)) Object.freeze(state.conn.groups);
+    Object.freeze(state.conn.disabled);
     Object.freeze(state.conn);
   }
   return Object.freeze(state);
@@ -282,6 +312,9 @@ export async function saveConnection(userId: string, input: NewConnection): Prom
   if (input.mode !== "read" && input.mode !== "write") throw new Error("invalid Zotero connection mode");
   if (typeof input.keyWrite !== "boolean") throw new Error("invalid write flag");
   if (input.mode === "write" && !input.keyWrite) throw new Error("write mode needs a key that can write");
+  if (input.disabled !== undefined && (!Array.isArray(input.disabled) || input.disabled.some((d) => typeof d !== "string" || !LIBRARY_REF_RE.test(d)))) {
+    throw new Error("invalid disabled libraries");
+  }
   const record: StoredConnection = {
     v: 1,
     userID: input.userID,
@@ -294,8 +327,27 @@ export async function saveConnection(userId: string, input: NewConnection): Prom
     revokedAt: null,
     mode: input.mode,
     keyWrite: input.keyWrite,
+    disabled: parseDisabled(input.disabled ?? []),
   };
   await write(userId, record);
+}
+
+/**
+ * Store which libraries are switched off for the key with fingerprint `fp`.
+ * Re-reads Clerk (not the micro-cache) and writes only while that key is
+ * still the stored, unrevoked one — a switch flipped on a page left open
+ * across a reconnect or a disconnect changes nothing. Returns whether it
+ * wrote. Throws on a malformed ref.
+ */
+export async function saveDisabledLibraries(userId: string, fp: string, disabled: readonly string[]): Promise<boolean> {
+  assertUserId(userId);
+  if (!Array.isArray(disabled) || disabled.length > MAX_DISABLED || disabled.some((d) => typeof d !== "string" || !LIBRARY_REF_RE.test(d))) {
+    throw new Error("invalid disabled libraries");
+  }
+  const stored = parseStored(await readRaw(userId));
+  if (!stored || stored.sealed === null || stored.fp === null || stored.fp !== fp || stored.revokedAt !== null) return false;
+  await write(userId, { ...stored, disabled: parseDisabled(disabled) });
+  return true;
 }
 
 /**

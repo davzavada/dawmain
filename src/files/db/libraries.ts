@@ -79,6 +79,13 @@ export async function getLibraries(db: Queryable, ids: string[]): Promise<Librar
 }
 
 /**
+ * Library cap to pass to reservePages when only the global cap binds: the
+ * per-library quota is in bytes of originals now (libraryBytesUsed), the
+ * page reservation stays for the installation's global page cap. int4 max.
+ */
+export const NO_LIBRARY_PAGE_CAP = 2_147_483_647;
+
+/**
  * Reserve `pages` against the library cap and the global cap in one atomic
  * step (files_reserve_pages: advisory lock + conditional UPDATE). The library
  * must be in the transaction's scope — the function raises otherwise.
@@ -200,7 +207,7 @@ export async function reviveLibrary(db: Queryable, libraryId: string): Promise<b
 
 /**
  * Delete every document of the library (children cascade), in small batches
- * so no single statement runs into the statement timeout, then zero the
+ * so no single statement runs into the statement timeout, then its folders, then zero the
  * counters, drop the display name (personal data) and set purged_at.
  * Only a library whose purge date has passed: the row is locked and the
  * mark re-read first, so a library revived since the caller listed it
@@ -220,6 +227,9 @@ export async function purgeLibraryContent(db: Queryable, libraryId: string): Pro
     deleted += rows.length;
     if (rows.length < PURGE_BATCH) break;
   }
+  // Folders after their documents (documents.folder_id references them); one
+  // statement, so the parent links among them are checked only at its end.
+  await db.query("DELETE FROM folders WHERE library_id = $1", [libraryId]);
   await db.query(
     `UPDATE libraries SET page_count = 0, pages_reserved = 0, doc_count = 0, display_name = NULL,
             settings = '{}'::jsonb, purged_at = now()
@@ -240,4 +250,36 @@ export async function lockDuePurge(db: Queryable, libraryId: string): Promise<bo
     [libraryId],
   );
   return rows.length > 0;
+}
+
+/**
+ * Bytes of originals per library — stored, or being uploaded (an upload
+ * counts from its first byte, so parallel uploads cannot overshoot the
+ * quota). Documents whose original is 'missing' (uploaded before originals
+ * were kept, or an abandoned upload the cron dropped) and documents being
+ * deleted do not count. Libraries without documents come back as 0.
+ */
+export async function libraryBytesUsed(db: Queryable, ids: string[]): Promise<Record<string, number>> {
+  const out: Record<string, number> = {};
+  for (const id of ids) out[id] = 0;
+  if (ids.length === 0) return out;
+  const { rows } = await db.query(
+    `SELECT library_id, coalesce(sum(file_bytes), 0) AS bytes FROM documents
+      WHERE library_id = ANY($1::text[]) AND original_status <> 'missing' AND status <> 'deleting'
+      GROUP BY library_id`,
+    [ids],
+  );
+  for (const r of rows) out[String(r.library_id)] = num(r.bytes);
+  return out;
+}
+
+/** Lock the library row (FOR UPDATE) so byte-quota checks of concurrent uploads run one after another. */
+export async function lockLibrary(db: Queryable, libraryId: string): Promise<void> {
+  await db.query("SELECT 1 FROM libraries WHERE id = $1 FOR UPDATE", [libraryId]);
+}
+
+/** Bytes of originals of every library that has any (files_library_bytes — sums only), by library id. */
+export async function allLibraryBytes(db: Queryable): Promise<Map<string, number>> {
+  const { rows } = await db.query("SELECT library_id, bytes FROM files_library_bytes()");
+  return new Map(rows.map((r) => [String(r.library_id), num(r.bytes)]));
 }

@@ -8,13 +8,13 @@ import { clerkConfigured, tokenMatches } from "@/src/mcp/config";
 import { proRefusal } from "@/src/mcp/pro-caller";
 import { forwardedHostTrusted } from "@/src/runtime";
 import { SourceError } from "@/src/sources/shared/errors";
-import { getKeyInfo, listGroups, revokeKey } from "./client";
+import { getKeyInfo, listGroups, revokeKey, searchItems } from "./client";
 import { CALLBACK_PATH, LIMITS, STATE_COOKIE, STATE_TTL_SECONDS, zoteroConfigured, type ZoteroMode } from "./config";
 import { ZoteroKeyInvalidError, zoteroBreakerOpen } from "./http";
 import { accessToken, authorizeUrl, openState, requestToken, sealState, type AccessGrant, type OpenedState } from "./oauth";
-import { deleteConnection, keyFingerprint, loadConnection, markRevoked, saveConnection } from "./store";
+import { deleteConnection, keyFingerprint, LIBRARY_REF_RE, loadConnection, markRevoked, saveConnection, saveDisabledLibraries } from "./store";
 import type { ConnectionState, KeyInfo, ZoteroCreds } from "./types";
-import type { ZoteroConnectionView, ZoteroStatus, ZoteroStav } from "./web-types";
+import type { ZoteroConnectionView, ZoteroLibrariesAnswer, ZoteroLibraryView, ZoteroStatus, ZoteroStav } from "./web-types";
 
 /**
  * The web side of the Zotero connection — the logic behind the thin route
@@ -35,10 +35,13 @@ import type { ZoteroConnectionView, ZoteroStatus, ZoteroStav } from "./web-types
  *               library; a key with more rights than chosen is kept and
  *               simply never used to write); the key it replaces is revoked.
  *   disconnect  fetch: revoke the key on zotero.org, best effort, and forget it.
- *   status      fetch: what the modal shows — never the key or its fingerprint.
+ *   status      fetch: what the page shows — never the key or its fingerprint.
+ *   libraries   fetch: GET the personal library and the readable groups,
+ *               each with its switch (on for the assistant, or off); POST
+ *               { library, on } flips one switch — at least one stays on.
  *
- * The navigations always answer 303: to zotero.org, or back to the modal
- * with a relative Location (/?zotero=1&stav=…), which the browser resolves
+ * The navigations always answer 303: to zotero.org, or back to the /zotero
+ * page with a relative Location (/zotero?stav=…), which the browser resolves
  * against the origin it is on — a preview needs no configured site URL.
  * The fetch routes answer no-store JSON with the /api/files messages. Logs
  * carry the step and an opaque code, never a token, a token secret, a
@@ -59,9 +62,9 @@ const DISCONNECT_UNAVAILABLE = "Zotero se teď nepodařilo odpojit. Zkuste to pr
 // ---------------------------------------------------------------------------
 // Plumbing
 
-/** Where every navigation ends: the Zotero modal, with the outcome for its banner. */
+/** Where every navigation ends: the /zotero page, with the outcome for its banner. */
 export function backTo(stav: ZoteroStav): string {
-  return `/?zotero=1&stav=${stav}`;
+  return `/zotero?stav=${stav}`;
 }
 
 /**
@@ -312,6 +315,8 @@ async function callbackFlow(request: Request): Promise<Response> {
 
   try {
     const previous: ConnectionState = await loadConnection(userId);
+    // The libraries switched off stay off across a reconnect of the same Zotero account (a new choice of mode).
+    const keepOff = previous.state === "ok" && previous.conn.creds.userID === grant.userID ? previous.conn.disabled : [];
     await saveConnection(userId, {
       userID: grant.userID,
       // /keys/current is the account's current name; the grant's is what it was at approval.
@@ -321,6 +326,7 @@ async function callbackFlow(request: Request): Promise<Response> {
       groups: info.groups,
       mode,
       keyWrite: info.userWrite,
+      ...(keepOff.length ? { disabled: [...keepOff] } : {}),
     });
     // Saved first: should the save fail, the old key must still work. A
     // re-approval that returned the same key must not revoke it.
@@ -437,5 +443,172 @@ export async function statusResponse(): Promise<Response> {
   } catch (error) {
     logZoteroError("status", error);
     return filesError(503, STATUS_UNAVAILABLE);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// GET / POST /api/zotero/libraries
+
+/** The library list is the page's main content: a little more patience than for the status's group names. */
+const LIBRARIES_MS = 6_000;
+const LIBRARIES_UNAVAILABLE = "Knihovny Zotera se teď nepodařilo načíst. Zkuste to prosím za chvíli.";
+const TOGGLE_UNAVAILABLE = "Změnu se teď nepodařilo uložit. Zkuste to prosím za chvíli.";
+const NOT_CONNECTED = "Zotero není připojené.";
+const NO_PRO = "Zotero jde používat jen v režimu Pro.";
+const NOT_CONFIGURED = "Připojení Zotera není na tomto webu zapnuté.";
+const LAST_ON = "Aspoň jedna knihovna musí zůstat zapnutá. Když asistent nemá v Zoteru hledat vůbec, Zotero odpojte.";
+const UNKNOWN_LIBRARY = "Tuhle knihovnu připojený klíč nečte. Načtěte stránku znovu.";
+const STALE = "Připojení Zotera se mezitím změnilo. Načtěte stránku znovu.";
+/** Bound on the toggle's body: one short JSON object. */
+const MAX_TOGGLE_BODY_CHARS = 512;
+
+type Conn = Extract<ConnectionState, { state: "ok" }>["conn"];
+
+/** A refusal of the library routes: status and the Czech message. */
+class LibrariesRefusal extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * The signed-in user's usable connection: configured, Pro, connected —
+ * else a LibrariesRefusal. Clerk failures throw as they are.
+ */
+async function usableConnection(): Promise<{ userId: string; conn: Conn }> {
+  if (!clerkConfigured() || !zoteroConfigured()) throw new LibrariesRefusal(404, NOT_CONFIGURED);
+  const userId = await sessionUserId();
+  if (!userId) throw new LibrariesRefusal(401, MESSAGES.signIn);
+  const [access, stored] = await Promise.all([getAccess(userId), loadConnection(userId)]);
+  if (proRefusal(access, "zotero") !== null) throw new LibrariesRefusal(403, NO_PRO);
+  if (stored.state !== "ok") throw new LibrariesRefusal(409, NOT_CONNECTED);
+  return { userId, conn: stored.conn };
+}
+
+/**
+ * Every library the key reads, personal first, with its switch and item
+ * count (best effort: the personal library's from the Total-Results of a
+ * one-item page, a group's from Zotero's own meta.numItems). Should the
+ * groups not list, `groupsFailed` says so and only the personal library
+ * comes back. A rejected key throws ZoteroKeyInvalidError.
+ */
+export async function librariesFor(conn: Conn): Promise<ZoteroLibrariesAnswer> {
+  const io = { signal: AbortSignal.timeout(LIBRARIES_MS) };
+  const off = new Set(conn.disabled);
+  const [count, groups] = await Promise.all([
+    searchItems(conn.creds, { type: "user", id: conn.creds.userID }, { limit: 1, start: 0 }, io).then(
+      (r) => r.paging.total,
+      (error: unknown) => {
+        if (error instanceof ZoteroKeyInvalidError) throw error;
+        logZoteroError("libraries.count", error);
+        return null;
+      },
+    ),
+    conn.groups === "none"
+      ? Promise.resolve([])
+      : listGroups(conn.creds, conn.groups, io).catch((error: unknown) => {
+          if (error instanceof ZoteroKeyInvalidError) throw error;
+          logZoteroError("libraries.groups", error);
+          return null;
+        }),
+  ]);
+  const libraries: ZoteroLibraryView[] = [
+    { id: "personal", kind: "personal", name: "Moje knihovna", items: count, on: !off.has("personal"), saves: conn.mode === "write" },
+    ...(groups ?? []).map(
+      (g): ZoteroLibraryView => ({
+        id: String(g.id),
+        kind: "group",
+        name: sanitizeLine(g.name, GROUP_NAME_CHARS) || `Skupina ${g.id}`,
+        items: g.numItems,
+        on: !off.has(String(g.id)),
+        saves: false,
+      }),
+    ),
+  ];
+  return { libraries, groupsFailed: groups === null, mode: conn.mode };
+}
+
+/** A rejected key on the way: mark it revoked (never sent again) and answer as not connected. */
+async function libraryFailure(error: unknown, where: string, unavailable: string, ctx: { userId: string; conn: Conn } | null): Promise<Response> {
+  if (error instanceof LibrariesRefusal) return filesError(error.status, error.message);
+  if (error instanceof ZoteroKeyInvalidError && ctx) {
+    try {
+      await markRevoked(ctx.userId, ctx.conn.fp);
+    } catch (markError) {
+      logZoteroError(`${where}.mark-revoked`, markError);
+    }
+    return filesError(409, "Klíč k Zoteru přestal platit. Připojte Zotero znovu.");
+  }
+  logZoteroError(where, error);
+  return filesError(503, unavailable);
+}
+
+/** GET /api/zotero/libraries → ZoteroLibrariesAnswer. */
+export async function librariesResponse(): Promise<Response> {
+  let ctx: { userId: string; conn: Conn } | null = null;
+  try {
+    ctx = await usableConnection();
+    return filesJson(await librariesFor(ctx.conn));
+  } catch (error) {
+    return libraryFailure(error, "libraries", LIBRARIES_UNAVAILABLE, ctx);
+  }
+}
+
+/** The toggle's body: { library: "personal" | "<group id>", on: boolean }, else null. */
+export async function toggleInput(request: Request): Promise<{ library: string; on: boolean } | null> {
+  try {
+    if (!(request.headers.get("content-type")?.toLowerCase() ?? "").startsWith("application/json")) return null;
+    const text = await request.text();
+    if (text.length > MAX_TOGGLE_BODY_CHARS) return null;
+    const body = JSON.parse(text) as { library?: unknown; on?: unknown } | null;
+    if (!body || typeof body !== "object") return null;
+    if (typeof body.library !== "string" || !LIBRARY_REF_RE.test(body.library) || typeof body.on !== "boolean") return null;
+    return { library: body.library, on: body.on };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The switched-off set after flipping one library, over the libraries the
+ * key reads now (`known`, personal included); refs the key no longer reads
+ * are dropped. A LibrariesRefusal for a library not in `known`, or when
+ * nothing would stay on. Pure.
+ */
+export function nextDisabled(current: readonly string[], known: readonly string[], library: string, on: boolean): string[] {
+  if (!known.includes(library)) throw new LibrariesRefusal(404, UNKNOWN_LIBRARY);
+  const off = new Set(current.filter((ref) => known.includes(ref)));
+  if (on) off.delete(library);
+  else off.add(library);
+  if (known.every((ref) => off.has(ref))) throw new LibrariesRefusal(409, LAST_ON);
+  return [...off];
+}
+
+/**
+ * POST /api/zotero/libraries { library, on } → the list as GET answers it,
+ * after the switch is stored. Same-origin only. The groups must list (a
+ * group the key no longer reads cannot be switched, and "at least one
+ * stays on" counts over what the key reads now).
+ */
+export async function toggleLibraryResponse(request: Request): Promise<Response> {
+  if (!sameOrigin(request)) return filesError(403, MESSAGES.badOrigin);
+  const input = await toggleInput(request);
+  if (!input) return filesError(400, MESSAGES.badRequest);
+  let ctx: { userId: string; conn: Conn } | null = null;
+  try {
+    ctx = await usableConnection();
+    const { conn, userId } = ctx;
+    const before = await librariesFor(conn);
+    if (before.groupsFailed) throw new LibrariesRefusal(503, LIBRARIES_UNAVAILABLE);
+    const known = before.libraries.map((l) => l.id);
+    const disabled = nextDisabled(conn.disabled, known, input.library, input.on);
+    if (!(await saveDisabledLibraries(userId, conn.fp, disabled))) throw new LibrariesRefusal(409, STALE);
+    const off = new Set(disabled);
+    return filesJson({ ...before, libraries: before.libraries.map((l) => ({ ...l, on: !off.has(l.id) })) } satisfies ZoteroLibrariesAnswer);
+  } catch (error) {
+    return libraryFailure(error, "libraries.toggle", TOGGLE_UNAVAILABLE, ctx);
   }
 }

@@ -23,7 +23,7 @@ import { hintCookie, readHint, type Hint } from "./hint";
  * hint's summary stands in until the real one arrives; the store keeps
  * that cookie up to date.
  *
- * The modals are driven by the URL (?soubory=1, ?zotero=1): links work,
+ * The files modal is driven by the URL (?soubory=1): links work,
  * the back button closes them. history.pushState integrates with Next's
  * router, so useSearchParams sees the change without a navigation — but
  * only when called with our own state (null): Next ignores a call whose
@@ -227,84 +227,25 @@ export function signOut(): void {
 }
 
 // ---------------------------------------------------------------------------
-// URL-driven modals
+// URL helpers
 
 /**
- * The URL parameter of the Vlastní soubory modal (?soubory=1, + &dokument=<id> for the
- * row opened in the list). ?zdroje=… is its old name, still read so links keep working.
+ * The old URL parameter of the Vlastní soubory modal (?soubory=1, + &dokument=<id>;
+ * ?zdroje=… before that). The files are a page now (/soubory); links with the
+ * parameter lead there (./modals.tsx).
  */
 export const FILES_PARAM = "soubory";
-const LEGACY_FILES_PARAM = "zdroje";
+export const LEGACY_FILES_PARAM = "zdroje";
 
-function filesParamIn(p: URLSearchParams): boolean {
-  return p.has(FILES_PARAM) || p.has(LEGACY_FILES_PARAM);
-}
-
-/** A modal this page opened with pushState is closed with history.back(), so Back never reopens it. */
-let pushedModal = false;
-/** The URL the Vlastní soubory modal was last shown at (null while it is closed), to restore it on a refused Back. */
-let modalHref: string | null = null;
-/** closeModal() is popping our own entry after the user already agreed: its popstate asks nothing. */
-let closingByBack = false;
-
-function hrefOf(loc: Location): string {
-  return `${loc.pathname}${loc.search}${loc.hash}`;
-}
-
-function noteLocation(): void {
-  modalHref = filesParamIn(new URLSearchParams(window.location.search)) ? hrefOf(window.location) : null;
-}
-
-/**
- * Back / Forward (the browser button, Android's back gesture) is a same-document history change:
- * nothing but this listener sees ?soubory disappear before ZdrojeModals unmounts the uploader, so a
- * conversion held only in memory would be lost without the question every other exit asks.
- * Refused: the modal's URL is pushed again, over the entry the user went back to, and stays open.
- * Registered at module load, before Next's own listener (app-router's effect), so Next's traverse
- * already reads the restored URL.
- */
-function onPopState(): void {
-  const previous = modalHref;
-  const closing = closingByBack;
-  closingByBack = false;
-  // The user went back (or forward) on their own: the entry we pushed is no longer ours to pop.
-  pushedModal = false;
-  noteLocation();
-  if (closing || modalHref !== null || previous === null) return;
-  // Another page entirely: its content is already on its way, only the modal's own URL is guarded.
-  if (new URL(previous, window.location.href).pathname !== window.location.pathname) return;
-  if (!unsavedWork?.() || window.confirm(DISCARD_QUESTION)) return;
-  window.history.pushState(null, "", previous);
-  pushedModal = true;
-  modalHref = previous;
-}
-
-if (typeof window !== "undefined") window.addEventListener("popstate", onPopState);
-
-/** The URL with some search params changed (path and hash kept), as pushState takes it. */
+/** The URL with some search params changed (path and hash kept), as replaceState takes it. */
 export function withParams(href: string, update: (p: URLSearchParams) => void): string {
   const url = new URL(href);
   update(url.searchParams);
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
-function pushParams(update: (p: URLSearchParams) => void, replace = false): void {
-  const next = withParams(window.location.href, update);
-  // State null, never window.history.state: that one is Next's own entry (__NA), and Next's
-  // patched pushState/replaceState skip the router for it — the URL would change, the modal not.
-  if (replace) window.history.replaceState(null, "", next);
-  else window.history.pushState(null, "", next);
-  noteLocation();
-}
-
-/** ZdrojeModals reports that the Vlastní soubory modal is open. */
-export function setFilesOpen(open: boolean): void {
-  // A deep link (or the /vlastni-zdroje redirect) opened it without pushParams.
-  if (open && modalHref === null) noteLocation();
-}
-
 // ---------------------------------------------------------------------------
-// Unsaved work: a finished conversion lives only in the uploader's memory.
+// Unsaved work: a file being converted or waiting lives only in the uploader's memory.
 
 let unsavedWork: (() => boolean) | null = null;
 
@@ -313,7 +254,7 @@ export function registerUnsavedWork(check: (() => boolean) | null): void {
   unsavedWork = check;
 }
 
-export const DISCARD_QUESTION = "Zahodit rozpracovaný převod? Převedený text ani vybrané soubory se neuloží.";
+export const DISCARD_QUESTION = "Zahodit rozpracované nahrávání? Soubory, které se ještě nenahrály, se neuloží.";
 
 /** Before anything that unmounts the uploader: true when nothing is lost or the user agreed to lose it. */
 export function mayDiscardWork(): boolean {
@@ -321,90 +262,12 @@ export function mayDiscardWork(): boolean {
   return window.confirm(DISCARD_QUESTION);
 }
 
-/** Open the Vlastní soubory modal (optionally with one document's row open). Signed out: sign in first. */
-export function openFiles(documentId?: string): void {
-  if (state.auth === "signed_out") {
-    requestSignIn();
-    return;
-  }
-  const params = new URLSearchParams(window.location.search);
-  const already = filesParamIn(params);
-  if (already) {
-    showFile(documentId ?? null);
-    return;
-  }
-  const replace = params.has("zotero");
-  pushParams((p) => {
-    p.set(FILES_PARAM, "1");
-    p.delete(LEGACY_FILES_PARAM);
-    p.delete("zotero");
-    p.delete("stav");
-    if (documentId) p.set("dokument", documentId);
-    else p.delete("dokument");
-  }, replace);
-  if (!replace) pushedModal = true;
-}
-
 /**
- * Open (or, with null, close) one document's row inside the open modal, without adding a
- * history entry: the URL keeps &dokument=<id>, so a reload or a copied link opens the same row.
- */
-export function showFile(documentId: string | null): void {
-  const p = new URLSearchParams(window.location.search);
-  if ((p.get("dokument") ?? null) === documentId && p.has(FILES_PARAM)) return;
-  pushParams((q) => {
-    q.set(FILES_PARAM, "1");
-    q.delete(LEGACY_FILES_PARAM);
-    if (documentId) q.set("dokument", documentId);
-    else q.delete("dokument");
-  }, true);
-}
-
-function closeModal(keys: string[]): void {
-  if (pushedModal) {
-    pushedModal = false;
-    closingByBack = true;
-    window.history.back();
-    return;
-  }
-  pushParams((p) => {
-    for (const k of keys) p.delete(k);
-  }, true);
-}
-
-export function closeFiles(): void {
-  if (!mayDiscardWork()) return;
-  closeModal([FILES_PARAM, LEGACY_FILES_PARAM, "dokument"]);
-}
-
-/**
- * Open the Zotero modal (?zotero=1). The connect flow comes back to the same URL
- * from the server, with &stav=<outcome> for the modal's banner.
- */
-export function openZotero(): void {
-  const params = new URLSearchParams(window.location.search);
-  const files = filesParamIn(params);
-  const replace = files || params.has("zotero");
-  if (files && !mayDiscardWork()) return;
-  pushParams((p) => {
-    p.delete(FILES_PARAM);
-    p.delete(LEGACY_FILES_PARAM);
-    p.delete("dokument");
-    p.delete("stav");
-    p.set("zotero", "1");
-  }, replace);
-  if (!replace) pushedModal = true;
-}
-
-export function closeZotero(): void {
-  closeModal(["zotero", "stav"]);
-}
-
-/**
- * The modal took the connect outcome into its banner: drop &stav from the URL
- * (replacing the entry), so a reload or a copied link does not announce it again.
+ * The Zotero page (app/zotero/zotero-page.tsx) took the connect outcome into its banner: drop
+ * &stav from the URL (replacing the entry), so a reload or a copied link does not announce it again.
  */
 export function dropZoteroStav(): void {
   if (!new URLSearchParams(window.location.search).has("stav")) return;
-  pushParams((p) => p.delete("stav"), true);
+  // State null, never window.history.state: that one is Next's own entry (__NA).
+  window.history.replaceState(null, "", withParams(window.location.href, (p) => p.delete("stav")));
 }

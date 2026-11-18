@@ -2,10 +2,12 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { getAccess } from "./access";
-import { LIBRARY_ID_RE, LIMITS, TERMS_VERSION, USER_ID_RE } from "./config";
+import { LIBRARY_ID_RE, LIMITS, TERMS_VERSION, USER_ID_RE, UUID_RE } from "./config";
 import { withScope, type Queryable } from "./db/client";
 import { insertUploadedDocument, isBlocked } from "./db/documents";
-import { ensureLibrary, getLibraries, reservePages, reviveLibrary } from "./db/libraries";
+import { formatBytes, zBefore } from "./bytes";
+import { getFolder } from "./db/folders";
+import { ensureLibrary, libraryBytesUsed, lockLibrary, NO_LIBRARY_PAGE_CAP, reservePages, reviveLibrary } from "./db/libraries";
 import { acceptTerms, audit, bumpUsage, hasAcceptedTerms, usageSum } from "./db/usage";
 import { billablePages } from "./dmd/billing";
 import { normalizeDmd, sanitizeLine } from "./dmd/normalize";
@@ -52,8 +54,10 @@ import {
  *      text — what is stored (the browser sends normalized text, so for it
  *      both hashes agree);
  *   6. one transaction: blocked content (notice-and-action), library row,
- *      atomic page
- *      reservation against the library and global caps, a library its
+ *      the target folder (same library), the storage quota when the
+ *      original follows (library row locked, bytes of originals stored or
+ *      uploading + this file ≤ quotaBytes → else 413), atomic page
+ *      reservation against the global cap, a library its
  *      owner uses again is revived (reviveLibrary), insert (duplicate
  *      content in the library → 409, reservation rolled back), the daily
  *      counters bumped and re-checked (a concurrent upload waits on the
@@ -152,6 +156,8 @@ const uploadMetaSchema = z.object({
   hints: hintsSchema.default({}),
   rights: z.enum(RIGHTS),
   doc_type_hint: z.enum(DOC_TYPES).optional(),
+  original: z.boolean().optional(),
+  folderId: z.string().regex(UUID_RE).nullable().optional(),
 });
 
 /** Base name of a client file name, one line, ≤ 255 chars. Pure. */
@@ -204,7 +210,16 @@ export function parseUploadMeta(raw: string): UploadMeta | null {
     hints: sanitizeHints(m.hints),
     rights: m.rights,
     doc_type_hint: m.doc_type_hint,
+    original: m.original === true,
+    folderId: m.folderId ? m.folderId.toLowerCase() : null,
   };
+}
+
+/** The byte-quota refusal: what the file needs, what is left, of how much. Pure. */
+export function quotaMessage(fileBytes: number, usedBytes: number, quotaBytes: number): string {
+  const left = Math.max(0, quotaBytes - usedBytes);
+  const quota = formatBytes(quotaBytes);
+  return `Soubor má ${formatBytes(fileBytes)}, v knihovně zbývá ${formatBytes(left)} ${zBefore(quota)} ${quota}. Smažte některý dokument.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -389,6 +404,10 @@ async function upload(request: Request, userId: string): Promise<UploadOutcome> 
   if ("status" in form) return form;
   const { meta, gz } = form;
   const libraryId = meta.library_id;
+  if (meta.original && meta.file.bytes > LIMITS.maxFileBytes) {
+    return refuse(413, `Soubor má ${formatBytes(meta.file.bytes)}, nahrát jde nejvýš ${formatBytes(LIMITS.maxFileBytes)}.`);
+  }
+  if (meta.original && meta.file.bytes <= 0) return refuse(400, "Údaje o nahrávaném dokumentu jsou neplatné.");
 
   // 2. Who: Clerk, fresh (a revoked Pro or membership must not keep uploading for a minute).
   const access = await getAccess(userId, { fresh: true });
@@ -451,17 +470,21 @@ async function upload(request: Request, userId: string): Promise<UploadOutcome> 
         return refuse(422, "Tento obsah byl na základě oznámení odstraněn a nelze ho nahrát znovu.");
       }
       await ensureLibrary(db, libraryId, library.name);
-      const reserved = await reservePages(db, libraryId, pages, library.quotaPages, LIMITS.globalPages);
-      if (reserved === "global") {
-        return refuse(403, "Úložiště Vlastních zdrojů je teď plné. Zkuste to prosím později.");
+      if (meta.folderId && !(await getFolder(db, meta.folderId, libraryId))) {
+        return refuse(422, "Vybraná složka už neexistuje. Načtěte stránku znovu.");
       }
-      if (reserved === "library") {
-        const [row] = await getLibraries(db, [libraryId]);
-        const left = Math.max(0, library.quotaPages - (row ? row.page_count + row.pages_reserved : 0));
-        return refuse(
-          403,
-          `Dokument má ${pages} normostran, v knihovně zbývá ${left} z ${library.quotaPages}. Smažte některý dokument nebo vyberte menší rozsah.`,
-        );
+      if (meta.original) {
+        // The row lock serializes the byte-quota checks of concurrent uploads into this library.
+        await lockLibrary(db, libraryId);
+        const used = (await libraryBytesUsed(db, [libraryId]))[libraryId] ?? 0;
+        if (used + meta.file.bytes > library.quotaBytes) {
+          return refuse(413, quotaMessage(meta.file.bytes, used, library.quotaBytes));
+        }
+      }
+      // Pages are still reserved for the installation's global page cap; the library's own quota is in bytes.
+      const reserved = await reservePages(db, libraryId, pages, NO_LIBRARY_PAGE_CAP, LIMITS.globalPages);
+      if (reserved !== "ok") {
+        return refuse(403, "Úložiště Vlastních zdrojů je teď plné. Zkuste to prosím později.");
       }
       const revived = await reviveLibrary(db, libraryId);
       const inserted = await insertUploadedDocument(db, {
@@ -476,6 +499,8 @@ async function upload(request: Request, userId: string): Promise<UploadOutcome> 
         quality: meta.quality,
         hints: meta.hints,
         injectionFlag,
+        original: meta.original === true,
+        folderId: meta.folderId ?? null,
       });
       if ("duplicate" in inserted) throw new Rollback({ status: 409, duplicate: inserted.duplicate });
       // Bump, then read: the upsert holds the counter row until commit, so a
@@ -495,7 +520,7 @@ async function upload(request: Request, userId: string): Promise<UploadOutcome> 
         actor: userId,
         action: "document.upload",
         docId: inserted.id,
-        detail: { pages, injection: injectionFlag },
+        detail: { pages, injection: injectionFlag, ...(meta.original ? { originalBytes: meta.file.bytes } : {}) },
       });
       return { status: 201 as const, id: inserted.id, libraryId };
     });
