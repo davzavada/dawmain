@@ -43,7 +43,7 @@ const BOLD_NAME_RE = /bold|black|heavy|semibold|demi/i;
 let loaded: Promise<PdfJs> | null = null;
 
 /** Load pdf.js once; in the browser give it its own module worker. */
-function loadPdfJs(): Promise<PdfJs> {
+export function loadPdfJs(): Promise<PdfJs> {
   loaded ??= import("pdfjs-dist/legacy/build/pdf.mjs").then((pdfjs) => {
     if (typeof window !== "undefined" && typeof Worker !== "undefined" && !pdfjs.GlobalWorkerOptions.workerPort) {
       pdfjs.GlobalWorkerOptions.workerPort = new Worker(new URL("pdfjs-dist/legacy/build/pdf.worker.min.mjs", import.meta.url), {

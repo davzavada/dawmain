@@ -5,7 +5,6 @@ import { Icon } from "@/app/_icons";
 import { DOC_TYPES, type DocStatus, type DocType } from "@/src/files/types";
 import type { DocumentDetail, DocumentListItem, DocumentListResponse, FolderItem } from "@/src/files/web-types";
 import { api, NETWORK_ERROR } from "./api";
-import { Confirm } from "./dialog";
 import { downloadFileName, typeLabel } from "./format";
 import { compactFields, formFromMeta, lineToList, listToLine, MAIN_DOC_TYPES, payloadFromForm, type FieldDef, type FieldWidth, type FormValues } from "./meta-form";
 import { refreshSummary } from "./store";
@@ -107,7 +106,7 @@ export function useDocumentList(libraryId: string) {
 }
 
 // ---------------------------------------------------------------------------
-// The detail panel's form: type, metadata, delete
+// The detail panel's form: type and metadata (deleting is in the row's ⋯ menu)
 
 const WIDTH_CLASS: Record<FieldWidth, string> = { full: "w-full", wide: "w-wide", half: "w-half", mid: "w-mid", narrow: "w-narrow" };
 
@@ -132,8 +131,7 @@ export function FileEditor({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [conflict, setConflict] = useState(false);
-  const [busy, setBusy] = useState<"type" | "save" | "delete" | "export" | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [busy, setBusy] = useState<"type" | "save" | "export" | null>(null);
   const [reload, setReload] = useState(0);
 
   useEffect(() => {
@@ -231,19 +229,6 @@ export function FileEditor({
     failed(res);
   }
 
-  async function remove() {
-    if (!doc) return;
-    setBusy("delete");
-    const res = await api(`/api/files/documents/${doc.id}`, { method: "DELETE" });
-    setBusy(null);
-    setConfirmDelete(false);
-    if (!res.ok && res.status !== 404) {
-      setMessage({ ok: false, text: res.error });
-      return;
-    }
-    onDeleted();
-  }
-
   /** Download the stored text (GET …/export): fetched first, so a refusal shows its Czech message here. */
   async function exportText() {
     if (!doc) return;
@@ -286,8 +271,6 @@ export function FileEditor({
         void save();
       }}
     >
-      {doc.status === "error" && doc.statusDetail ? <p className="zd-error">{doc.statusDetail}</p> : null}
-      {doc.status === "review" ? <p className="zd-banner zd-banner-info">Zkontrolujte údaje a uložte je. Dokud je neuložíte, asistent v souboru nehledá.</p> : null}
       {settled ? (
         <fieldset className="zd-file-fields" disabled={!editable || busy !== null}>
           <div className="zd-file-type">
@@ -387,23 +370,8 @@ export function FileEditor({
               {busy === "export" ? "Stahuji…" : "Stáhnout text"}
             </button>
           ) : null}
-          {doc.canDelete ? (
-            // Pro not required: whoever owns the text may delete it, also after Pro was withdrawn.
-            <button type="button" className="zd-link-button zd-danger-link" onClick={() => setConfirmDelete(true)} disabled={busy !== null}>
-              Smazat dokument
-            </button>
-          ) : null}
         </span>
       </div>
-      {confirmDelete ? (
-        <Confirm
-          question={<>Smazat „{doc.fileName}“? Originál, text i index se odstraní natrvalo.</>}
-          confirmLabel="Smazat"
-          busy={busy === "delete"}
-          onConfirm={() => void remove()}
-          onCancel={() => setConfirmDelete(false)}
-        />
-      ) : null}
     </form>
   );
 }

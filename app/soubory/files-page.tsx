@@ -10,6 +10,7 @@ import { Confirm } from "../_zdroje/dialog";
 import { FileEditor, PENDING, useDocumentList } from "../_zdroje/file-editor";
 import { formatDate, formatStorageBytes as formatBytes, kindLabel, zBefore, plural, statusBadge, typeLabel } from "../_zdroje/format";
 import { ZIcon } from "../_zdroje/icons";
+import { DocPreview } from "../_zdroje/doc-preview";
 import { FolderGlyph, LibraryMark } from "../_zdroje/library-mark";
 import { refreshSummary, requestSignIn, useZdroje } from "../_zdroje/store";
 import { ACCEPT, useUploads } from "../_zdroje/upload";
@@ -140,6 +141,8 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<DocumentListItem | null>(null);
+  /** What the side panel shows for the open document: its preview, or the form of its metadata (⋯ → Upravit údaje). */
+  const [panelMode, setPanelMode] = useState<"preview" | "meta">("preview");
   const [busy, setBusy] = useState(false);
   const [dropOver, setDropOver] = useState<string | null>(null);
   const [fileDrag, setFileDrag] = useState(false);
@@ -444,7 +447,8 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
   useEffect(() => {
     if (!menu) return;
     const close = (e: globalThis.MouseEvent) => {
-      if (!(e.target as HTMLElement).closest(".fp-menu")) setMenu(null);
+      // The ⋯ buttons toggle the menu themselves (their click follows this mousedown).
+      if (!(e.target as HTMLElement).closest(".fp-menu, .fp-more")) setMenu(null);
     };
     const esc = (e: globalThis.KeyboardEvent) => e.key === "Escape" && setMenu(null);
     const scroll = () => setMenu(null);
@@ -505,11 +509,6 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
         <p className="zd-banner fp-banner">Vlastní soubory jsou teď jen pro čtení: hledat, číst a mazat jde, nahrávat a upravovat ne. Zkuste to později.</p>
       ) : mode === "off" ? (
         <p className="zd-banner fp-banner">Vlastní soubory jsou teď dočasně vypnuté. Mazat a stahovat soubory jde dál.</p>
-      ) : team ? (
-        <p className="zd-banner zd-banner-team fp-banner">
-          Soubory tady vidí všichni členové týmu {lib.name} a asistent v nich hledá i pro ně.{" "}
-          {lib.canManageAll ? "Jako správce týmu můžete upravit a smazat kterýkoli z nich." : "Upravit a smazat můžete ty, které jste nahráli vy."}
-        </p>
       ) : null}
 
       <div className="fp-toolbar">
@@ -684,7 +683,10 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
                   onClick={() => {
                     if (renaming === key) return;
                     if (isFolder) openFolder(item.folder.id);
-                    else select(doc!.id === openId ? null : doc!.id);
+                    else {
+                      setPanelMode("preview");
+                      select(doc!.id === openId ? null : doc!.id);
+                    }
                   }}
                   onDoubleClick={() => {
                     if (!isFolder && manage) setRenaming(key);
@@ -731,12 +733,13 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
           <DetailPanel
             key={openDoc.id}
             doc={openDoc}
+            mode={panelMode}
+            onMode={setPanelMode}
+            onMenu={(e) => openMenu(e, { kind: "doc", doc: openDoc })}
+            menuOpen={menu?.key === `d:${openDoc.id}`}
             readonly={!writable}
-            canManage={canManageDoc(openDoc)}
             location={where(openDoc.folderId ?? null)}
             onClose={() => select(null)}
-            onRename={() => setRenaming(`d:${openDoc.id}`)}
-            onDelete={() => setConfirmDelete(openDoc)}
             onChanged={reload}
             onDeleted={() => {
               setDocuments((list) => list?.filter((d) => d.id !== openDoc.id) ?? list);
@@ -785,19 +788,33 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
                     type="button"
                     role="menuitem"
                     className="fp-mi"
+                    disabled={PENDING.has(menuItem.doc.status) || menuItem.doc.status === "deleting"}
                     onClick={() => {
                       setMenu(null);
-                      select(menuItem.doc.id);
+                      setPanelMode("meta");
+                      if (menuItem.doc.id !== openId) select(menuItem.doc.id);
                     }}
                   >
                     <ZIcon name="file" size={15} />
-                    Zobrazit podrobnosti
+                    {menuItem.doc.canEdit && writable ? "Upravit údaje" : "Zobrazit údaje"}
                   </button>
                   {menuItem.doc.original === "ready" ? (
                     <a role="menuitem" className="fp-mi" href={`/api/files/documents/${menuItem.doc.id}/original`} download onClick={() => setMenu(null)}>
                       <ZIcon name="download" size={15} />
-                      Stáhnout originál
+                      Stáhnout
                       <span className="fp-mi-end">{formatBytes(menuItem.doc.fileBytes ?? 0)}</span>
+                    </a>
+                  ) : menuItem.doc.canDelete && (menuItem.doc.status === "ready" || menuItem.doc.status === "review") ? (
+                    <a
+                      role="menuitem"
+                      className="fp-mi"
+                      href={`/api/files/documents/${menuItem.doc.id}/export?lib=${encodeURIComponent(menuItem.doc.libraryId)}`}
+                      download
+                      onClick={() => setMenu(null)}
+                    >
+                      <ZIcon name="download" size={15} />
+                      Stáhnout text
+                      <span className="fp-mi-end">originál není</span>
                     </a>
                   ) : null}
                 </>
@@ -962,142 +979,92 @@ function MoveMenu({
 
 function DetailPanel({
   doc,
+  mode,
+  onMode,
+  onMenu,
+  menuOpen,
   readonly,
-  canManage,
   location,
   onClose,
-  onRename,
-  onDelete,
   onChanged,
   onDeleted,
   onSaved,
 }: {
   doc: DocumentListItem;
+  mode: "preview" | "meta";
+  onMode: (mode: "preview" | "meta") => void;
+  onMenu: (e: MouseEvent) => void;
+  menuOpen: boolean;
   readonly: boolean;
-  canManage: boolean;
   location: string;
   onClose: () => void;
-  onRename: () => void;
-  onDelete: () => void;
   onChanged: () => void;
   onDeleted: () => void;
   onSaved: (detail: DocumentDetail) => void;
 }) {
-  const [tab, setTab] = useState<"meta" | "text">("meta");
-  const [preview, setPreview] = useState<string | null>(null);
   const ext = extOf(doc.fileName) || doc.fileKind;
   const pending = PENDING.has(doc.status) || doc.status === "deleting";
-  const inline = doc.original === "ready" && (doc.fileKind === "pdf" || doc.fileKind === "txt" || doc.fileKind === "md");
-  const originalUrl = `/api/files/documents/${encodeURIComponent(doc.id)}/original`;
-
-  useEffect(() => {
-    if (tab !== "text" || preview !== null || pending) return;
-    const ctrl = new AbortController();
-    void api<DocumentDetail>(`/api/files/documents/${encodeURIComponent(doc.id)}`, { signal: ctrl.signal })
-      .then((res) => setPreview(res.ok ? res.data.preview : res.error))
-      .catch(() => undefined);
-    return () => ctrl.abort();
-  }, [tab, preview, pending, doc.id]);
+  const place = location.replace(/^ve složce /, "").replace(/^v kořeni knihovny$/, "Všechny soubory");
+  const facts = [
+    doc.original === "ready" ? `${kindLabel(doc.fileKind)} · ${formatBytes(doc.fileBytes ?? 0)}` : kindLabel(doc.fileKind),
+    place,
+    `${doc.mine ? "Vy" : "Člen týmu"}, ${formatDate(doc.uploadedAt)}`,
+  ];
+  const meta = mode === "meta" && !pending;
 
   return (
-    <aside className="fp-detail" aria-label="Podrobnosti souboru">
+    <aside className="fp-detail" aria-label={meta ? "Údaje o souboru" : "Náhled souboru"}>
       <div className="fp-detail-head">
         <span className={`fp-doc fp-doc-${ext}`}>{ext.toUpperCase().slice(0, 4)}</span>
-        <b title={doc.fileName}>{doc.fileName}</b>
-        <button type="button" className="fp-x" aria-label="Zavřít podrobnosti" onClick={onClose}>
+        <span className="fp-detail-title">
+          <b title={doc.fileName}>{doc.fileName}</b>
+          <span>{facts.join(" · ")}</span>
+        </span>
+        <button type="button" className="fp-more fp-more-on" aria-label={`Akce: ${doc.fileName}`} aria-expanded={menuOpen} onClick={onMenu}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <circle cx="5" cy="12" r="1.6" />
+            <circle cx="12" cy="12" r="1.6" />
+            <circle cx="19" cy="12" r="1.6" />
+          </svg>
+        </button>
+        <button type="button" className="fp-x" aria-label="Zavřít" onClick={onClose}>
           <ZIcon name="close" size={16} />
         </button>
       </div>
 
-      <div className="fp-detail-actions">
-        {inline ? (
-          <a className="zd-btn zd-btn-primary fp-btn" href={`${originalUrl}?inline=1`} target="_blank" rel="noopener">
-            Otevřít
-          </a>
-        ) : null}
-        {doc.original === "ready" ? (
-          <a className={`zd-btn ${inline ? "zd-btn-secondary" : "zd-btn-primary"} fp-btn`} href={originalUrl} download>
-            <ZIcon name="download" size={15} />
-            Stáhnout originál
-          </a>
-        ) : null}
-        {canManage ? (
-          <button type="button" className="zd-btn zd-btn-secondary fp-btn" onClick={onRename}>
-            <ZIcon name="edit" size={15} />
-            Přejmenovat
+      {doc.status === "review" && !meta ? (
+        <p className="zd-banner zd-banner-info fp-banner">
+          Asistent v souboru začne hledat, až potvrdíte jeho údaje.{" "}
+          <button type="button" className="zd-link-button" onClick={() => onMode("meta")}>
+            Zkontrolovat údaje
           </button>
-        ) : null}
-      </div>
+        </p>
+      ) : null}
+      {doc.status === "error" ? (
+        <p className="zd-error">
+          {statusBadge(doc.status, doc.statusDetail).label}
+          {doc.statusDetail ? ` · ${doc.statusDetail}` : ""}
+        </p>
+      ) : null}
 
-      <dl className="fp-facts">
-        <div>
-          <dt>Originál</dt>
-          <dd>
-            {doc.original === "ready"
-              ? `${kindLabel(doc.fileKind)}, ${formatBytes(doc.fileBytes ?? 0)}`
-              : doc.original === "uploading"
-                ? "Nahrává se, nebo se nahrávání nedokončilo."
-                : "Neuložený. Soubor se nahrál dřív, než se originály ukládaly; je tu jen text."}
-          </dd>
+      {meta ? (
+        <div className="fp-meta-box">
+          <button type="button" className="zd-link-button fp-back" onClick={() => onMode("preview")}>
+            ← Zpět na náhled
+          </button>
+          <FileEditor doc={doc} readonly={readonly} onChanged={onChanged} onDeleted={onDeleted} onSaved={onSaved} onClose={() => onMode("preview")} />
         </div>
-        <div>
-          <dt>Pro asistenta</dt>
-          <dd>
-            {pending ? "Zpracovává se…" : doc.status === "error" ? statusBadge(doc.status, doc.statusDetail).label : doc.status === "review" ? "Čeká na kontrolu údajů" : `Text připraven · ${doc.billablePages} ${plural(doc.billablePages, "strana", "strany", "stran")}`}
-          </dd>
-        </div>
-        <div>
-          <dt>Umístění</dt>
-          <dd>{location.replace(/^ve složce /, "").replace(/^v kořeni knihovny$/, "Všechny soubory")}</dd>
-        </div>
-        <div>
-          <dt>Nahrál</dt>
-          <dd>
-            {doc.mine ? "Vy" : "Člen týmu"}, {formatDate(doc.uploadedAt)}
-          </dd>
-        </div>
-      </dl>
-
-      <div className="fp-detail-tabs" role="tablist">
-        <button type="button" role="tab" aria-selected={tab === "meta"} onClick={() => setTab("meta")}>
-          Údaje
-        </button>
-        <button type="button" role="tab" aria-selected={tab === "text"} onClick={() => setTab("text")}>
-          Text pro asistenta
-        </button>
-      </div>
-
-      {tab === "meta" ? (
-        pending ? (
-          <p className="zd-progress fp-pad" role="status">
-            <span className="zd-spinner" aria-hidden="true" />
-            Soubor se zpracovává, údaje půjde upravit za chvíli.
-          </p>
-        ) : (
-          <FileEditor doc={doc} readonly={readonly} onChanged={onChanged} onDeleted={onDeleted} onSaved={onSaved} onClose={onClose} />
-        )
       ) : (
-        <div className="fp-text">
+        <>
           {pending ? (
-            <p className="zd-muted">Text bude k dispozici po zpracování.</p>
-          ) : preview === null ? (
             <p className="zd-progress" role="status">
               <span className="zd-spinner" aria-hidden="true" />
-              Načítám text…
+              Asistent soubor ještě zpracovává.
             </p>
-          ) : (
-            <>
-              <pre>{preview}</pre>
-              <p className="zd-muted zd-small">Začátek textu, se kterým pracuje asistent. Celý si stáhnete v Údajích tlačítkem Stáhnout text.</p>
-            </>
-          )}
-        </div>
+          ) : null}
+          {!pending || doc.original === "ready" ? <DocPreview key={`${doc.id}:${doc.original}`} doc={doc} /> : null}
+        </>
       )}
-      {pending && canManage ? (
-        <button type="button" className="zd-link-button zd-danger-link fp-detail-delete" onClick={onDelete}>
-          Smazat soubor
-        </button>
-      ) : null}
     </aside>
   );
 }
