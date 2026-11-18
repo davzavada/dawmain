@@ -10,7 +10,7 @@ import { Confirm } from "../_zdroje/dialog";
 import { FileEditor, PENDING, useDocumentList } from "../_zdroje/file-editor";
 import { formatDate, formatStorageBytes as formatBytes, kindLabel, zBefore, plural, statusBadge, typeLabel } from "../_zdroje/format";
 import { ZIcon } from "../_zdroje/icons";
-import { DocPreview } from "../_zdroje/doc-preview";
+import { DocViewer } from "../_zdroje/doc-viewer";
 import { FolderGlyph, LibraryMark } from "../_zdroje/library-mark";
 import { refreshSummary, requestSignIn, useZdroje } from "../_zdroje/store";
 import { ACCEPT, useUploads } from "../_zdroje/upload";
@@ -141,8 +141,29 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<DocumentListItem | null>(null);
-  /** What the side panel shows for the open document: its preview, or the form of its metadata (⋯ → Upravit údaje). */
-  const [panelMode, setPanelMode] = useState<"preview" | "meta">("preview");
+  /** The document whose metadata form is open in the side panel (⋯ → Upravit údaje); the viewer is ?dokument. */
+  const [metaId, setMetaId] = useState<string | null>(null);
+  /** Folders opened in place with their disclosure arrow (kept per library in this browser). */
+  const [expanded, setExpanded] = useState<Set<string>>(() => {
+    try {
+      const raw = window.localStorage.getItem(`fp-open:${lib.id}`);
+      return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+    } catch {
+      return new Set();
+    }
+  });
+  const toggleExpanded = (id: string) =>
+    setExpanded((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      try {
+        window.localStorage.setItem(`fp-open:${lib.id}`, JSON.stringify([...next]));
+      } catch {
+        // private window: the arrows still work for this visit
+      }
+      return next;
+    });
   const [busy, setBusy] = useState(false);
   const [dropOver, setDropOver] = useState<string | null>(null);
   const [fileDrag, setFileDrag] = useState(false);
@@ -160,6 +181,7 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
   const folderId = rawFolder && (byId.has(rawFolder) || folders.length === 0) ? rawFolder : null;
   const openId = search.get("dokument");
   const openDoc = documents?.find((d) => d.id === openId) ?? null;
+  const metaDoc = documents?.find((d) => d.id === metaId) ?? null;
 
   const uploads = useUploads({
     library: lib,
@@ -197,6 +219,7 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
     go({ folder: id });
   };
   const select = (id: string | null) => go({ doc: id }, true);
+  const closeViewer = useCallback(() => go({ doc: null }, true), [go]);
 
   // ---- toast ----
   const say = useCallback((text: string, undo?: Toast["undo"]) => {
@@ -238,7 +261,7 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
     return counts;
   }, [folders, documents]);
 
-  const items: Item[] = useMemo(() => {
+  const rows: Array<{ item: Item; depth: number }> = useMemo(() => {
     const docs = documents ?? [];
     const byName = (a: string, b: string) => a.localeCompare(b, "cs", { numeric: true });
     if (q.trim()) {
@@ -247,18 +270,28 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
       const d = docs
         .filter((x) => x.fileName.toLocaleLowerCase("cs").includes(needle) || x.title.toLocaleLowerCase("cs").includes(needle))
         .map((doc): Item => ({ kind: "doc", doc }));
-      return [...f, ...d].sort((a, b) => (a.kind === b.kind ? byName(nameOf(a), nameOf(b)) : a.kind === "folder" ? -1 : 1));
+      return [...f, ...d]
+        .sort((a, b) => (a.kind === b.kind ? byName(nameOf(a), nameOf(b)) : a.kind === "folder" ? -1 : 1))
+        .map((item) => ({ item, depth: 0 }));
     }
-    const f = folders
-      .filter((x) => x.parentId === folderId)
-      .sort((a, b) => byName(a.name, b.name))
-      .map((folder): Item => ({ kind: "folder", folder }));
-    const d = docs
-      .filter((x) => (x.folderId ?? null) === folderId || (x.folderId && !byId.has(x.folderId) && folderId === null))
-      .sort((a, b) => byName(a.fileName, b.fileName))
-      .map((doc): Item => ({ kind: "doc", doc }));
-    return [...f, ...d];
-  }, [documents, folders, folderId, q, byId]);
+    const out: Array<{ item: Item; depth: number }> = [];
+    // A folder's content: its subfolders, then its documents; an expanded subfolder's content follows it, indented.
+    const walk = (parent: string | null, depth: number) => {
+      if (depth > 32) return;
+      for (const folder of folders.filter((x) => x.parentId === parent).sort((a, b) => byName(a.name, b.name))) {
+        out.push({ item: { kind: "folder", folder }, depth });
+        if (expanded.has(folder.id)) walk(folder.id, depth + 1);
+      }
+      for (const doc of docs
+        .filter((x) => (x.folderId ?? null) === parent || (parent === null && x.folderId && !byId.has(x.folderId)))
+        .sort((a, b) => byName(a.fileName, b.fileName))) {
+        out.push({ item: { kind: "doc", doc }, depth });
+      }
+    };
+    walk(folderId, 0);
+    return out;
+  }, [documents, folders, folderId, q, byId, expanded]);
+  const items = useMemo(() => rows.map((r) => r.item), [rows]);
 
   const canManageDoc = (doc: DocumentListItem) => writable && doc.canDelete;
   const canManage = (item: Item) => (item.kind === "folder" ? canFolders : canManageDoc(item.doc));
@@ -368,6 +401,7 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
     }
     setDocuments((list) => list?.filter((d) => d.id !== doc.id) ?? list);
     if (openId === doc.id) select(null);
+    if (metaId === doc.id) setMetaId(null);
     reload();
     void refreshSummary();
     say(`„${doc.fileName}“ smazán.`);
@@ -422,6 +456,9 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
       e.preventDefault();
       if (item.kind === "folder") openFolder(item.folder.id);
       else select(item.doc.id);
+    } else if ((e.key === "ArrowRight" || e.key === "ArrowLeft") && item.kind === "folder" && !q) {
+      e.preventDefault();
+      if ((e.key === "ArrowRight") !== expanded.has(item.folder.id)) toggleExpanded(item.folder.id);
     } else if (e.key === "F2" && canManage(item)) {
       e.preventDefault();
       setRenaming(keyOf(item));
@@ -485,7 +522,7 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
   }
 
   return (
-    <div className="fp" data-detail={openDoc ? "true" : undefined}>
+    <div className="fp" data-detail={metaDoc ? "true" : undefined}>
       <header className="fp-head">
         <LibraryMark lib={lib} size={40} />
         <div className="fp-head-text">
@@ -639,7 +676,7 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
               </span>
             </div>
           ) : (
-            items.map((item) => {
+            rows.map(({ item, depth }) => {
               const key = keyOf(item);
               const isFolder = item.kind === "folder";
               const manage = canManage(item);
@@ -666,7 +703,9 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
                   tabIndex={0}
                   className="fp-row fp-item"
                   data-folder={isFolder || undefined}
-                  aria-selected={doc ? doc.id === openId : undefined}
+                  aria-selected={doc ? doc.id === openId || doc.id === metaId : undefined}
+                  aria-level={q ? undefined : depth + 1}
+                  aria-expanded={isFolder && !q ? expanded.has(item.folder.id) : undefined}
                   data-drop={dropOver === key || undefined}
                   data-bad={doc?.status === "error" || undefined}
                   draggable={manage && renaming !== key && !pending}
@@ -683,17 +722,33 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
                   onClick={() => {
                     if (renaming === key) return;
                     if (isFolder) openFolder(item.folder.id);
-                    else {
-                      setPanelMode("preview");
-                      select(doc!.id === openId ? null : doc!.id);
-                    }
+                    else select(doc!.id);
                   }}
                   onDoubleClick={() => {
                     if (!isFolder && manage) setRenaming(key);
                   }}
                   onKeyDown={(e) => onRowKey(e, item)}
                 >
-                  <span className="fp-name">
+                  <span className="fp-name" style={depth ? { paddingLeft: depth * 22 } : undefined}>
+                    {isFolder && !q ? (
+                      <button
+                        type="button"
+                        className="fp-disclosure"
+                        aria-label={expanded.has(item.folder.id) ? `Sbalit ${item.folder.name}` : `Rozbalit ${item.folder.name}`}
+                        aria-expanded={expanded.has(item.folder.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleExpanded(item.folder.id);
+                        }}
+                        onDoubleClick={(e) => e.stopPropagation()}
+                      >
+                        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                          <path d="M3 1.5 7 5 3 8.5z" fill="currentColor" />
+                        </svg>
+                      </button>
+                    ) : !q ? (
+                      <span className="fp-disclosure-space" aria-hidden="true" />
+                    ) : null}
                     {isFolder ? <FolderGlyph /> : <span className={`fp-doc fp-doc-${ext}`}>{(ext || kindLabel(doc!.fileKind)).toUpperCase().slice(0, 4)}</span>}
                     {renaming === key ? (
                       <RenameInput item={item} onDone={(value) => void renameItem(item, value)} onCancel={() => setRenaming(null)} />
@@ -729,21 +784,19 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
           {fileDrag ? <div className="fp-dropcover">Pusťte soubory sem{folderId ? ` do složky „${byId.get(folderId)?.name ?? ""}“` : ""}</div> : null}
         </section>
 
-        {openDoc ? (
+        {metaDoc ? (
           <DetailPanel
-            key={openDoc.id}
-            doc={openDoc}
-            mode={panelMode}
-            onMode={setPanelMode}
-            onMenu={(e) => openMenu(e, { kind: "doc", doc: openDoc })}
-            menuOpen={menu?.key === `d:${openDoc.id}`}
+            key={metaDoc.id}
+            doc={metaDoc}
+            onMenu={(e) => openMenu(e, { kind: "doc", doc: metaDoc })}
+            menuOpen={menu?.key === `d:${metaDoc.id}`}
             readonly={!writable}
-            location={where(openDoc.folderId ?? null)}
-            onClose={() => select(null)}
+            location={where(metaDoc.folderId ?? null)}
+            onClose={() => setMetaId(null)}
             onChanged={reload}
             onDeleted={() => {
-              setDocuments((list) => list?.filter((d) => d.id !== openDoc.id) ?? list);
-              select(null);
+              setDocuments((list) => list?.filter((d) => d.id !== metaDoc.id) ?? list);
+              setMetaId(null);
               reload();
               void refreshSummary();
             }}
@@ -753,6 +806,23 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
           />
         ) : null}
       </div>
+
+      {openDoc ? (
+        <DocViewer
+          key={openDoc.id}
+          doc={openDoc}
+          onClose={closeViewer}
+          actions={
+            <button type="button" className="dv-tool fp-more fp-more-on" aria-label={`Akce: ${openDoc.fileName}`} aria-expanded={menu?.key === `d:${openDoc.id}`} onClick={(e) => openMenu(e, { kind: "doc", doc: openDoc })}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <circle cx="5" cy="12" r="1.6" />
+                <circle cx="12" cy="12" r="1.6" />
+                <circle cx="19" cy="12" r="1.6" />
+              </svg>
+            </button>
+          }
+        />
+      ) : null}
 
       <p className="zd-muted zd-small fp-rules">
         Nahráním potvrzujete, že k souboru máte právo a že nejde o spisy klientů ani neveřejné osobní údaje (
@@ -791,8 +861,8 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
                     disabled={PENDING.has(menuItem.doc.status) || menuItem.doc.status === "deleting"}
                     onClick={() => {
                       setMenu(null);
-                      setPanelMode("meta");
-                      if (menuItem.doc.id !== openId) select(menuItem.doc.id);
+                      setMetaId(menuItem.doc.id);
+                      if (openId) select(null);
                     }}
                   >
                     <ZIcon name="file" size={15} />
@@ -979,8 +1049,6 @@ function MoveMenu({
 
 function DetailPanel({
   doc,
-  mode,
-  onMode,
   onMenu,
   menuOpen,
   readonly,
@@ -991,8 +1059,6 @@ function DetailPanel({
   onSaved,
 }: {
   doc: DocumentListItem;
-  mode: "preview" | "meta";
-  onMode: (mode: "preview" | "meta") => void;
   onMenu: (e: MouseEvent) => void;
   menuOpen: boolean;
   readonly: boolean;
@@ -1010,10 +1076,9 @@ function DetailPanel({
     place,
     `${doc.mine ? "Vy" : "Člen týmu"}, ${formatDate(doc.uploadedAt)}`,
   ];
-  const meta = mode === "meta" && !pending;
 
   return (
-    <aside className="fp-detail" aria-label={meta ? "Údaje o souboru" : "Náhled souboru"}>
+    <aside className="fp-detail" aria-label="Údaje o souboru">
       <div className="fp-detail-head">
         <span className={`fp-doc fp-doc-${ext}`}>{ext.toUpperCase().slice(0, 4)}</span>
         <span className="fp-detail-title">
@@ -1031,39 +1096,20 @@ function DetailPanel({
           <ZIcon name="close" size={16} />
         </button>
       </div>
-
-      {doc.status === "review" && !meta ? (
-        <p className="zd-banner zd-banner-info fp-banner">
-          Asistent v souboru začne hledat, až potvrdíte jeho údaje.{" "}
-          <button type="button" className="zd-link-button" onClick={() => onMode("meta")}>
-            Zkontrolovat údaje
-          </button>
-        </p>
-      ) : null}
+      {doc.status === "review" ? <p className="zd-banner zd-banner-info fp-banner">Asistent v souboru začne hledat, až údaje potvrdíte tlačítkem Uložit.</p> : null}
       {doc.status === "error" ? (
         <p className="zd-error">
           {statusBadge(doc.status, doc.statusDetail).label}
           {doc.statusDetail ? ` · ${doc.statusDetail}` : ""}
         </p>
       ) : null}
-
-      {meta ? (
-        <div className="fp-meta-box">
-          <button type="button" className="zd-link-button fp-back" onClick={() => onMode("preview")}>
-            ← Zpět na náhled
-          </button>
-          <FileEditor doc={doc} readonly={readonly} onChanged={onChanged} onDeleted={onDeleted} onSaved={onSaved} onClose={() => onMode("preview")} />
-        </div>
+      {pending ? (
+        <p className="zd-progress" role="status">
+          <span className="zd-spinner" aria-hidden="true" />
+          Asistent soubor ještě zpracovává, údaje půjde upravit za chvíli.
+        </p>
       ) : (
-        <>
-          {pending ? (
-            <p className="zd-progress" role="status">
-              <span className="zd-spinner" aria-hidden="true" />
-              Asistent soubor ještě zpracovává.
-            </p>
-          ) : null}
-          {!pending || doc.original === "ready" ? <DocPreview key={`${doc.id}:${doc.original}`} doc={doc} /> : null}
-        </>
+        <FileEditor doc={doc} readonly={readonly} onChanged={onChanged} onDeleted={onDeleted} onSaved={onSaved} onClose={onClose} />
       )}
     </aside>
   );

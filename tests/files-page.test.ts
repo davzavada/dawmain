@@ -453,65 +453,91 @@ describe("rights", () => {
   });
 });
 
-describe("the detail panel", () => {
-  it("a click opens the preview on the right; downloads, metadata and delete live in the ⋯ menu", async () => {
+describe("the document viewer", () => {
+  const viewer = () => host.querySelector<HTMLElement>(".dv-layer");
+
+  it("a click opens the document in a large window; ⋯ → Upravit údaje opens the form beside the list", async () => {
     standard();
     await open();
     await act(async () => row("zakon.pdf").click());
     await settle();
     expect(nav.state.replaced).toEqual([`/soubory?dokument=${D_ZAKON}`]);
-    const panel = host.querySelector(".fp-detail")!;
-    expect(panel.querySelector("b")?.textContent).toBe("zakon.pdf");
-    // Only the preview: no buttons, no form, no delete, no "text for the assistant".
-    expect(panel.querySelector(".fp-preview")).not.toBeNull();
-    expect(panel.querySelectorAll("a")).toHaveLength(0);
-    expect(panel.querySelector(".zd-file-open")).toBeNull();
-    expect(panel.textContent).not.toContain("Text pro asistenta");
-    expect(panel.textContent).not.toContain("Smazat");
-    // ⋯ in the panel: Upravit údaje switches the panel to the form, and back.
-    await act(async () => panel.querySelector<HTMLButtonElement>(".fp-more")!.click());
-    const download = menuItem("Stáhnout") as unknown as HTMLAnchorElement;
+    const win = viewer()!;
+    expect(win.getAttribute("role")).toBe("dialog");
+    expect(win.querySelector(".dv-title")?.textContent).toBe("zakon.pdf");
+    const download = [...win.querySelectorAll("a")].find((a) => a.textContent?.includes("Stáhnout"))!;
     expect(download.getAttribute("href")).toBe(`/api/files/documents/${D_ZAKON}/original`);
     expect(download.hasAttribute("download")).toBe(true);
+    // No side panel while viewing, no form, no delete in the window itself.
+    expect(host.querySelector(".fp-detail")).toBeNull();
+    expect(win.textContent).not.toContain("Smazat");
+    // ⋯ in the window: the row's menu.
+    await act(async () => win.querySelector<HTMLButtonElement>(".fp-more")!.click());
     expect(menuItem("Smazat")).toBeDefined();
     await act(async () => menuItem("Upravit údaje")!.click());
     await settle();
+    expect(nav.state.replaced.at(-1)).toBe("/soubory");
+    expect(viewer()).toBeNull();
+    const panel = host.querySelector(".fp-detail")!;
     expect(panel.querySelector(".zd-file-open")).not.toBeNull();
     expect(panel.textContent).not.toContain("Smazat dokument");
-    await act(async () => [...panel.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.includes("Zpět na náhled"))!.click());
-    expect(panel.querySelector(".zd-file-open")).toBeNull();
     await act(async () => panel.querySelector<HTMLButtonElement>('[aria-label="Zavřít"]')!.click());
-    expect(nav.state.replaced.at(-1)).toBe("/soubory");
     expect(host.querySelector(".fp-detail")).toBeNull();
   });
 
-  it("without a stored original: the preview shows the start of the text, the menu offers the text", async () => {
+  it("Escape and × close the window", async () => {
+    standard();
+    await open({ search: `dokument=${D_ZAKON}` });
+    await settle();
+    expect(viewer()).not.toBeNull();
+    await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(nav.state.replaced.at(-1)).toBe("/soubory");
+  });
+
+  it("without a stored original: the window shows the start of the text, the menu offers the text", async () => {
     standard();
     await open({ search: `dokument=${D_KOMENTAR}` });
     await settle();
-    const panel = host.querySelector(".fp-detail")!;
-    await settle();
-    expect(panel.textContent).toContain("není uložený");
-    expect(panel.textContent).toContain("Začátek.");
+    const win = viewer()!;
+    expect(win.textContent).toContain("není uložený");
+    expect(win.textContent).toContain("Začátek.");
+    expect([...win.querySelectorAll("a")].some((a) => a.getAttribute("href")?.endsWith("/original"))).toBe(false);
     await openMenu("Komentar.pdf");
     expect((menuItem("Stáhnout text") as unknown as HTMLAnchorElement).getAttribute("href")).toContain(`/api/files/documents/${D_KOMENTAR}/export?lib=`);
-    expect([...host.querySelectorAll(".fp-menu a")].some((a) => a.getAttribute("href")?.endsWith("/original"))).toBe(false);
   });
 
-  it("an original still uploading is not offered either", async () => {
+  it("an original still uploading is not offered for download", async () => {
     serve({ libs: [library()], folders: [], docs: [doc(D_ZAKON, "zakon.pdf", null, { original: "uploading" })] });
     await open({ search: `dokument=${D_ZAKON}` });
-    expect(host.querySelector(".fp-detail")!.textContent).not.toContain("Stáhnout originál");
+    await settle();
+    expect([...viewer()!.querySelectorAll("a")].some((a) => a.getAttribute("href")?.endsWith("/original"))).toBe(false);
   });
 
-  it("a file still being processed spins: no form yet", async () => {
+  it("a file still being processed: its metadata cannot be opened yet", async () => {
     serve({ libs: [library()], folders: [], docs: [doc(D_ZAKON, "zakon.pdf", null, { status: "processing" })] });
-    await open({ search: `dokument=${D_ZAKON}` });
+    await open();
     expect(row("zakon.pdf").textContent).toContain("Zpracovávám…");
-    const panel = host.querySelector(".fp-detail")!;
-    expect(panel.textContent).toContain("Asistent soubor ještě zpracovává");
-    expect(panel.querySelector(".zd-file-open")).toBeNull();
-    expect(calls.some((c) => c.url === `/api/files/documents/${D_ZAKON}`)).toBe(false);
+    await openMenu("zakon.pdf");
+    expect(menuItem("Upravit údaje")!.disabled).toBe(true);
+  });
+});
+
+describe("folders open in place (disclosure arrow)", () => {
+  it("the arrow shows a folder's content indented under it, and hides it again; a click on the row still opens the folder", async () => {
+    standard();
+    await open();
+    expect(host.textContent).not.toContain("smlouva.docx");
+    const arrow = () => host.querySelector<HTMLButtonElement>('[aria-label="Rozbalit Smlouvy"], [aria-label="Sbalit Smlouvy"]')!;
+    await act(async () => arrow().click());
+    expect(arrow().getAttribute("aria-expanded")).toBe("true");
+    expect(row("smlouva.docx").getAttribute("aria-level")).toBe("2");
+    expect(row("Smlouvy").getAttribute("aria-level")).toBe("1");
+    // The arrow does not navigate.
+    expect(nav.state.pushed).toEqual([]);
+    await act(async () => arrow().click());
+    expect(host.textContent).not.toContain("smlouva.docx");
+    await act(async () => row("Smlouvy").click());
+    expect(nav.state.pushed.at(-1)).toBe(`/soubory?slozka=${F_SMLOUVY}`);
   });
 });
 
