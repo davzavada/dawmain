@@ -597,10 +597,11 @@ describe("files_search", () => {
   });
 
   it("rejects bad input with fixed, actionable messages", async () => {
-    // `library` is no longer an input: an old client's value is ignored, never an error.
-    const staleLib = await call("files_search", { query: "škoda", library: "cizi-tym" });
-    expect(staleLib.isError).toBe(false);
-    expect(staleLib.text).not.toContain("cizi-tym");
+    // A library the caller does not belong to: the same answer as one that does not exist, naming the available ones.
+    const foreignLib = await call("files_search", { query: "škoda", library: "cizi-tym" });
+    expect(foreignLib.isError).toBe(true);
+    expect(foreignLib.text).toContain('No library "cizi-tym"');
+    expect(foreignLib.text).toContain('Osobní (library: "osobni")');
     expect((await call("files_search", { query: "škoda", act: "nesmysl" })).text).toContain('Unknown act "nesmysl"');
     expect((await call("files_search", { case_number: "nic takového" })).text).toContain("not a recognisable spisová značka");
     expect((await call("files_search", {})).text).toContain("Provide query/queries, case_number or section.");

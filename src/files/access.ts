@@ -2,7 +2,8 @@ import "server-only";
 import { clerkClient } from "@clerk/nextjs/server";
 import { TtlCache } from "@/src/sources/shared/cache";
 import type { Access, LibraryAccess } from "./access-types";
-import { LIMITS, USER_ID_RE } from "./config";
+import { LIMITS, ORG_ID_RE, USER_ID_RE } from "./config";
+import { sanitizeLine } from "./dmd/normalize";
 import { clerkStatus } from "./errors";
 
 export type { Access, LibraryAccess } from "./access-types";
@@ -27,13 +28,25 @@ export type { Access, LibraryAccess } from "./access-types";
  *     other way round: UKAŽ (doctrine_*) stays off until an admin sets it
  *     to `true`, and like the rest it needs Pro.
  *
- * There are no shared (team) libraries: Clerk organizations are ignored.
- * `libraries` holds the Pro library (search, read, upload); `all` the
- * personal library, Pro or not (list, delete, export — a user who lost Pro
- * keeps control over what they stored).
+ * Team libraries `org_…`: one per Clerk organization the user belongs
+ * to. Teams are created and staffed by an admin on /sprava (src/admin) —
+ * members cannot invite anyone. A team library is Pro when
+ * `organization.publicMetadata.pro === true` (the admin's "active"
+ * switch); every member searches it, reads it and uploads into it, edits
+ * and deletes their own uploads, and a member with the org:admin role
+ * ("správce týmu") manages every document of the team. The user's own
+ * `features.files: false` switches the feature off for them everywhere,
+ * their teams included; the organization's `features.files: false` only
+ * for that team. Zotero and UKAŽ stay personal (a team grants neither).
+ * Quota: the organization's `filesQuota.pages`, else LIMITS.teamPages.
  *
- * One Clerk call per lookup (getUser), cached per user for 60 s on the
- * instance; `fresh` (uploads, edits) accepts at most 10 s — which also caps
+ * `libraries` holds the Pro libraries (search, read, upload), personal
+ * first, then teams by name; `all` every library the user owns or belongs
+ * to, Pro or not (list, delete, export — a user who lost Pro keeps control
+ * over what they stored).
+ *
+ * Two Clerk calls per lookup (getUser + getOrganizationMembershipList, in
+ * parallel), cached per user for 60 s on the instance; `fresh` (uploads, edits) accepts at most 10 s — which also caps
  * the Backend API rate one user can cause. Concurrent lookups of one user share a single request.
  * Cached objects are frozen: one warm instance serves many users at once,
  * and nothing may mutate what another request is reading.
@@ -43,6 +56,9 @@ const CACHE_TTL_MS = 60_000;
 const FRESH_TTL_MS = 10_000;
 /** Name of the personal library in the UI and in tool output. */
 export const PERSONAL_LIBRARY_NAME = "Osobní";
+/** Clerk's page size cap for membership lists; a user in more teams is an operator anomaly. */
+const MEMBERSHIP_LIMIT = 100;
+const MAX_NAME = 120;
 
 type Loader = (userId: string) => Promise<Access>;
 
@@ -56,6 +72,14 @@ export function __setAccessLoaderForTests(loader: Loader | null): void {
   testLoader = loader;
   cache = newCache();
   inflight.clear();
+}
+
+/**
+ * Forget a user's cached access on this instance — after an admin changed
+ * their teams here. Other instances catch up within their TTL (60 s).
+ */
+export function invalidateAccess(userId: string): void {
+  cache.delete(userId);
 }
 
 /** Deep-freeze an Access so a cached value can be shared across requests. */
@@ -102,7 +126,8 @@ export async function getAccess(userId: string, opts: { fresh?: boolean } = {}):
 
 /**
  * May modify a document — save or confirm its metadata (anything that
- * re-derives the index): the owner, and only in a Pro library.
+ * re-derives the index): a member their own uploads, the owner / team
+ * manager everything, and only in a Pro library either way.
  */
 export function canEditDocument(lib: LibraryAccess, uploadedBy: string, userId: string): boolean {
   return lib.pro && (lib.canManageAll || (lib.canUpload && uploadedBy === userId));
@@ -110,8 +135,8 @@ export function canEditDocument(lib: LibraryAccess, uploadedBy: string, userId: 
 
 /**
  * May delete or export a document — ownership only, Pro not required (a
- * user who lost Pro keeps control over what they stored): the uploader
- * or the owner of the library. The library must come from
+ * user who lost Pro keeps control over what they stored): the uploader,
+ * or the owner / team manager of the library. The library must come from
  * ownedScope (the caller belongs to it).
  */
 export function canDeleteDocument(lib: LibraryAccess, uploadedBy: string, userId: string): boolean {
@@ -165,8 +190,17 @@ export interface ClerkUserLike {
   publicMetadata?: unknown;
 }
 
-/** Access from a Clerk user. Pure — unit-tested with plain objects. */
-export function buildAccess(user: ClerkUserLike): Access {
+export interface ClerkMembershipLike {
+  role: string;
+  organization: { id: string; name?: string | null; slug?: string | null; publicMetadata?: unknown };
+}
+
+/**
+ * Access from a Clerk user and their team memberships. Pure — unit-tested
+ * with plain objects. Personal library first, then teams in name order;
+ * duplicates and malformed org ids are dropped.
+ */
+export function buildAccess(user: ClerkUserLike, memberships: readonly ClerkMembershipLike[] = []): Access {
   const userId = user.id;
   if (user.banned === true || user.locked === true) return emptyAccess(userId, true);
   const userPro = proFrom(user.publicMetadata);
@@ -185,7 +219,29 @@ export function buildAccess(user: ClerkUserLike): Access {
     canManageAll: true,
     quotaPages: quotaFrom(user.publicMetadata, LIMITS.personalPages),
   };
-  const all = [personal];
+  const teams: LibraryAccess[] = [];
+  const seen = new Set<string>();
+  for (const m of memberships) {
+    const org = m?.organization;
+    if (!org || typeof org.id !== "string" || !ORG_ID_RE.test(org.id) || seen.has(org.id)) continue;
+    seen.add(org.id);
+    const teamPro = proFrom(org.publicMetadata) && !userFilesOff && !featureOff(org.publicMetadata, "files");
+    const manager = m.role === "org:admin";
+    const slug = typeof org.slug === "string" ? sanitizeLine(org.slug, MAX_NAME) : "";
+    teams.push({
+      id: org.id,
+      kind: "org",
+      name: sanitizeLine(typeof org.name === "string" ? org.name : "", MAX_NAME) || slug || "Tým",
+      slug: slug || null,
+      role: manager ? "org:admin" : "org:member",
+      pro: teamPro,
+      canUpload: teamPro,
+      canManageAll: manager,
+      quotaPages: quotaFrom(org.publicMetadata, LIMITS.teamPages),
+    });
+  }
+  teams.sort((a, b) => a.name.localeCompare(b.name, "cs") || a.id.localeCompare(b.id));
+  const all = [personal, ...teams];
   // UKAŽ hangs under Pro like the rest: switched on and Pro.
   return { userId, banned: false, libraries: all.filter((l) => l.pro), all, zotero, ukaz: userPro && ukazOn(user.publicMetadata) };
 }
@@ -193,13 +249,19 @@ export function buildAccess(user: ClerkUserLike): Access {
 async function loadFromClerk(userId: string): Promise<Access> {
   const client = await clerkClient();
   let user: ClerkUserLike;
+  let memberships: ClerkMembershipLike[];
   try {
-    user = await client.users.getUser(userId);
+    const [u, list] = await Promise.all([
+      client.users.getUser(userId),
+      client.users.getOrganizationMembershipList({ userId, limit: MEMBERSHIP_LIMIT }),
+    ]);
+    user = u;
+    memberships = list.data;
   } catch (error) {
     if (clerkStatus(error) === 404) return emptyAccess(userId);
     throw error;
   }
-  return buildAccess(user);
+  return buildAccess(user, memberships);
 }
 
 // ---------------------------------------------------------------------------
@@ -218,16 +280,20 @@ export function __setOwnerLookupForTests(lookup: OwnerLookup | null): void {
  * Does the owner of a library still exist in Clerk, and is it Pro? Pro
  * alone — deliberately not the feature switches: `features.files: false`
  * pauses Vlastní soubory, it must never start the 90-day purge. One
- * Backend API call (getUser). A 404 is "gone" (the deletion webhook may
- * have been missed); other failures throw. A team library (`org_…`) left
- * over from before teams were removed is never Pro again: it takes the
- * ordinary 90-day path to deletion.
+ * Backend API call (getUser / getOrganization). A 404 is "gone" (the
+ * deletion webhook may have been missed); other failures throw. A team
+ * library is Pro while its organization is active (`publicMetadata.pro`);
+ * an admin who deactivates a team starts the same purge path as a user
+ * who lost Pro (app/api/cron/files: about a week).
  */
 export async function libraryOwnerState(libraryId: string): Promise<OwnerState> {
   if (testOwnerLookup) return testOwnerLookup(libraryId);
-  if (libraryId.startsWith("org_")) return "not_pro";
   const client = await clerkClient();
   try {
+    if (libraryId.startsWith("org_")) {
+      const org = await client.organizations.getOrganization({ organizationId: libraryId });
+      return proFrom(org.publicMetadata) ? "pro" : "not_pro";
+    }
     const user = await client.users.getUser(libraryId);
     return proFrom(user.publicMetadata) && !user.banned ? "pro" : "not_pro";
   } catch (error) {

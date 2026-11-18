@@ -588,8 +588,9 @@ describe("GET /api/files/documents/[id]/export?lib=", () => {
   it("a daily budget per user across documents: a second full library in one day is refused", async () => {
     const ids = [await uploaded("user_a", "user_a", "a"), await uploaded("user_a", "user_a", "b")];
     const theirs = await uploaded("user_x", "user_x", "m");
-    // The budget is one library's quota; shrink it to these two documents.
+    // The budget is the larger of the personal and team quotas; shrink both to these two documents.
     process.env.FILES_PERSONAL_PAGES = String(2 * exportPages(3));
+    process.env.FILES_TEAM_PAGES = String(2 * exportPages(3));
     for (const id of ids) expect((await exportOf("user_a", id, "user_a")).status).toBe(200);
     for (const id of ids) {
       const capped = await exportOf("user_a", id, "user_a");

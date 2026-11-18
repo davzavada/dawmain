@@ -1566,6 +1566,44 @@ span.source-title:has(> svg) {
   font-size: 14px;
   color: var(--muted);
 }
+.zd-lib-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.zd-lib-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.zd-lib-tab:hover {
+  color: var(--text);
+}
+.zd-lib-tab[aria-selected="true"] {
+  border-color: var(--accent);
+  color: var(--text);
+  font-weight: 600;
+}
+.zd-lib-tab[data-off] {
+  opacity: 0.65;
+}
+.zd-lib-tab-count {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+}
 .zd-files-list {
   display: flex;
   flex-direction: column;
@@ -2736,6 +2774,73 @@ button.zd-file-row:hover .zd-file-title {
   display: block;
   height: 100%;
   background: var(--accent);
+}
+
+/* Správa → Týmy (/sprava/tymy) */
+.adm-team-new {
+  display: flex;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.adm-team-new .adm-quota-input,
+.adm-quota-input.adm-team-name {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  text-align: left;
+  font-variant-numeric: normal;
+}
+.adm-team-name-form {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.adm-team-avatar {
+  border-radius: 8px;
+}
+.adm-select {
+  max-width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+.adm-members {
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+.adm-member {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+.adm-member:last-child {
+  border-bottom: 0;
+}
+.adm-member-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.adm-member-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.adm-member-add .adm-search {
+  width: 140px;
+}
+.adm-member-add .adm-select:first-of-type {
+  flex: 1;
+  min-width: 160px;
 }
 @media (max-width: 980px) {
   .adm-grid {

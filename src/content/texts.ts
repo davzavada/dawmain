@@ -136,6 +136,8 @@ Nahráním dokumentu potvrzujete, že pravidla v tomto oddílu dodržíte - web 
 
 **Záloha není.** Originály si nechte u sebe: server je nikdy nedostane, takže vám je ani nemůže vrátit. Uložený text a metadata nezálohuji a za jejich ztrátu, třeba při výpadku nebo ukončení služby, neručím. Text svých dokumentů si ale můžete stáhnout odkazem „Stáhnout text“ u dokumentu v seznamu souborů (s denním limitem).
 
+**Týmy.** Na požádání vás zařadím do týmu. Tým má vlastní sdílenou knihovnu: dokumenty nahrané do ní vidí a prohledávají všichni jeho členové a jejich asistenti, správce týmu je může upravit i smazat. Do týmu nahrávejte jen to, co smějí vidět všichni jeho členové. Osobní soubory zůstávají jen vaše. Členy týmů přiděluji a měním já.
+
 **Osobní údaje.** Jak s nimi zacházím, popisují [Zásady ochrany osobních údajů](/soukromi). Požádá-li mě někdo o výmaz údajů o sobě z nahraného dokumentu, dokument smažu a dám vám vědět.
 
 **Nezákonný obsah.** Máte-li za to, že je ve Vlastních souborech nezákonný obsah (typicky porušení autorských práv), napište mi na ${MAIL}: o jaký dokument jde, proč je podle vás nezákonný, a své jméno a e-mail. Oznámení posoudím bez zbytečného odkladu. Nezákonný obsah nebo obsah v rozporu s těmito pravidly můžu odstranit, zabránit jeho opětovnému nahrání a přístup k Vlastním souborům omezit nebo zrušit. Tomu, koho se to týká, napíšu, co jsem udělal a proč, a může se proti tomu ohradit.
@@ -188,7 +190,7 @@ E-mail: ${MAIL}
 
 - Údaje o účtu - dokud účet trvá; o jeho smazání můžete kdykoli požádat e-mailem.
 - Provozní záznamy serveru - jen po dobu potřebnou k řešení chyb a ochraně služby; počty volání u účtu nejdéle 12 měsíců.
-- Vlastní soubory a záznamy o práci s nimi - dokud dokument nesmažete, nejdéle však do zrušení účtu nebo odebrání Pro. Pak knihovnu do týdne smažu (do té doby si po odebrání Pro můžete stáhnout text svých dokumentů). Databázi zatím pravidelně nezálohuji; smazaný dokument může zůstat nejvýš v dočasném snímku serveru, který pořizuji před údržbou databáze, a to dokud ten snímek nesmažu. Po výmazu knihovny si ponechám jen záznam o výmazu (identifikátor knihovny, datum a počet smazaných dokumentů), dokud může být potřeba výmaz doložit.
+- Vlastní soubory a záznamy o práci s nimi - dokud dokument nesmažete, nejdéle však do zrušení účtu nebo odebrání Pro. Pak knihovnu do týdne smažu (do té doby si po odebrání Pro můžete stáhnout text svých dokumentů). Dokumenty v týmové knihovně zůstávají týmu i po vašem odchodu z něj a do týdne po vypnutí nebo zrušení týmu je smažu. Databázi zatím pravidelně nezálohuji; smazaný dokument může zůstat nejvýš v dočasném snímku serveru, který pořizuji před údržbou databáze, a to dokud ten snímek nesmažu. Po výmazu knihovny si ponechám jen záznam o výmazu (identifikátor knihovny, datum a počet smazaných dokumentů), dokud může být potřeba výmaz doložit.
 - Klíč k Zoteru, uživatelské jméno a identifikátor - dokud Zotero neodpojíte nebo nezrušíte účet. Přestane-li klíč platit, smažu ho a do opětovného připojení, odpojení nebo zrušení účtu si ponechám jen uživatelské jméno a čas, kdy klíč přestal platit.
 
 ## 5. Komu údaje předávám
@@ -200,7 +202,7 @@ Dawmain i databáze Vlastních souborů běží na mém vlastním serveru v Čes
 
 **Návrh metadat.** Typ dokumentu, název, autory a další metadata navrhne po nahrání server sám podle začátku dokumentu; text dokumentu přitom žádnému poskytovateli AI neposílám. Co z dokumentu přečte přes nástroje Dawmainu váš asistent, dostane poskytovatel asistenta, kterého používáte.
 
-Clerk i Cloudflare jsou americké společnosti; předávání do USA se opírá o EU-US Data Privacy Framework. Jinak údaje předám jen orgánům veřejné moci, ukládá-li mi to zákon. Přihlášení účtem Google se řídí [zásadami ochrany soukromí Google](https://policies.google.com/privacy).
+Clerk i Cloudflare jsou americké společnosti; předávání do USA se opírá o EU-US Data Privacy Framework. Dokumenty nahrané do týmové knihovny vidí členové toho týmu. Jinak údaje předám jen orgánům veřejné moci, ukládá-li mi to zákon. Přihlášení účtem Google se řídí [zásadami ochrany soukromí Google](https://policies.google.com/privacy).
 
 ## 6. Zabezpečení
 

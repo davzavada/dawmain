@@ -508,6 +508,7 @@ až novým buildem, `deploy.sh`).
 | `DATABASE_URL_UNPOOLED` | vlastnické připojení (`files_owner`), jen pro `scripts/db-migrate.mjs` z terminálu; aplikace ho nečte | — |
 | `FILES_GLOBAL_MAX_PAGES` | strop stran pro celou instalaci | 30 000 |
 | `FILES_PERSONAL_PAGES` | kvóta osobní knihovny (stran) | 10 000 |
+| `FILES_TEAM_PAGES` | výchozí kvóta týmové knihovny (stran) | 10 000 |
 | `FILES_OPERATOR_IDS` | Clerk `user_…` oddělená čárkou — provozovatelé Vlastních zdrojů (`src/files/operator.ts`) a zároveň správci na `/sprava` | — |
 | `ADMIN_USER_IDS` | Clerk `user_…` oddělená čárkou — správci na `/sprava` bez ohledu na Clerk: první správce a cesta zpět. Další správce se povyšují na stránce Správa (`publicMetadata.role = "admin"`) | — |
 | `FILES_GLOBAL_UPLOADS_PER_DAY` | nahrání za den ve všech knihovnách dohromady | 200 |
@@ -530,24 +531,29 @@ přepsat v Clerku (níže).
    připojují MCP, dostal úkol vybrat si organizaci), **vypnout Allow
    user-created organizations**. Výchozí limit je 5 členů na tým; zdarma jde
    zvednout nejvýš na 20.
-2. **Tým zakládej ty, s jeho budoucím správcem jako tvůrcem** — kdybys ho
-   založil za sebe, stal by ses členem a viděl bys týmové dokumenty. Pak
-   vypni mazání týmu adminem (smazání týmu = výmaz celé knihovny):
+2. **Týmy spravuj na `/sprava/tymy`** (záložka Týmy ve Správě): založení,
+   přejmenování, zapnutí/vypnutí, kvóta, přidání a odebrání členů a jejich
+   role. Členové nikoho nezvou, týmy přiděluje jen správce Dawmainu. Tým
+   zakládá server bez tvůrce (`createOrganization` bez `createdBy`), takže
+   se správce Dawmainu nestává jeho členem a týmové dokumenty nevidí. Nový
+   tým je rovnou aktivní (`public_metadata.pro = true`). Řádek tabulky
+   otevře detail týmu: členy, počet sdílených dokumentů a stran a kvótu.
+   Vypnutí týmu = jako odebrání Pro: cron knihovnu do týdne smaže, pokud ho
+   nezapneš znovu. Smazání týmu = webhook `organization.deleted` (nebo denní
+   kontrola) označí knihovnu k výmazu. Výchozí kvóta týmu je
+   `FILES_TEAM_PAGES` (10 000), vlastní kvóta se nastaví v detailu týmu.
 
-   ```bash
-   curl -sS https://api.clerk.com/v1/organizations \
-     -H "Authorization: Bearer $CLERK_SECRET_KEY" -H 'Content-Type: application/json' \
-     -d '{"name":"AK Novák","created_by":"user_…","max_allowed_memberships":20,"public_metadata":{"pro":true}}'
-   curl -sS -X PATCH https://api.clerk.com/v1/organizations/org_… \
-     -H "Authorization: Bearer $CLERK_SECRET_KEY" -H 'Content-Type: application/json' \
-     -d '{"admin_delete_enabled":false}'
-   ```
+   Role: **správce týmu** (`org:admin`) upravuje a maže všechny dokumenty
+   týmu, **člen** (`org:member`) jen své; nahrávat smějí všichni členové
+   aktivního týmu, i bez osobního Pro. Zotero a UKAŽ tým nedává, ty jsou
+   dál jen osobní. Na webu má člen v modalu Vlastní soubory záložky
+   Osobní / <tým>; MCP `files_search` a `files_list` hledají v osobní knihovně i ve
+   všech týmech, filtr `library` („osobni“ nebo tým) rozsah zúží.
 
 3. **Pro se přiděluje v public metadata** (*Users → uživatel → Metadata*,
-   resp. *Organizations → tým → Metadata*): `{ "pro": true }` — přesně
+   u týmu to za tebe nastaví `/sprava/tymy`): `{ "pro": true }` — přesně
    boolean `true`. Vlastní kvóta: `{ "pro": true, "filesQuota": { "pages": 5000 } }`.
-   Projeví se do minuty (přístup se cachuje 60 s). Členové týmu s Pro nahrávat
-   smějí všichni; správce (`org:admin`) upravuje a maže všechno, člen jen své.
+   Projeví se do minuty (přístup se cachuje 60 s).
 4. **Vypnutí jednotlivých funkcí** (tamtéž, public metadata uživatele nebo
    týmu): Pro zapíná všechno, jednotlivou funkci vypne `false` pod
    `features`:
@@ -560,8 +566,7 @@ přepsat v Clerku (níže).
    a `zotero` (`zotero_*` a připojení Zotera na webu). Vypíná jen přesně
    boolean `false`; chybějící klíč, `true` nebo cokoli jiného funkci nechá
    zapnutou a bez Pro ji žádný přepínač nezapne. **U týmu** vypne funkci
-   v tom týmu (Zotero člen i tak má, dává-li mu ho vlastní Pro nebo jiný
-   tým); **u uživatele** mu ji vypne všude, i v jeho týmech. Projeví se do
+   `files` jen v tom týmu (Zotero tým nedává vůbec); **u uživatele** mu ji vypne všude, i v jeho týmech. Projeví se do
    minuty (přístup se cachuje 60 s); seznam nástrojů v klientu zůstane,
    nástroje odpoví jako bez Pro a asistent je v konverzaci dál nevolá.
    - `files: false` knihovnu jen **pozastaví**: je dál vidět, dá se z ní

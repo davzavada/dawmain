@@ -52,6 +52,10 @@ export const LIMITS = {
   get personalPages() {
     return intEnv("FILES_PERSONAL_PAGES", 10_000);
   },
+  /** Default quota of a team library (override: organization.publicMetadata.filesQuota.pages). */
+  get teamPages() {
+    return intEnv("FILES_TEAM_PAGES", 10_000);
+  },
   get globalPages() {
     return intEnv("FILES_GLOBAL_MAX_PAGES", 30_000);
   },
@@ -130,4 +134,5 @@ export function cronSecret(): string | undefined {
  */
 export const LIBRARY_ID_RE = /^(user|org)_[A-Za-z0-9]+$/;
 export const USER_ID_RE = /^user_[A-Za-z0-9]+$/;
+export const ORG_ID_RE = /^org_[A-Za-z0-9]+$/;
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

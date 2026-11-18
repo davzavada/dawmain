@@ -56,10 +56,13 @@ describe("hint cookie", () => {
     // A tampered library drops the summary, not the page.
     const bad = { ...SUMMARY, libraries: [{ ...LIB, pro: "yes" }] };
     expect(parseHint(encodeURIComponent(JSON.stringify({ i: "DZ", s: bad })))).toEqual({ initials: "DZ", image: null, summary: null });
-    // So does a team library or role from before teams were removed (an old cookie).
-    for (const lib of [{ ...LIB, id: "org_1", kind: "org" }, { ...LIB, role: "org:admin" }]) {
+    // So does an unknown library kind or role.
+    for (const lib of [{ ...LIB, id: "grp_1", kind: "group" }, { ...LIB, role: "org:owner" }]) {
       expect(parseHint(encodeURIComponent(JSON.stringify({ i: "DZ", s: { ...SUMMARY, libraries: [lib] } })))).toEqual({ initials: "DZ", image: null, summary: null });
     }
+    // A team library (with its role) is kept.
+    const team = { ...LIB, id: "org_1", kind: "org", name: "Spory", role: "org:member", canManageAll: false };
+    expect(parseHint(encodeURIComponent(JSON.stringify({ i: "DZ", s: { ...SUMMARY, libraries: [LIB, team] } })))?.summary).toMatchObject({ libraries: [LIB, team] });
     // Markup in the initials never survives.
     expect(parseHint(encodeURIComponent(JSON.stringify({ i: "<b>", s: null })))?.initials).toBe("b");
   });
@@ -129,6 +132,14 @@ describe("the cookie keeps what the hint shows", () => {
     expect(filesRowView({ state: "unavailable", mode: "on" })).toEqual({ desc: "Teď dočasně vypnuté.", locked: false });
     const empty = { ...SUMMARY, libraries: [{ ...LIB, counts: { ...LIB.counts!, total: 0 } }] };
     expect(filesRowView(empty).desc).toBe("Zatím žádné dokumenty");
+  });
+
+  it("the files line counts the user's teams too; a team unlocks the row without personal Pro", () => {
+    const team: LibrarySummary = { ...LIB, id: "org_t", kind: "org", name: "Spory", role: "org:member", canManageAll: false, pagesUsed: 30, counts: { ...LIB.counts!, total: 3 } };
+    expect(filesRowView({ ...SUMMARY, libraries: [LIB, team] })).toEqual({ desc: "5 dokumentů · 42 stran · včetně týmu", locked: false });
+    const teamOnly = { ...SUMMARY, libraries: [{ ...LIB, pro: false, canUpload: false, counts: null, pagesUsed: null }, team] };
+    expect(filesRowView(teamOnly)).toEqual({ desc: "3 dokumenty · 30 stran · včetně týmu", locked: false });
+    expect(filesRowView({ ...SUMMARY, libraries: [{ ...LIB, pro: false }, { ...team, pro: false }] }).locked).toBe(true);
   });
 
   it("readHint finds it among other cookies", () => {
