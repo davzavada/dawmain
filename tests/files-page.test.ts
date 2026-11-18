@@ -415,7 +415,9 @@ describe("rights", () => {
     });
     await open({ handle: "spory" });
     expect(host.querySelector("h1")?.textContent).toBe("Spory");
-    expect(host.textContent).toContain("Upravit a smazat můžete ty, které jste nahráli vy.");
+    // No banner about who sees the team's files: the page says "Sdílené s týmem" in its subtitle.
+    expect(host.querySelector(".zd-banner-team")).toBeNull();
+    expect(host.querySelector(".fp-head p")?.textContent).toContain("Sdílené s týmem");
     await openMenu("cizi.pdf");
     for (const label of ["Přejmenovat", "Přesunout do", "Smazat"]) expect(menuItem(label)!.disabled, label).toBe(true);
     expect(host.querySelector(".fp-menu")?.textContent).toContain("Nahrál ho jiný člen týmu.");
@@ -445,13 +447,14 @@ describe("rights", () => {
     expect(button("Nová složka")).toBeUndefined();
     expect(button("Nahrát soubory")).toBeUndefined();
     await openMenu("zakon.pdf");
-    expect(menuItem("Stáhnout originál")).toBeDefined();
+    expect((menuItem("Stáhnout") as unknown as HTMLAnchorElement).getAttribute("href")).toBe(`/api/files/documents/${D_ZAKON}/original`);
+    expect(menuItem("Zobrazit údaje")).toBeDefined();
     expect(menuItem("Přejmenovat")!.disabled).toBe(true);
   });
 });
 
 describe("the detail panel", () => {
-  it("opens through ?dokument; a stored original can be opened and downloaded", async () => {
+  it("a click opens the preview on the right; downloads, metadata and delete live in the ⋯ menu", async () => {
     standard();
     await open();
     await act(async () => row("zakon.pdf").click());
@@ -459,26 +462,40 @@ describe("the detail panel", () => {
     expect(nav.state.replaced).toEqual([`/soubory?dokument=${D_ZAKON}`]);
     const panel = host.querySelector(".fp-detail")!;
     expect(panel.querySelector("b")?.textContent).toBe("zakon.pdf");
-    const links = [...panel.querySelectorAll("a")];
-    const download = links.find((a) => a.textContent?.includes("Stáhnout originál"))!;
+    // Only the preview: no buttons, no form, no delete, no "text for the assistant".
+    expect(panel.querySelector(".fp-preview")).not.toBeNull();
+    expect(panel.querySelectorAll("a")).toHaveLength(0);
+    expect(panel.querySelector(".zd-file-open")).toBeNull();
+    expect(panel.textContent).not.toContain("Text pro asistenta");
+    expect(panel.textContent).not.toContain("Smazat");
+    // ⋯ in the panel: Upravit údaje switches the panel to the form, and back.
+    await act(async () => panel.querySelector<HTMLButtonElement>(".fp-more")!.click());
+    const download = menuItem("Stáhnout") as unknown as HTMLAnchorElement;
     expect(download.getAttribute("href")).toBe(`/api/files/documents/${D_ZAKON}/original`);
     expect(download.hasAttribute("download")).toBe(true);
-    expect(links.find((a) => a.textContent === "Otevřít")?.getAttribute("href")).toBe(`/api/files/documents/${D_ZAKON}/original?inline=1`);
-    // The metadata form below it.
+    expect(menuItem("Smazat")).toBeDefined();
+    await act(async () => menuItem("Upravit údaje")!.click());
+    await settle();
     expect(panel.querySelector(".zd-file-open")).not.toBeNull();
-    await act(async () => panel.querySelector<HTMLButtonElement>('[aria-label="Zavřít podrobnosti"]')!.click());
+    expect(panel.textContent).not.toContain("Smazat dokument");
+    await act(async () => [...panel.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.includes("Zpět na náhled"))!.click());
+    expect(panel.querySelector(".zd-file-open")).toBeNull();
+    await act(async () => panel.querySelector<HTMLButtonElement>('[aria-label="Zavřít"]')!.click());
     expect(nav.state.replaced.at(-1)).toBe("/soubory");
     expect(host.querySelector(".fp-detail")).toBeNull();
   });
 
-  it("without a stored original: no download, the panel says only the text is there", async () => {
+  it("without a stored original: the preview shows the start of the text, the menu offers the text", async () => {
     standard();
     await open({ search: `dokument=${D_KOMENTAR}` });
+    await settle();
     const panel = host.querySelector(".fp-detail")!;
-    expect(panel.textContent).not.toContain("Stáhnout originál");
-    expect(panel.textContent).toContain("je tu jen text");
+    await settle();
+    expect(panel.textContent).toContain("není uložený");
+    expect(panel.textContent).toContain("Začátek.");
     await openMenu("Komentar.pdf");
-    expect(menuItem("Stáhnout originál")).toBeUndefined();
+    expect((menuItem("Stáhnout text") as unknown as HTMLAnchorElement).getAttribute("href")).toContain(`/api/files/documents/${D_KOMENTAR}/export?lib=`);
+    expect([...host.querySelectorAll(".fp-menu a")].some((a) => a.getAttribute("href")?.endsWith("/original"))).toBe(false);
   });
 
   it("an original still uploading is not offered either", async () => {
@@ -492,7 +509,7 @@ describe("the detail panel", () => {
     await open({ search: `dokument=${D_ZAKON}` });
     expect(row("zakon.pdf").textContent).toContain("Zpracovávám…");
     const panel = host.querySelector(".fp-detail")!;
-    expect(panel.textContent).toContain("Soubor se zpracovává");
+    expect(panel.textContent).toContain("Asistent soubor ještě zpracovává");
     expect(panel.querySelector(".zd-file-open")).toBeNull();
     expect(calls.some((c) => c.url === `/api/files/documents/${D_ZAKON}`)).toBe(false);
   });

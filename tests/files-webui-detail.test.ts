@@ -155,7 +155,8 @@ describe("a document's metadata form (FileEditor)", () => {
     });
     expect(host.textContent).toContain("Režim Pro tu už není aktivní");
     expect(button("Uložit")).toBeUndefined();
-    expect(button("Smazat dokument")).toBeDefined();
+    // Deleting is in the row's ⋯ menu, not in the form.
+    expect(button("Smazat dokument")).toBeUndefined();
     await act(async () => button("Stáhnout text")!.click());
     await waitFor(() => downloaded !== null);
     expect(calls.at(-1)?.url).toBe(`/api/files/documents/${ID}/export?lib=user_a`);
@@ -214,13 +215,9 @@ describe("a document's metadata form (FileEditor)", () => {
     expect(button("Stáhnout text")).toBeDefined();
   });
 
-  it("Smazat dokument asks first, then DELETEs and reports onDeleted", async () => {
+  it("has no delete of its own: deleting is in the ⋯ menu of the page", async () => {
     await setup(detail({ canEdit: true }));
-    await act(async () => button("Smazat dokument")!.click());
+    expect(button("Smazat dokument")).toBeUndefined();
     expect(calls.some((c) => c.method === "DELETE")).toBe(false);
-    expect(host.textContent).toContain("Smazat „k.pdf“?");
-    await act(async () => button("Smazat")!.click());
-    await waitFor(() => handlers.onDeleted.mock.calls.length === 1);
-    expect(calls.find((c) => c.method === "DELETE")?.url).toBe(`/api/files/documents/${ID}`);
   });
 });
