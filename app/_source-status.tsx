@@ -10,8 +10,7 @@ import {
   type MirrorCounts,
 } from "@/src/mcp/databases";
 import { Icon, type IconName } from "./_icons";
-import { ZIcon } from "./_zdroje/icons";
-import { requestSignIn, useZdroje } from "./_zdroje/store";
+import { useZdroje } from "./_zdroje/store";
 import { useSourceTexts } from "./_zdroje/texts";
 
 /**
@@ -74,7 +73,7 @@ function useStatuses(): Answers {
 // ---------------------------------------------------------------------------
 // The header summary
 
-function Summary({ state, text }: { state: "ok" | "down" | "pending"; text: string }) {
+function Summary({ state, text }: { state: "ok" | "down" | "pending" | "unknown"; text: string }) {
   return (
     <span className="summary">
       <span className="summary-dot" data-state={state} aria-hidden="true" />
@@ -87,7 +86,7 @@ export function StatusSummary() {
   const answers = useStatuses();
   if (DATABASES.some((db) => answers[db.canaryId] === undefined)) return <Summary state="pending" text="Ověřuji zdroje…" />;
   const known = DATABASES.map((db) => answers[db.canaryId]).filter((s): s is DatabaseStatus => !!s && s.ok !== null);
-  if (known.length === 0) return <Summary state="pending" text="Stav zdrojů neověřen" />;
+  if (known.length === 0) return <Summary state="unknown" text="Stav zdrojů neověřen" />;
   const up = known.filter((s) => s.ok).length;
   const total = DATABASES.length;
   const at = formatTime(Math.max(...known.map((s) => s.at!)));
@@ -196,7 +195,7 @@ export function SourceList({ groups = DATABASE_GROUPS }: { groups?: readonly Dat
             <p className="source-box-note">Rozhodnutí českých soudů hledá Dawmain ve vlastní, pravidelně aktualizované kopii. Odkaz vždy vede na originál u soudu.</p>
             <ul>
               {mirrored.map((row) => (
-                <DatabaseRow key={row.id} row={row} count={row.mirror ? counts?.[row.mirror] : undefined} />
+                <DatabaseRow key={row.id} row={row} count={row.mirror ? counts?.[row.mirror] : undefined} countLoading={counts === undefined} />
               ))}
             </ul>
           </div>
@@ -215,7 +214,8 @@ export function SourceList({ groups = DATABASE_GROUPS }: { groups?: readonly Dat
   });
 }
 
-function DatabaseRow({ row, count }: { row: Row; count?: number }) {
+/** `countLoading`: a mirrored court's count is still on its way — a shimmering bar in its place, not the status light. */
+function DatabaseRow({ row, count, countLoading = false }: { row: Row; count?: number; countLoading?: boolean }) {
   const look = LOOK[row.id] ?? { icon: "list", color: "var(--soft)" };
   return (
     <li className="source">
@@ -224,7 +224,15 @@ function DatabaseRow({ row, count }: { row: Row; count?: number }) {
         <a href={row.href}>{row.label}</a>
         <span className="source-host">{host(row.href)}</span>
       </div>
-      {count !== undefined ? <DecisionCount value={count} /> : <StateDot row={row} />}
+      {count !== undefined ? (
+        <DecisionCount value={count} />
+      ) : countLoading ? (
+        <span className="source-count" aria-hidden="true">
+          <span className="zd-shimmer zd-shimmer-late source-count-shimmer" />
+        </span>
+      ) : (
+        <StateDot row={row} />
+      )}
     </li>
   );
 }
@@ -303,25 +311,10 @@ const UKAZ = DATABASES.find((db) => db.canaryId === "primo")!;
  * the status asked for.
  */
 export function UkazRow({ signedIn }: { signedIn: boolean }) {
-  const { auth, summary } = useZdroje();
-  if (!signedIn) {
-    return (
-      <UkazRowView locked>
-        <button type="button" className="source-title zd-row-button" onClick={requestSignIn} disabled={auth !== "signed_out"}>
-          {UKAZ.label}
-        </button>
-      </UkazRowView>
-    );
-  }
-  if (summary?.state === "ok" && summary.ukaz === true) return <UkazRowOn />;
-  return (
-    <UkazRowView locked>
-      <span className="source-title">
-        {UKAZ.label}
-        <ZIcon name="lock" size={13} />
-      </span>
-    </UkazRowView>
-  );
+  const { summary } = useZdroje();
+  // A hidden feature: only an account an admin switched it on for sees it at all.
+  if (!signedIn || summary?.state !== "ok" || summary.ukaz !== true) return null;
+  return <UkazRowOn />;
 }
 
 /** Switched on: the same card as for visitors, without the lock; the whole card opens the catalogue. */

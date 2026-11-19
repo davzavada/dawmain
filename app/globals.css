@@ -531,7 +531,8 @@ main > footer a {
 }
 .sources > .zd-own > .source-box > ul {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* Two cards (UKAŽ hidden) or three: they share the row. */
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 12px;
 }
 .sources > .zd-own > .source-box > ul > .source {
@@ -4429,4 +4430,54 @@ button.zd-file-row:hover .zd-file-title {
 .tm-who span {
   font-size: 12.5px;
   color: var(--muted);
+}
+
+/* Late-loading bits (counts, the sidebar's teams, status lights): a shimmer in their place, appearing only if the wait is noticeable. */
+.zd-shimmer-late {
+  opacity: 0;
+  animation:
+    zd-loading-in 0.2s ease-out 0.2s forwards,
+    zd-shimmer 1.4s ease-in-out infinite;
+}
+.nav-count-shimmer {
+  display: inline-block;
+  width: 16px;
+  height: 10px;
+  margin-left: auto;
+  padding: 0;
+  border-radius: 4px;
+}
+.source-count-shimmer {
+  display: inline-block;
+  width: 108px;
+  height: 10px;
+  vertical-align: middle;
+}
+.tab-hinted {
+  display: contents;
+}
+:root:not([data-hint]) .tab-hinted {
+  display: none;
+}
+.nav-in {
+  animation: zd-loading-in 0.25s ease-out both;
+}
+@keyframes zd-dot-wait {
+  50% {
+    opacity: 0.35;
+  }
+}
+.source-dot[data-state="pending"],
+.summary-dot[data-state="pending"] {
+  animation: zd-dot-wait 1.2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .zd-shimmer-late {
+    animation: zd-loading-in 0.2s ease-out 0.2s forwards;
+  }
+  .nav-in,
+  .source-dot[data-state="pending"],
+  .summary-dot[data-state="pending"] {
+    animation: none;
+  }
 }
