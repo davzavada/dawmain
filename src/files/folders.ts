@@ -85,7 +85,7 @@ async function requireModeOn(): Promise<void> {
 
 /** May manage the folders of this library: Pro, and the caller may upload into it. */
 function assertManages(lib: LibraryAccess): void {
-  if (!lib.pro || !lib.canUpload) throw new FilesUserError(403, "Složky lze upravovat jen v knihovně s Pro, do které můžete nahrávat.");
+  if (!lib.pro || !lib.canUpload) throw new FilesUserError(403, "Složky lze upravovat jen v knihovně s Pro (právníky), do které můžete nahrávat.");
 }
 
 /** pg unique violation (a sibling took the name between the check and the write) → 409. */

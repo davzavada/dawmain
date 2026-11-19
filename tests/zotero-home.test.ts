@@ -179,7 +179,7 @@ describe("the Zotero row on the home page", () => {
     await render();
     const g = group()!;
     expect(g.locked).toBe(true);
-    expect(g.textContent).toContain("bez režimu Pro do knihovny asistent nevidí");
+    expect(g.textContent).toContain("bez režimu Pro (právníky) do knihovny asistent nevidí");
     expect(g.querySelector(".zd-badge")).toBeNull();
   });
 

@@ -71,7 +71,7 @@ export const STAV_BANNER: Record<ZoteroStav, { tone: Tone; text: string }> = {
     // Only "no session": another account than the one that started gets vyprselo (its state cookie does not open).
     text: "Připojení se nepodařilo dokončit, protože nejste přihlášeni. Přihlaste se a zkuste to znovu.",
   },
-  nepro: { tone: "bad", text: "Zotero jde připojit jen v režimu Pro." },
+  nepro: { tone: "bad", text: "Zotero jde připojit jen v režimu Pro (právníky)." },
   nedostupne: { tone: "bad", text: "Připojení Zotera není na tomto webu zapnuté." },
   limit: { tone: "bad", text: "Pokusů o připojení bylo teď příliš mnoho. Zkuste to prosím později." },
   // web.ts also answers chyba to a key without read access to the personal library (the user unticked it on zotero.org).
@@ -209,7 +209,7 @@ export function ZoteroPanel({ stav }: { stav: string | null }) {
           !status.configured
             ? "Připojení Zotera je teď na tomto webu vypnuté, asistent do knihovny nevidí. Odpojit Zotero můžete dál."
             : !status.pro
-              ? "Režim Pro teď nemáte, asistent do knihovny nevidí. Odpojit Zotero můžete dál."
+              ? "Režim Pro (právníky) teď nemáte, asistent do knihovny nevidí. Odpojit Zotero můžete dál."
               : null
         }
         onRevoked={changed}
@@ -222,8 +222,8 @@ export function ZoteroPanel({ stav }: { stav: string | null }) {
     body = (
       <Notice
         icon="lock"
-        title="Zotero patří k režimu Pro"
-        text="Stejně jako Vlastní zdroje je Zotero součástí režimu Pro. S ním asistent hledá a čte i ve vaší knihovně Zotero. Režim Pro přiděluji ručně a zdarma - napište mi, když ho chcete."
+        title="Zotero patří k režimu Pro (právníky)"
+        text="Stejně jako Vlastní zdroje je Zotero součástí režimu Pro (právníky). S ním asistent hledá a čte i ve vaší knihovně Zotero. Režim Pro (právníky) přiděluji ručně a zdarma - napište mi, když ho chcete."
       >
         <a className="zd-btn zd-btn-primary" href={MAIL_ZOTERO}>
           Napsat o přístup

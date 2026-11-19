@@ -2987,7 +2987,7 @@ const SAVE_REFUSAL_CS: Record<ZoteroGateReason | "readOnly" | "personalOff", (co
     `Osobní knihovnu Zotera máte pro asistenta vypnutou, nic jsem do ní neuložil. Zapnout ji můžete na ${connect}.`,
   unavailable: () => "Ukládání do Zotera není na tomto webu zapnuté.",
   signIn: () => "Do Zotera jde ukládat jen po osobním přihlášení k Dawmainu, ne přes sdílený přístupový kód.",
-  noPro: () => "Ukládat do Zotera jde jen v režimu Pro.",
+  noPro: () => "Ukládat do Zotera jde jen v režimu Pro (právníky).",
   notConnected: (connect) => `Zotero není připojené. Připojte ho na ${connect} a zvolte „Číst a ukládat“.`,
   revoked: (connect) => `Klíč k Zoteru přestal platit, nic jsem neuložil. Připojte Zotero znovu na ${connect}.`,
   unreadable: (connect) => `Připojení Zotera je potřeba obnovit, nic jsem neuložil. Připojte Zotero znovu na ${connect}.`,
