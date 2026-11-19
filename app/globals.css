@@ -1084,12 +1084,17 @@ main > footer a {
 .zd-pad {
   padding: 24px;
 }
-/* Loading placeholder (app/_zdroje/loading.tsx): shimmering bars shaped like what is coming, from the first frame. */
+/* Loading placeholder (app/_zdroje/loading.tsx): shimmering bars shaped like what is coming, after a 150 ms grace. */
 .zd-loading {
   display: grid;
   gap: 12px;
   opacity: 0;
-  animation: zd-loading-in 150ms ease-out forwards;
+  /* 150 ms of nothing first: what is already loaded (cached) never flashes a shimmer; a real wait gets one before it feels empty. */
+  animation: zd-loading-in 150ms ease-out 150ms forwards;
+}
+.fp-skeleton {
+  opacity: 0;
+  animation: zd-loading-in 150ms ease-out 150ms forwards;
 }
 .zd-loading[data-shape="rows"] {
   gap: 0;
@@ -2248,11 +2253,9 @@ main > .fp {
 }
 .fp-confirm {
   position: fixed;
-  left: 50%;
-  bottom: 24px;
-  transform: translateX(-50%);
   z-index: 95;
-  width: min(520px, calc(100vw - 32px));
+  width: min(360px, calc(100vw - 16px));
+  animation: zd-loading-in 0.12s ease-out both;
   padding: 12px 14px;
   border-radius: 12px;
   background: var(--bg);

@@ -130,7 +130,7 @@ function PageNotice({ title, text, children }: { title: string; text: string; ch
 /** While the account loads: the page's own shape (header, toolbar, rows), so nothing jumps when it arrives. */
 function PageLoading() {
   return (
-    <div className="fp" role="status">
+    <div className="fp fp-skeleton" role="status">
       <span className="sr-only">Načítám…</span>
       <div className="fp-skeleton-head" aria-hidden="true">
         <span className="zd-shimmer" />
@@ -163,6 +163,8 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Item | null>(null);
+  /** Where the delete confirmation opens: next to the item (its ⋯ menu or its row), not at the bottom of the screen. */
+  const [confirmAt, setConfirmAt] = useState<{ x: number; y: number } | null>(null);
   /** Folders opened in place with their disclosure arrow (kept per library in this browser). */
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     try {
@@ -460,9 +462,17 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
   }
 
   /** Delete from the menu or the keyboard: an empty folder goes at once, anything else asks first. */
-  function askDelete(item: Item) {
-    if (item.kind === "folder" && (childCount.get(item.folder.id) ?? 0) === 0) void deleteFolder(item.folder);
-    else setConfirmDelete(item);
+  function askDelete(item: Item, anchor: { right: number; top: number }) {
+    if (item.kind === "folder" && (childCount.get(item.folder.id) ?? 0) === 0) {
+      void deleteFolder(item.folder);
+      return;
+    }
+    // .fp-confirm is at most 360 px wide and about 130 px tall (globals.css).
+    setConfirmAt({
+      x: Math.max(8, Math.min(anchor.right - 360, window.innerWidth - 368)),
+      y: Math.max(8, Math.min(anchor.top, window.innerHeight - 150)),
+    });
+    setConfirmDelete(item);
   }
 
   /** Rename in the list: the viewer closes and, if the row is not on screen, its folder opens. */
@@ -534,7 +544,8 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
       setRenaming(keyOf(item));
     } else if ((e.key === "Delete" || (e.key === "Backspace" && e.metaKey)) && canManage(item)) {
       e.preventDefault();
-      askDelete(item);
+      const row = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      askDelete(item, { right: row.right, top: row.bottom + 4 });
     }
   }
 
@@ -952,7 +963,8 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
                 disabled={!canManage(menuItem)}
                 onClick={() => {
                   setMenu(null);
-                  askDelete(menuItem);
+                  // Where the menu was: the confirmation takes its place.
+                  askDelete(menuItem, { right: menu.x + 230, top: menu.y });
                 }}
               >
                 <ZIcon name="trash" size={15} />
@@ -967,7 +979,7 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
       ) : null}
 
       {confirmDelete ? (
-        <div className="fp-confirm">
+        <div className="fp-confirm" style={confirmAt ? { left: confirmAt.x, top: confirmAt.y } : undefined}>
           <Confirm
             question={
               confirmDelete.kind === "doc" ? (

@@ -1,7 +1,7 @@
 /**
  * A loading placeholder instead of a spinner: shimmering bars shaped like
- * what is coming — rows of a list, or lines of text — from the first frame,
- * so the content replaces them without a jump (the real rows fade in, see
+ * what is coming — rows of a list, or lines of text — after a 150 ms grace
+ * (a cached answer never flashes one), so the content replaces them without a jump (the real rows fade in, see
  * app/globals.css). Pure CSS, works before hydration too; a screen reader
  * hears `label` at once. Plain element: usable from server and client.
  */
