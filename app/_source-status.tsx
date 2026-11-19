@@ -17,7 +17,7 @@ import { useSourceTexts } from "./_zdroje/texts";
 /**
  * The source checks in the browser: the summary in the header and the
  * badges on the home page. Both read GET /api/status once the page is up -
- * a static answer the server serves from its cache at once, regenerated at most hourly
+ * a static answer the server serves from its cache at once, regenerated at most every 14 minutes
  * (app/api/status/route.ts) - so no page waits on it.
  */
 
@@ -224,9 +224,56 @@ function DatabaseRow({ row, count }: { row: Row; count?: number }) {
         <a href={row.href}>{row.label}</a>
         <span className="source-host">{host(row.href)}</span>
       </div>
-      {count !== undefined ? <span className="source-count">{formatDecisions(count)}</span> : <StateDot row={row} />}
+      {count !== undefined ? <DecisionCount value={count} /> : <StateDot row={row} />}
     </li>
   );
+}
+
+/**
+ * The decision counts run up from zero the first time this tab shows them
+ * (about a second, easing out); a reload, a later visit in the same tab or
+ * reduced motion shows them at once. Remembered in sessionStorage.
+ */
+const COUNTED_KEY = "dm-counted";
+const COUNT_MS = 1100;
+let countedThisLoad: boolean | undefined;
+
+function shouldCount(): boolean {
+  if (countedThisLoad !== undefined) return countedThisLoad;
+  let seen = false;
+  try {
+    seen = window.sessionStorage.getItem(COUNTED_KEY) === "1";
+    window.sessionStorage.setItem(COUNTED_KEY, "1");
+  } catch {
+    seen = true; // no storage: no animation rather than one on every reload
+  }
+  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  countedThisLoad = !seen && !reduced;
+  return countedThisLoad;
+}
+
+function useCountUp(target: number): number {
+  const [shown, setShown] = useState(() => (typeof window !== "undefined" && shouldCount() ? 0 : target));
+  useEffect(() => {
+    if (!shouldCount()) {
+      setShown(target);
+      return;
+    }
+    let frame = 0;
+    const start = performance.now();
+    const step = (now: number) => {
+      const t = Math.min(1, (now - start) / COUNT_MS);
+      setShown(Math.round(target * (1 - Math.pow(1 - t, 3))));
+      if (t < 1) frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [target]);
+  return shown;
+}
+
+function DecisionCount({ value }: { value: number }) {
+  return <span className="source-count">{formatDecisions(useCountUp(value))}</span>;
 }
 
 function formatDecisions(n: number): string {
@@ -277,17 +324,18 @@ export function UkazRow({ signedIn }: { signedIn: boolean }) {
   );
 }
 
+/** Switched on: the same card as for visitors, without the lock; the whole card opens the catalogue. */
 function UkazRowOn() {
-  const answers = useStatuses();
-  const row = toRow(UKAZ, answers[UKAZ.canaryId]);
   return (
-    <UkazRowView state={<StateDot row={row} />}>
-      <a href={UKAZ.href}>{UKAZ.label}</a>
+    <UkazRowView>
+      <a href={UKAZ.href} className="source-title zd-row-button">
+        {UKAZ.label}
+      </a>
     </UkazRowView>
   );
 }
 
-function UkazRowView({ locked = false, state, children }: { locked?: boolean; state?: ReactNode; children: ReactNode }) {
+function UkazRowView({ locked = false, children }: { locked?: boolean; children: ReactNode }) {
   // What UKAŽ is, worded as the other rows of the Pro group are — an editable text (sources.ukaz).
   const texts = useSourceTexts();
   return (
@@ -297,7 +345,6 @@ function UkazRowView({ locked = false, state, children }: { locked?: boolean; st
         {children}
         <span className="source-desc">{texts.ukaz}</span>
       </div>
-      {state}
     </li>
   );
 }

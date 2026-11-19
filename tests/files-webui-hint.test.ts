@@ -237,8 +237,9 @@ describe("until Clerk loads: both variants, CSS picks", () => {
     const html = renderToString(createElement(OwnSourcesGroup, { zotero: true }));
     expect(html).toContain("source-group locked zd-own zd-hint-out");
     expect(html).toContain("source-group zd-own zd-hint-in");
-    expect(html).toContain("zd-hint-files-desc");
-    expect(html).toContain("Spravovat");
+    // Signed in, the card reads as for visitors: no counts, no "Spravovat"; only the lock is the hint's.
+    expect(html).toContain("zd-hint-files-lock");
+    expect(html).not.toContain("Spravovat");
   });
 
   it("hydrates over the hinted page without a mismatch", async () => {
@@ -285,14 +286,14 @@ describe("once Clerk says signed in, the hint's texts stay until the real ones c
     vi.unstubAllGlobals();
   });
 
-  it("the avatar shows the remembered initials and crown, the row the remembered line", async () => {
+  it("the avatar shows the remembered initials and crown, the row its usual line", async () => {
     store.setAuth("signed_in");
     await act(async () => root.render(createElement("div", null, createElement(AccountControl), createElement(OwnSourcesGroup, { zotero: false }))));
     const avatar = host.querySelector(".zd-avatar-button")!;
     expect(avatar.textContent).toBe("DZ");
     expect(avatar.querySelector(".zd-pro-badge")).not.toBeNull();
     expect(host.querySelector(".zd-hint-in, .zd-hint-out")).toBeNull();
-    expect(host.querySelector(".source-desc")?.textContent).toBe(hintView(SUMMARY).files.desc);
+    expect(host.querySelector(".source-desc")?.textContent).toContain("Nahrané knihy");
   });
 
   it("the avatar shows the remembered picture until Clerk's user loads", async () => {

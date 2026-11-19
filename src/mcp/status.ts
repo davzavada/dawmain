@@ -13,7 +13,7 @@ export {
  * The green/red light next to each database on the home page.
  *
  * One canary per database, all at once, behind GET /api/status - a static
- * Route Handler that Next regenerates in the background at most once an hour
+ * Route Handler that Next regenerates in the background at most every 14 minutes
  * (app/api/status/route.ts). Next serves the last answer from its cache to
  * every visitor without running a check, and outside Clerk's proxy, so no
  * visitor ever waits on a canary, and no cron is needed: the first request
@@ -38,7 +38,9 @@ async function check(db: (typeof DATABASES)[number]): Promise<DatabaseStatus> {
   const canary = canaries().find((item) => item.id === canaryId);
   if (!canary) return { ...row, ok: false, at: Date.now(), via: "kontrola", detail: "neznámý zdroj" };
   // runCanary never throws; error is set exactly when the fetch itself failed.
-  const result = await runCanary(canary);
+  // One more try before "neověřeno": a slow gateway (Slov-Lex) often answers the second time.
+  let result = await runCanary(canary);
+  if (result.error !== null) result = await runCanary(canary);
   if (result.error !== null) return { ...row, ok: null, at: null, via: null };
   return {
     ...row,

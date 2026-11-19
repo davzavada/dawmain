@@ -509,13 +509,19 @@ main > footer a {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 24px;
-  align-items: start;
 }
 .sources-col {
   display: flex;
   flex-direction: column;
   gap: 22px;
   min-width: 0;
+}
+/* Both columns end on one line: the last box of each stretches to the taller one. */
+.sources-col > .source-group:last-child {
+  flex: 1;
+}
+.sources-col > .source-group:last-child > .source-box:last-child {
+  flex: 1;
 }
 /* The Pro group under them: its rows as cards side by side, instead of one box. */
 .sources > .zd-own > .source-box {
@@ -535,6 +541,33 @@ main > footer a {
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--well);
+}
+.sources > .zd-own > .source-box > ul > .source {
+  position: relative;
+  transition:
+    border-color 0.15s,
+    background-color 0.15s;
+}
+/* The whole card is the row's link or button (its ::after covers the card); no underline, the card lights up instead. */
+.sources > .zd-own .zd-row-button::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+}
+.sources > .zd-own .zd-row-button:hover {
+  text-decoration: none;
+}
+.sources > .zd-own > .source-box > ul > .source:has(.zd-row-button:not(:disabled)):hover {
+  border-color: var(--idle);
+  background: var(--surface);
+}
+.sources > .zd-own .zd-row-button:focus-visible {
+  outline: none;
+}
+.sources > .zd-own > .source-box > ul > .source:has(.zd-row-button:focus-visible) {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
 }
 .sources > .zd-own > .source-box > ul > .source > .icon {
   margin-top: 2px;
