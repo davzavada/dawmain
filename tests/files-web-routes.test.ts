@@ -43,7 +43,7 @@ import { __resetGuardsForTests, MODE_OVERRIDE_KEY } from "@/src/files/guards";
 import { normalizeDmd } from "@/src/files/dmd/normalize";
 import { buildTsQuery } from "@/src/files/text/analyze";
 import type { ConversionQuality, UploadMeta } from "@/src/files/types";
-import { EXPORTS_PER_DOC_PER_DAY, exportDisposition, exportFileNames, exportFor, exportHeader } from "@/src/files/web";
+import { EXPORTS_PER_DOC_PER_DAY, exportDisposition, exportFileNames, exportFor, exportHeader, fileNameForTitle } from "@/src/files/web";
 import type { DocumentDetail, DocumentListResponse, SummaryResponse } from "@/src/files/web-types";
 import { createTestDb, type TestDb } from "./helpers/pglite";
 
@@ -331,6 +331,9 @@ describe("PATCH /api/files/documents/[id]", () => {
     expect(body.status).toBe("ready");
     expect(body.meta.title).toBe("Občanský zákoník. Komentář");
     expect(body.meta.year).toBe(2019);
+    // The new title renamed the file, extension kept.
+    expect(body.fileName.startsWith("Občanský zákoník. Komentář")).toBe(true);
+    expect(/\.[A-Za-z0-9]{1,5}$/.exec(body.fileName)?.[0]).toBe(/\.[A-Za-z0-9]{1,5}$/.exec(proposal.fileName)?.[0]);
     expect((await row(id)).meta_version).toBe(before.meta_version + 1);
   });
 
@@ -675,5 +678,15 @@ describe("POST /api/files/terms", () => {
     expect((await termsPOST(send("/api/files/terms", "POST", { accept: false, version: TERMS_VERSION }))).status).toBe(400);
     signedIn("user_none");
     expect((await termsPOST(send("/api/files/terms", "POST", { accept: true, version: TERMS_VERSION }))).status).toBe(403);
+  });
+});
+
+describe("fileNameForTitle", () => {
+  it("renames to a changed title with the extension; leaves an unchanged or empty one", () => {
+    expect(fileNameForTitle("Stará", "Nová kniha", "scan_001.pdf")).toBe("Nová kniha.pdf");
+    expect(fileNameForTitle("Stejná", "Stejná", "scan_001.pdf")).toBeNull();
+    expect(fileNameForTitle("Stará", "  ", "scan_001.pdf")).toBeNull();
+    expect(fileNameForTitle("Stará", "A/B smlouva", "x.docx")).toBe("A-B smlouva.docx");
+    expect(fileNameForTitle("Stará", "Nová", "Nová.pdf")).toBeNull();
   });
 });

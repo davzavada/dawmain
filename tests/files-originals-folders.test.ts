@@ -490,22 +490,42 @@ describe("folders", () => {
     expect((await patchFolder("user_a", c, {})).status).toBe(400);
   });
 
-  it("delete: its documents and subfolders move up, a clashing subfolder name gets a number", async () => {
+  it("delete: the folder goes with its subfolders and every document in them", async () => {
     const parent = await folderId("user_a", "user_a", "Rodič");
     const doomed = await folderId("user_a", "user_a", "Smazat", parent);
-    const clash = await folderId("user_a", "user_a", "Smazat", doomed);
-    const other = await folderId("user_a", "user_a", "Jiná", doomed);
+    const sub = await folderId("user_a", "user_a", "Pod", doomed);
+    const kept = await uploadDoc("user_a", "user_a", "inparent", { folderId: parent });
     const doc = await uploadDoc("user_a", "user_a", "infolder", { folderId: doomed });
+    const deep = await uploadDoc("user_a", "user_a", "insub", { folderId: sub });
     signedIn("user_a");
     const res = await folderDELETE(new Request(url(`/api/files/folders/${doomed}`), { method: "DELETE", headers: ORIGIN }), ctx(doomed));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ deleted: true, movedDocuments: 1, movedFolders: 2 });
+    expect(await res.json()).toEqual({ deleted: true, deletedDocuments: 2, deletedFolders: 2 });
     const body = await list("user_a", "user_a");
-    expect(body.documents.find((d) => d.id === doc)?.folderId).toBe(parent);
-    const byId = new Map(body.folders.map((f) => [f.id, f]));
-    expect(byId.has(doomed)).toBe(false);
-    expect(byId.get(clash)).toMatchObject({ parentId: parent, name: "Smazat" });
-    expect(byId.get(other)).toMatchObject({ parentId: parent, name: "Jiná" });
+    const docs = new Set(body.documents.map((d) => d.id));
+    expect(docs.has(doc)).toBe(false);
+    expect(docs.has(deep)).toBe(false);
+    expect(docs.has(kept)).toBe(true);
+    const ids = new Set(body.folders.map((f) => f.id));
+    expect(ids.has(doomed)).toBe(false);
+    expect(ids.has(sub)).toBe(false);
+    expect(ids.has(parent)).toBe(true);
+  });
+
+  it("delete in a team: a member may not delete a colleague's documents with the folder", async () => {
+    const shared = await folderId("user_a", "org_t", "Společná");
+    const theirs = await uploadDoc("user_a", "org_t", "colleague", { folderId: shared });
+    signedIn("user_b");
+    const res = await folderDELETE(new Request(url(`/api/files/folders/${shared}`), { method: "DELETE", headers: ORIGIN }), ctx(shared));
+    expect(res.status).toBe(403);
+    const body = await list("user_a", "org_t");
+    expect(body.documents.some((d) => d.id === theirs)).toBe(true);
+    expect(body.folders.some((f) => f.id === shared)).toBe(true);
+    // The team's manager may.
+    signedIn("user_boss");
+    const boss = await folderDELETE(new Request(url(`/api/files/folders/${shared}`), { method: "DELETE", headers: ORIGIN }), ctx(shared));
+    expect(boss.status).toBe(200);
+    expect(await boss.json()).toEqual({ deleted: true, deletedDocuments: 1, deletedFolders: 1 });
   });
 });
 

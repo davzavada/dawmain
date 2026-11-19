@@ -25,17 +25,13 @@ export interface TeamPerson {
 
 const ROLE_LABEL: Record<TeamRole, string> = { "org:admin": "Správce týmu", "org:member": "Člen" };
 
-const sum = (a: number[]) => a.reduce((x, y) => x + y, 0);
-
 export function TeamsConsole({
   teams: initial,
   people,
-  statsAvailable,
   defaultQuotaMb,
 }: {
   teams: AdminTeam[];
   people: TeamPerson[];
-  statsAvailable: boolean;
   /** LIMITS.teamBytes in MB: the storage quota of a team without its own. */
   defaultQuotaMb: number;
 }) {
@@ -60,8 +56,6 @@ export function TeamsConsole({
   }, [teams, query, byId]);
 
   const current = teams.find((t) => t.id === selected) ?? null;
-  const memberIds = new Set(teams.flatMap((t) => t.members.map((m) => m.userId)));
-  const num = (n: number) => (statsAvailable ? formatCount(n) : "—");
 
   function run(teamId: string | null, change: TeamChange, after?: () => void) {
     runResult(() => changeTeamAction(teamId, change), after);
@@ -94,13 +88,6 @@ export function TeamsConsole({
 
   return (
     <>
-      <section className="adm-summary" aria-label="Přehled">
-        <Stat label="Týmů" value={formatCount(teams.length)} note={`${teams.filter((t) => t.active).length} aktivních`} />
-        <Stat label="Lidí v týmech" value={formatCount(memberIds.size)} note={`z ${formatCount(people.length)} účtů`} />
-        <Stat label="Sdílených dokumentů" value={num(sum(teams.map((t) => t.library?.documents ?? 0)))} note="ve všech týmech" />
-        <Stat label="Sdílená data" value={statsAvailable ? formatBytes(sum(teams.map((t) => t.library?.bytes ?? 0))) : "—"} note={statsAvailable ? "původní soubory" : "počítadla nejsou dostupná"} />
-      </section>
-
       <div className="adm-grid">
         <section className="adm-panel" aria-label="Týmy">
           <div className="adm-panel-head">
@@ -206,16 +193,6 @@ function memberPreview(team: AdminTeam, byId: Map<string, TeamPerson>): string {
   if (team.members.length === 0) return "bez členů";
   const names = team.members.slice(0, 3).map((m) => byId.get(m.userId)?.name ?? "neznámý účet");
   return names.join(", ") + (team.members.length > 3 ? ` a ${team.members.length - 3} další` : "");
-}
-
-function Stat({ label, value, note }: { label: string; value: string; note: string }) {
-  return (
-    <div className="adm-stat">
-      <div className="adm-stat-label">{label}</div>
-      <div className="adm-stat-value">{value}</div>
-      <div className="adm-stat-note">{note}</div>
-    </div>
-  );
 }
 
 function Switch({ label, on, disabled, onToggle }: { label: string; on: boolean; disabled?: boolean; onToggle: () => void }) {

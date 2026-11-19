@@ -13,6 +13,9 @@ import { ZIcon } from "../_zdroje/icons";
 import { DocViewer } from "../_zdroje/doc-viewer";
 import { FolderGlyph, LibraryMark } from "../_zdroje/library-mark";
 import { refreshSummary, requestSignIn, useZdroje } from "../_zdroje/store";
+import type { TeamPanel } from "@/src/admin/team-manage";
+import { teamPanelAction } from "./team-actions";
+import { TeamDialog } from "./team-dialog";
 import { ACCEPT, useUploads } from "../_zdroje/upload";
 
 /**
@@ -182,6 +185,23 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
   const team = lib.kind === "org";
   const writable = lib.pro && mode === "on";
   const canFolders = writable && lib.canUpload;
+
+  /** "Spravovat tým": asked once per team page; null for anyone who may not manage the team (and for the personal library). */
+  const [teamPanel, setTeamPanel] = useState<TeamPanel | null>(null);
+  const [managing, setManaging] = useState(false);
+  useEffect(() => {
+    setTeamPanel(null);
+    if (!team) return;
+    let live = true;
+    teamPanelAction(lib.id)
+      .then((panel) => {
+        if (live) setTeamPanel(panel);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [team, lib.id]);
 
   const byId = useMemo(() => new Map(folders.map((f) => [f.id, f])), [folders]);
   const rawFolder = search.get("slozka");
@@ -388,15 +408,27 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
   }
 
   async function deleteFolder(folder: FolderItem) {
-    const done = await call<unknown>(`/api/files/folders/${folder.id}`, "DELETE");
+    const done = await call<{ deletedDocuments: number }>(`/api/files/folders/${folder.id}`, "DELETE");
     setConfirmDelete(null);
     if (done === null) return;
-    const had = (childCount.get(folder.id) ?? 0) > 0;
-    // The server moved its content one level up; read the library again.
-    setFolders((list) => list.filter((f) => f.id !== folder.id));
+    // The server deleted the folder with everything under it; read the library again.
+    const gone = new Set([folder.id]);
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const f of folders) {
+        if (f.parentId && gone.has(f.parentId) && !gone.has(f.id)) {
+          gone.add(f.id);
+          grew = true;
+        }
+      }
+    }
+    setFolders((list) => list.filter((f) => !gone.has(f.id)));
+    setDocuments((list) => list?.filter((d) => !d.folderId || !gone.has(d.folderId)) ?? list);
+    if (openDoc?.folderId && gone.has(openDoc.folderId)) select(null);
     reload();
-    if (folderId === folder.id) openFolder(folder.parentId);
-    say(`Složka „${folder.name}“ smazána${had ? ", její obsah je o úroveň výš" : ""}.`);
+    void refreshSummary();
+    if (folderId && gone.has(folderId)) openFolder(folder.parentId);
+    say(`Složka „${folder.name}“ smazána${done.deletedDocuments > 0 ? ` i s ${done.deletedDocuments} ${plural(done.deletedDocuments, "dokumentem", "dokumenty", "dokumenty")}` : ""}.`);
   }
 
   async function deleteDocument(doc: DocumentListItem) {
@@ -554,8 +586,7 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
   // ---- render ----
   const used = lib.bytesUsed;
   const storage = used !== null ? `${formatBytes(used)} ${zBefore(formatBytes(lib.quotaBytes))} ${formatBytes(lib.quotaBytes)}` : null;
-  const roleLabel = lib.role === "org:admin" ? "jste správce týmu" : lib.role === "org:member" ? "jste člen týmu" : null;
-  const subtitle = [team ? "Sdílené s týmem" : "Jen pro vás", roleLabel, lib.pro ? storage : team ? "tým je vypnutý" : null].filter(Boolean).join(" · ");
+  const subtitle = lib.pro ? storage : team ? "Tým je vypnutý" : null;
   const fullShare = used !== null && lib.quotaBytes > 0 ? Math.min(1, used / lib.quotaBytes) : 0;
 
   if (!lib.pro && documents !== null && documents.length === 0 && folders.length === 0) {
@@ -579,8 +610,14 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
         <LibraryMark lib={lib} size={40} />
         <div className="fp-head-text">
           <h1>{team ? lib.name : "Osobní soubory"}</h1>
-          <p>{subtitle}</p>
+          {subtitle ? <p>{subtitle}</p> : null}
         </div>
+        {teamPanel?.canManage ? (
+          <button type="button" className="zd-btn zd-btn-secondary fp-btn" onClick={() => setManaging(true)}>
+            <ZIcon name="users" size={15} />
+            Spravovat tým
+          </button>
+        ) : null}
         {lib.pro && used !== null ? (
           <div className="fp-meter" title={`Využito ${storage}`} aria-hidden="true">
             <span style={{ width: `${Math.round(fullShare * 100)}%` }} data-full={fullShare > 0.9 || undefined} />
@@ -719,13 +756,6 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
             <div className="fp-empty">
               <FolderGlyph size={48} />
               <strong>{searching ? "Nic nenalezeno" : folderId ? "Složka je prázdná" : "Zatím tu nic není"}</strong>
-              <span>
-                {searching
-                  ? "Hledá se v názvech souborů a složek v celé knihovně."
-                  : writable && lib.canUpload
-                    ? "Přetáhněte sem soubory, nebo je nahrajte tlačítkem nahoře. PDF, DOCX, TXT nebo MD."
-                    : "Nic sem teď nahrát nejde."}
-              </span>
             </div>
           ) : (
             rows.map(({ item, depth }) => {
@@ -850,7 +880,7 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
               void refreshSummary();
             }}
             onSaved={(detail) =>
-              setDocuments((list) => list?.map((d) => (d.id === detail.id ? { ...d, title: detail.title, docType: detail.docType, status: detail.status, statusDetail: detail.statusDetail } : d)) ?? list)
+              setDocuments((list) => list?.map((d) => (d.id === detail.id ? { ...d, title: detail.title, fileName: detail.fileName, docType: detail.docType, status: detail.status, statusDetail: detail.statusDetail } : d)) ?? list)
             }
           />
         ) : null}
@@ -872,14 +902,6 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
           }
         />
       ) : null}
-
-      <p className="zd-muted zd-small fp-rules">
-        Nahráním potvrzujete, že k souboru máte právo a že nejde o spisy klientů ani neveřejné osobní údaje (
-        <a href="/podminky" target="_blank" rel="noopener">
-          pravidla
-        </a>
-        ). Asistent pracuje s textem souboru, originál máte uložený tady.
-      </p>
 
       {menu && menuItem ? (
         <div className="fp-menu" role="menu" ref={menuBox} style={{ top: menu.y, left: menu.x }} onKeyDown={onMenuKey}>
@@ -983,7 +1005,7 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
                 <>Smazat „{confirmDelete.doc.fileName}“? Originál, text i index se odstraní natrvalo.</>
               ) : (
                 <>
-                  Smazat složku „{confirmDelete.folder.name}“? Nic z ní se nesmaže, její obsah se přesune o úroveň výš.
+                  Smazat složku „{confirmDelete.folder.name}“ se vším, co obsahuje? Podsložky i dokumenty se odstraní natrvalo.
                 </>
               )
             }
@@ -993,6 +1015,19 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
             onCancel={() => setConfirmDelete(null)}
           />
         </div>
+      ) : null}
+
+      {managing && teamPanel ? (
+        <TeamDialog
+          teamId={lib.id}
+          name={lib.name}
+          panel={teamPanel}
+          onClose={() => setManaging(false)}
+          onChanged={(panel) => {
+            setTeamPanel(panel);
+            void refreshSummary();
+          }}
+        />
       ) : null}
 
       {toast ? (

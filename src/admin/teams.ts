@@ -85,9 +85,14 @@ export async function applyTeamChange(actor: string, teamId: string | null, chan
         id = org.id;
         break;
       }
-      case "rename":
+      case "rename": {
         await client.organizations.updateOrganization(id, { name: change.name });
+        // Members see the team's name from their cached access: drop it here so the new name shows at once.
+        const members = await client.organizations.getOrganizationMembershipList({ organizationId: id, limit: MAX_MEMBERS });
+        for (const m of members.data) if (m.publicUserData?.userId) invalidateAccess(m.publicUserData.userId);
+        invalidateAccess(actor);
         break;
+      }
       case "active":
       case "quota":
         await client.organizations.updateOrganizationMetadata(id, { publicMetadata: teamMetadataPatch(change) });

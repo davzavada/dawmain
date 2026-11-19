@@ -10,8 +10,8 @@ type Ctx = { params: Promise<{ id: string }> };
 /**
  * One folder (src/files/folders.ts):
  *   PATCH   { name?, parentId? } — rename and/or move (parentId null = the root) → FolderItem
- *   DELETE  its documents and subfolders move to its parent, then it goes
- *           → { deleted: true, movedDocuments, movedFolders }
+ *   DELETE  the folder, its subfolders and every document in them
+ *           → { deleted: true, deletedDocuments, deletedFolders }
  */
 export async function PATCH(request: Request, ctx: Ctx): Promise<Response> {
   const refused = originRefusal(request) ?? envRefusal();

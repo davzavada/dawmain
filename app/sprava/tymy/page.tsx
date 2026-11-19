@@ -24,13 +24,11 @@ export default async function TeamsPage() {
   if (!me) notFound();
 
   let teams: AdminTeam[] = [];
-  let statsAvailable = false;
   let people: TeamPerson[] = [];
   let failed = false;
   try {
     const [t, users] = await Promise.all([listAdminTeams(), listAdminUsers()]);
     teams = t.teams;
-    statsAvailable = t.statsAvailable;
     people = users.map((u) => ({ id: u.id, name: u.name, email: u.email, imageUrl: u.imageUrl, pro: u.pro }));
   } catch {
     failed = true;
@@ -49,7 +47,7 @@ export default async function TeamsPage() {
       {failed ? (
         <p className="zd-error">Týmy se nepodařilo načíst z Clerku. Zkontroluj, že jsou v Clerku zapnuté Organizations, a obnov stránku.</p>
       ) : (
-        <TeamsConsole teams={teams} people={people} statsAvailable={statsAvailable} defaultQuotaMb={Math.round(LIMITS.teamBytes / (1024 * 1024))} />
+        <TeamsConsole teams={teams} people={people} defaultQuotaMb={Math.round(LIMITS.teamBytes / (1024 * 1024))} />
       )}
       <p className="muted small adm-foot">
         Tým má jednu sdílenou knihovnu Vlastních souborů. Každý člen v ní hledá a nahrává do ní, své nahrané soubory upravuje a maže; správce týmu spravuje všechny.
