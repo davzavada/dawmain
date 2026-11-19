@@ -7,8 +7,8 @@ import { CONTACT } from "@/app/_legal";
 import type { DocumentDetail, DocumentListItem, FolderItem, LibrarySummary } from "@/src/files/web-types";
 import { api } from "../_zdroje/api";
 import { Confirm } from "../_zdroje/dialog";
-import { FileEditor, PENDING, useDocumentList } from "../_zdroje/file-editor";
-import { formatDate, formatStorageBytes as formatBytes, kindLabel, zBefore, plural, statusBadge, typeLabel } from "../_zdroje/format";
+import { PENDING, useDocumentList } from "../_zdroje/file-editor";
+import { formatDate, formatStorageBytes as formatBytes, kindLabel, zBefore, plural, statusBadge } from "../_zdroje/format";
 import { ZIcon } from "../_zdroje/icons";
 import { DocViewer } from "../_zdroje/doc-viewer";
 import { FolderGlyph, LibraryMark } from "../_zdroje/library-mark";
@@ -148,8 +148,6 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Item | null>(null);
-  /** The document whose metadata form is open in the side panel (⋯ → Upravit údaje); the viewer is ?dokument. */
-  const [metaId, setMetaId] = useState<string | null>(null);
   /** Folders opened in place with their disclosure arrow (kept per library in this browser). */
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     try {
@@ -208,7 +206,6 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
   const folderId = rawFolder && (byId.has(rawFolder) || folders.length === 0) ? rawFolder : null;
   const openId = search.get("dokument");
   const openDoc = documents?.find((d) => d.id === openId) ?? null;
-  const metaDoc = documents?.find((d) => d.id === metaId) ?? null;
 
   const uploads = useUploads({
     library: lib,
@@ -442,7 +439,6 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
     }
     setDocuments((list) => list?.filter((d) => d.id !== doc.id) ?? list);
     if (openId === doc.id) select(null);
-    if (metaId === doc.id) setMetaId(null);
     reload();
     void refreshSummary();
     say(`„${doc.fileName}“ smazán.`);
@@ -605,7 +601,7 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
   }
 
   return (
-    <div className="fp" data-detail={metaDoc ? "true" : undefined}>
+    <div className="fp">
       <header className="fp-head">
         <LibraryMark lib={lib} size={40} />
         <div className="fp-head-text">
@@ -772,10 +768,6 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
               else if (doc) {
                 if (pending) sub.push(doc.status === "deleting" ? "Mažu…" : "Zpracovávám…");
                 else if (doc.status === "error") sub.push(statusBadge(doc.status, doc.statusDetail).label);
-                else {
-                  sub.push(typeLabel(doc.docType));
-                  if (doc.status === "review") sub.push("ke kontrole");
-                }
                 if (doc.fileBytes) sub.push(formatBytes(doc.fileBytes));
               }
               return (
@@ -785,7 +777,7 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
                   tabIndex={0}
                   className="fp-row fp-item"
                   data-folder={isFolder || undefined}
-                  aria-selected={doc ? doc.id === openId || doc.id === metaId : undefined}
+                  aria-selected={doc ? doc.id === openId : undefined}
                   aria-level={searching ? undefined : depth + 1}
                   aria-expanded={isFolder && !searching ? expanded.has(item.folder.id) : undefined}
                   data-drop={dropOver === key || undefined}
@@ -863,27 +855,6 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
           {fileDrag ? <div className="fp-dropcover">Pusťte soubory sem{folderId ? ` do složky „${byId.get(folderId)?.name ?? ""}“` : ""}</div> : null}
         </section>
 
-        {metaDoc ? (
-          <DetailPanel
-            key={metaDoc.id}
-            doc={metaDoc}
-            onMenu={(e) => openMenu(e, { kind: "doc", doc: metaDoc })}
-            menuOpen={menu?.key === `d:${metaDoc.id}`}
-            readonly={!writable}
-            location={where(metaDoc.folderId ?? null)}
-            onClose={() => setMetaId(null)}
-            onChanged={reload}
-            onDeleted={() => {
-              setDocuments((list) => list?.filter((d) => d.id !== metaDoc.id) ?? list);
-              setMetaId(null);
-              reload();
-              void refreshSummary();
-            }}
-            onSaved={(detail) =>
-              setDocuments((list) => list?.map((d) => (d.id === detail.id ? { ...d, title: detail.title, fileName: detail.fileName, docType: detail.docType, status: detail.status, statusDetail: detail.statusDetail } : d)) ?? list)
-            }
-          />
-        ) : null}
       </div>
 
       {openDoc ? (
@@ -925,20 +896,6 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
                 </button>
               ) : (
                 <>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="fp-mi"
-                    disabled={PENDING.has(menuItem.doc.status) || menuItem.doc.status === "deleting"}
-                    onClick={() => {
-                      setMenu(null);
-                      setMetaId(menuItem.doc.id);
-                      if (openId) select(null);
-                    }}
-                  >
-                    <ZIcon name="file" size={15} />
-                    {menuItem.doc.canEdit && writable ? "Upravit údaje" : "Zobrazit údaje"}
-                  </button>
                   {menuItem.doc.original === "ready" ? (
                     <a role="menuitem" className="fp-mi" href={`/api/files/documents/${menuItem.doc.id}/original`} download onClick={() => setMenu(null)}>
                       <ZIcon name="download" size={15} />
@@ -1132,73 +1089,3 @@ function MoveMenu({
   );
 }
 
-// ---------------------------------------------------------------------------
-// The side panel of one document
-
-function DetailPanel({
-  doc,
-  onMenu,
-  menuOpen,
-  readonly,
-  location,
-  onClose,
-  onChanged,
-  onDeleted,
-  onSaved,
-}: {
-  doc: DocumentListItem;
-  onMenu: (e: MouseEvent) => void;
-  menuOpen: boolean;
-  readonly: boolean;
-  location: string;
-  onClose: () => void;
-  onChanged: () => void;
-  onDeleted: () => void;
-  onSaved: (detail: DocumentDetail) => void;
-}) {
-  const ext = extOf(doc.fileName) || doc.fileKind;
-  const pending = PENDING.has(doc.status) || doc.status === "deleting";
-  const place = location.replace(/^ve složce /, "").replace(/^v kořeni knihovny$/, "Všechny soubory");
-  const facts = [
-    doc.original === "ready" ? `${kindLabel(doc.fileKind)} · ${formatBytes(doc.fileBytes ?? 0)}` : kindLabel(doc.fileKind),
-    place,
-    `${doc.mine ? "Vy" : "Člen týmu"}, ${formatDate(doc.uploadedAt)}`,
-  ];
-
-  return (
-    <aside className="fp-detail" aria-label="Údaje o souboru">
-      <div className="fp-detail-head">
-        <span className={`fp-doc fp-doc-${ext}`}>{ext.toUpperCase().slice(0, 4)}</span>
-        <span className="fp-detail-title">
-          <b title={doc.fileName}>{doc.fileName}</b>
-          <span>{facts.join(" · ")}</span>
-        </span>
-        <button type="button" className="fp-more fp-more-on" aria-label={`Akce: ${doc.fileName}`} aria-expanded={menuOpen} onClick={onMenu}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <circle cx="5" cy="12" r="1.6" />
-            <circle cx="12" cy="12" r="1.6" />
-            <circle cx="19" cy="12" r="1.6" />
-          </svg>
-        </button>
-        <button type="button" className="fp-x" aria-label="Zavřít" onClick={onClose}>
-          <ZIcon name="close" size={16} />
-        </button>
-      </div>
-      {doc.status === "review" ? <p className="zd-banner zd-banner-info fp-banner">Asistent v souboru začne hledat, až údaje potvrdíte tlačítkem Uložit.</p> : null}
-      {doc.status === "error" ? (
-        <p className="zd-error">
-          {statusBadge(doc.status, doc.statusDetail).label}
-          {doc.statusDetail ? ` · ${doc.statusDetail}` : ""}
-        </p>
-      ) : null}
-      {pending ? (
-        <p className="zd-progress" role="status">
-          <span className="zd-spinner" aria-hidden="true" />
-          Asistent soubor ještě zpracovává, údaje půjde upravit za chvíli.
-        </p>
-      ) : (
-        <FileEditor doc={doc} readonly={readonly} onChanged={onChanged} onDeleted={onDeleted} onSaved={onSaved} onClose={onClose} />
-      )}
-    </aside>
-  );
-}

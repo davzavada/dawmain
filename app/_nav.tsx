@@ -64,9 +64,9 @@ function useActiveSection(enabled: boolean): string | null {
 
 /**
  * "Moje zdroje": the signed-in user's own sources, each a page of its own —
- * Osobní soubory (/soubory), Zotero (/zotero, where the deployment can
- * connect it) and, under "Týmy", one entry per team library the user is a
- * member of (/soubory/<handle>, with the team's logo or initials).
+ * Osobní soubory (/soubory), one entry per team library the user is a
+ * member of, named after the team (/soubory/<handle>, with the team's logo
+ * or initials), and Zotero (/zotero, where the deployment can connect it).
  */
 function OwnSourcesNav({ pathname, zotero }: { pathname: string; zotero: boolean }) {
   const { auth, summary } = useZdroje();
@@ -84,6 +84,16 @@ function OwnSourcesNav({ pathname, zotero }: { pathname: string; zotero: boolean
           <span>Osobní soubory</span>
           {personal?.counts ? <span className="nav-count">{personal.counts.total}</span> : null}
         </Link>
+        {teams.map((team) => {
+          const href = `/soubory/${encodeURIComponent(team.handle)}`;
+          return (
+            <Link key={team.id} href={href} className="nav-item" data-off={!team.pro || undefined} {...current(href)}>
+              <LibraryMark lib={team} size={18} />
+              <span className="nav-label">{team.name}</span>
+              {team.counts ? <span className="nav-count">{team.counts.total}</span> : null}
+            </Link>
+          );
+        })}
         {zotero ? (
           <Link href="/zotero" className="nav-item" {...current("/zotero")}>
             <span className="nav-zotero" aria-hidden="true">
@@ -93,21 +103,6 @@ function OwnSourcesNav({ pathname, zotero }: { pathname: string; zotero: boolean
           </Link>
         ) : null}
       </div>
-      {teams.length > 0 ? (
-        <div className="nav-group">
-          <span className="nav-heading">Týmy</span>
-          {teams.map((team) => {
-            const href = `/soubory/${encodeURIComponent(team.handle)}`;
-            return (
-              <Link key={team.id} href={href} className="nav-item" data-off={!team.pro || undefined} {...current(href)}>
-                <LibraryMark lib={team} size={18} />
-                <span className="nav-label">{team.name}</span>
-                {team.counts ? <span className="nav-count">{team.counts.total}</span> : null}
-              </Link>
-            );
-          })}
-        </div>
-      ) : null}
     </>
   );
 }
