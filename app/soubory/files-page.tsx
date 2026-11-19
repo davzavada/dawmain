@@ -127,10 +127,27 @@ function PageNotice({ title, text, children }: { title: string; text: string; ch
   );
 }
 
+/** While the account loads: the page's own shape (header, toolbar, rows), so nothing jumps when it arrives. */
 function PageLoading() {
   return (
-    <div className="fp fp-notice">
-      <Loading label="Načítám…" />
+    <div className="fp" role="status">
+      <span className="sr-only">Načítám…</span>
+      <div className="fp-skeleton-head" aria-hidden="true">
+        <span className="zd-shimmer" />
+        <span className="fp-skeleton-title">
+          <span className="zd-shimmer" style={{ width: 200, height: 22 }} />
+          <span className="zd-shimmer" style={{ width: 120, height: 12 }} />
+        </span>
+      </div>
+      <div className="fp-skeleton-toolbar" aria-hidden="true">
+        <span className="zd-shimmer" style={{ flex: "1 1 120px", maxWidth: 160, height: 14 }} />
+        <span style={{ flex: "1 1 auto" }} />
+        <span className="zd-shimmer" style={{ width: 200 }} />
+        <span className="zd-shimmer" style={{ width: 120 }} />
+      </div>
+      <div className="fp-list" aria-hidden="true">
+        <Loading label="" shape="rows" count={6} />
+      </div>
     </div>
   );
 }
@@ -742,7 +759,7 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
               {error}
             </p>
           ) : documents === null ? (
-            <Loading label="Načítám soubory…" shape="rows" count={4} />
+            <Loading label="Načítám soubory…" shape="rows" count={6} />
           ) : items.length === 0 ? (
             <div className="fp-empty">
               <FolderGlyph size={48} />
