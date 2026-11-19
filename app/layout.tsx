@@ -48,7 +48,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       {clerk ? <ClerkBridge /> : <NoClerk />}
       <SiteHeader />
       <div className="shell">
-        <SiteNav sourceCount={DATABASES.length} />
+        <SiteNav sourceCount={DATABASES.filter((db) => db.group !== "Pro").length} />
         <main>
           {children}
           <footer>

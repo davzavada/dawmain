@@ -14,7 +14,8 @@ import { useZoteroStatus } from "./zotero-status";
 /**
  * The "Pro" group at the end of the home page's source list (wireframe 01,
  * 02): Vlastní soubory, Zotero (always listed; locked where the deployment
- * cannot connect it) and UKAŽ (switched on per account by an admin, app/_source-status.tsx).
+ * cannot connect it) and UKAŽ — a hidden feature: listed only for an account an admin
+ * switched it on for (app/_source-status.tsx), never for visitors.
  * Visitors see them greyed out with a lock, each with one line on what it
  * is, and a click signs them in (01); signed in, the rows read the same
  * (no counts, no account, no lights: that lives in the sidebar's pages)
@@ -56,12 +57,10 @@ function OwnSources({ zotero }: { zotero: boolean }) {
         <Group signedIn={false} className="zd-hint-out">
           <FilesInvite auth={auth} />
           {zotero ? <ZoteroRow signedIn={false} /> : <ZoteroUnavailable signedIn={false} />}
-          <UkazRow signedIn={false} />
         </Group>
         <Group signedIn className="zd-hint-in">
           <HintedFilesRow />
           {zotero ? <ZoteroRowView desc={texts.zotero} /> : <ZoteroUnavailable signedIn />}
-          <UkazRow signedIn />
         </Group>
       </>
     );

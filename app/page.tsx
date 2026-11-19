@@ -59,7 +59,7 @@ export default async function Home() {
         {/*
           Client island, the Pro group: Vlastní soubory (counts from GET /api/files/summary),
           Zotero (locked where the deployment cannot connect it — no OAuth app or CREDENTIALS_SECRET)
-          and UKAŽ (switched on per account).
+          and UKAŽ (hidden: only for accounts an admin switched it on for).
         */}
         <OwnSourcesGroup
           zotero={zoteroConfigured()}

@@ -70,7 +70,21 @@ function useActiveSection(enabled: boolean): string | null {
  */
 function OwnSourcesNav({ pathname }: { pathname: string }) {
   const { auth, summary } = useZdroje();
+  // Until Clerk loads: the group as the sign-in hint expects it (CSS shows it only to the remembered signed-in), counts shimmering.
+  if (auth === "loading") {
+    return (
+      <div className="nav-group zd-hint-in">
+        <span className="nav-heading">Moje zdroje</span>
+        <Link href="/soubory" className="nav-item">
+          <Icon name="book" />
+          <span>Osobní soubory</span>
+          <span className="nav-count zd-shimmer zd-shimmer-late nav-count-shimmer" aria-hidden="true" />
+        </Link>
+      </div>
+    );
+  }
   if (auth !== "signed_in") return null;
+  const loading = summary === null;
   const libraries = summary?.state === "ok" ? summary.libraries : [];
   const personal = libraries.find((l) => l.kind === "user");
   const teams = libraries.filter((l) => l.kind === "org");
@@ -82,12 +96,16 @@ function OwnSourcesNav({ pathname }: { pathname: string }) {
         <Link href="/soubory" className="nav-item" {...current("/soubory")}>
           <Icon name="book" />
           <span>Osobní soubory</span>
-          {personal?.counts ? <span className="nav-count">{personal.counts.total}</span> : null}
+          {personal?.counts ? (
+            <span className="nav-count">{personal.counts.total}</span>
+          ) : loading ? (
+            <span className="nav-count zd-shimmer zd-shimmer-late nav-count-shimmer" aria-hidden="true" />
+          ) : null}
         </Link>
         {teams.map((team) => {
           const href = `/soubory/${encodeURIComponent(team.handle)}`;
           return (
-            <Link key={team.id} href={href} className="nav-item" data-off={!team.pro || undefined} {...current(href)}>
+            <Link key={team.id} href={href} className="nav-item nav-in" data-off={!team.pro || undefined} {...current(href)}>
               <LibraryMark lib={team} size={18} />
               <span className="nav-label">{team.name}</span>
               {team.counts ? <span className="nav-count">{team.counts.total}</span> : null}
@@ -102,6 +120,16 @@ function OwnSourcesNav({ pathname }: { pathname: string }) {
 /** The same entries in the strip under the header, which replaces the sidebar on narrow screens. */
 function OwnSourcesTabs({ pathname }: { pathname: string }) {
   const { auth, summary } = useZdroje();
+  if (auth === "loading") {
+    return (
+      <span className="zd-hint-in tab-hinted">
+        <span className="tab-sep" aria-hidden="true" />
+        <Link href="/soubory" className="tab-item">
+          Soubory
+        </Link>
+      </span>
+    );
+  }
   if (auth !== "signed_in") return null;
   const teams = summary?.state === "ok" ? summary.libraries.filter((l) => l.kind === "org") : [];
   const current = (href: string) => (pathname === href ? { "aria-current": "page" as const } : {});
@@ -114,7 +142,7 @@ function OwnSourcesTabs({ pathname }: { pathname: string }) {
       {teams.map((team) => {
         const href = `/soubory/${encodeURIComponent(team.handle)}`;
         return (
-          <Link key={team.id} href={href} className="tab-item" data-off={!team.pro || undefined} {...current(href)}>
+          <Link key={team.id} href={href} className="tab-item nav-in" data-off={!team.pro || undefined} {...current(href)}>
             <LibraryMark lib={team} size={16} />
             {team.name}
           </Link>
