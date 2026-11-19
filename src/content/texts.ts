@@ -184,11 +184,8 @@ Podmínky můžu přiměřeně změnit, když se změní fungování služby neb
 | 5 | Osobní údaje jiných lidí v nahraných dokumentech (třeba jména autorů), aby v nich asistent mohl hledat | to, co dokument obsahuje | oprávněný zájem | jako dokument |
 | 6 | Zotero (Pro) | zašifrovaný klíč k vaší knihovně, uživatelské jméno a identifikátor v Zoteru | plnění smlouvy | dokud Zotero neodpojíte nebo nezrušíte účet; neplatný klíč smažu hned |
 | 7 | Doložení výmazu knihovny | identifikátor knihovny, datum, počet smazaných dokumentů | oprávněný zájem | dokud může být potřeba výmaz doložit |
-| 8 | Zmínka, že Dawmain používáte (třeba když se mě někdo zeptá, kdo ho používá) | jméno, případně kancelář, a že máte účet | souhlas (čl. 6 odst. 1 písm. a) GDPR) | do odvolání souhlasu |
 
 Údaje o účtu jsou pro poskytování služby nezbytné; bez nich účet nelze vytvořit. Provozní záznamy vznikají automaticky při každém použití služby. Nahrávání dokumentů a připojení Zotera jsou dobrovolné.
-
-Souhlas podle řádku 8 je nepovinný: dáváte ho zaškrtnutím „Smím říct, že Dawmain používáte“ v menu účtu a stejně snadno ho kdykoli odvoláte (i e-mailem). Službu můžete používat i bez něj. Odvolání nemá vliv na to, co jsem řekl předtím.
 
 Obsah rešerší si neukládám a s vaším účtem ho nespojuji. Rozhodnutí českých soudů si server kopíruje do vlastní databáze; soudy je zveřejňují už anonymizovaná a kopíruji je tak, jak jsou zveřejněná. Databázi zatím pravidelně nezálohuji; smazaný dokument může zůstat nejvýš v dočasném snímku serveru před údržbou, dokud ho nesmažu.
 
@@ -207,7 +204,7 @@ Jen HTTPS a šifrovaný tunel k serveru, knihovny oddělené v databázi, klíč
 
 ## 5. Vaše práva
 
-Máte právo na přístup ke svým údajům, jejich opravu a výmaz, omezení zpracování a přenositelnost, vznést námitku proti zpracování na základě oprávněného zájmu (řádky 2, 3, 5 a 7), kdykoli odvolat souhlas (řádek 8) a podat stížnost u Úřadu pro ochranu osobních údajů ([uoou.gov.cz](https://uoou.gov.cz)). Napište mi na ${MAIL}; odpovím do měsíce.`,
+Máte právo na přístup ke svým údajům, jejich opravu a výmaz, omezení zpracování a přenositelnost, vznést námitku proti zpracování na základě oprávněného zájmu (řádky 2, 3, 5 a 7) a podat stížnost u Úřadu pro ochranu osobních údajů ([uoou.gov.cz](https://uoou.gov.cz)). Napište mi na ${MAIL}; odpovím do měsíce.`,
   },
 ] as const satisfies readonly TextField[];
 

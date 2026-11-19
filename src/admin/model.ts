@@ -41,20 +41,6 @@ export interface AdminUser {
    */
   quotaMb: number | null;
   banned: boolean;
-  /** The account's own consent that the operator may say it uses Dawmain (privacy policy, row 8); off unless the user switched it on. */
-  mentionConsent: MentionConsent;
-}
-
-/** `publicMetadata.mentionConsent`: set only by the account itself (app/_zdroje/consent-actions.ts). `at` = ISO time of the last change. */
-export interface MentionConsent {
-  on: boolean;
-  at: string | null;
-}
-
-/** The consent as stored, read defensively: anything but `on: true` is no consent. Pure. */
-export function mentionConsentFrom(publicMetadata: unknown): MentionConsent {
-  const c = record(record(publicMetadata).mentionConsent);
-  return { on: c.on === true, at: typeof c.at === "string" ? c.at : null };
 }
 
 /** The largest storage quota an admin can set, in MB (an account's or a team's). */
@@ -122,7 +108,6 @@ export function toAdminUser(user: ClerkAdminUserLike, envAdmin: boolean): AdminU
     features: { files: features.files !== false, zotero: features.zotero !== false, ukaz: features.ukaz === true },
     quotaMb: ownQuotaMb(meta.filesQuota),
     banned: user.banned === true || user.locked === true,
-    mentionConsent: mentionConsentFrom(meta),
   };
 }
 

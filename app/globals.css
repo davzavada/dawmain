@@ -4562,38 +4562,3 @@ button.zd-file-row:hover .zd-file-title {
   color: var(--muted);
 }
 
-/* The account menu's consent checkbox (app/_zdroje/account.tsx, MentionConsentItem). */
-.zd-menu-check {
-  align-items: flex-start;
-  text-align: left;
-}
-.zd-check {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 16px;
-  height: 16px;
-  margin-top: 2px;
-  border: 1.5px solid var(--idle);
-  border-radius: 4px;
-  background: var(--bg);
-  color: #ffffff;
-  transition:
-    background-color 0.15s,
-    border-color 0.15s;
-}
-.zd-check[data-on] {
-  border-color: var(--text);
-  background: var(--text);
-}
-.zd-menu-check-text {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-}
-.zd-menu-check-text small {
-  font-size: 12px;
-  color: var(--muted);
-  white-space: normal;
-}

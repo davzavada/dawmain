@@ -239,13 +239,3 @@ describe("guard caps the own server can raise", () => {
     }
   });
 });
-
-describe("mention consent (privacy policy, row 8)", () => {
-  it("is on only when the account switched it on; the time comes along", async () => {
-    const { mentionConsentFrom, toAdminUser } = await import("@/src/admin/model");
-    expect(mentionConsentFrom(undefined)).toEqual({ on: false, at: null });
-    expect(mentionConsentFrom({ mentionConsent: { on: "true" } })).toEqual({ on: false, at: null });
-    expect(mentionConsentFrom({ mentionConsent: { on: true, at: "2026-11-19T17:00:00.000Z" } })).toEqual({ on: true, at: "2026-11-19T17:00:00.000Z" });
-    expect(toAdminUser({ id: "user_a" }, false).mentionConsent.on).toBe(false);
-  });
-});

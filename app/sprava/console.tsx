@@ -144,11 +144,6 @@ export function AdminConsole({
                     <td>
                       <span className={`adm-pill ${user.role}`}>{user.role === "admin" ? "Správce" : "Uživatel"}</span>
                       {user.pro ? <span className="adm-pill pro">Pro</span> : null}
-                      {user.mentionConsent.on ? (
-                        <span className="adm-pill" title={user.mentionConsent.at ? `Souhlas se zmínkou od ${formatDay(user.mentionConsent.at)}` : "Souhlas se zmínkou"}>
-                          Smím zmínit
-                        </span>
-                      ) : null}
                     </td>
                     <td className="r adm-mono">{usage ? formatCount(usage.calls) : usageAvailable ? "0" : "—"}</td>
                     <td>{usage ? <Spark data={usage.daily} /> : null}</td>

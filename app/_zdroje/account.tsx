@@ -3,8 +3,6 @@
 import { useUser } from "@clerk/nextjs";
 import Link from "next/link";
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { mentionConsentFrom } from "@/src/admin/model";
-import { setMentionConsentAction } from "./consent-actions";
 import { initials } from "./format";
 import { avatarSrc, hasPro } from "./hint";
 import { ZIcon } from "./icons";
@@ -135,7 +133,7 @@ function AccountMenu({ zotero }: { zotero: boolean }) {
     document.addEventListener("pointerdown", onPointer);
     document.addEventListener("keydown", onKey);
     // Focus the first item for keyboard users.
-    menu.current?.querySelector<HTMLElement>('[role="menuitem"], [role="menuitemcheckbox"]')?.focus();
+    menu.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
     return () => {
       document.removeEventListener("pointerdown", onPointer);
       document.removeEventListener("keydown", onKey);
@@ -144,7 +142,7 @@ function AccountMenu({ zotero }: { zotero: boolean }) {
 
   function onMenuKey(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-    const items = [...(menu.current?.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemcheckbox"]') ?? [])];
+    const items = [...(menu.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
     if (items.length === 0) return;
     event.preventDefault();
     const at = items.indexOf(document.activeElement as HTMLElement);
@@ -222,9 +220,6 @@ function AccountMenu({ zotero }: { zotero: boolean }) {
               <span>Spravovat účet</span>
             </button>
           </div>
-          <div className="zd-menu-items">
-            <MentionConsentItem />
-          </div>
           <div className="zd-menu-items zd-menu-last">
             <button type="button" role="menuitem" className="zd-menu-item" onClick={choose(signOut)}>
               <ZIcon name="logout" />
@@ -246,47 +241,4 @@ function AvatarFace({ image, initials }: { image: string | null; initials: strin
   const [broken, setBroken] = useState<string | null>(null);
   if (!image || broken === image) return <>{initials}</>;
   return <img className="zd-avatar-image" src={avatarSrc(image)} alt="" onError={() => setBroken(image)} />;
-}
-
-/**
- * The account's own consent that the operator may say it uses Dawmain
- * (privacy policy, row 8): off until the user switches it on, one click
- * either way, nothing else depends on it.
- */
-function MentionConsentItem() {
-  const { user } = useUser();
-  const stored = mentionConsentFrom(user?.publicMetadata).on;
-  const [on, setOn] = useState(stored);
-  const [busy, setBusy] = useState(false);
-  const [failed, setFailed] = useState(false);
-  useEffect(() => setOn(stored), [stored]);
-
-  async function toggle() {
-    const next = !on;
-    setBusy(true);
-    setFailed(false);
-    setOn(next);
-    try {
-      const result = await setMentionConsentAction(next);
-      if (!result.ok) throw new Error(result.error);
-      await user?.reload();
-    } catch {
-      setOn(!next);
-      setFailed(true);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <button type="button" role="menuitemcheckbox" aria-checked={on} className="zd-menu-item zd-menu-check" onClick={() => void toggle()} disabled={busy}>
-      <span className="zd-check" data-on={on || undefined} aria-hidden="true">
-        {on ? <ZIcon name="check" size={12} /> : null}
-      </span>
-      <span className="zd-menu-check-text">
-        <span>Smím říct, že Dawmain používáte</span>
-        <small>{failed ? "Nepovedlo se uložit, zkuste to znovu." : "Nepovinné, kdykoli vypnete (bod 8 zásad)."}</small>
-      </span>
-    </button>
-  );
 }
