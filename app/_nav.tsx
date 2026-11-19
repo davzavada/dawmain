@@ -66,9 +66,9 @@ function useActiveSection(enabled: boolean): string | null {
  * "Moje zdroje": the signed-in user's own sources, each a page of its own —
  * Osobní soubory (/soubory), one entry per team library the user is a
  * member of, named after the team (/soubory/<handle>, with the team's logo
- * or initials), and Zotero (/zotero, where the deployment can connect it).
+ * or initials). Zotero is in the account menu (app/_zdroje/account.tsx).
  */
-function OwnSourcesNav({ pathname, zotero }: { pathname: string; zotero: boolean }) {
+function OwnSourcesNav({ pathname }: { pathname: string }) {
   const { auth, summary } = useZdroje();
   if (auth !== "signed_in") return null;
   const libraries = summary?.state === "ok" ? summary.libraries : [];
@@ -94,21 +94,13 @@ function OwnSourcesNav({ pathname, zotero }: { pathname: string; zotero: boolean
             </Link>
           );
         })}
-        {zotero ? (
-          <Link href="/zotero" className="nav-item" {...current("/zotero")}>
-            <span className="nav-zotero" aria-hidden="true">
-              Z
-            </span>
-            <span>Zotero</span>
-          </Link>
-        ) : null}
       </div>
     </>
   );
 }
 
 /** The same entries in the strip under the header, which replaces the sidebar on narrow screens. */
-function OwnSourcesTabs({ pathname, zotero }: { pathname: string; zotero: boolean }) {
+function OwnSourcesTabs({ pathname }: { pathname: string }) {
   const { auth, summary } = useZdroje();
   if (auth !== "signed_in") return null;
   const teams = summary?.state === "ok" ? summary.libraries.filter((l) => l.kind === "org") : [];
@@ -128,16 +120,11 @@ function OwnSourcesTabs({ pathname, zotero }: { pathname: string; zotero: boolea
           </Link>
         );
       })}
-      {zotero ? (
-        <Link href="/zotero" className="tab-item" {...current("/zotero")}>
-          Zotero
-        </Link>
-      ) : null}
     </>
   );
 }
 
-export function SiteNav({ sourceCount, zotero = false }: { sourceCount: number; zotero?: boolean }) {
+export function SiteNav({ sourceCount }: { sourceCount: number }) {
   const pathname = usePathname();
   const home = pathname === "/";
   const active = useActiveSection(home);
@@ -168,7 +155,7 @@ export function SiteNav({ sourceCount, zotero = false }: { sourceCount: number; 
           ))}
         </div>
 
-        <OwnSourcesNav pathname={pathname} zotero={zotero} />
+        <OwnSourcesNav pathname={pathname} />
 
         <div className="nav-group">
           <span className="nav-heading">Návod pro</span>
@@ -203,7 +190,7 @@ export function SiteNav({ sourceCount, zotero = false }: { sourceCount: number; 
               {short}
             </Link>
           ))}
-          <OwnSourcesTabs pathname={pathname} zotero={zotero} />
+          <OwnSourcesTabs pathname={pathname} />
         </nav>
       </div>
     </>

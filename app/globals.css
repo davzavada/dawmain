@@ -366,19 +366,6 @@ main > footer a {
 .nav-item[data-off] .nav-label {
   color: var(--muted);
 }
-.nav-zotero {
-  width: 18px;
-  height: 18px;
-  flex: none;
-  display: grid;
-  place-items: center;
-  border-radius: 5px;
-  /* Neutral like the personal library's mark: only teams get a colour. */
-  background: var(--surface);
-  color: var(--soft);
-  font-size: 11px;
-  font-weight: 700;
-}
 /* A library's mark: team logo, initials, or the personal icon (app/_zdroje/library-mark.tsx). */
 .lib-mark {
   flex: none;
