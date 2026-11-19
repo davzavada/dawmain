@@ -116,6 +116,10 @@ export const TEXT_FIELDS = [
     maxChars: 40000,
     default: `Dawmain provozuji zdarma a ve volném čase jako nekomerční projekt. Napsat mi můžete na ${MAIL}. Smlouva mezi námi vzniká založením uživatelského účtu. Je bezplatná.
 
+## Kdo může Dawmain používat
+
+Dawmain je zdarma pro všechny: studenty, akademiky, úřady, advokáty i menší advokátní kanceláře. Výjimkou jsou advokátní kanceláře, ve kterých působí více než 20 advokátů. Ty mohou Dawmain používat jen po domluvě se mnou; pokud o přístup stojíte, napište mi na ${MAIL} a domluvíme se.
+
 ## Účet a slušné užívání
 
 Používejte prosím svůj vlastní účet a nepůjčujte ho dál. Za to, co se pod ním děje, včetně volání vašeho asistenta, odpovídáte vy. Služba je na běžné rešerše. Nedělejte z ní prosím hromadné stahování databází - zdroje jsou cizí a jejich přetížení odnesou všichni ostatní. Když by někdo provoz ohrožoval, můžu jeho přístup dočasně omezit; ozvu se mu a domluvíme se.
