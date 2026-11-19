@@ -504,6 +504,66 @@ main > footer a {
   padding: 0;
   list-style: none;
 }
+/* Two columns of groups (home page): one column on narrow screens. */
+.sources-cols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  align-items: start;
+}
+.sources-col {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  min-width: 0;
+}
+/* The Pro group under them: its rows as cards side by side, instead of one box. */
+.sources > .zd-own > .source-box {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.sources > .zd-own > .source-box > ul {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.sources > .zd-own > .source-box > ul > .source {
+  align-items: flex-start;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--well);
+}
+.sources > .zd-own > .source-box > ul > .source > .icon {
+  margin-top: 2px;
+}
+.sources > .zd-own > .source-box > ul > .source > .source-name {
+  flex: 1 1 0;
+}
+.sources > .zd-own > .source-box > ul > .source > .source-state {
+  flex-basis: 100%;
+  margin-left: 0;
+  padding-left: 28px;
+}
+.sources > .zd-own > .source-box > ul > .source > .source-state:empty {
+  display: none;
+}
+.sources {
+  container-type: inline-size;
+}
+/* By the section's own width (the sidebar takes part of the screen): one column below 640 px, Pro cards stack below 560 px. */
+@container (max-width: 640px) {
+  .sources-cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@container (max-width: 560px) {
+  .sources > .zd-own > .source-box > ul {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 .source-group {
   display: flex;
   flex-direction: column;
