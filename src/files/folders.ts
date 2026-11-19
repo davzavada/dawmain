@@ -1,11 +1,13 @@
 import "server-only";
 import { z } from "zod";
-import { getAccess, type LibraryAccess } from "./access";
+import { canDeleteDocument, getAccess, type LibraryAccess } from "./access";
 import { LIBRARY_ID_RE, UUID_RE } from "./config";
 import { withScope, type Queryable } from "./db/client";
 import {
   countFolders,
-  deleteFolderMovingUp,
+  deleteFolders,
+  documentsInFolders,
+  folderSubtree,
   getFolder,
   insertFolder,
   isSelfOrDescendant,
@@ -15,6 +17,8 @@ import {
   updateFolder,
   type FolderRow,
 } from "./db/folders";
+import { deleteDocument } from "./db/documents";
+import { forgetPages, releasePages } from "./db/libraries";
 import { audit } from "./db/usage";
 import { FilesUserError, MESSAGES } from "./errors";
 import { effectiveMode } from "./guards";
@@ -30,8 +34,10 @@ import type { FolderItem } from "./web-types";
  * canUpload) manages its folders — creating, renaming, moving and deleting
  * them, whoever made them. Effective mode "on" only. A folder of a library
  * the caller does not belong to is 404, like one that does not exist.
- * Deleting a folder never deletes documents: they and the subfolders move
- * to its parent.
+ * Deleting a folder deletes everything in it — its subfolders and every
+ * document in them, originals and index included. In a team, a member may
+ * only do so when all those documents are theirs; the team's manager may
+ * always.
  */
 
 const NOT_FOUND = "Složka nenalezena.";
@@ -208,21 +214,39 @@ export async function patchFolderFor(userId: string, id: string, body: unknown):
   return folderItem(row, userId);
 }
 
-/** DELETE /api/files/folders/[id] — its documents and subfolders move to its parent, then it goes. */
-export async function deleteFolderFor(userId: string, id: string): Promise<{ deleted: true; movedDocuments: number; movedFolders: number }> {
+/** DELETE /api/files/folders/[id] — the folder, its subfolders and every document in them. */
+export async function deleteFolderFor(userId: string, id: string): Promise<{ deleted: true; deletedDocuments: number; deletedFolders: number }> {
   if (!UUID_RE.test(id)) throw new FilesUserError(404, NOT_FOUND);
   await requireModeOn();
   const access = await getAccess(userId, { fresh: true });
   const scope = ownedScope(access);
   if (scope.libraryIds.length === 0) throw new FilesUserError(404, NOT_FOUND);
-  return guardDuplicate(() =>
-    withScope(scope.libraryIds, async (db) => {
-      const { folder, lib } = await findFolder(db, scope.libraries, id.toLowerCase());
-      assertManages(lib);
-      const moved = await deleteFolderMovingUp(db, folder);
-      if (!moved) throw new FilesUserError(404, NOT_FOUND);
-      await audit(db, { libraryId: lib.id, actor: userId, action: "folder.delete", detail: { folder: folder.id, ...moved } });
-      return { deleted: true as const, movedDocuments: moved.documents, movedFolders: moved.folders };
-    }),
-  );
+  return withScope(scope.libraryIds, async (db) => {
+    const { folder, lib } = await findFolder(db, scope.libraries, id.toLowerCase());
+    assertManages(lib);
+    const subtree = await folderSubtree(db, lib.id, folder.id);
+    const docs = await documentsInFolders(db, lib.id, subtree);
+    if (docs.some((d) => !canDeleteDocument(lib, d.uploaded_by, userId))) {
+      throw new FilesUserError(403, "Ve složce jsou dokumenty jiných členů týmu. Celou ji může smazat jen správce týmu.");
+    }
+    let deletedDocuments = 0;
+    for (const doc of docs) {
+      const gone = await deleteDocument(db, doc.id, lib.id);
+      if (!gone) continue;
+      deletedDocuments += 1;
+      if (gone.status === "review" || gone.status === "ready") await forgetPages(db, lib.id, gone.billablePages);
+      else if (gone.status === "queued" || gone.status === "processing") await releasePages(db, lib.id, gone.billablePages);
+      await audit(db, {
+        libraryId: lib.id,
+        actor: userId,
+        action: "document.delete",
+        docId: doc.id,
+        detail: { pages: gone.billablePages, status: gone.status, byAdmin: doc.uploaded_by !== userId, folder: folder.id },
+      });
+    }
+    const deletedFolders = await deleteFolders(db, lib.id, subtree);
+    if (deletedFolders === 0) throw new FilesUserError(404, NOT_FOUND);
+    await audit(db, { libraryId: lib.id, actor: userId, action: "folder.delete", detail: { folder: folder.id, documents: deletedDocuments, folders: deletedFolders } });
+    return { deleted: true as const, deletedDocuments, deletedFolders };
+  });
 }

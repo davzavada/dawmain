@@ -152,48 +152,39 @@ export function freeName(name: string, taken: ReadonlySet<string>): string {
   }
 }
 
-/**
- * Delete a folder: its documents and subfolders move to its parent first
- * (a subfolder whose name the parent already has gets " (2)" etc.).
- * Returns how many documents and subfolders moved, or null when the folder
- * is not there. The caller locked the folder row.
- */
-export async function deleteFolderMovingUp(
+/** The folder and every folder under it (ids), or [] when it is not there. */
+export async function folderSubtree(db: Queryable, libraryId: string, folderId: string): Promise<string[]> {
+  const { rows } = await db.query<{ id: string }>(
+    `WITH RECURSIVE sub AS (
+       SELECT id FROM folders WHERE id = $2::uuid AND library_id = $1
+       UNION
+       SELECT f.id FROM folders f JOIN sub ON f.parent_id = sub.id WHERE f.library_id = $1
+     )
+     SELECT id FROM sub`,
+    [libraryId, folderId],
+  );
+  return rows.map((r) => String(r.id));
+}
+
+/** The documents filed in any of these folders (locked), with who uploaded them. */
+export async function documentsInFolders(
   db: Queryable,
-  folder: FolderRow,
-): Promise<{ documents: number; folders: number } | null> {
-  const lib = folder.library_id;
-  const docs = await db.query(
-    "UPDATE documents SET folder_id = $3::uuid, updated_at = now() WHERE library_id = $1 AND folder_id = $2::uuid RETURNING id",
-    [lib, folder.id, folder.parent_id],
+  libraryId: string,
+  folderIds: readonly string[],
+): Promise<{ id: string; uploaded_by: string }[]> {
+  if (folderIds.length === 0) return [];
+  const { rows } = await db.query(
+    "SELECT id, uploaded_by FROM documents WHERE library_id = $1 AND folder_id = ANY($2::uuid[]) ORDER BY id FOR UPDATE",
+    [libraryId, [...folderIds]],
   );
-  const children = await db.query<{ id: string; name: string }>(
-    "SELECT id, name FROM folders WHERE library_id = $1 AND parent_id = $2::uuid ORDER BY lower(name), id FOR UPDATE",
-    [lib, folder.id],
-  );
-  if (children.rows.length > 0) {
-    // The dying folder steps out of its siblings' way first: a child of the
-    // same name may take that name in the parent.
-    await db.query("UPDATE folders SET name = id::text WHERE id = $1 AND library_id = $2", [folder.id, lib]);
-    const siblings = await db.query<{ name: string }>(
-      "SELECT name FROM folders WHERE library_id = $1 AND parent_id IS NOT DISTINCT FROM $2::uuid AND id <> $3::uuid",
-      [lib, folder.parent_id, folder.id],
-    );
-    const taken = new Set(siblings.rows.map((r) => String(r.name).toLowerCase()));
-    for (const child of children.rows) {
-      const name = freeName(String(child.name), taken);
-      taken.add(name.toLowerCase());
-      await db.query("UPDATE folders SET parent_id = $3::uuid, name = $4 WHERE id = $1 AND library_id = $2", [
-        child.id,
-        lib,
-        folder.parent_id,
-        name,
-      ]);
-    }
-  }
-  const gone = await db.query("DELETE FROM folders WHERE id = $1 AND library_id = $2 RETURNING id", [folder.id, lib]);
-  if (gone.rows.length === 0) return null;
-  return { documents: docs.rows.length, folders: children.rows.length };
+  return rows.map((r) => ({ id: String(r.id), uploaded_by: String(r.uploaded_by) }));
+}
+
+/** Delete these folders (a whole subtree at once: the parent links are checked at the end of the statement). Returns how many went. */
+export async function deleteFolders(db: Queryable, libraryId: string, folderIds: readonly string[]): Promise<number> {
+  if (folderIds.length === 0) return 0;
+  const { rows } = await db.query("DELETE FROM folders WHERE library_id = $1 AND id = ANY($2::uuid[]) RETURNING id", [libraryId, [...folderIds]]);
+  return rows.length;
 }
 
 /** Move a document into a folder of its library (null = the root). False when the document is not there. */

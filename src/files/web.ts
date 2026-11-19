@@ -310,6 +310,19 @@ export function renamedFileName(raw: string, current: string): { name: string } 
   return { name };
 }
 
+/**
+ * The file name a changed title gives the document: the title with the
+ * current extension, "/" and "\\" turned into "-". Null when the title did
+ * not change, is empty, or already is the file name. Pure.
+ */
+export function fileNameForTitle(before: string | null | undefined, after: string | null | undefined, currentFileName: string): string | null {
+  const title = (after ?? "").trim();
+  if (!title || title === (before ?? "").trim()) return null;
+  const next = renamedFileName(title.replace(/[\\/]+/g, "-").slice(0, 240), currentFileName);
+  if ("error" in next || next.name === currentFileName) return null;
+  return next.name;
+}
+
 /** Validation errors of the metadata form: field path → Czech message (first per field). */
 export class MetaValidationError extends FilesUserError {
   constructor(public readonly fields: Record<string, string>) {
@@ -387,6 +400,9 @@ export async function patchFor(userId: string, id: string, body: unknown): Promi
       );
     }
     await audit(db, { libraryId: row.library_id, actor: userId, action: input.action === "confirm" ? "document.confirm" : "document.meta", docId: row.id });
+    // A new title renames the file too (the extension stays), so the list shows what the form says.
+    const fileName = fileNameForTitle(row.meta.title, next.title, row.file_name);
+    if (fileName) await renameDocument(db, row.id, row.library_id, fileName);
     if (indexInputsChanged(row.meta, next)) changed.reindex = { id: row.id, libraryId: row.library_id };
   });
   if (changed.reindex) {

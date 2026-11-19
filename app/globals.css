@@ -373,8 +373,9 @@ main > footer a {
   display: grid;
   place-items: center;
   border-radius: 5px;
-  background: #cc2936;
-  color: #ffffff;
+  /* Neutral like the personal library's mark: only teams get a colour. */
+  background: var(--surface);
+  color: var(--soft);
   font-size: 11px;
   font-weight: 700;
 }
@@ -2036,9 +2037,6 @@ main > .fp {
   color: var(--accent);
   font-weight: 600;
   pointer-events: none;
-}
-.fp-rules {
-  margin: 0;
 }
 /* the menu of a row */
 .fp-menu {
@@ -3956,8 +3954,8 @@ button.zd-file-row:hover .zd-file-title {
   width: 40px;
   height: 40px;
   border-radius: 10px;
-  background: #cc2936;
-  color: #ffffff;
+  background: var(--surface);
+  color: var(--soft);
   font-size: 16px;
   font-weight: 700;
   letter-spacing: -0.02em;
@@ -4195,4 +4193,98 @@ button.zd-file-row:hover .zd-file-title {
   .zp-panel > :not(.zd-zotero-live):not(.zp-sec) {
     margin: 14px;
   }
+}
+
+/* "Spravovat tým" (app/soubory/team-dialog.tsx) */
+.tm {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  padding: 18px 20px 22px;
+  overflow-y: auto;
+}
+.tm-label {
+  display: block;
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--soft);
+}
+.tm-inline {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.tm-input {
+  flex: 1 1 200px;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+}
+.tm-select {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+}
+.tm-input:focus,
+.tm-select:focus {
+  outline: none;
+  border-color: var(--link);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+.tm-members {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.tm-member {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+}
+.tm-member + .tm-member {
+  border-top: 1px solid var(--line);
+}
+.tm-avatar {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--surface);
+  color: var(--soft);
+  font-size: 11px;
+  font-weight: 700;
+}
+.tm-who {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+}
+.tm-who b,
+.tm-who span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tm-who b {
+  font-size: 14px;
+  font-weight: 600;
+}
+.tm-who span {
+  font-size: 12.5px;
+  color: var(--muted);
 }

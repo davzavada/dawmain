@@ -49,6 +49,8 @@ vi.mock("next/navigation", () => ({
   useRouter: () => nav.router,
   usePathname: () => "/soubory",
 }));
+// "Spravovat tým" asks the server (Clerk); the page tests run without it.
+vi.mock("@/app/soubory/team-actions", () => ({ teamPanelAction: async () => null, teamManageAction: async () => ({ ok: false, error: "test" }) }));
 vi.mock("next/link", () => ({
   default: ({ href, children, ...rest }: { href: string; children?: ReactNode }) => createElement("a", { href, ...rest }, children),
 }));
@@ -380,7 +382,7 @@ describe("folders and renaming", () => {
     await open();
     await key(row("Smlouvy"), "Delete");
     expect(writes()).toEqual([]);
-    expect(host.querySelector(".fp-confirm")?.textContent).toContain("Smazat složku „Smlouvy“? Nic z ní se nesmaže");
+    expect(host.querySelector(".fp-confirm")?.textContent).toContain("Smazat složku „Smlouvy“ se vším, co obsahuje?");
     await act(async () => button("Zrušit")!.click());
     expect(host.querySelector(".fp-confirm")).toBeNull();
     await key(row("Vzory"), "Delete");
@@ -436,9 +438,8 @@ describe("rights", () => {
     });
     await open({ handle: "spory" });
     expect(host.querySelector("h1")?.textContent).toBe("Spory");
-    // No banner about who sees the team's files: the page says "Sdílené s týmem" in its subtitle.
+    // No banner about who sees the team's files, no wording about it in the header either.
     expect(host.querySelector(".zd-banner-team")).toBeNull();
-    expect(host.querySelector(".fp-head p")?.textContent).toContain("Sdílené s týmem");
     await openMenu("cizi.pdf");
     for (const label of ["Přejmenovat", "Přesunout do", "Smazat"]) expect(menuItem(label)!.disabled, label).toBe(true);
     expect(host.querySelector(".fp-menu")?.textContent).toContain("Nahrál ho jiný člen týmu.");
