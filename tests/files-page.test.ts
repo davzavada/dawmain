@@ -382,7 +382,7 @@ describe("folders and renaming", () => {
     await open();
     await key(row("Smlouvy"), "Delete");
     expect(writes()).toEqual([]);
-    expect(host.querySelector(".fp-confirm")?.textContent).toContain("Smazat složku „Smlouvy“ se vším, co obsahuje?");
+    expect(host.querySelector(".fp-confirm")?.textContent).toContain("Smazat složku i s obsahem natrvalo?");
     await act(async () => button("Zrušit")!.click());
     expect(host.querySelector(".fp-confirm")).toBeNull();
     await key(row("Vzory"), "Delete");
