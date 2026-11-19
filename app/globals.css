@@ -3416,7 +3416,7 @@ button.zd-file-row:hover .zd-file-title {
   font-weight: 600;
 }
 .adm {
-  max-width: 1240px !important;
+  max-width: 1600px !important;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -3453,7 +3453,7 @@ button.zd-file-row:hover .zd-file-title {
 }
 .adm-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
   gap: 16px;
   align-items: start;
 }

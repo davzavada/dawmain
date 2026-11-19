@@ -119,6 +119,7 @@ export function AdminConsole({
                 <tr>
                   <th>Účet</th>
                   <th>Role</th>
+                  <th className="r">Dnes</th>
                   <th className="r">Volání {windowDays} dní</th>
                   <th>Trend</th>
                   <th>Poslední volání</th>
@@ -145,6 +146,7 @@ export function AdminConsole({
                       <span className={`adm-pill ${user.role}`}>{user.role === "admin" ? "Správce" : "Uživatel"}</span>
                       {user.pro ? <span className="adm-pill pro">Pro</span> : null}
                     </td>
+                    <td className="r adm-mono">{usage ? formatCount(usage.daily[usage.daily.length - 1] ?? 0) : usageAvailable ? "0" : "—"}</td>
                     <td className="r adm-mono">{usage ? formatCount(usage.calls) : usageAvailable ? "0" : "—"}</td>
                     <td>{usage ? <Spark data={usage.daily} /> : null}</td>
                     <td className="adm-dim">{usage ? formatDay(usage.lastDay) : "nikdy"}</td>
@@ -152,7 +154,7 @@ export function AdminConsole({
                 ))}
                 {visible.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="adm-empty">
+                    <td colSpan={6} className="adm-empty">
                       Nikdo neodpovídá filtru.
                     </td>
                   </tr>
