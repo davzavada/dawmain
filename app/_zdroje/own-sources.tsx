@@ -5,7 +5,7 @@ import type { MouseEvent, ReactNode } from "react";
 import { Icon } from "@/app/_icons";
 import { UkazRow } from "@/app/_source-status";
 import type { SummaryResponse } from "@/src/files/web-types";
-import { FILES_DESC, filesRowView } from "./hint";
+import { filesRowView } from "./hint";
 import { ZIcon } from "./icons";
 import { requestSignIn, useZdroje } from "./store";
 import { DEFAULT_SOURCE_TEXTS, SourceTextsContext, useSourceTexts, type SourceTexts } from "./texts";
@@ -16,9 +16,9 @@ import { useZoteroStatus } from "./zotero-status";
  * 02): Vlastní soubory, Zotero (always listed; locked where the deployment
  * cannot connect it) and UKAŽ (switched on per account by an admin, app/_source-status.tsx).
  * Visitors see them greyed out with a lock, each with one line on what it
- * is, and a click signs them in (01); signed in, Vlastní soubory shows the
- * documents and pages, with "Spravovat" opening the modal, and Zotero the
- * connected account (02). The rows read the shared summary
+ * is, and a click signs them in (01); signed in, the rows read the same
+ * (no counts, no account, no lights: that lives in the sidebar's pages)
+ * and the whole card links to its page, a lock only without Pro. The rows read the shared summary
  * (./store.ts) and the Zotero status, so the page itself stays
  * static and never waits for them. Until Clerk loads, the group renders
  * both the visitor's and the signed-in variant; the sign-in hint (./hint.ts)
@@ -49,6 +49,7 @@ export function OwnSourcesGroup({ zotero, texts = DEFAULT_SOURCE_TEXTS }: { zote
 
 function OwnSources({ zotero }: { zotero: boolean }) {
   const { auth, summary } = useZdroje();
+  const texts = useSourceTexts();
   if (auth === "loading") {
     return (
       <>
@@ -59,7 +60,7 @@ function OwnSources({ zotero }: { zotero: boolean }) {
         </Group>
         <Group signedIn className="zd-hint-in">
           <HintedFilesRow />
-          {zotero ? <ZoteroRowView desc={LOADING} /> : <ZoteroUnavailable signedIn />}
+          {zotero ? <ZoteroRowView desc={texts.zotero} /> : <ZoteroUnavailable signedIn />}
           <UkazRow signedIn />
         </Group>
       </>
@@ -90,8 +91,6 @@ function Group({ signedIn, className, children }: { signedIn: boolean; className
   );
 }
 
-const LOADING = "Načítám…";
-
 /** What Zotero is: the visitor's line, and the line of an account without Pro (the group's heading says Pro). Its default wording; the rows show the editable text (useSourceTexts). */
 const ZOTERO_DESC = DEFAULT_SOURCE_TEXTS.zotero;
 
@@ -111,26 +110,19 @@ function FilesInvite({ auth }: { auth: string }) {
   );
 }
 
+/** Signed in: the same line as for visitors (no counts), the whole card a link to the files page; a lock only without Pro. */
 function FilesRow({ auth, summary }: { auth: string; summary: SummaryResponse | null }) {
-  const view = filesRowView(summary);
+  const locked = filesRowView(summary).locked;
   const texts = useSourceTexts();
-  // filesRowView is pure and shared with the sign-in hint: where it answers with the description, show the edited one.
-  const desc = view.desc === FILES_DESC ? texts.files : view.desc;
-  const locked = view.locked;
   return (
     <li className={locked ? "source zd-own-row zd-row-locked" : "source zd-own-row"}>
       <Icon name="upload" />
       <div className="source-name">
-        <span className="source-title">
+        <Link href={OWN_FILES_HREF} className="source-title zd-row-button" onClick={intercept(auth)}>
           Vlastní soubory
           {locked ? <ZIcon name="lock" size={13} /> : null}
-        </span>
-        <span className="source-desc">{desc}</span>
-      </div>
-      <div className="source-state">
-        <a href={OWN_FILES_HREF} className="zd-manage" onClick={intercept(auth)}>
-          Spravovat
-        </a>
+        </Link>
+        <span className="source-desc">{texts.files}</span>
       </div>
     </li>
   );
@@ -138,20 +130,16 @@ function FilesRow({ auth, summary }: { auth: string; summary: SummaryResponse | 
 
 /** FilesRow as the sign-in hint draws it before Clerk loads: the line and the lock come from CSS. */
 function HintedFilesRow() {
+  const texts = useSourceTexts();
   return (
     <li className="source zd-own-row zd-hint-files">
       <Icon name="upload" />
       <div className="source-name">
-        <span className="source-title">
+        <Link href={OWN_FILES_HREF} className="source-title zd-row-button">
           Vlastní soubory
           <ZIcon name="lock" size={13} className="zd-hint-files-lock" />
-        </span>
-        <span className="source-desc zd-hint-files-desc" />
-      </div>
-      <div className="source-state">
-        <a href={OWN_FILES_HREF} className="zd-manage">
-          Spravovat
-        </a>
+        </Link>
+        <span className="source-desc">{texts.files}</span>
       </div>
     </li>
   );
@@ -169,33 +157,17 @@ function ZoteroRow({ signedIn }: { signedIn: boolean }) {
   // The server may know better than the client that nobody is signed in (an expired session).
   const visitor = !signedIn || status?.state === "signed_out";
 
-  let desc: string;
+  // Signed in, the row reads as for visitors (the account and the connection live on /zotero);
+  // only a lock without Pro, and a broken key, which needs the user, change it.
+  let desc = ZOTERO_DESC;
   let locked = false;
-  let connected = false;
-  if (visitor) {
-    desc = ZOTERO_DESC;
-  } else if (status === undefined) {
-    desc = LOADING;
-  } else if (!ok) {
-    desc = "Stav připojení se teď nepodařilo zjistit.";
-  } else if (ok.connection && ok.pro) {
-    desc = `Účet ${ok.connection.username}`;
-    connected = true;
-  } else if (ok.connection) {
-    desc = `Účet ${ok.connection.username} - bez režimu Pro (právníky) do knihovny asistent nevidí.`;
-    locked = true;
-  } else if (!ok.pro) {
-    desc = ZOTERO_DESC;
-    locked = true;
-  } else if (ok.revoked) {
-    desc = "Klíč přestal platit - připojte Zotero znovu.";
-  } else if (ok.unreadable) {
-    desc = "Připojení je potřeba obnovit - připojte Zotero znovu.";
-  } else {
-    desc = "Připojte svou knihovnu - asistent v ní bude hledat, číst, a když povolíte, i ukládat.";
+  if (!visitor && ok) {
+    if (!ok.pro) locked = true;
+    else if (!ok.connection && ok.revoked) desc = "Klíč přestal platit - připojte Zotero znovu.";
+    else if (!ok.connection && ok.unreadable) desc = "Připojení je potřeba obnovit - připojte Zotero znovu.";
   }
 
-  return <ZoteroRowView desc={desc === ZOTERO_DESC ? texts.zotero : desc} locked={locked} connected={connected} onClick={visitor ? requestSignIn : ZOTERO_PAGE} />;
+  return <ZoteroRowView desc={desc === ZOTERO_DESC ? texts.zotero : desc} locked={locked} onClick={visitor ? requestSignIn : ZOTERO_PAGE} />;
 }
 
 /**
@@ -210,7 +182,7 @@ function ZoteroUnavailable({ signedIn }: { signedIn: boolean }) {
 const ZOTERO_PAGE = "/zotero";
 
 /** The Zotero row itself; without a status yet (the hinted variant), a click opens the page, which waits for Clerk. */
-function ZoteroRowView({ desc, locked = false, connected = false, onClick = ZOTERO_PAGE }: { desc: string; locked?: boolean; connected?: boolean; onClick?: (() => void) | string | null }) {
+function ZoteroRowView({ desc, locked = false, onClick = ZOTERO_PAGE }: { desc: string; locked?: boolean; onClick?: (() => void) | string | null }) {
   const lock = locked ? <ZIcon name="lock" size={13} /> : null;
   return (
     <li className={locked ? "source zd-own-row zd-row-locked" : "source zd-own-row"}>
@@ -234,11 +206,6 @@ function ZoteroRowView({ desc, locked = false, connected = false, onClick = ZOTE
         )}
         <span className="source-desc">{desc}</span>
       </div>
-      {connected ? (
-        <span className="source-dot" data-state="ok" title="připojeno">
-          <span className="sr-only">připojeno</span>
-        </span>
-      ) : null}
     </li>
   );
 }

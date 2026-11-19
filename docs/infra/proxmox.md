@@ -152,6 +152,9 @@ neprivilegovaný, `nesting=1`, start po bootu, Node 22 (NodeSource),
   nezvedne-li se služba, vrátí předchozí vydání. Zůstane posledních pět vydání.
   Po změně unit souborů je zkopírovat do `/etc/systemd/system/` a
   `systemctl daemon-reload`.
+- **Stav zdrojů** `dawmain-status.timer` (7:00–21:45 každých 15 min): zavolá
+  `/api/status`, ať se zelené tečky na úvodní stránce obnovují i bez návštěvníků
+  (route má `revalidate` 14 min). V noci kontrolu spustí první návštěvník.
 - **Cron** `dawmain-cron.timer` (04:00, denní úklid Vlastních zdrojů). Na jeho
   denním běhu stojí lhůty v zásadách ochrany osobních údajů (výmaz knihovny
   „do týdne“, počty volání 12 měsíců). Ruční spuštění:

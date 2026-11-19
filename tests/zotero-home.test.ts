@@ -139,26 +139,25 @@ describe("the Zotero row on the home page", () => {
     expect(statusCalls()).toBe(0);
   });
 
-  it("offers to connect, with a link to the /zotero page", async () => {
+  it("signed in with Pro: the same line as for visitors, no lock, the card links to /zotero", async () => {
     await render();
     const g = group()!;
     expect(g.locked).toBe(false);
-    expect(g.textContent).toContain("Připojte svou knihovnu");
+    expect(g.textContent).toContain("Vaše knihovna");
     expect(g.querySelector<HTMLAnchorElement>("a.source-title")?.getAttribute("href")).toBe("/zotero");
   });
 
-  it("shows the connected account once, with the green light, not greyed out", async () => {
+  it("never shows the connected account or a light: that lives on /zotero", async () => {
     status = { code: 200, body: CONNECTED };
     await render();
     const g = group()!;
     expect(g.locked).toBe(false);
-    expect(g.textContent).toContain("Účet jnovakova");
-    expect(g.textContent!.match(/připojeno/g)).toHaveLength(1);
-    const dot = g.querySelector('.source-dot[data-state="ok"]');
-    expect(dot?.getAttribute("title")).toBe("připojeno");
+    expect(g.textContent).toContain("Vaše knihovna");
+    expect(g.textContent).not.toContain("jnovakova");
+    expect(g.querySelector(".source-dot")).toBeNull();
   });
 
-  it("asks for the status once, however the Vlastní soubory summary settles", async () => {
+  it("asks for the status once, and the Vlastní soubory card shows no counts", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
@@ -170,25 +169,25 @@ describe("the Zotero row on the home page", () => {
       }),
     );
     await render();
-    expect(host.textContent).toContain("2 dokumenty · 10 MB");
+    expect(host.textContent).not.toContain("2 dokumenty");
+    expect(host.textContent).not.toContain("Spravovat");
     expect(statusCalls()).toBe(1);
   });
 
-  it("a connection without Pro is locked and says the assistant cannot see the library", async () => {
+  it("without Pro the card is locked, with the same line", async () => {
     status = { code: 200, body: { ...CONNECTED, pro: false } };
     await render();
     const g = group()!;
     expect(g.locked).toBe(true);
-    expect(g.textContent).toContain("bez režimu Pro (právníky) do knihovny asistent nevidí");
-    expect(g.querySelector(".zd-badge")).toBeNull();
+    expect(g.textContent).toContain("Vaše knihovna");
   });
 
-  it("tells a revoked key from an unreadable one, is locked without Pro, and survives a server error", async () => {
+  it("only a broken key changes the line; a server error keeps the usual one", async () => {
     const cases: Array<[unknown, number, string]> = [
       [{ ...NOT_CONNECTED, pro: false }, 200, "Vaše knihovna"],
       [{ ...NOT_CONNECTED, revoked: { username: "jnovakova", revokedAt: "2026-09-20T10:00:00Z" } }, 200, "Klíč přestal platit"],
       [{ ...NOT_CONNECTED, unreadable: { username: "jnovakova" } }, 200, "Připojení je potřeba obnovit"],
-      [{ error: "Stav připojení Zotera se teď nepodařilo zjistit." }, 503, "Stav připojení se teď nepodařilo zjistit."],
+      [{ error: "Stav připojení Zotera se teď nepodařilo zjistit." }, 503, "Vaše knihovna"],
       [{ state: "signed_out" }, 200, "Vaše knihovna"],
     ];
     for (const [body, code, text] of cases) {
@@ -200,39 +199,13 @@ describe("the Zotero row on the home page", () => {
     }
   });
 
-  it("never shows the previous account after signing out and in as someone else", async () => {
+  it("reloads the status when the Zotero page reports a change", async () => {
     status = { code: 200, body: CONNECTED };
     await render();
-    expect(group()!.textContent).toContain("jnovakova");
-    await act(async () => store.setAuth("signed_out"));
-    // The next user's status request hangs: whatever shows meanwhile must not be the old account.
-    let release: (r: Response) => void = () => {};
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = String(input);
-        calls.push(url);
-        if (url === "/api/zotero/status") return new Promise<Response>((r) => (release = r));
-        return json({ error: "Nenalezeno." }, 404);
-      }),
-    );
-    await act(async () => store.setAuth("signed_in"));
-    await settle();
-    expect(group()!.textContent).not.toContain("jnovakova");
-    expect(group()!.textContent).toContain("Načítám");
-    await act(async () => release(json({ ...CONNECTED, connection: { ...CONNECTED.connection!, username: "pdvorak" } })));
-    await settle();
-    expect(group()!.textContent).toContain("Účet pdvorak");
-  });
-
-  it("reloads the status when the modal reports a change (Odpojit)", async () => {
-    status = { code: 200, body: CONNECTED };
-    await render();
-    expect(group()!.textContent).toContain("Účet jnovakova");
-    status = { code: 200, body: NOT_CONNECTED };
+    expect(group()!.textContent).toContain("Vaše knihovna");
+    status = { code: 200, body: { ...NOT_CONNECTED, revoked: { username: "jnovakova", revokedAt: "2026-09-20T10:00:00Z" } } };
     await act(async () => notifyZoteroChanged());
     await settle();
-    expect(group()!.textContent).toContain("Připojte svou knihovnu");
-    expect(group()!.textContent).not.toContain("jnovakova");
+    expect(group()!.textContent).toContain("Klíč přestal platit");
   });
 });

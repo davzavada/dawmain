@@ -1,0 +1,16 @@
+# Started by dawmain-status.timer. A plain GET: the route is public and the
+# same for everyone; the request only makes Next regenerate a stale answer.
+[Unit]
+Description=Dawmain source status refresh
+After=dawmain-web.service
+Wants=dawmain-web.service
+
+[Service]
+Type=oneshot
+User=dawmain
+Group=dawmain
+ExecStart=/usr/bin/curl -fsS --max-time 60 -o /dev/null http://127.0.0.1:3000/api/status
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes

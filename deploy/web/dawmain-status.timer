@@ -1,0 +1,13 @@
+# The source lights on the home page: by day (07:00-21:45, Europe/Prague)
+# ask GET /api/status every 15 minutes, so its cached answer (revalidate 14
+# min, app/api/status/route.ts) is regenerated even when nobody visits. At
+# night the first visitor starts the check, as before.
+[Unit]
+Description=Dawmain source status refresh every 15 minutes by day
+
+[Timer]
+OnCalendar=*-*-* 07..21:00/15:00
+RandomizedDelaySec=20s
+
+[Install]
+WantedBy=timers.target
