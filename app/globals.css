@@ -4533,7 +4533,8 @@ button.zd-file-row:hover .zd-file-title {
 }
 .md-table table {
   width: 100%;
-  min-width: 640px;
+  min-width: 720px;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 14px;
   line-height: 1.45;
@@ -4557,8 +4558,23 @@ button.zd-file-row:hover .zd-file-title {
 }
 .md-table td:first-child,
 .md-table th:first-child {
-  width: 1%;
   white-space: nowrap;
   color: var(--muted);
+}
+/* Five columns (the privacy policy's overview: #, what and why, data, legal basis, how long): the text columns share the width by how much they say. */
+.md-table table:has(th:nth-child(5)) th:nth-child(1) {
+  width: 36px;
+}
+.md-table table:has(th:nth-child(5)) th:nth-child(2) {
+  width: 26%;
+}
+.md-table table:has(th:nth-child(5)) th:nth-child(3) {
+  width: 27%;
+}
+.md-table table:has(th:nth-child(5)) th:nth-child(4) {
+  width: 19%;
+}
+.md-table td a {
+  overflow-wrap: anywhere;
 }
 

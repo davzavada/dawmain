@@ -37,6 +37,8 @@ export interface TextField {
 
 /** The contact as the legal texts link it. */
 const MAIL = `[${CONTACT}](mailto:${CONTACT})`;
+/** The GDPR on EUR-Lex (Czech), linked from every legal basis in the privacy policy. */
+const GDPR = "https://eur-lex.europa.eu/legal-content/CS/TXT/?uri=CELEX:32016R0679";
 
 const HOME = "Hlavní stránka";
 const SOURCES = "Popisky zdrojů";
@@ -175,15 +177,22 @@ Podmínky můžu přiměřeně změnit, když se změní fungování služby neb
 
 ## 2. Co zpracovávám, proč a jak dlouho
 
+**Základ – pro každý účet**
+
 | # | Co a proč | Jaké údaje | Právní základ | Jak dlouho |
 |---|---|---|---|---|
-| 1 | Účet a přihlášení | e-mail, jméno, identifikátor účtu (při přihlášení účtem Google je předá Google) | plnění smlouvy (čl. 6 odst. 1 písm. b) GDPR) | dokud účet trvá |
-| 2 | Provoz a ochrana služby: chyby, limity, zneužití | čas požadavku, volaný nástroj, výsledek, IP adresa | oprávněný zájem (čl. 6 odst. 1 písm. f) GDPR) | jen po dobu potřebnou k řešení chyb a ochraně služby |
-| 3 | Přehled o tom, kdo službu používá, jak často a které nástroje, abych ji mohl rozvíjet; je jen pro mě, k marketingu ho nepoužívám | počty volání u účtu | oprávněný zájem | počty volání u účtu nejdéle 12 měsíců |
-| 4 | Vlastní soubory (Pro) | soubory, které nahrajete (originál i převedený text), metadata (název, autoři, rok, typ, název souboru a složky), záznam o nahrání, úpravách, stažení a smazání | plnění smlouvy | dokud dokument nesmažete, nejdéle však do zrušení účtu nebo odebrání Pro. Pak knihovnu do týdne smažu (předtím si soubory můžete stáhnout). Týmové dokumenty do týdne po vypnutí nebo zrušení týmu je smažu |
-| 5 | Osobní údaje jiných lidí v nahraných dokumentech (třeba jména autorů), aby v nich asistent mohl hledat | to, co dokument obsahuje | oprávněný zájem | jako dokument |
-| 6 | Zotero (Pro) | zašifrovaný klíč k vaší knihovně, uživatelské jméno a identifikátor v Zoteru | plnění smlouvy | dokud Zotero neodpojíte nebo nezrušíte účet; neplatný klíč smažu hned |
-| 7 | Doložení výmazu knihovny | identifikátor knihovny, datum, počet smazaných dokumentů | oprávněný zájem | dokud může být potřeba výmaz doložit |
+| 1 | Účet a přihlášení | e-mail, jméno, identifikátor účtu (při přihlášení účtem Google je předá Google) | plnění smlouvy ([čl. 6 odst. 1 písm. b) GDPR](${GDPR})) | dokud účet trvá |
+| 2 | Provoz a ochrana služby: chyby, limity, zneužití | čas požadavku, volaný nástroj, výsledek, IP adresa | oprávněný zájem ([čl. 6 odst. 1 písm. f) GDPR](${GDPR})) | jen po dobu potřebnou k řešení chyb a ochraně služby |
+| 3 | Přehled o tom, kdo službu používá, jak často a které nástroje, abych ji mohl rozvíjet; je jen pro mě, k marketingu ho nepoužívám | počty volání u účtu | oprávněný zájem ([čl. 6 odst. 1 písm. f) GDPR](${GDPR})) | počty volání u účtu nejdéle 12 měsíců |
+
+**Nástavba Pro (právníky)**
+
+| # | Co a proč | Jaké údaje | Právní základ | Jak dlouho |
+|---|---|---|---|---|
+| 4 | Vlastní soubory | soubory, které nahrajete (originál i převedený text), metadata (název, autoři, rok, typ, název souboru a složky), záznam o nahrání, úpravách, stažení a smazání | plnění smlouvy ([čl. 6 odst. 1 písm. b) GDPR](${GDPR})) | dokud dokument nesmažete, nejdéle však do zrušení účtu nebo odebrání Pro. Pak knihovnu do týdne smažu (předtím si soubory můžete stáhnout). Týmové dokumenty do týdne po vypnutí nebo zrušení týmu je smažu |
+| 5 | Osobní údaje jiných lidí v nahraných dokumentech (třeba jména autorů), aby v nich asistent mohl hledat | to, co dokument obsahuje | oprávněný zájem ([čl. 6 odst. 1 písm. f) GDPR](${GDPR})) | jako dokument |
+| 6 | Zotero | zašifrovaný klíč k vaší knihovně, uživatelské jméno a identifikátor v Zoteru | plnění smlouvy ([čl. 6 odst. 1 písm. b) GDPR](${GDPR})) | dokud Zotero neodpojíte nebo nezrušíte účet; neplatný klíč smažu hned |
+| 7 | Doložení výmazu knihovny | identifikátor knihovny, datum, počet smazaných dokumentů | oprávněný zájem ([čl. 6 odst. 1 písm. f) GDPR](${GDPR})) | dokud může být potřeba výmaz doložit |
 
 Údaje o účtu jsou pro poskytování služby nezbytné; bez nich účet nelze vytvořit. Provozní záznamy vznikají automaticky při každém použití služby. Nahrávání dokumentů a připojení Zotera jsou dobrovolné.
 
