@@ -1084,12 +1084,12 @@ main > footer a {
 .zd-pad {
   padding: 24px;
 }
-/* Loading placeholder (app/_zdroje/loading.tsx): hidden for the first 400 ms, then shimmering bars. */
+/* Loading placeholder (app/_zdroje/loading.tsx): shimmering bars shaped like what is coming, from the first frame. */
 .zd-loading {
   display: grid;
   gap: 12px;
   opacity: 0;
-  animation: zd-loading-in 200ms ease-out 400ms forwards;
+  animation: zd-loading-in 150ms ease-out forwards;
 }
 .zd-loading[data-shape="rows"] {
   gap: 0;
@@ -4478,6 +4478,45 @@ button.zd-file-row:hover .zd-file-title {
   .nav-in,
   .source-dot[data-state="pending"],
   .summary-dot[data-state="pending"] {
+    animation: none;
+  }
+}
+
+/* The files page: a skeleton of the page while the account loads; the real header, toolbar and rows fade into its place. */
+.fp-skeleton-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.fp-skeleton-head .zd-shimmer:first-child {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+}
+.fp-skeleton-title {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fp-skeleton-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 4px;
+}
+.fp-skeleton-toolbar .zd-shimmer {
+  height: 32px;
+  border-radius: 8px;
+}
+.fp > .fp-head,
+.fp > .fp-toolbar,
+.fp-item {
+  animation: zd-loading-in 0.18s ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fp > .fp-head,
+  .fp > .fp-toolbar,
+  .fp-item {
     animation: none;
   }
 }
