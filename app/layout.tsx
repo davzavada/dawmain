@@ -1,5 +1,26 @@
 import { ClerkProvider } from "@clerk/nextjs";
 import { csCZ } from "@clerk/localizations";
+
+/**
+ * Clerk's Czech texts, with the sign-up checkbox reworded: the terms are agreed to
+ * (a contract), the privacy policy is only taken note of — the account's data rest
+ * on the contract, not on a consent, so the checkbox must not read as one.
+ */
+const LOCALIZATION = {
+  ...csCZ,
+  signUp: {
+    ...csCZ.signUp,
+    legalConsent: {
+      ...csCZ.signUp?.legalConsent,
+      checkbox: {
+        ...csCZ.signUp?.legalConsent?.checkbox,
+        label__termsOfServiceAndPrivacyPolicy:
+          'Souhlasím s {{ termsOfServiceLink || link("Podmínkami užití") }} a beru na vědomí {{ privacyPolicyLink || link("Zásady ochrany osobních údajů") }}',
+        label__onlyTermsOfService: 'Souhlasím s {{ termsOfServiceLink || link("Podmínkami užití") }}',
+      },
+    },
+  },
+};
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
@@ -66,7 +87,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="cs" className={`${geist.variable} ${geistMono.variable}`} suppressHydrationWarning>
       <head>{clerk ? <script dangerouslySetInnerHTML={{ __html: HINT_SCRIPT }} /> : null}</head>
-      <body>{clerk ? <ClerkProvider afterSignOutUrl="/" localization={csCZ}>{page}</ClerkProvider> : page}</body>
+      <body>{clerk ? <ClerkProvider afterSignOutUrl="/" localization={LOCALIZATION}>{page}</ClerkProvider> : page}</body>
     </html>
   );
 }

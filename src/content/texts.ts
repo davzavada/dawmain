@@ -171,59 +171,43 @@ Podmínky můžu přiměřeně změnit, když se změní fungování služby neb
     maxChars: 40000,
     default: `## 1. Správce osobních údajů
 
-**David Závada**, fyzická osoba
-E-mail: ${MAIL}
+**David Závada**, fyzická osoba, e-mail ${MAIL}.
 
-## 2. Jaké údaje zpracovávám
+## 2. Co zpracovávám, proč a jak dlouho
 
-- **Údaje o účtu** - e-mailová adresa, jméno a identifikátor účtu (při přihlášení účtem Google je předá Google).
-- **Provozní záznamy a přehled o používání** - čas požadavku, volaný nástroj, výsledek a IP adresa; počty volání u účtu, ze kterých vidím, kdo službu používá, jak často a které nástroje.
-- **Vlastní soubory (Pro)** - soubory, které nahrajete (originál i převedený text), jejich metadata (název, autoři, rok, typ, název souboru a složky) a záznam o tom, kdy jste je nahráli, upravili, stáhli nebo smazali. Dokumenty mohou obsahovat i osobní údaje jiných lidí, například jména autorů.
-- **Zotero (Pro)** - zašifrovaný klíč k vaší knihovně a vaše uživatelské jméno a identifikátor v Zoteru.
+| # | Co a proč | Jaké údaje | Právní základ | Jak dlouho |
+|---|---|---|---|---|
+| 1 | Účet a přihlášení | e-mail, jméno, identifikátor účtu (při přihlášení účtem Google je předá Google) | plnění smlouvy (čl. 6 odst. 1 písm. b) GDPR) | dokud účet trvá |
+| 2 | Provoz a ochrana služby: chyby, limity, zneužití | čas požadavku, volaný nástroj, výsledek, IP adresa | oprávněný zájem (čl. 6 odst. 1 písm. f) GDPR) | jen po dobu potřebnou k řešení chyb a ochraně služby |
+| 3 | Přehled o tom, kdo službu používá, jak často a které nástroje, abych ji mohl rozvíjet; je jen pro mě, k marketingu ho nepoužívám | počty volání u účtu | oprávněný zájem | počty volání u účtu nejdéle 12 měsíců |
+| 4 | Vlastní soubory (Pro) | soubory, které nahrajete (originál i převedený text), metadata (název, autoři, rok, typ, název souboru a složky), záznam o nahrání, úpravách, stažení a smazání | plnění smlouvy | dokud dokument nesmažete, nejdéle však do zrušení účtu nebo odebrání Pro. Pak knihovnu do týdne smažu (předtím si soubory můžete stáhnout). Týmové dokumenty do týdne po vypnutí nebo zrušení týmu je smažu |
+| 5 | Osobní údaje jiných lidí v nahraných dokumentech (třeba jména autorů), aby v nich asistent mohl hledat | to, co dokument obsahuje | oprávněný zájem | jako dokument |
+| 6 | Zotero (Pro) | zašifrovaný klíč k vaší knihovně, uživatelské jméno a identifikátor v Zoteru | plnění smlouvy | dokud Zotero neodpojíte nebo nezrušíte účet; neplatný klíč smažu hned |
+| 7 | Doložení výmazu knihovny | identifikátor knihovny, datum, počet smazaných dokumentů | oprávněný zájem | dokud může být potřeba výmaz doložit |
+| 8 | Zmínka, že Dawmain používáte (třeba když se mě někdo zeptá, kdo ho používá) | jméno, případně kancelář, a že máte účet | souhlas (čl. 6 odst. 1 písm. a) GDPR) | do odvolání souhlasu |
 
-Údaje o účtu jsou pro poskytování služby nezbytné; bez nich účet nelze vytvořit. Provozní záznamy vznikají automaticky při každém použití služby. Nahrávání dokumentů a připojení Zotera jsou dobrovolné. Obsah rešerší si neukládám a s vaším účtem ho nespojuji.
+Údaje o účtu jsou pro poskytování služby nezbytné; bez nich účet nelze vytvořit. Provozní záznamy vznikají automaticky při každém použití služby. Nahrávání dokumentů a připojení Zotera jsou dobrovolné.
 
-**Judikatura.** Rozhodnutí českých soudů (Nejvyššího soudu, Nejvyššího správního soudu, Ústavního soudu a obecných soudů) si server pravidelně kopíruje do vlastní databáze, aby v nich mohl hledat. Jde o veřejná rozhodnutí, která soudy zveřejňují už anonymizovaná; kopíruji je tak, jak jsou zveřejněná, a odkazy vedou vždy na originál u soudu.
+Souhlas podle řádku 8 je nepovinný: dáváte ho zaškrtnutím „Smím říct, že Dawmain používáte“ v menu účtu a stejně snadno ho kdykoli odvoláte (i e-mailem). Službu můžete používat i bez něj. Odvolání nemá vliv na to, co jsem řekl předtím.
 
-## 3. Účel a právní základ
+Obsah rešerší si neukládám a s vaším účtem ho nespojuji. Rozhodnutí českých soudů si server kopíruje do vlastní databáze; soudy je zveřejňují už anonymizovaná a kopíruji je tak, jak jsou zveřejněná. Databázi zatím pravidelně nezálohuji; smazaný dokument může zůstat nejvýš v dočasném snímku serveru před údržbou, dokud ho nesmažu.
 
-- **plnění smlouvy** (čl. 6 odst. 1 písm. b) GDPR): vedení účtu, přihlášení, Vlastní soubory včetně návrhu metadat (bod 5) a připojení Zotera;
-- **oprávněný zájem** (čl. 6 odst. 1 písm. f) GDPR): provozní záznamy, hlídání limitů, ochrana služby před zneužitím, záznam o provedeném výmazu a přehled o tom, kdo a jak službu používá, abych ji mohl rozvíjet. Přehled je jen pro mě, k marketingu ho nepoužívám, nikomu ho nedávám a nepoužívám žádné analytické nástroje třetích stran. Na oprávněném zájmu stojí i zpracování osobních údajů jiných lidí v nahraných dokumentech - jen v rozsahu potřebném k tomu, aby v nich váš asistent mohl hledat. Proti zpracování na základě oprávněného zájmu můžete vznést námitku.
+## 3. Komu údaje předávám
 
-## 4. Doba uchování
-
-- Údaje o účtu - dokud účet trvá; o jeho smazání můžete kdykoli požádat e-mailem.
-- Provozní záznamy serveru - jen po dobu potřebnou k řešení chyb a ochraně služby; počty volání u účtu nejdéle 12 měsíců.
-- Vlastní soubory a záznamy o práci s nimi - dokud dokument nesmažete, nejdéle však do zrušení účtu nebo odebrání Pro. Pak knihovnu do týdne smažu (do té doby si po odebrání Pro můžete stáhnout své soubory). Dokumenty v týmové knihovně zůstávají týmu i po vašem odchodu z něj a do týdne po vypnutí nebo zrušení týmu je smažu. Databázi zatím pravidelně nezálohuji; smazaný dokument může zůstat nejvýš v dočasném snímku serveru, který pořizuji před údržbou databáze, a to dokud ten snímek nesmažu. Po výmazu knihovny si ponechám jen záznam o výmazu (identifikátor knihovny, datum a počet smazaných dokumentů), dokud může být potřeba výmaz doložit.
-- Klíč k Zoteru, uživatelské jméno a identifikátor - dokud Zotero neodpojíte nebo nezrušíte účet. Přestane-li klíč platit, smažu ho a do opětovného připojení, odpojení nebo zrušení účtu si ponechám jen uživatelské jméno a čas, kdy klíč přestal platit.
-
-## 5. Komu údaje předávám
-
-Dawmain i databáze Vlastních souborů běží na mém vlastním serveru v České republice. Na provozu se podílejí tito zpracovatelé:
+Dawmain běží na mém vlastním serveru v České republice. Na provozu se podílejí tito zpracovatelé:
 
 - **Clerk, Inc.** - přihlašování a správa účtů,
-- **Cloudflare, Inc.** - síť, přes kterou vede veškerá komunikace s webem a serverem (ochrana před útoky a šifrované spojení k serveru); požadavky včetně IP adresy proto zpracovává při přenosu.
+- **Cloudflare, Inc.** - síť, přes kterou vede komunikace s webem (ochrana před útoky, šifrované spojení); zpracovává proto IP adresu při přenosu.
 
-**Návrh metadat.** Typ dokumentu, název, autory a další metadata navrhne po nahrání server sám podle začátku dokumentu; text dokumentu přitom žádnému poskytovateli AI neposílám. Co z dokumentu přečte přes nástroje Dawmainu váš asistent, dostane poskytovatel asistenta, kterého používáte.
+Clerk i Cloudflare jsou americké společnosti; předávání do USA se opírá o EU-US Data Privacy Framework. Metadata dokumentu navrhne po nahrání server sám podle začátku dokumentu; text dokumentu přitom žádnému poskytovateli AI neposílám. Co z dokumentu přečte váš asistent, dostane poskytovatel asistenta, kterého používáte. Dokumenty nahrané do týmové knihovny vidí členové toho týmu. Jinak údaje předám jen orgánům veřejné moci, ukládá-li mi to zákon. Přihlášení účtem Google se řídí [zásadami Google](https://policies.google.com/privacy).
 
-Clerk i Cloudflare jsou americké společnosti; předávání do USA se opírá o EU-US Data Privacy Framework. Dokumenty nahrané do týmové knihovny vidí členové toho týmu. Jinak údaje předám jen orgánům veřejné moci, ukládá-li mi to zákon. Přihlášení účtem Google se řídí [zásadami ochrany soukromí Google](https://policies.google.com/privacy).
+## 4. Zabezpečení
 
-## 6. Zabezpečení
+Jen HTTPS a šifrovaný tunel k serveru, knihovny oddělené v databázi, klíč k Zoteru šifrovaný. Používám jen cookies nezbytné pro přihlášení, žádné analytické ani reklamní.
 
-Komunikace s webem probíhá výhradně přes HTTPS a od Cloudflare k mému serveru vede šifrovaný tunel. Knihovny Vlastních souborů jsou v databázi od sebe oddělené a klíč k Zoteru je šifrovaný. Používám jen cookies nezbytné pro přihlášení, žádné analytické ani reklamní.
+## 5. Vaše práva
 
-## 7. Vaše práva
-
-Máte právo:
-
-- na přístup ke svým osobním údajům,
-- na opravu nepřesných údajů,
-- na výmaz údajů,
-- na omezení zpracování a na přenositelnost údajů,
-- vznést námitku proti zpracování na základě oprávněného zájmu,
-- podat stížnost u Úřadu pro ochranu osobních údajů ([uoou.gov.cz](https://uoou.gov.cz)).
-
-Pro uplatnění svých práv mě kontaktujte na ${MAIL}; odpovím do měsíce.`,
+Máte právo na přístup ke svým údajům, jejich opravu a výmaz, omezení zpracování a přenositelnost, vznést námitku proti zpracování na základě oprávněného zájmu (řádky 2, 3, 5 a 7), kdykoli odvolat souhlas (řádek 8) a podat stížnost u Úřadu pro ochranu osobních údajů ([uoou.gov.cz](https://uoou.gov.cz)). Napište mi na ${MAIL}; odpovím do měsíce.`,
   },
 ] as const satisfies readonly TextField[];
 

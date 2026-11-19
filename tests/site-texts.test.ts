@@ -175,3 +175,14 @@ describe("the store", () => {
     expect(await saveTextAction("home.title", null)).toEqual({ ok: true, overrides: {} });
   });
 });
+
+describe("tables", () => {
+  it("a block of | lines is a table: header, the --- row skipped, cells trimmed", async () => {
+    const { parseBlocks } = await import("@/src/content/markdown");
+    expect(parseBlocks("| a | b |\n|---|---|\n| 1 | **2** |\n| 3 | 4 |")).toEqual([
+      { kind: "table", head: ["a", "b"], rows: [["1", "**2**"], ["3", "4"]] },
+    ]);
+    // A paragraph that only mentions a pipe stays a paragraph.
+    expect(parseBlocks("a | b")[0].kind).toBe("paragraph");
+  });
+});

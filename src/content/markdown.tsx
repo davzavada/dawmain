@@ -3,8 +3,8 @@ import type { ReactNode } from "react";
 
 /**
  * The small Markdown the site's editable texts are written in (src/content/
- * texts.ts): paragraphs, `## headings`, `- lists`, **bold**, *italic* and
- * [links](…). Rendered to React elements, never to an HTML string — whatever
+ * texts.ts): paragraphs, `## headings`, `- lists`, `| tables |`, **bold**,
+ * *italic* and [links](…). Rendered to React elements, never to an HTML string — whatever
  * an admin types is text or one of these few elements, so no markup of
  * theirs can reach the page.
  *
@@ -20,7 +20,19 @@ import type { ReactNode } from "react";
 export type Block =
   | { kind: "heading"; text: string }
   | { kind: "paragraph"; text: string }
-  | { kind: "list"; items: string[] };
+  | { kind: "list"; items: string[] }
+  /** A block whose every line starts with "|": the first row is the header, a "|---|" row under it is skipped. */
+  | { kind: "table"; head: string[]; rows: string[][] };
+
+/** The cells of one "| a | b |" line. Pure. */
+function tableCells(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim());
+}
 
 /** Where a link may lead. Pure. */
 export function safeHref(raw: string): string | null {
@@ -45,6 +57,12 @@ export function parseBlocks(source: string): Block[] {
       blocks.push({ kind: "heading", text: heading[1].trim() });
       lines.shift();
       if (!lines.length) continue;
+    }
+    if (lines.every((line) => line.trim().startsWith("|"))) {
+      const rows = lines.filter((line) => !/^\|?\s*:?-{3,}/.test(line.trim())).map(tableCells);
+      const [head, ...body] = rows;
+      blocks.push({ kind: "table", head, rows: body });
+      continue;
     }
     if (/^[-*]\s+/.test(lines[0])) {
       // A line that does not start an item continues the one above it.
@@ -100,6 +118,34 @@ export function Inline({ text }: { text: string }): ReactNode {
 
 function BlockView({ block, paragraphClass }: { block: Block; paragraphClass?: string }) {
   if (block.kind === "heading") return <h2>{block.text}</h2>;
+  if (block.kind === "table") {
+    return (
+      <div className="md-table">
+        <table>
+          <thead>
+            <tr>
+              {block.head.map((cell, i) => (
+                <th key={i} scope="col">
+                  <Inline text={cell} />
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {block.rows.map((row, r) => (
+              <tr key={r}>
+                {block.head.map((_, c) => (
+                  <td key={c}>
+                    <Inline text={row[c] ?? ""} />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
   if (block.kind === "list") {
     return (
       <ul>

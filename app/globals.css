@@ -4523,3 +4523,77 @@ button.zd-file-row:hover .zd-file-title {
     animation: none;
   }
 }
+
+/* Tables in the editable texts (src/content/markdown.tsx): the privacy policy's overview. Scrolls sideways on a phone. */
+.md-table {
+  overflow-x: auto;
+  margin: 4px 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.md-table table {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.md-table th,
+.md-table td {
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--hairline);
+}
+.md-table th {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--soft);
+  background: var(--well);
+  border-bottom-color: var(--line);
+}
+.md-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.md-table td:first-child,
+.md-table th:first-child {
+  width: 1%;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+/* The account menu's consent checkbox (app/_zdroje/account.tsx, MentionConsentItem). */
+.zd-menu-check {
+  align-items: flex-start;
+  text-align: left;
+}
+.zd-check {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  border: 1.5px solid var(--idle);
+  border-radius: 4px;
+  background: var(--bg);
+  color: #ffffff;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s;
+}
+.zd-check[data-on] {
+  border-color: var(--text);
+  background: var(--text);
+}
+.zd-menu-check-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.zd-menu-check-text small {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: normal;
+}
