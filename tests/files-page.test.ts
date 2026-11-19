@@ -393,7 +393,7 @@ describe("folders and renaming", () => {
     standard();
     await open();
     await openMenu("zakon.pdf");
-    expect(document.activeElement?.textContent).toContain("Upravit údaje");
+    expect(document.activeElement?.textContent).toContain("Stáhnout");
     await key(document.activeElement as HTMLElement, "ArrowUp");
     expect(document.activeElement?.textContent).toContain("Smazat");
     await key(document.activeElement as HTMLElement, "Escape");
@@ -470,7 +470,8 @@ describe("rights", () => {
     expect(button("Nahrát soubory")).toBeUndefined();
     await openMenu("zakon.pdf");
     expect((menuItem("Stáhnout") as unknown as HTMLAnchorElement).getAttribute("href")).toBe(`/api/files/documents/${D_ZAKON}/original`);
-    expect(menuItem("Zobrazit údaje")).toBeDefined();
+    // No metadata form at all any more.
+    expect(menuItem("Zobrazit údaje")).toBeUndefined();
     expect(menuItem("Přejmenovat")!.disabled).toBe(true);
   });
 });
@@ -478,7 +479,7 @@ describe("rights", () => {
 describe("the document viewer", () => {
   const viewer = () => host.querySelector<HTMLElement>(".dv-layer");
 
-  it("a click opens the document in a large window; ⋯ → Upravit údaje opens the form beside the list", async () => {
+  it("a click opens the document in a large window; there is no metadata form", async () => {
     standard();
     await open();
     await act(async () => row("zakon.pdf").click());
@@ -496,15 +497,7 @@ describe("the document viewer", () => {
     // ⋯ in the window: the row's menu.
     await act(async () => win.querySelector<HTMLButtonElement>(".fp-more")!.click());
     expect(menuItem("Smazat")).toBeDefined();
-    await act(async () => menuItem("Upravit údaje")!.click());
-    await settle();
-    expect(nav.state.replaced.at(-1)).toBe("/soubory");
-    expect(viewer()).toBeNull();
-    const panel = host.querySelector(".fp-detail")!;
-    expect(panel.querySelector(".zd-file-open")).not.toBeNull();
-    expect(panel.textContent).not.toContain("Smazat dokument");
-    await act(async () => panel.querySelector<HTMLButtonElement>('[aria-label="Zavřít"]')!.click());
-    expect(host.querySelector(".fp-detail")).toBeNull();
+    expect(menuItem("Upravit údaje")).toBeUndefined();
   });
 
   it("Escape and × close the window", async () => {
@@ -535,12 +528,10 @@ describe("the document viewer", () => {
     expect([...viewer()!.querySelectorAll("a")].some((a) => a.getAttribute("href")?.endsWith("/original"))).toBe(false);
   });
 
-  it("a file still being processed: its metadata cannot be opened yet", async () => {
+  it("a file still being processed says so in its row", async () => {
     serve({ libs: [library()], folders: [], docs: [doc(D_ZAKON, "zakon.pdf", null, { status: "processing" })] });
     await open();
     expect(row("zakon.pdf").textContent).toContain("Zpracovávám…");
-    await openMenu("zakon.pdf");
-    expect(menuItem("Upravit údaje")!.disabled).toBe(true);
   });
 });
 
