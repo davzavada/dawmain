@@ -4523,3 +4523,42 @@ button.zd-file-row:hover .zd-file-title {
     animation: none;
   }
 }
+
+/* Tables in the editable texts (src/content/markdown.tsx): the privacy policy's overview. Scrolls sideways on a phone. */
+.md-table {
+  overflow-x: auto;
+  margin: 4px 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.md-table table {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.md-table th,
+.md-table td {
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--hairline);
+}
+.md-table th {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--soft);
+  background: var(--well);
+  border-bottom-color: var(--line);
+}
+.md-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.md-table td:first-child,
+.md-table th:first-child {
+  width: 1%;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
