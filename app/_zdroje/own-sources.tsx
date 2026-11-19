@@ -80,7 +80,7 @@ function Group({ signedIn, className, children }: { signedIn: boolean; className
   return (
     <div className={classes}>
       <div className="source-group-head">
-        <h3 className="source-group-name">Pro</h3>
+        <h3 className="source-group-name">Pro (právníky)</h3>
         {signedIn ? null : <ZIcon name="lock" size={13} className="zd-group-lock" />}
       </div>
       <div className="source-box">
@@ -182,7 +182,7 @@ function ZoteroRow({ signedIn }: { signedIn: boolean }) {
     desc = `Účet ${ok.connection.username}`;
     connected = true;
   } else if (ok.connection) {
-    desc = `Účet ${ok.connection.username} - bez režimu Pro do knihovny asistent nevidí.`;
+    desc = `Účet ${ok.connection.username} - bez režimu Pro (právníky) do knihovny asistent nevidí.`;
     locked = true;
   } else if (!ok.pro) {
     desc = ZOTERO_DESC;

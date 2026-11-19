@@ -623,7 +623,7 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
         <p className="zd-banner fp-banner">
           {team
             ? `Tým ${lib.name} je teď vypnutý. Soubory si můžete stáhnout nebo je smazat, nové nahrát nejde, a do týdne se smažou.`
-            : "Režim Pro tu už není aktivní. Soubory můžete smazat nebo si je stáhnout, nové nahrát nejde."}
+            : "Režim Pro (právníky) tu už není aktivní. Soubory můžete smazat nebo si je stáhnout, nové nahrát nejde."}
         </p>
       ) : mode === "readonly" ? (
         <p className="zd-banner fp-banner">Vlastní soubory jsou teď jen pro čtení: hledat, číst a mazat jde, nahrávat a upravovat ne. Zkuste to později.</p>

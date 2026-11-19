@@ -324,7 +324,7 @@ describe("page states (GET /api/zotero/status)", () => {
   it("without Pro: the locked panel with a mailto, no connect form", async () => {
     status = { code: 200, body: { ...NOT_CONNECTED, pro: false } };
     await renderModal();
-    expect(text()).toContain("Režim Pro přiděluji ručně a zdarma");
+    expect(text()).toContain("Režim Pro (právníky) přiděluji ručně a zdarma");
     const mail = host.querySelector<HTMLAnchorElement>('a[href^="mailto:"]');
     expect(mail?.textContent).toBe("Napsat o přístup");
     expect(decodeURIComponent(mail!.getAttribute("href")!)).toContain("subject=Dawmain - Zotero (Pro)");
@@ -471,7 +471,7 @@ describe("page states (GET /api/zotero/status)", () => {
     status = { code: 200, body: { ...CONNECTED, pro: false } };
     await renderModal();
     expect(text()).toContain("Účet jnovakova");
-    expect(text()).toContain("Režim Pro teď nemáte");
+    expect(text()).toContain("Režim Pro (právníky) teď nemáte");
     expect(button("Odpojit Zotero")).toBeDefined();
     // The libraries are not asked for: the route refuses without Pro.
     expect(calls.some((c) => c.url === "/api/zotero/libraries")).toBe(false);

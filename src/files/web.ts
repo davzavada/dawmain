@@ -344,7 +344,7 @@ export function parseMetaForm(raw: unknown, confirm: boolean): BibMeta {
 }
 
 /** Edits of a document in a library without Pro (listing, deleting and exporting stay). */
-const NO_PRO_EDIT = "Upravovat dokumenty lze jen v knihovně s Pro. Dokument můžete dál smazat nebo si stáhnout jeho text.";
+const NO_PRO_EDIT = "Upravovat dokumenty lze jen v knihovně s Pro (právníky). Dokument můžete dál smazat nebo si stáhnout jeho text.";
 
 /** Changes to these fields change how the text is indexed — re-derive after saving. */
 function indexInputsChanged(before: BibMeta, after: BibMeta): boolean {

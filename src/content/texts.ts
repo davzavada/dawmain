@@ -60,7 +60,7 @@ export const TEXT_FIELDS = [
     kind: "block",
     maxChars: 3000,
     default:
-      "Právní rešerše s AI jsou super. Přístup k judikatuře a právním předpisům s AI by ale podle mě neměl vést jen přes komerční nástroje. Data jsou dnes dobře dostupná a provoz zvládne i server doma. Proto jsem vytvořil nekomerční alternativu. Budu rád, když ji vyzkoušíte :)\n\nV oficiálních databázích server hledá živě – funguje jako nachytřený Google. Jen judikaturu českých soudů si pravidelně kopíruje do vlastní databáze, aby v ní hledal rychleji; odkazy ale vždy vedou na originál u soudu. Kdo má režim Pro, může připojit svou knihovnu Zotero a nahrát vlastní soubory.",
+      "Právní rešerše s AI jsou super. Přístup k judikatuře a právním předpisům s AI by ale podle mě neměl vést jen přes komerční nástroje. Data jsou dnes dobře dostupná a provoz zvládne i server doma. Proto jsem vytvořil nekomerční alternativu. Budu rád, když ji vyzkoušíte :)\n\nV oficiálních databázích server hledá živě – funguje jako nachytřený Google. Jen judikaturu českých soudů si pravidelně kopíruje do vlastní databáze, aby v ní hledal rychleji; odkazy ale vždy vedou na originál u soudu. Kdo má režim Pro (právníky), může připojit svou knihovnu Zotero a nahrát vlastní soubory.",
   },
   {
     key: "home.owl",
@@ -126,7 +126,7 @@ Za správnost, úplnost ani aktuálnost obsahu ze zdrojů neručím, stejně jak
 
 ## Vlastní soubory (Pro)
 
-V režimu Pro si na webu nahrajete vlastní dokumenty a váš asistent v nich pak hledá vedle oficiálních databází. Pro je zdarma s dobrovolným příspěvkem ve výši jednoho (1) piva dle volby uživatele a přiděluji ho ručně; stačí mi napsat na ${MAIL}. Můžu ho kdykoli odebrat.
+V režimu Pro (právníky) si na webu nahrajete vlastní dokumenty a váš asistent v nich pak hledá vedle oficiálních databází. Pro je zdarma s dobrovolným příspěvkem ve výši jednoho (1) piva dle volby uživatele a přiděluji ho ručně; stačí mi napsat na ${MAIL}. Můžu ho kdykoli odebrat.
 
 Nahráním dokumentu potvrzujete, že pravidla v tomto oddílu dodržíte - web na ně upozorňuje přímo u nahrávání.
 
@@ -148,7 +148,7 @@ Nahráním dokumentu potvrzujete, že pravidla v tomto oddílu dodržíte - web 
 
 ## Zotero (Pro)
 
-V režimu Pro si můžete k Dawmainu připojit svou knihovnu v Zoteru (zotero.org). Váš asistent v ní pak hledá a čte záznamy, poznámky, anotace a text příloh, včetně skupin, kterých jste v Zoteru členem. Při připojení si vyberete, jestli Dawmain smí knihovnu **jen číst**, nebo **číst a ukládat**: pak asistent může nalezené dokumenty uložit do vaší osobní knihovny jako nové záznamy. Stávající záznamy Dawmain nikdy nemění ani nemaže a do skupin nezapisuje.
+V režimu Pro (právníky) si můžete k Dawmainu připojit svou knihovnu v Zoteru (zotero.org). Váš asistent v ní pak hledá a čte záznamy, poznámky, anotace a text příloh, včetně skupin, kterých jste v Zoteru členem. Při připojení si vyberete, jestli Dawmain smí knihovnu **jen číst**, nebo **číst a ukládat**: pak asistent může nalezené dokumenty uložit do vaší osobní knihovny jako nové záznamy. Stávající záznamy Dawmain nikdy nemění ani nemaže a do skupin nezapisuje.
 
 Zotero se řídí vlastními podmínkami.
 
