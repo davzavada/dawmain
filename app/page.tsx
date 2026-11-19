@@ -47,7 +47,15 @@ export default async function Home() {
       <section id="zdroje" className="sources">
         <h2>Zdroje</h2>
         {/* Client island: the status lights come from GET /api/status (static, checked hourly) after the page is up. */}
-        <SourceList groups={["Judikatura", "Předpisy", "Slovensko"]} />
+        {/* Two columns on wide screens: case law on the left, legislation and Slovakia on the right. */}
+        <div className="sources-cols">
+          <div className="sources-col">
+            <SourceList groups={["Judikatura"]} />
+          </div>
+          <div className="sources-col">
+            <SourceList groups={["Předpisy", "Slovensko"]} />
+          </div>
+        </div>
         {/*
           Client island, the Pro group: Vlastní soubory (counts from GET /api/files/summary),
           Zotero (locked where the deployment cannot connect it — no OAuth app or CREDENTIALS_SECRET)
