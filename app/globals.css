@@ -990,6 +990,58 @@ main > footer a {
 .zd-pad {
   padding: 24px;
 }
+/* Loading placeholder (app/_zdroje/loading.tsx): hidden for the first 400 ms, then shimmering bars. */
+.zd-loading {
+  display: grid;
+  gap: 12px;
+  opacity: 0;
+  animation: zd-loading-in 200ms ease-out 400ms forwards;
+}
+.zd-loading[data-shape="rows"] {
+  gap: 0;
+}
+.zd-shimmer-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.zd-loading[data-shape="rows"] .zd-shimmer-row {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.zd-shimmer {
+  display: block;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--surface) 0%, var(--line) 50%, var(--surface) 100%);
+  background-size: 200% 100%;
+  animation: zd-shimmer 1.4s ease-in-out infinite;
+}
+.zd-shimmer-icon {
+  flex: none;
+  width: 28px;
+  height: 28px;
+}
+.zd-shimmer-bar {
+  height: 12px;
+}
+@keyframes zd-loading-in {
+  to {
+    opacity: 1;
+  }
+}
+@keyframes zd-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .zd-shimmer {
+    animation: none;
+  }
+}
 .zd-spinner {
   flex: none;
   width: 14px;
@@ -3680,6 +3732,16 @@ button.zd-file-row:hover .zd-file-title {
   font-size: 14px;
   font-variant-numeric: tabular-nums;
   text-align: right;
+}
+.adm-quota-gb {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.adm-quota-gb .adm-quota-input {
+  width: 72px;
 }
 .adm-quota-input[aria-invalid="true"] {
   border-color: var(--bad);

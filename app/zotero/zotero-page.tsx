@@ -7,6 +7,7 @@ import { api } from "@/app/_zdroje/api";
 import { Confirm } from "@/app/_zdroje/dialog";
 import { formatCount, formatDate, plural } from "@/app/_zdroje/format";
 import { ZIcon, type ZIconName } from "@/app/_zdroje/icons";
+import { Loading } from "@/app/_zdroje/loading";
 import { dropZoteroStav, requestSignIn, useZdroje } from "@/app/_zdroje/store";
 import { asStatus, notifyZoteroChanged, STATUS_URL } from "@/app/_zdroje/zotero-status";
 import {
@@ -197,10 +198,7 @@ export function ZoteroPanel({ stav }: { stav: string | null }) {
         </button>
       </div>
     ) : (
-      <p className="zd-progress" role="status">
-        <span className="zd-spinner" aria-hidden="true" />
-        Načítám…
-      </p>
+      <Loading label="Načítám…" count={2} />
     );
   } else if (status.connection) {
     // Connected wins over the switches below: the user must still see the key and be able to remove it.
@@ -605,10 +603,7 @@ function Libraries({ state, mode, onRevoked }: { state: LibrariesState; mode: Zo
     );
   } else {
     list = (
-      <p className="zd-progress" role="status">
-        <span className="zd-spinner" aria-hidden="true" />
-        Načítám knihovny…
-      </p>
+      <Loading label="Načítám knihovny…" shape="rows" count={3} />
     );
   }
   return (
