@@ -982,13 +982,7 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
         <div className="fp-confirm" style={confirmAt ? { left: confirmAt.x, top: confirmAt.y } : undefined}>
           <Confirm
             question={
-              confirmDelete.kind === "doc" ? (
-                <>Smazat „{confirmDelete.doc.fileName}“? Originál, text i index se odstraní natrvalo.</>
-              ) : (
-                <>
-                  Smazat složku „{confirmDelete.folder.name}“ se vším, co obsahuje? Podsložky i dokumenty se odstraní natrvalo.
-                </>
-              )
+              confirmDelete.kind === "doc" ? <>Smazat natrvalo?</> : <>Smazat složku i s obsahem natrvalo?</>
             }
             confirmLabel="Smazat"
             busy={busy}
