@@ -1,9 +1,10 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { dayBefore, formatDay, MAX_QUOTA_MB, validQuotaMb, type AdminFeature, type AdminUser } from "@/src/admin/model";
-import { formatCount, formatStorageBytes as formatBytes, initials } from "../_zdroje/format";
+import { dayBefore, formatDay, type AdminFeature, type AdminUser } from "@/src/admin/model";
+import { formatCount, initials } from "../_zdroje/format";
 import { changeUserAction } from "./actions";
+import { QuotaField } from "./quota-field";
 
 /**
  * The interactive part of the admin page: the account table on the left,
@@ -260,48 +261,7 @@ function Quota({
   pending: boolean;
   onChange: (user: AdminUser, change: Parameters<typeof changeUserAction>[1]) => void;
 }) {
-  const current = user.quotaMb ?? defaultMb;
-  const [text, setText] = useState(String(current));
-  const mb = /^\d{1,7}$/.test(text.trim()) ? Number(text.trim()) : NaN;
-  const valid = validQuotaMb(mb);
-  const changed = valid && mb !== current;
-  const defaultLabel = formatBytes(defaultMb * 1024 * 1024);
-  return (
-    <div className="adm-row adm-row-sub adm-quota">
-      <div>
-        <b>Kvóta úložiště (MB)</b>
-        <span>
-          {user.quotaMb === null ? `Výchozí: ${defaultLabel}` : `Vlastní kvóta (výchozí je ${defaultLabel})`}
-          {text.trim() !== "" && !valid ? ` · zadej celé číslo 1 až ${formatCount(MAX_QUOTA_MB)}` : ""}
-        </span>
-      </div>
-      <form
-        className="adm-quota-form"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (changed) onChange(user, { kind: "quota", mb });
-        }}
-      >
-        <input
-          className="adm-quota-input"
-          inputMode="numeric"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          aria-label={`Kvóta úložiště v MB pro ${user.name}`}
-          aria-invalid={text.trim() !== "" && !valid}
-          disabled={pending}
-        />
-        <button type="submit" className="zd-btn" disabled={pending || !changed}>
-          Uložit
-        </button>
-        {user.quotaMb !== null ? (
-          <button type="button" className="zd-btn" disabled={pending} onClick={() => onChange(user, { kind: "quota", mb: null })}>
-            Výchozí
-          </button>
-        ) : null}
-      </form>
-    </div>
-  );
+  return <QuotaField ownMb={user.quotaMb} defaultMb={defaultMb} pending={pending} label={`Kvóta úložiště pro ${user.name}`} onSave={(mb) => onChange(user, { kind: "quota", mb })} />;
 }
 
 function Switch({ label, on, disabled, onToggle }: { label: string; on: boolean; disabled?: boolean; onToggle: () => void }) {

@@ -2,9 +2,10 @@
 
 import { useMemo, useRef, useState, useTransition } from "react";
 import { formatDay } from "@/src/admin/model";
-import { cleanTeamName, LOGO_TYPES, logoProblem, MAX_TEAM_QUOTA_MB, membersLabel, validTeamQuota, type AdminTeam, type TeamChange, type TeamRole } from "@/src/admin/teams-model";
+import { cleanTeamName, LOGO_TYPES, logoProblem, membersLabel, type AdminTeam, type TeamChange, type TeamRole } from "@/src/admin/teams-model";
 import type { TeamResult } from "@/src/admin/teams";
 import { formatCount, formatStorageBytes as formatBytes, initials } from "../../_zdroje/format";
+import { QuotaField } from "../quota-field";
 import { changeTeamAction, teamLogoAction } from "./actions";
 
 /**
@@ -236,17 +237,13 @@ function TeamDetail({
   const [name, setName] = useState(team.name);
   const [logoError, setLogoError] = useState<string | null>(null);
   const logoPicker = useRef<HTMLInputElement>(null);
-  const [quota, setQuota] = useState(String(team.quotaMb ?? defaultQuotaMb));
   const [candidate, setCandidate] = useState("");
   const [role, setRole] = useState<TeamRole>("org:member");
   const [find, setFind] = useState("");
 
   const cleanName = cleanTeamName(name);
-  const quotaMb = /^\d{1,7}$/.test(quota.trim()) ? Number(quota.trim()) : NaN;
-  const quotaValid = validTeamQuota(quotaMb);
   const currentQuota = team.quotaMb ?? defaultQuotaMb;
   const currentQuotaBytes = currentQuota * 1024 * 1024;
-  const defaultLabel = formatBytes(defaultQuotaMb * 1024 * 1024);
   const inTeam = new Set(team.members.map((m) => m.userId));
   const q = find.trim().toLowerCase();
   const candidates = people.filter((p) => !inTeam.has(p.id) && (!q || `${p.name} ${p.email}`.toLowerCase().includes(q))).slice(0, 50);
@@ -342,32 +339,7 @@ function TeamDetail({
             }}
           />
         </div>
-        <form
-          className="adm-row adm-row-sub adm-quota"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (quotaValid && quotaMb !== currentQuota) onChange({ kind: "quota", mb: quotaMb });
-          }}
-        >
-          <div>
-            <b>Kvóta úložiště (MB)</b>
-            <span>
-              {team.quotaMb === null ? `Výchozí: ${defaultLabel}` : `Vlastní kvóta (výchozí je ${defaultLabel})`}
-              {quota.trim() !== "" && !quotaValid ? ` · zadej celé číslo 1 až ${formatCount(MAX_TEAM_QUOTA_MB)}` : ""}
-            </span>
-          </div>
-          <div className="adm-quota-form">
-            <input className="adm-quota-input" inputMode="numeric" value={quota} onChange={(e) => setQuota(e.target.value)} aria-label="Kvóta úložiště týmu v MB" aria-invalid={!quotaValid} disabled={pending} />
-            <button type="submit" className="zd-btn" disabled={pending || !quotaValid || quotaMb === currentQuota}>
-              Uložit
-            </button>
-            {team.quotaMb !== null ? (
-              <button type="button" className="zd-btn" disabled={pending} onClick={() => onChange({ kind: "quota", mb: null })}>
-                Výchozí
-              </button>
-            ) : null}
-          </div>
-        </form>
+        <QuotaField ownMb={team.quotaMb} defaultMb={defaultQuotaMb} pending={pending} label="Kvóta úložiště týmu" onSave={(mb) => onChange({ kind: "quota", mb })} />
       </div>
 
       <div className="adm-sec">

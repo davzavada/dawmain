@@ -10,6 +10,7 @@ import { Confirm } from "../_zdroje/dialog";
 import { PENDING, useDocumentList } from "../_zdroje/file-editor";
 import { formatDate, formatStorageBytes as formatBytes, kindLabel, zBefore, plural, statusBadge } from "../_zdroje/format";
 import { ZIcon } from "../_zdroje/icons";
+import { Loading } from "../_zdroje/loading";
 import { DocViewer } from "../_zdroje/doc-viewer";
 import { FolderGlyph, LibraryMark } from "../_zdroje/library-mark";
 import { refreshSummary, requestSignIn, useZdroje } from "../_zdroje/store";
@@ -129,10 +130,7 @@ function PageNotice({ title, text, children }: { title: string; text: string; ch
 function PageLoading() {
   return (
     <div className="fp fp-notice">
-      <p className="zd-progress" role="status">
-        <span className="zd-spinner" aria-hidden="true" />
-        Načítám…
-      </p>
+      <Loading label="Načítám…" />
     </div>
   );
 }
@@ -744,10 +742,7 @@ function LibraryPage({ lib, mode, maxFileBytes }: { lib: LibrarySummary; mode: s
               {error}
             </p>
           ) : documents === null ? (
-            <p className="zd-progress fp-pad" role="status">
-              <span className="zd-spinner" aria-hidden="true" />
-              Načítám soubory…
-            </p>
+            <Loading label="Načítám soubory…" shape="rows" count={4} />
           ) : items.length === 0 ? (
             <div className="fp-empty">
               <FolderGlyph size={48} />

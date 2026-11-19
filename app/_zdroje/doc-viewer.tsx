@@ -5,6 +5,7 @@ import type { DocumentDetail, DocumentListItem } from "@/src/files/web-types";
 import { api } from "./api";
 import { docHtmlToReact } from "./doc-preview";
 import { ZIcon } from "./icons";
+import { Loading } from "./loading";
 
 /**
  * The document viewer of the files page: a large window over the page with
@@ -195,10 +196,7 @@ export function DocViewer({ doc, onClose, actions }: { doc: DocumentListItem; on
   let thumbs: ReactNode = null;
   if (state.kind === "loading") {
     body = (
-      <p className="zd-progress dv-note" role="status">
-        <span className="zd-spinner" aria-hidden="true" />
-        Načítám dokument…
-      </p>
+      <Loading label="Načítám dokument…" count={8} className="dv-note" />
     );
   } else if (state.kind === "error" || state.kind === "big") {
     body = (
