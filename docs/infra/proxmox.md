@@ -100,6 +100,9 @@ Návrat: `pct rollback 101 pre-<migrace>` (zahodí vše zapsané po snapshotu).
   takže se projeví i opravy u zdroje (běh `sync`). Každý běh je řádek
   `sync_run`; `mirror status` ukazuje poslední.
 - NSS se synchronizuje až po doběhnutí backfillu (sdílí s ním limit NSS).
+- `mirror-nss-texts.timer` → `mirror-nss-texts.service` denně ve 13:30: opakuje
+  frontu NSS přes den (500 rozhodnutí na běh). Noční běh dostává od NSS u části
+  dokumentů prázdnou stránku „N/A“, přes den je soud vrací (zjištěno 20. 11. 2026).
 - Ručně: `npx tsx scripts/mirror.ts sync [--source us] [--days 7] [--no-retry]`.
 
 ### Databáze `files` (Vlastní zdroje)
@@ -167,6 +170,13 @@ neprivilegovaný, `nesting=1`, start po bootu, Node 22 (NodeSource),
   pro záznam v `deploy/web/migrace/`; znovu se nespouštějí.
 - **Zrcadlo** jde z webu přes LAN: `MIRROR_API_URL=http://192.168.0.52:8080`
   (API poslouchá jen na LAN adrese), bez Cloudflare Access.
+- **Firewall a přístup** (20. 11. 2026): firewall Proxmoxu zapnutý
+  (`/etc/pve/firewall/cluster.fw`: příchozí jen SSH a 8006 z `192.168.0.0/24` a
+  ping, zbytek DROP); SSH na hostiteli jen klíčem
+  (`/etc/ssh/sshd_config.d/10-key-only.conf`), heslo roota bere dál webové
+  rozhraní. V kontejnerech `/etc/nftables.conf` zahazuje nová příchozí IPv6
+  spojení mimo linku (LAN rozhraní má veřejnou IPv6 adresu) a běží
+  `unattended-upgrades`.
 - **Tunel**: v `/etc/cloudflared/config.yml` na `app` míří `dawmain.davidzavada.cz`
   a `dawmain-novy.davidzavada.cz` na `http://10.10.10.4:3000` (záloha
   `config.yml.bak-2026-11-16`). Obě jména bez Cloudflare Access. WAF pravidlo
