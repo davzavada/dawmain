@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { applyChange, requireAdmin, type ChangeResult } from "@/src/admin/server";
 import { ADMIN_FEATURES, validQuotaMb, type AdminChange } from "@/src/admin/model";
+import { saveDailyLimit, type SaveDailyLimitResult } from "@/src/admin/daily-limit";
+import { validDailyLimit } from "@/src/mcp/daily-limit";
 
 /**
  * Server Function of the admin page: one change to one account. It
@@ -36,5 +38,21 @@ export async function changeUserAction(targetId: string, change: AdminChange): P
           : { kind: "feature", feature: change.feature, on: change.on };
   const result = await applyChange(actor, targetId, clean);
   if (result.ok) revalidatePath("/sprava");
+  return result;
+}
+
+/**
+ * The daily limit of tool calls per account (Správa → Systém): a whole
+ * number, or null for the default. Checked again in saveDailyLimit.
+ */
+export async function setDailyLimitAction(value: number | null): Promise<SaveDailyLimitResult> {
+  const actor = await requireAdmin();
+  if (!actor) return { ok: false, error: "Nemáš oprávnění správce." };
+  if (value !== null && !validDailyLimit(value)) return { ok: false, error: "Neplatná hodnota." };
+  const result = await saveDailyLimit(value);
+  if (result.ok) {
+    console.info("admin daily limit", JSON.stringify({ actor, limit: result.own }));
+    revalidatePath("/sprava/system");
+  }
   return result;
 }
