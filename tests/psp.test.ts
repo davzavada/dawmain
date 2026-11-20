@@ -92,6 +92,13 @@ describe("buildSearchUrl — the form as the browser sends it (HAR 2026-10)", ()
     expect(p.get("tqa17")).toBeNull();
   });
 
+  it("the title goes without diacritics: psp.cz reads the query as Windows-1250, and UTF-8 bytes match nothing", () => {
+    const url = buildSearchUrl({ query: " občanský zákoník, soudní řád ", period: 10 });
+    expect(new URL(url).searchParams.get("na")).toBe("obcansky zakonik, soudni rad");
+    expect(url).toContain("na=obcansky+zakonik");
+    expect(url).not.toMatch(/%C3|%C4|%C5/);
+  });
+
   it("types narrow the checkboxes; only_pending ticks tqa17", () => {
     const p = new URL(buildSearchUrl({ query: "x", period: 9, types: ["bills", "amendments"], onlyPending: true })).searchParams;
     expect(p.get("tqa27")).toBe("on");

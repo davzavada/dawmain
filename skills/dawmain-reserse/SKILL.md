@@ -899,6 +899,29 @@ Precision has a time dimension — check it before you cite:
   amendment, fetch the text with `date` and cite that version. `esbirka_get_text` names
   the version it quotes (in force from–to) and warns when a future version is already
   published — carry both into the memo.
+- **The amendment on its way (chystaná novela).** The law may be about to change, and
+  a reader who acts on the memo next month needs to know. Check both places in the
+  same turn as you read the provision, for every provision the answer rests on:
+  1. *Published, not yet in force.* `esbirka_get_act` and `esbirka_get_text` mark a
+     future version with ⚠. Read the provision again with `date` set to the day it
+     takes effect and put both wordings in the memo: today's, and the new one with
+     its date of effect and the amending act (č. …/… Sb.).
+  2. *Still in the Chamber.* `psp_search {query: "občanský zákoník", only_pending:
+     true, types: ["bills"]}` — the short name of the act, the current period (the
+     default). For each bill that touches your provision: `psp_get_tisk` for the stage
+     it has reached (1., 2., 3. čtení, Senát, prezident) and its date, `psp_get_text`
+     on part 0 with `find: "§ 2201"` for the proposed wording and its důvodová zpráva.
+  Report it in the memo under **Chystané změny**: the tisk number with its link, who
+  proposed it, the stage and the date of the last step, what it would change in the
+  provision, and the proposed date of effect when the bill names one. **A bill is not
+  law**: never apply it to the facts and never quote it as the wording — write
+  "návrh", name the stage, and say it may still change or fall. Say also what the
+  check covered: the search matches bill titles, so an amendment carried by another
+  act's bill (a doprovodný zákon) can be missed, and the Senát's own prints and the
+  stage before the Chamber (eKLEP, připomínkové řízení) are not searched. Found
+  nothing: one sentence with the date ("Ke dni … není ve Sněmovně tisk, který by
+  podle názvu měnil zákon č. …"). Skip the check only for a pure lookup (one § by
+  number, one decision by sp. zn.) and for a question wholly about the past.
 - **The break.** Case law decided under the previous wording (typically pre-2014 civil
   law) may still hold, but say which wording it was decided under.
 - **Was it reversed?** For obecné soudy, `justice_search` answers this directly: the
@@ -974,7 +997,9 @@ Stopping the search never shortens the reading: what you cite, you have read who
 5. **Read whole the decisions you will cite.** Every page, in parallel, without asking:
    page 1 of all of them in one turn, all remaining pages of all of them in the next.
    Then the reading check (Reading, above).
-6. **Check it is still good law.** Section above.
+6. **Check it is still good law — and whether it is about to change.** Section above:
+   the wording that governed, the fate of the decisions, and the amendment on its way
+   (a future version in e-Sbírka, a pending bill in `psp_search` with `only_pending`).
 7. **Write the memo.**
 
 ## The memo
@@ -1000,6 +1025,11 @@ record. The user's own documents with their reference line and pinpoint, no link
 Leges, 2018, § 2913, m. č. 14, s. 1245 (vlastní dokument).
 
 No source list at the end — except **Další zdroje** below.
+
+**Chystané změny** — only when the check found one: the provision, the amending act
+already in the Sbírka with its date of effect (both wordings quoted), or the pending
+sněmovní tisk with its link, stage and what it would change — marked as a návrh, not
+law. Otherwise the one sentence that nothing pending was found, under **Co chybí**.
 
 **Co chybí** — what you did not find, what is contested, what needs verifying, and what
 the search did not cover (a court that failed, a date window, a truncated list).
