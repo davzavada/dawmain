@@ -4,7 +4,7 @@ import { SourceError } from "@/src/sources/shared/errors";
 import {
   getMirrorCitations,
   mirrorConfigured,
-  searchMirror,
+  mirrorDecisionsByCase,
   MIRROR_COURTS,
   MIRROR_SOURCE_LABEL,
   type MirrorCitations,
@@ -154,19 +154,19 @@ export function registerCitations(server: McpServer): void {
           if (!case_number?.trim()) {
             throw new SourceError(MIRROR_SOURCE_LABEL, "INPUT_INVALID", "Neither id nor case_number was given.", "Pass the id from a search hit, or the spisová značka as case_number.");
           }
-          const found = await searchMirror({ caseNumber: case_number.trim(), sources: [source], limit: 10 });
-          if (!found.hits.length) {
+          const found = await mirrorDecisionsByCase(case_number.trim(), [source]);
+          if (!found.length) {
             return {
               content: [{ type: "text" as const, text: `${MIRROR_NOTE}\nNo ${source.toUpperCase()} decision with spisová značka "${case_number.trim()}" in the mirror. Check the court (source) and the značka, or find the decision with the court's search tool and pass its id.` }],
             };
           }
-          if (found.hits.length > 1) {
-            const list = found.hits.map((hit, i) => `${i + 1}. ${hit.caseNumber ?? "?"} (${[hit.form ? (FORM[hit.form] ?? hit.form) : null, hit.date].filter(Boolean).join(", ")})${hit.court ? ` — ${hit.court}` : ""} → caselaw_citations source: ${hit.source}, id: ${hit.id}`);
+          if (found.length > 1) {
+            const list = found.map((d, i) => `${i + 1}. ${decisionLine(d).replace(/ → .*$/, "")} → caselaw_citations source: ${d.source}, id: ${d.id}`);
             return {
-              content: [{ type: "text" as const, text: [MIRROR_NOTE, `${found.hits.length} decisions carry "${case_number.trim()}" — call again with the id of the one you mean:`, ...list].join("\n") }],
+              content: [{ type: "text" as const, text: [MIRROR_NOTE, `${found.length} decisions carry "${case_number.trim()}" — call again with the id of the one you mean:`, ...list].join("\n") }],
             };
           }
-          decisionId = found.hits[0].id;
+          decisionId = found[0].id;
         }
         const citedBySources = cited_by_sources?.length ? (cited_by_sources.filter((s) => MIRROR_COURTS.includes(s)) as MirrorCourt[]) : undefined;
         const links = await getMirrorCitations(source, decisionId, { limit, offset, citedBySources });

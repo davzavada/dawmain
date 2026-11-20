@@ -247,6 +247,14 @@ export interface MirrorCitations {
   citedBy: { total: number; hits: Array<MirrorLinkedDecision & { mentions: number }> };
 }
 
+/** The decisions carrying `caseNumber` (sp. zn. or ECLI) as their own — exact, newest first. */
+export async function mirrorDecisionsByCase(caseNumber: string, sources?: MirrorCourt[]): Promise<MirrorLinkedDecision[]> {
+  const qs = new URLSearchParams({ case: caseNumber.trim() });
+  for (const court of sources ?? []) qs.append("source", court);
+  const result = await getJson<{ decisions: MirrorLinkedDecision[] }>(`/v1/by-case?${qs}`, READ_TIMEOUT_MS);
+  return result?.decisions ?? [];
+}
+
 /** The citation links of one decision; null = the mirror does not hold it. */
 export async function getMirrorCitations(
   source: MirrorCourt,

@@ -450,6 +450,14 @@ describe("GET /v1/decisions/:source/:id/citations", () => {
     expect((await (await get("/v1/decisions/us/4-296-24_1/citations?source=ns")).json()).citedBy.total).toBe(0);
   });
 
+  it("GET /v1/by-case names the decision carrying the značka, not the ones citing it", async () => {
+    const own = await (await get(`/v1/by-case?case=${encodeURIComponent("IV. ÚS 296/24")}`)).json();
+    expect(own.decisions.map((d: { id: string }) => d.id)).toEqual(["4-296-24_1"]);
+    expect((await (await get(`/v1/by-case?case=${encodeURIComponent("IV. ÚS 296/24")}&source=ns`)).json()).decisions).toEqual([]);
+    expect((await (await get("/v1/by-case?case=nic")).json()).decisions).toEqual([]);
+    expect((await get("/v1/by-case")).status).toBe(400);
+  });
+
   it("answers 404 for an unknown decision and 400 for bad paging", async () => {
     expect((await get("/v1/decisions/us/nope/citations")).status).toBe(404);
     expect((await get("/v1/decisions/us/4-296-24_1/citations?limit=0")).status).toBe(400);

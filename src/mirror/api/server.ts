@@ -15,7 +15,7 @@ import {
   MAX_LIMIT,
 } from "./queries";
 import { renderDecisionHtml } from "./render";
-import { CITED_BY_MAX_LIMIT, linksOfDecision } from "./citations";
+import { CITED_BY_MAX_LIMIT, decisionsByCaseNumber, linksOfDecision } from "./citations";
 import { originalOf } from "./original";
 import {
   ACT_GROUPS,
@@ -38,6 +38,7 @@ import {
  * API v1 of the mirror (v1-plan: jen LAN, bearer token), run as
  * mirror-api.service on LXC `app`, listening on its LAN address only:
  *
+ *   GET /v1/by-case?case=&source=   the decisions carrying that sp. zn. / ECLI as their own
  *   GET /v1/search?q=&source=&court=&type=&category=&from=&to=&case=&limit=   (category: NS A–E, "A,B"; source: "ns,nss")
  *                  &sort=relevance|newest &regional=1 (NSS with the regional courts) &per_source=N (one lane per court)
  *                  &in=vyrok (the words in výroky only)
@@ -316,6 +317,13 @@ export function createMirrorApi(options: {
       etag: `"${image.sha256}"`,
       "cache-control": "private, max-age=86400",
     });
+  });
+
+  // The decisions carrying a sp. zn. / ECLI as their own (exact), for the citator's lookup by case number.
+  app.get("/v1/by-case", async (c) => {
+    const value = c.req.query("case")?.trim();
+    if (!value || value.length > 120) throw new BadRequest("case is required (a spisová značka or ECLI, at most 120 characters)");
+    return c.json({ decisions: await decisionsByCaseNumber(db, value, sources(c.req.queries("source"))) });
   });
 
   app.get("/v1/decisions/:source/:id/citations", async (c) => {

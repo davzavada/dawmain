@@ -11,6 +11,7 @@ import { registerNs } from "@/src/mcp/tools/ns";
 import { registerNalus } from "@/src/mcp/tools/nalus";
 import { registerNss } from "@/src/mcp/tools/nss";
 import { registerCzCaselaw } from "@/src/mcp/tools/cz-caselaw";
+import { registerCitations } from "@/src/mcp/tools/citations";
 import { registerJustice } from "@/src/mcp/tools/justice";
 import { registerCuria } from "@/src/mcp/tools/curia";
 import { registerEurlex } from "@/src/mcp/tools/eurlex";
@@ -58,6 +59,7 @@ function registerTheOldWay(server: McpServer, zotero: boolean): void {
     registerNalus,
     registerNss,
     registerCzCaselaw,
+    registerCitations,
     registerJustice,
     registerCuria,
     registerEurlex,
