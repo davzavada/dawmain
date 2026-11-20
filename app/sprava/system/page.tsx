@@ -3,8 +3,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireAdmin } from "@/src/admin/server";
 import { systemSnapshot, type SystemSnapshot } from "@/src/admin/system";
+import { loadDailyLimit, type LoadedDailyLimit } from "@/src/admin/daily-limit";
+import { DEFAULT_DAILY_CALL_LIMIT } from "@/src/mcp/daily-limit";
 import { formatCount, plural } from "../../_zdroje/format";
 import { AdminTabs } from "../_tabs";
+import { DailyLimitField } from "./limit-field";
 
 export const dynamic = "force-dynamic";
 
@@ -14,8 +17,9 @@ export const metadata: Metadata = { title: "Systém · Správa · Dawmain", robo
  * The Systém tab of the admin area: how long this web process has been up,
  * what it runs on, how big the databases are, what the case-law mirror holds
  * and when the regular jobs last ran (src/admin/system.ts). Read on every
- * visit, nothing to switch. Admins only — anyone else gets the same 404 as
- * a page that does not exist.
+ * visit. The one thing set here is the daily limit of tool calls per
+ * account (src/mcp/daily-limit.ts) — a figure only admins ever see. Admins
+ * only — anyone else gets the same 404 as a page that does not exist.
  */
 
 const COURTS: Array<{ id: string; label: string }> = [
@@ -55,7 +59,7 @@ function duration(sec: number): string {
 export default async function AdminSystemPage() {
   const me = await requireAdmin();
   if (!me) notFound();
-  const data = await systemSnapshot();
+  const [data, limit] = await Promise.all([systemSnapshot(), loadDailyLimit()]);
 
   return (
     <div className="adm">
@@ -68,6 +72,7 @@ export default async function AdminSystemPage() {
       </header>
       <AdminTabs active="system" />
       <System data={data} />
+      <Limits limit={limit} />
     </div>
   );
 }
@@ -248,6 +253,22 @@ function System({ data }: { data: SystemSnapshot }) {
         </div>
       </section>
     </>
+  );
+}
+
+function Limits({ limit }: { limit: LoadedDailyLimit }) {
+  return (
+    <section className="adm-panel" aria-label="Omezení">
+      <div className="adm-panel-head">
+        <h2>Omezení</h2>
+      </div>
+      <DailyLimitField own={limit.own} defaultLimit={DEFAULT_DAILY_CALL_LIMIT} available={limit.available} />
+      <p className="muted" style={{ margin: "12px 0 0", fontSize: 13 }}>
+        Nejvyšší počet volání nástrojů, který jeden účet za den provede (den se počítá v UTC, všechny nástroje dohromady kromě dawmain_ping a
+        dawmain_guide). Sdíleného přístupového kódu se limit netýká. Uživatelům se číslo nikde neukazuje; po vyčerpání dostanou jen odmítnutí do
+        dalšího dne.
+      </p>
+    </section>
   );
 }
 

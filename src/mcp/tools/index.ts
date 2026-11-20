@@ -22,6 +22,7 @@ import { registerZotero } from "./zotero";
 import { zoteroConfigured } from "@/src/zotero/config";
 import { withGuideHint } from "../guide-hint";
 import { trackToolCall } from "../usage";
+import { admitToolCall, dailyLimitRefusal } from "../daily-limit";
 import { mirrorConfigured } from "@/src/sources/mirror";
 import { callerFromCtx } from "../caller";
 import { MIRROR_TOOLS, type MirrorAnswer } from "./mirror-route";
@@ -171,7 +172,10 @@ function textOnly(server: McpServer): McpServer {
         name,
         rest,
         async (...args: unknown[]) => {
-          // args[1] is the request ctx (the caller's identity); counted once per call, whatever the outcome.
+          // args[1] is the request ctx (the caller's identity). An account over its daily limit is
+          // answered here, before anything upstream is asked (src/mcp/daily-limit.ts) — not counted.
+          if (!(await admitToolCall(name, args[1]))) return dailyLimitRefusal();
+          // Counted once per call that runs, whatever its outcome.
           void trackToolCall(name, args[1]);
           const { structuredContent: _dropped, ...result } = await withinBudget(name, () => routed(name, handler, args));
           return result;
