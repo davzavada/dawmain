@@ -236,15 +236,18 @@ describe("GET /v1/search: court_code (justice)", () => {
     await save("j-ksbrji", "Krajský soud v Brně", "ECLI:CZ:KSBRJI:2025:54.Co.20.2025.1", "54 Co 20/2025", "2025-03-01");
     await save("j-ospv", "Okresní soud v Prostějově", "ECLI:CZ:OSPV:2025:9.C.311.2024.1", "9 C 311/2024", "2025-02-07");
     await save("j-none", "Krajský soud v Brně", null, "15 Co 99/2024", "2024-06-01");
+    await save("j-bad", "Obvodní soud pro Prahu 2", "MSP-8/2022-OINS-SRZT/1", "15 C 7/2024", "2024-06-02");
+    await save("j-unknown", "(nezadán)", "", "0 OINS 8/2022", "2022-06-23");
   });
   const q = encodeURIComponent("zmeškaný dostavník");
   const ids = async (extra: string) => ((await (await get(`/v1/search?q=${q}&source=justice${extra}`)).json()).hits as Array<{ id: string }>).map((h) => h.id).sort();
 
-  it("keeps the decisions whose ECLI names one of the courts; a pobočka is a court of its own", async () => {
-    expect(await ids("")).toEqual(["j-ksbr", "j-ksbrji", "j-none", "j-ospv"]);
-    expect(await ids("&court_code=KSBR")).toEqual(["j-ksbr"]);
-    expect(await ids("&court_code=KSBR,KSBRJI")).toEqual(["j-ksbr", "j-ksbrji"]);
-    expect(await ids("&court_code=ksbr&court_code=OSPV")).toEqual(["j-ksbr", "j-ospv"]);
+  it("keeps the decisions of the courts named: by the ECLI's code, and by the court's name where the ECLI is missing or no ECLI", async () => {
+    expect(await ids("")).toEqual(["j-bad", "j-ksbr", "j-ksbrji", "j-none", "j-ospv", "j-unknown"]);
+    expect(await ids("&court_code=KSBR")).toEqual(["j-ksbr", "j-none"]);
+    expect(await ids("&court_code=KSBR,KSBRJI")).toEqual(["j-ksbr", "j-ksbrji", "j-none"]);
+    expect(await ids("&court_code=ksbr&court_code=OSPV")).toEqual(["j-ksbr", "j-none", "j-ospv"]);
+    expect(await ids("&court_code=OSPH02")).toEqual(["j-bad"]);
     expect(await ids("&court_code=OSUH")).toEqual([]);
   });
 
@@ -263,9 +266,20 @@ describe("GET /v1/search: court_code (justice)", () => {
     expect((await get(`/v1/search?q=${q}&source=ns,justice&court_code=KSBR`)).status).toBe(400);
   });
 
-  it("the index of 0021 is on the expression the filter uses", async () => {
-    const { rows } = await pg.query<{ indexdef: string }>("SELECT indexdef FROM pg_indexes WHERE indexname = 'decision_justice_court_code'");
-    expect(rows[0].indexdef).toMatch(/split_part\(ecli, ':'(::text)?, 3\), decided_on\) WHERE \(source = 'justice'(::text)?\)/);
+  it("the index of 0022 is on the column the filter uses, and 0021's is gone", async () => {
+    const { rows } = await pg.query<{ indexname: string; indexdef: string }>("SELECT indexname, indexdef FROM pg_indexes WHERE indexname IN ('decision_court_code', 'decision_justice_court_code')");
+    expect(rows.map((r) => r.indexname)).toEqual(["decision_court_code"]);
+    expect(rows[0].indexdef).toMatch(/\(court_code, decided_on\) WHERE \(source = 'justice'(::text)?\)/);
+  });
+
+  it("the trigger keeps court_code with the row: set on insert, changed with the ECLI, empty outside justice", async () => {
+    const code = async (id: string) => (await pg.query<{ court_code: string | null }>("SELECT court_code FROM mirror.decision WHERE source_id = $1", [id])).rows[0].court_code;
+    expect(await code("j-ospv")).toBe("OSPV");
+    expect(await code("j-unknown")).toBeNull();
+    await pg.query("UPDATE mirror.decision SET ecli = 'ECLI:CZ:OSUH:2025:9.C.311.2024.1' WHERE source_id = 'j-ospv'");
+    expect(await code("j-ospv")).toBe("OSUH");
+    await pg.query("UPDATE mirror.decision SET ecli = 'ECLI:CZ:OSPV:2025:9.C.311.2024.1' WHERE source_id = 'j-ospv'");
+    expect((await pg.query<{ n: number }>("SELECT count(*)::int AS n FROM mirror.decision WHERE source <> 'justice' AND court_code IS NOT NULL")).rows[0].n).toBe(0);
   });
 });
 
@@ -290,7 +304,7 @@ describe("searchDecisions with BM25: court codes", () => {
     const { db, calls } = fake([]);
     await searchDecisions(db, input);
     const first = calls[0];
-    expect(first.text).toContain("d.source = 'justice' AND split_part(d.ecli, ':', 3) = ANY($");
+    expect(first.text).toContain("d.source = 'justice' AND d.court_code = ANY($");
     expect(first.text).toContain(`LIMIT ${BM25_CANDIDATES}`);
     expect(first.text).not.toContain("OSPV");
     expect(first.params).toContainEqual(["OSPV"]);

@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 /**
- * Security headers. Everywhere: HSTS, no framing (the Vlastní zdroje modal with
+ * Security headers. Everywhere: HSTS, a small CSP, no framing (the Vlastní zdroje modal with
  * its delete and confirm buttons opens over any page, so clickjacking
  * protection cannot stop at one path) and no MIME sniffing. On the
  * Vlastní zdroje pages and API and the Zotero API: no referrer to other
@@ -12,6 +12,12 @@ const everywhere = [
   // Browsers that reached the site over https once never try plain http again.
   { key: "Strict-Transport-Security", value: "max-age=31536000" },
   { key: "X-Frame-Options", value: "DENY" },
+  // A first Content-Security-Policy that cannot break the static pages (Next
+  // and Clerk need inline <script> and their own origins, so script-src stays
+  // open until the pages carry nonces): no inline event handlers anywhere —
+  // the one way markup injected into the page (an uploaded Word file in the
+  // viewer) could run code — no plugins, no <base> hijack, no framing.
+  { key: "Content-Security-Policy", value: "script-src-attr 'none'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" },
   { key: "X-Content-Type-Options", value: "nosniff" },
 ];
 const privateArea = [

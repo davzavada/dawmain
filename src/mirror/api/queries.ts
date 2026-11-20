@@ -53,13 +53,13 @@ function topCourtsOnly(d: string): string {
 }
 
 /**
- * The court code of a general court's decision: the third part of its ECLI ("ECLI:CZ:KSBR:2024:…" → KSBR),
- * which the open-data listing gives for every decision — the court's name is free text and source_meta is
- * mostly empty. Exact match, as rozhodnuti.justice.cz does: a pobočka has a code of its own (KSBRJI).
- * Spelled as in the index decision_justice_court_code (0021), source literal included, so it can serve.
+ * The court code of a general court's decision (decision.court_code, migration 0022): the third part of
+ * its ECLI ("ECLI:CZ:KSBR:2024:…" → KSBR) where that is a real code, else the code the court's name
+ * carries — a trigger fills it. Exact match; a pobočka shares its court's code, as in the ECLI.
+ * Served by the index decision_court_code, whose WHERE is this source literal.
  */
 function courtCodeIn(d: string, param: string): string {
-  return `(${d}.source = 'justice' AND split_part(${d}.ecli, ':', 3) = ANY(${param}::text[]))`;
+  return `(${d}.source = 'justice' AND ${d}.court_code = ANY(${param}::text[]))`;
 }
 
 /** The regional administrative courts are left out unless asked for, or unless a court is named. */

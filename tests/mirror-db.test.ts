@@ -82,6 +82,7 @@ describe("mirror schema", () => {
       "decision_verdict",
       "fetch_queue",
       "image_blob",
+      "justice_court_name",
       "provision_state",
       "sync_cursor",
       "sync_run",
