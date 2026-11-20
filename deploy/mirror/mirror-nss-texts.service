@@ -1,9 +1,12 @@
-# Daytime retry of the NSS texts the source did not return (fetch_queue, kind
-# "text"), started by mirror-nss-texts.timer. vyhledavac.nssoud.cz answers the
-# night run's text requests with its empty "N/A" page for documents it serves
-# during the day: 4 904 decisions sat without text until a run at 17:20 got
-# them (20. 11. 2026). `sync --source nss --days 1` retries the 500 rows due
-# first and then re-reads the last day's publications, which costs little.
+# A second, daytime pass over the NSS retry queue (fetch_queue), started by
+# mirror-nss-texts.timer. During the backfill and the first days of November
+# 2026 vyhledavac.nssoud.cz answered thousands of text requests (mostly
+# decisions of 2015–2016) with its empty "N/A" page; the documents are there
+# now. The night sync retries 500 queued rows a run, this adds 500 more at
+# midday so a backlog like that clears twice as fast. `sync --source nss
+# --days 1` retries the rows due first and then re-reads the last day's
+# publications, which costs little. Not a fix for a night-time outage: the
+# night runs do get texts (checked 20. 11. 2026).
 [Unit]
 Description=Dawmain mirror: NSS texts, daytime retry
 After=network-online.target
