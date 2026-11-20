@@ -68,7 +68,7 @@ export const TEXT_FIELDS = [
     key: "home.owl",
     group: HOME,
     label: "Karta Owl",
-    hint: "Text karty s odkazem na Owl pod úvodem.",
+    hint: "Text karty s odkazem na Owl dole na stránce.",
     kind: "plain",
     maxChars: 300,
     default: "Pokud vás zajímá monitoring recentní rozhodovací praxe a doktrinálního vývoje, podívejte se na můj další projekt.",
