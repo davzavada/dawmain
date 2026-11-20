@@ -66,6 +66,20 @@ export const JUSTICE_COURT_CODES = [
   "OSUL", "OSUO", "OSVS", "OSVSVM", "OSVY", "OSZL", "OSZN", "OSZR",
 ] as const;
 
+/** The code as the index spells it; an unknown one fails with the whole list (also the mirror's answer). */
+export function justiceCourtCode(code: string): string {
+  const wanted = code.trim().toUpperCase();
+  if (!(JUSTICE_COURT_CODES as readonly string[]).includes(wanted)) {
+    throw new SourceError(
+      SOURCE,
+      "INPUT_INVALID",
+      `"${code}" is not a justice.cz court code.`,
+      `Valid codes: ${JUSTICE_COURT_CODES.join(", ")}.`,
+    );
+  }
+  return wanted;
+}
+
 /** DocTypeEnm values, verbatim from the captured request. */
 export const JUSTICE_DOC_TYPES = ["JUDGEMENT", "ORDER_T", "RESOLUTION"] as const;
 export type JusticeDocType = (typeof JUSTICE_DOC_TYPES)[number];
@@ -279,18 +293,7 @@ export function buildJusticeQuery(
     params.set("caseNumberIndex", parts.number);
     params.set("caseNumberYear", parts.year);
   }
-  for (const code of input.courtCodes ?? []) {
-    const wanted = code.trim().toUpperCase();
-    if (!(JUSTICE_COURT_CODES as readonly string[]).includes(wanted)) {
-      throw new SourceError(
-        SOURCE,
-        "INPUT_INVALID",
-        `"${code}" is not a justice.cz court code.`,
-        `Valid codes: ${JUSTICE_COURT_CODES.join(", ")}.`,
-      );
-    }
-    params.append("courtCodes", wanted);
-  }
+  for (const code of input.courtCodes ?? []) params.append("courtCodes", justiceCourtCode(code));
   for (const type of input.types ?? []) params.append("type", type);
   if (input.decidedFrom) params.set("issuedFrom", input.decidedFrom);
   if (input.decidedTo) params.set("issuedTo", input.decidedTo);

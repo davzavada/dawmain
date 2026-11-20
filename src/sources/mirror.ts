@@ -140,6 +140,8 @@ export interface MirrorSearchParams {
   from?: string;
   to?: string;
   categories?: string[];
+  /** rozhodnuti.justice.cz court codes, any of them; with sources: ["justice"] only. */
+  courtCodes?: string[];
   /** rozsudek | usneseni | nalez | stanovisko | jine */
   type?: string;
   regional?: boolean;
@@ -178,6 +180,7 @@ function searchQuery(params: MirrorSearchParams): URLSearchParams {
   if (params.from) qs.set("from", params.from);
   if (params.to) qs.set("to", params.to);
   if (params.categories?.length) qs.set("category", params.categories.join(","));
+  if (params.courtCodes?.length) qs.set("court_code", params.courtCodes.join(","));
   if (params.type) qs.set("type", params.type);
   if (params.regional) qs.set("regional", "1");
   if (params.sort) qs.set("sort", params.sort);

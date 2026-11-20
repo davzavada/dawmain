@@ -1,4 +1,5 @@
-import { SourceError } from "@/src/sources/shared/errors";
+import { SourceError, toToolError } from "@/src/sources/shared/errors";
+import { justiceCourtCode } from "@/src/sources/justice";
 import { interleave, pageOrExcerpt, uniqueQueries } from "@/src/sources/shared/text";
 import {
   getMirrorDecision,
@@ -183,8 +184,8 @@ interface CourtSearchSpec {
   defaults: Record<string, unknown>;
   /** Whether the call asks for a page past the first. */
   laterPage: (args: Args) => boolean;
-  /** Extra mirror parameters from the call; a string = fall back with that reason. */
-  extra?: (args: Args) => Partial<MirrorSearchParams> | string;
+  /** Extra mirror parameters from the call; a string = fall back with that reason; a ToolText = the answer (an input error). */
+  extra?: (args: Args) => Partial<MirrorSearchParams> | string | ToolText;
   limit: (args: Args) => number;
 }
 
@@ -242,12 +243,25 @@ const COURT_SEARCH: Record<string, CourtSearchSpec> = {
   },
   justice_search: {
     court: "justice",
-    handled: [...COMMON, "page", "sort"],
+    handled: [...COMMON, "page", "sort", "court_codes"],
     defaults: { match: "all_words" },
     laterPage: (args) => num(args.page, 0) > 0,
-    extra: (args) =>
-      // Without words the live tool lists the newest; the mirror sorts by decision date.
-      ({ sort: str(args.query) ? ("relevance" as const) : ("newest" as const) }),
+    extra: (args) => {
+      let courtCodes: string[];
+      try {
+        // An unknown code answers with the whole list, as live: the mirror would find nothing for it.
+        courtCodes = [...new Set((Array.isArray(args.court_codes) ? (args.court_codes as unknown[]) : []).map((code) => justiceCourtCode(String(code))))];
+      } catch (error) {
+        if (!(error instanceof SourceError)) throw error;
+        const { content, isError } = toToolError(error);
+        return { content, isError };
+      }
+      return {
+        // Without words the live tool lists the newest; the mirror sorts by decision date.
+        sort: str(args.query) ? ("relevance" as const) : ("newest" as const),
+        ...(courtCodes.length ? { courtCodes } : {}),
+      };
+    },
     limit: (args) => num(args.limit, 20),
   },
 };
@@ -261,6 +275,7 @@ async function courtSearch(name: string, args: Args): Promise<MirrorAnswer> {
   const caseNumber = str(args.case_number);
   const extra = spec.extra?.(args) ?? {};
   if (typeof extra === "string") return { fallback: extra };
+  if ("content" in extra) return extra;
   if (!variants.length && !caseNumber && !extra.caseNumber) return { fallback: "no query or spisová značka" };
   const from = str(args.date_from);
   const to = str(args.date_to);

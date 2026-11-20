@@ -30,6 +30,8 @@ const IDENT_SCORE = 0.5;
 export const BM25_CANDIDATES = 5000;
 /** Words with an identifier: the words' chunks are read for this many BM25-first decisions (~20 chunks each). */
 const WITHIN_CANDIDATES = 1000;
+/** A court (court_code) with at most this many decisions under the filters is searched whole when BM25's candidates fall short. */
+export const COURT_EXACT_MAX = 5000;
 /** BM25's first decisions that the importance prior reorders. */
 const RERANK_CANDIDATES = 200;
 
@@ -50,6 +52,16 @@ function topCourtsOnly(d: string): string {
   return `(${d}.source <> 'nss' OR coalesce(${d}.court, 'Nejvyšší správní soud') ILIKE 'Nejvyšší správní soud%')`;
 }
 
+/**
+ * The court code of a general court's decision: the third part of its ECLI ("ECLI:CZ:KSBR:2024:…" → KSBR),
+ * which the open-data listing gives for every decision — the court's name is free text and source_meta is
+ * mostly empty. Exact match, as rozhodnuti.justice.cz does: a pobočka has a code of its own (KSBRJI).
+ * Spelled as in the index decision_justice_court_code (0021), source literal included, so it can serve.
+ */
+function courtCodeIn(d: string, param: string): string {
+  return `(${d}.source = 'justice' AND split_part(${d}.ecli, ':', 3) = ANY(${param}::text[]))`;
+}
+
 /** The regional administrative courts are left out unless asked for, or unless a court is named. */
 function withoutRegional(input: SearchInput): boolean {
   return !input.regional && !input.court && (!input.sources?.length || input.sources.includes("nss"));
@@ -60,6 +72,8 @@ export interface SearchInput {
   /** Any of these courts; none = all. */
   sources?: MirrorSource[];
   court?: string;
+  /** rozhodnuti.justice.cz court codes, any of them (["KSBR", "KSBRJI"]); source justice only. */
+  courtCodes?: string[];
   type?: DecisionType;
   from?: string;
   to?: string;
@@ -154,7 +168,7 @@ async function runChannel(
        FROM mirror.decision_chunk c, q
        WHERE $1::text IS NOT NULL AND ($3::text[] IS NULL OR c.source = ANY($3)) AND c.tsv @@ q.tsq${
          // The words only in the decisions BM25 found (decision_id index); without BM25 every chunk is read.
-         within ? " AND c.decision_id = ANY($13::bigint[])" : ""
+         within ? " AND c.decision_id = ANY($14::bigint[])" : ""
        }
        UNION ALL
        SELECT c.source, c.decision_id, c.char_start, c.char_end, c.tsv, c.ident_keys
@@ -184,6 +198,7 @@ async function runChannel(
                SELECT 1 FROM mirror.decision_chunk c2 WHERE c2.decision_id = d.id AND c2.ident_keys && $8::text[]))
          AND (cardinality($10::text[]) = 0 OR d.category = ANY($10::text[]))
          AND (NOT $11::boolean OR ${topCourtsOnly("d")})
+         AND ($13::text[] IS NULL OR ${courtCodeIn("d", "$13")})
        ORDER BY CASE WHEN $12::boolean THEN d.decided_on END DESC NULLS LAST, score DESC, d.decided_on DESC NULLS LAST
        LIMIT $9
      )
@@ -208,6 +223,7 @@ async function runChannel(
       input.categories ?? [],
       withoutRegional(input),
       input.sort === "newest",
+      input.courtCodes?.length ? input.courtCodes : null,
       ...(within ? [within] : []),
     ],
   );
@@ -282,6 +298,7 @@ async function runBm25(db: Queryable, input: SearchInput, text: string, all: boo
   // The court is not in the index: the BM25-first candidates, then the court, then the prior, then the limit.
   const courts = [
     input.court ? `d.court ILIKE '%' || $${params.push(input.court)} || '%'` : "",
+    input.courtCodes?.length ? courtCodeIn("d", `$${params.push(input.courtCodes)}`) : "",
     withoutRegional(input) ? topCourtsOnly("d") : "",
   ].filter(Boolean);
   const pool = newest ? "$3" : String(RERANK_CANDIDATES);
@@ -332,6 +349,7 @@ async function runVerdict(db: Queryable, input: SearchInput, text: string, all: 
   const newest = input.sort === "newest";
   const courts = [
     input.court ? `d.court ILIKE '%' || $${params.push(input.court)} || '%'` : "",
+    input.courtCodes?.length ? courtCodeIn("d", `$${params.push(input.courtCodes)}`) : "",
     withoutRegional(input) ? topCourtsOnly("d") : "",
   ].filter(Boolean);
   let top: string;
@@ -374,6 +392,22 @@ async function runVerdict(db: Queryable, input: SearchInput, text: string, all: 
   return rows;
 }
 
+/**
+ * The decisions of the courts asked for (court_code) under the date and type filters, by the index
+ * decision_justice_court_code — at most `limit` ids.
+ */
+async function courtDecisionIds(db: Queryable, input: SearchInput, limit: number): Promise<number[]> {
+  const { rows } = await db.query<{ id: string }>(
+    `SELECT d.id::text AS id FROM mirror.decision d
+     WHERE ${courtCodeIn("d", "$1")}
+       AND ($2::date IS NULL OR d.decided_on >= $2) AND ($3::date IS NULL OR d.decided_on <= $3)
+       AND ($4::text IS NULL OR d.decision_type = $4)
+     LIMIT $5`,
+    [input.courtCodes, input.from ?? null, input.to ?? null, input.type ?? null, limit],
+  );
+  return rows.map((r) => Number(r.id));
+}
+
 export class UnsupportedSearch extends Error {}
 
 export async function searchDecisions(db: Queryable, input: SearchInput): Promise<SearchResult> {
@@ -399,6 +433,21 @@ export async function searchDecisions(db: Queryable, input: SearchInput): Promis
     if (rows.length === 0) {
       channel = "or";
       rows = await runBm25(db, input, words, false, p.tsOr ?? p.tsAnd);
+    }
+    // The court code is checked on BM25's first candidates only: a small court under a common phrase
+    // gets fewer hits than it has. Such a court is searched whole instead, chunk by chunk.
+    const limit = Math.min(Math.max(1, Math.floor(input.limit ?? 20)), MAX_LIMIT);
+    if (input.courtCodes?.length && rows.length < limit) {
+      const own = await courtDecisionIds(db, input, COURT_EXACT_MAX + 1);
+      if (own.length > 0 && own.length <= COURT_EXACT_MAX) {
+        let exact = await runChannel(db, input, p.tsAnd, [], [], own);
+        const exactChannel: SearchResult["channel"] = exact.length || !p.tsOr ? "and" : "or";
+        if (exact.length === 0 && p.tsOr) exact = await runChannel(db, input, p.tsOr, [], [], own);
+        if (exact.length > rows.length || (exactChannel === "and" && channel === "or" && exact.length > 0)) {
+          rows = exact;
+          channel = exactChannel;
+        }
+      }
     }
     return { hits: rows.map((r) => toHit(r, p.terms, [])), channel, terms: p.terms, identKeys: [] };
   }

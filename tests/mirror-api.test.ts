@@ -6,6 +6,7 @@ import type { Hono } from "hono";
 import type { Db } from "@/src/mirror/db/client";
 import { saveDecision } from "@/src/mirror/db/store";
 import { createMirrorApi } from "@/src/mirror/api/server";
+import { BM25_CANDIDATES, COURT_EXACT_MAX, searchDecisions } from "@/src/mirror/api/queries";
 import { buildActLookup } from "@/src/mirror/legal/lookup";
 import { provisionsSource } from "@/src/mirror/provisions";
 import type { DecisionRecord } from "@/src/mirror/types";
@@ -218,6 +219,103 @@ describe("GET /v1/search: ranking, courts, lanes", () => {
   it("rejects a bad sort or lane size", async () => {
     expect((await get(`/v1/search?q=${q}&sort=random`)).status).toBe(400);
     expect((await get(`/v1/search?q=${q}&per_source=0`)).status).toBe(400);
+  });
+});
+
+describe("GET /v1/search: court_code (justice)", () => {
+  const justice = { source: "justice" as const, decisionType: "rozsudek" as const, url: "https://rozhodnuti.justice.cz/rozhodnuti/?id=x" };
+  const body = "Žalobce se domáhal náhrady za zmeškaný dostavník. ".repeat(6);
+  beforeAll(async () => {
+    const db: Db = {
+      query: (text, params) => pg.query(text, params) as never,
+      transaction: (fn) => pg.transaction((tx) => fn({ query: (text, params) => tx.query(text, params) as never })),
+    };
+    const save = (sourceId: string, court: string, ecli: string | null, caseNumber: string, decidedOn: string) =>
+      saveDecision(db, record({ ...justice, sourceId, court, ecli, caseNumber, caseNumbers: [caseNumber], decidedOn, text: { body, source: "justice:finaldoc" } }));
+    await save("j-ksbr", "Krajský soud v Brně", "ECLI:CZ:KSBR:2024:15.Co.10.2024.1", "15 Co 10/2024", "2024-05-01");
+    await save("j-ksbrji", "Krajský soud v Brně", "ECLI:CZ:KSBRJI:2025:54.Co.20.2025.1", "54 Co 20/2025", "2025-03-01");
+    await save("j-ospv", "Okresní soud v Prostějově", "ECLI:CZ:OSPV:2025:9.C.311.2024.1", "9 C 311/2024", "2025-02-07");
+    await save("j-none", "Krajský soud v Brně", null, "15 Co 99/2024", "2024-06-01");
+  });
+  const q = encodeURIComponent("zmeškaný dostavník");
+  const ids = async (extra: string) => ((await (await get(`/v1/search?q=${q}&source=justice${extra}`)).json()).hits as Array<{ id: string }>).map((h) => h.id).sort();
+
+  it("keeps the decisions whose ECLI names one of the courts; a pobočka is a court of its own", async () => {
+    expect(await ids("")).toEqual(["j-ksbr", "j-ksbrji", "j-none", "j-ospv"]);
+    expect(await ids("&court_code=KSBR")).toEqual(["j-ksbr"]);
+    expect(await ids("&court_code=KSBR,KSBRJI")).toEqual(["j-ksbr", "j-ksbrji"]);
+    expect(await ids("&court_code=ksbr&court_code=OSPV")).toEqual(["j-ksbr", "j-ospv"]);
+    expect(await ids("&court_code=OSUH")).toEqual([]);
+  });
+
+  it("combines with dates, the type and a spisová značka", async () => {
+    expect(await ids("&court_code=KSBR,KSBRJI&from=2025-01-01")).toEqual(["j-ksbrji"]);
+    expect(await ids("&court_code=KSBR,KSBRJI&type=usneseni")).toEqual([]);
+    const byCase = async (code: string) =>
+      ((await (await get(`/v1/search?case=${encodeURIComponent("9 C 311/2024")}&source=justice&court_code=${code}`)).json()).hits as Array<{ id: string }>).map((h) => h.id);
+    expect(await byCase("OSPV")).toEqual(["j-ospv"]);
+    expect(await byCase("KSBR")).toEqual([]);
+  });
+
+  it("takes codes only, and only for justice", async () => {
+    expect((await get(`/v1/search?q=${q}&source=justice&court_code=${encodeURIComponent("KSBR'; DROP")}`)).status).toBe(400);
+    expect((await get(`/v1/search?q=${q}&court_code=KSBR`)).status).toBe(400);
+    expect((await get(`/v1/search?q=${q}&source=ns,justice&court_code=KSBR`)).status).toBe(400);
+  });
+
+  it("the index of 0021 is on the expression the filter uses", async () => {
+    const { rows } = await pg.query<{ indexdef: string }>("SELECT indexdef FROM pg_indexes WHERE indexname = 'decision_justice_court_code'");
+    expect(rows[0].indexdef).toMatch(/split_part\(ecli, ':'(::text)?, 3\), decided_on\) WHERE \(source = 'justice'(::text)?\)/);
+  });
+});
+
+describe("searchDecisions with BM25: court codes", () => {
+  type Call = { text: string; params: unknown[] };
+  const row = { source: "justice", source_id: "j-1", case_number: "1 C 1/2025", court: "Okresní soud v Prostějově", decision_type: "rozsudek", category: null, decided_on: "2025-01-01", published_on: null, ecli: "ECLI:CZ:OSPV:2025:1.C.1.2025.1", url: "u", score: 1, char_start: 0, chunk: "zmeškaný dostavník", dissent_starts: null };
+  function fake(courtIds: number[], bm25Rows: unknown[] = []) {
+    const calls: Call[] = [];
+    const db = {
+      async query(text: string, params: unknown[] = []) {
+        calls.push({ text, params });
+        if (text.includes("pdb.score")) return { rows: bm25Rows };
+        if (text.startsWith("SELECT d.id::text")) return { rows: courtIds.map((id) => ({ id: String(id) })) };
+        return { rows: [row] };
+      },
+    };
+    return { db: db as never, calls };
+  }
+  const input = { q: "zmeškaný dostavník", sources: ["justice" as const], courtCodes: ["OSPV"], from: "2025-01-01", bm25: true };
+
+  it("filters BM25's candidates by the ECLI's court, the codes as a parameter", async () => {
+    const { db, calls } = fake([]);
+    await searchDecisions(db, input);
+    const first = calls[0];
+    expect(first.text).toContain("d.source = 'justice' AND split_part(d.ecli, ':', 3) = ANY($");
+    expect(first.text).toContain(`LIMIT ${BM25_CANDIDATES}`);
+    expect(first.text).not.toContain("OSPV");
+    expect(first.params).toContainEqual(["OSPV"]);
+  });
+
+  it("searches a small court whole when the candidates fall short", async () => {
+    const { db, calls } = fake([11, 12]);
+    const result = await searchDecisions(db, input);
+    const lookup = calls.find((c) => c.text.startsWith("SELECT d.id::text"))!;
+    expect(lookup.params).toEqual([["OSPV"], "2025-01-01", null, null, COURT_EXACT_MAX + 1]);
+    const exact = calls.at(-1)!;
+    expect(exact.text).toContain("c.decision_id = ANY($14::bigint[])");
+    expect(exact.params[12]).toEqual(["OSPV"]);
+    expect(exact.params[13]).toEqual([11, 12]);
+    expect(result.hits.map((h) => h.id)).toEqual(["j-1"]);
+    expect(result.channel).toBe("and");
+  });
+
+  it("leaves a big court to BM25, and asks nothing more when the page is full", async () => {
+    const big = fake(Array.from({ length: COURT_EXACT_MAX + 1 }, (_, i) => i));
+    expect((await searchDecisions(big.db, input)).hits).toEqual([]);
+    expect(big.calls.filter((c) => c.text.includes("decision_chunk c, q"))).toHaveLength(0);
+    const full = fake([1], [row]);
+    await searchDecisions(full.db, { ...input, limit: 1 });
+    expect(full.calls).toHaveLength(1);
   });
 });
 
