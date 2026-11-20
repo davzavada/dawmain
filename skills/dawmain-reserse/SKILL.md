@@ -138,6 +138,7 @@ Names follow one pattern: `<zdroj>_search` finds, `<zdroj>_get_*` reads.
 |---|---|
 | Case law on a topic (start here) | `caselaw_search` — NSS + NS + ÚS in parallel; `include_eu` adds the CJEU, `include_regional` the krajské správní soudy |
 | Deeper digging in one court | `ns_search`, `nss_search`, `us_search` (Ústavní soud), `sdeu_search` (CJEU) |
+| Who cites a decision, and what it cites (the citator) | `caselaw_citations {source, id}` or `{source, case_number}` — later decisions of NS, NSS, ÚS and obecné soudy naming it, newest first; `direction: "cites"` for what it relies on |
 | Full text of a decision | `ns_get_decision {unid}`, `nss_get_decision {document_id}`, `us_get_decision {sz}`, `sdeu_get_document {ecli}`, `justice_get_decision {uuid}` |
 | Which act, and its wording | `esbirka_search` → `esbirka_get_act` → `esbirka_get_text` (one § via `section: "§ 12"`, one article via `section: "čl. 36"`; any date) |
 | Lower courts (okresní/krajské/vrchní) | `justice_search` → `justice_get_decision` — full text, spisová značka, soud, druh, data, and applied provision |
@@ -151,7 +152,8 @@ Names follow one pattern: `<zdroj>_search` finds, `<zdroj>_get_*` reads.
 | Slovak law — Zbierka zákonov SR, eLegislatíva, súdne rozhodnutia (only when the question is about Slovak law or a CZ/SK comparison) | `sk_predpis_search` → `sk_predpis_get_text`; `sk_lp_search` → `sk_lp_get_process`; `sk_judikatura_search` → `sk_judikatura_get_decision` — see Slovensko below |
 | A source misbehaves | `dawmain_probe_sources` |
 
-Not covered: EUIPO, ÚPV, the Peace Palace Library, and EUR-Lex's list of national
+Not covered: InfoSoud (the course of proceedings, právní moc — see "Is it still good
+law?"), EUIPO, ÚPV, the Peace Palace Library, and EUR-Lex's list of national
 transposition measures (the official per-country list of acts transposing a
 directive). If the question needs them, say so and point at euipo.europa.eu /
 isdv.upv.gov.cz / peacepalace.on.worldcat.org / the directive's page on eur-lex.europa.eu
@@ -899,22 +901,42 @@ Precision has a time dimension — check it before you cite:
   amendment, fetch the text with `date` and cite that version. `esbirka_get_text` names
   the version it quotes (in force from–to) and warns when a future version is already
   published — carry both into the memo.
+- **The amendment on its way (chystaná novela).** The law may be about to change;
+  check both places for every provision the answer rests on, in the same turn as
+  you read it:
+  1. *Published, not yet in force.* `esbirka_get_act` and `esbirka_get_text` mark a
+     future version with ⚠ — read the provision again with `date` set to the day it
+     takes effect and give both wordings, the new one with its date of effect.
+  2. *Still in the Chamber.* `psp_search {query: "občanský zákoník", only_pending:
+     true, types: ["bills"]}` (the act's short name, current period); for a bill that
+     touches the provision, `psp_get_tisk` for its stage and `psp_get_text` on part 0
+     with `find: "§ 2201"` for the proposed wording.
+  Report it under **Chystané změny**: tisk number with link, proposer, stage and its
+  date, what would change, the proposed date of effect. **A bill is not law** — never
+  apply it to the facts or quote it as the wording; write "návrh" and say it may
+  change or fall. The search matches bill titles only, and the Senát and the stage
+  before the Chamber (eKLEP) are not covered — say so. Nothing found: one sentence
+  with the date. Skip only for a pure lookup or a question wholly about the past.
 - **The break.** Case law decided under the previous wording (typically pre-2014 civil
   law) may still hold, but say which wording it was decided under.
 - **Was it reversed?** For obecné soudy, `justice_search` answers this directly: the
   "mění/potvrzuje" line of an appellate hit names the decision below and what happened
   to it (CONFIRM / CHANGE / CANCEL). Do not cite a first-instance rozsudek as practice
   without checking that it stood.
-- **Later authority.** For the top courts there is no citation graph, but decisions
-  quote the sp. zn. they follow — so full-text search the citation itself:
-  `ns_search {query: "31 Cdo 1945/2010", date_from: "2016-01-01",
-  date_to: "2016-12-31"}` → 22 decisions citing it
-  (verified). Pass the whole značka; a fragment like "1945/2010" matches nothing. Quotes
-  make it an exact phrase, which is worth it for a wording but changes nothing for a
-  značka. Where the citing line is long, walk it in date slices — the 900-document
-  ceiling applies here as everywhere. `us_search` and `nss_search` take the same query.
-  Then look for a velký senát decision, a sjednocující stanovisko, or an ÚS nález
-  derogating the provision.
+- **Later authority.** Run `caselaw_citations {source: "ns", case_number: "31 Cdo
+  1945/2010"}` (or `id` from the hit) on every decision the answer rests on: the
+  later decisions of NS, NSS, ÚS and obecné soudy that name it, newest first
+  (`cited_by_sources: ["us"]` for the Ústavní soud alone). Look for a velký senát
+  decision, a sjednocující stanovisko and an ÚS nález, and open those with `find`
+  set to the cited značka to see what they did with it — a citation is not
+  approval, never write "potvrzeno" from the list. An empty list is not proof that
+  nobody cites it: where it matters, also full-text search the whole značka
+  (`ns_search {query: "31 Cdo 1945/2010"}`; `us_search`, `nss_search` alike).
+- **Právní moc and pending appeals — not checkable here.** Only InfoSoud
+  (infosoud.gov.cz) records whether a lower-court decision is final or under
+  appeal, and it refuses automated queries. When the argument rests on an okresní
+  or krajský soud decision, say so in **Co chybí** with the court and spisová
+  značka to enter there; never write "je pravomocné" unless a text you read says it.
 - **Slovak law.** `sk_predpis_get_act` lists the versions (⚠ for one published, not
   yet in force); `sk_predpis_get_text` with `date` reads the one that governed. A
   decision from `sudy` names its povaha — `Zrušujúce` / `Zmeňujúce` marks one that
@@ -974,7 +996,9 @@ Stopping the search never shortens the reading: what you cite, you have read who
 5. **Read whole the decisions you will cite.** Every page, in parallel, without asking:
    page 1 of all of them in one turn, all remaining pages of all of them in the next.
    Then the reading check (Reading, above).
-6. **Check it is still good law.** Section above.
+6. **Check it is still good law — and whether it is about to change.** Section above:
+   the wording that governed, the fate of the decisions, and the amendment on its way
+   (a future version in e-Sbírka, a pending bill in `psp_search` with `only_pending`).
 7. **Write the memo.**
 
 ## The memo
@@ -1000,6 +1024,9 @@ record. The user's own documents with their reference line and pinpoint, no link
 Leges, 2018, § 2913, m. č. 14, s. 1245 (vlastní dokument).
 
 No source list at the end — except **Další zdroje** below.
+
+**Chystané změny** — only when the check found one: the future wording with its date
+of effect, or the pending sněmovní tisk with link and stage — marked as a návrh.
 
 **Co chybí** — what you did not find, what is contested, what needs verifying, and what
 the search did not cover (a court that failed, a date window, a truncated list).

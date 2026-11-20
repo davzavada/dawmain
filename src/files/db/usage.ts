@@ -231,6 +231,22 @@ export async function recordToolCall(db: Queryable, who: CallerKey, tool: string
   await bumpUsage(db, `${CALLS_PREFIX}${who}:${tool}`, { tool_calls: 1 });
 }
 
+/**
+ * Today's (UTC) tool calls of one account across all its tools, without the
+ * tools in `except` — the seed of the daily call limit (src/mcp/daily-limit.ts).
+ * Anything but a Clerk user id counts as none. System scope.
+ */
+export async function userCallsToday(db: Queryable, userId: string, except: readonly string[] = []): Promise<number> {
+  if (!USER_ID_RE.test(userId)) return 0;
+  const prefix = `${CALLS_PREFIX}${userId}:`;
+  const { rows } = await db.query(
+    `SELECT coalesce(sum(tool_calls), 0) AS n FROM usage_daily
+      WHERE day = ${TODAY_UTC} AND starts_with(scope, $1) AND NOT (scope = ANY($2::text[]))`,
+    [prefix, except.filter((tool) => TOOL_NAME_RE.test(tool)).map((tool) => `${prefix}${tool}`)],
+  );
+  return num(rows[0]?.n);
+}
+
 export interface CallerUsage {
   who: CallerKey;
   /** Calls over the window, and over its last 7 days. */

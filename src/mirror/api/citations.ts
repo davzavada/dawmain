@@ -1,4 +1,4 @@
-import { canonicalCaseNumber } from "@/src/files/index/identifiers";
+import { canonicalCaseNumber, queryIdentKeys } from "@/src/files/index/identifiers";
 import type { Queryable } from "../db/client";
 import type { DecisionType, MirrorSource } from "../types";
 
@@ -107,4 +107,26 @@ export async function linksOfDecision(
       hits: citedBy.rows.map((r) => ({ ...linked(r), mentions: Number(r.mentions) })),
     },
   };
+}
+
+export const BY_CASE_MAX = 20;
+
+/**
+ * The decisions that CARRY a spisová značka or ECLI as their own (decision_key)
+ * — not the ones whose text names it, which is what /v1/search?case= finds and
+ * ranks first for any decision cited often. Newest first; none when the text
+ * holds no sp. zn. / ECLI the mirror recognises.
+ */
+export async function decisionsByCaseNumber(db: Queryable, caseNumber: string, sources?: MirrorSource[]): Promise<LinkedDecision[]> {
+  const keys = queryIdentKeys(caseNumber).keys.filter((key) => key.startsWith("sz:") || key.startsWith("ecli:"));
+  if (!keys.length) return [];
+  const found = await db.query<Record<string, unknown>>(
+    `SELECT DISTINCT d.id, d.source, d.source_id, d.case_number, d.court, d.decision_type, d.decided_on::text AS decided_on
+     FROM mirror.decision_key k JOIN mirror.decision d ON d.id = k.decision_id
+     WHERE k.key = ANY($1::text[]) AND ($2::text[] IS NULL OR d.source = ANY($2))
+     ORDER BY decided_on DESC NULLS LAST, d.id DESC
+     LIMIT ${BY_CASE_MAX}`,
+    [keys, sources?.length ? sources : null],
+  );
+  return found.rows.map(linked);
 }

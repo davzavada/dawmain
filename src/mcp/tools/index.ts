@@ -8,6 +8,7 @@ import { registerNs } from "./ns";
 import { registerNalus } from "./nalus";
 import { registerNss } from "./nss";
 import { registerCzCaselaw } from "./cz-caselaw";
+import { registerCitations } from "./citations";
 import { registerCuria } from "./curia";
 import { registerEurlex } from "./eurlex";
 import { registerPsp } from "./psp";
@@ -21,6 +22,7 @@ import { registerZotero } from "./zotero";
 import { zoteroConfigured } from "@/src/zotero/config";
 import { withGuideHint } from "../guide-hint";
 import { trackToolCall } from "../usage";
+import { admitToolCall, dailyLimitRefusal } from "../daily-limit";
 import { mirrorConfigured } from "@/src/sources/mirror";
 import { callerFromCtx } from "../caller";
 import { MIRROR_TOOLS, type MirrorAnswer } from "./mirror-route";
@@ -38,6 +40,11 @@ import { MIRROR_TOOLS, type MirrorAnswer } from "./mirror-route";
  * for both used to sit here dormant; they were unreachable code aging against
  * sites nobody was checking, so they went. Git history has them if either
  * source ever opens up, but by then they would want rewriting anyway.
+ * InfoSoud (infosoud.gov.cz, the course of proceedings and právní moc) is
+ * left out for the same reason: it answers an ordinary form query with
+ * "Požadavek nebude zpracován. Vypadá jako odeslán robotem." (live 2026-11-20)
+ * — the site refuses automated requests and nothing here works around that;
+ * the skill sends the user there to check by hand.
  */
 const registrars: Array<(server: McpServer) => void> = [
   registerPing,
@@ -48,6 +55,7 @@ const registrars: Array<(server: McpServer) => void> = [
   registerNalus,
   registerNss,
   registerCzCaselaw,
+  registerCitations,
   registerJustice,
   registerCuria,
   registerEurlex,
@@ -164,7 +172,10 @@ function textOnly(server: McpServer): McpServer {
         name,
         rest,
         async (...args: unknown[]) => {
-          // args[1] is the request ctx (the caller's identity); counted once per call, whatever the outcome.
+          // args[1] is the request ctx (the caller's identity). An account over its daily limit is
+          // answered here, before anything upstream is asked (src/mcp/daily-limit.ts) — not counted.
+          if (!(await admitToolCall(name, args[1]))) return dailyLimitRefusal();
+          // Counted once per call that runs, whatever its outcome.
           void trackToolCall(name, args[1]);
           const { structuredContent: _dropped, ...result } = await withinBudget(name, () => routed(name, handler, args));
           return result;

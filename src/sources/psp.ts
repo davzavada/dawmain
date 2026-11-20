@@ -160,7 +160,11 @@ export function buildSearchUrl(input: PspSearchInput): string {
   params.set("tqb1", "2");
   params.set("utq", "2");
   params.set("o", String(input.period));
-  params.set("na", input.query?.trim() ?? "");
+  // psp.cz reads the query string as Windows-1250; URLSearchParams writes
+  // UTF-8, so "zákoník" arrived as mojibake and matched nothing (live
+  // 2026-11-20). The title filter ignores diacritics, so the query goes
+  // without them: "zakonik" finds "Novela z. - trestní zákoník".
+  params.set("na", (input.query?.trim() ?? "").normalize("NFD").replace(/\p{M}+/gu, ""));
   params.set("tqb25", input.number !== undefined ? String(input.number) : "");
   params.set("tqb26", input.part !== undefined ? String(input.part) : "");
   const types = input.types?.length ? input.types : (Object.keys(PSP_TYPES) as PspType[]);
