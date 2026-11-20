@@ -227,6 +227,36 @@ export async function getMirrorDecision(source: MirrorCourt, id: string): Promis
   return { ...meta, text: [firstPage.text, ...rest.map((page) => page?.text?.text ?? "")].join("") };
 }
 
+/** One decision as the links name it (GET /v1/decisions/:source/:id/citations). */
+export interface MirrorLinkedDecision {
+  source: MirrorCourt;
+  id: string;
+  caseNumber: string | null;
+  court: string | null;
+  form: string | null;
+  date: string | null;
+}
+
+export interface MirrorCitations {
+  /** What the decision cites: each cited sp. zn. / ECLI with the mirrored decisions carrying it (none = a court the mirror does not hold). */
+  cites: Array<{ key: string; display: string; mentions: number; firstAt: number; decisions: MirrorLinkedDecision[] }>;
+  /** Who cites it, newest first; `total` counts all, `hits` is the page asked for. */
+  citedBy: { total: number; hits: Array<MirrorLinkedDecision & { mentions: number }> };
+}
+
+/** The citation links of one decision; null = the mirror does not hold it. */
+export async function getMirrorCitations(
+  source: MirrorCourt,
+  id: string,
+  options: { limit?: number; offset?: number; citedBySources?: MirrorCourt[] } = {},
+): Promise<MirrorCitations | null> {
+  const qs = new URLSearchParams();
+  qs.set("limit", String(Math.min(100, Math.max(1, options.limit ?? 20))));
+  if (options.offset) qs.set("offset", String(Math.max(0, options.offset)));
+  for (const court of options.citedBySources ?? []) qs.append("source", court);
+  return getJson<MirrorCitations>(`/v1/decisions/${source}/${encodeURIComponent(id)}/citations?${qs}`, READ_TIMEOUT_MS);
+}
+
 export interface MirrorStatusJson {
   asOf: string;
   sources?: Array<{

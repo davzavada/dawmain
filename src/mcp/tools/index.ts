@@ -8,6 +8,7 @@ import { registerNs } from "./ns";
 import { registerNalus } from "./nalus";
 import { registerNss } from "./nss";
 import { registerCzCaselaw } from "./cz-caselaw";
+import { registerCitations } from "./citations";
 import { registerCuria } from "./curia";
 import { registerEurlex } from "./eurlex";
 import { registerPsp } from "./psp";
@@ -38,6 +39,11 @@ import { MIRROR_TOOLS, type MirrorAnswer } from "./mirror-route";
  * for both used to sit here dormant; they were unreachable code aging against
  * sites nobody was checking, so they went. Git history has them if either
  * source ever opens up, but by then they would want rewriting anyway.
+ * InfoSoud (infosoud.gov.cz, the course of proceedings and právní moc) is
+ * left out for the same reason: it answers an ordinary form query with
+ * "Požadavek nebude zpracován. Vypadá jako odeslán robotem." (live 2026-11-20)
+ * — the site refuses automated requests and nothing here works around that;
+ * the skill sends the user there to check by hand.
  */
 const registrars: Array<(server: McpServer) => void> = [
   registerPing,
@@ -48,6 +54,7 @@ const registrars: Array<(server: McpServer) => void> = [
   registerNalus,
   registerNss,
   registerCzCaselaw,
+  registerCitations,
   registerJustice,
   registerCuria,
   registerEurlex,
