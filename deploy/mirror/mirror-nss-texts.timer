@@ -1,0 +1,11 @@
+# 13:30 local time, every day — see mirror-nss-texts.service. Not Persistent:
+# a missed day is simply the next day's batch.
+[Unit]
+Description=Dawmain mirror: NSS texts at 13:30
+
+[Timer]
+OnCalendar=*-*-* 13:30:00
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target
