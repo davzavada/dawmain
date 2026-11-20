@@ -9,6 +9,7 @@ import {
   type MirrorSearchParams,
 } from "@/src/sources/mirror";
 import { continuationHint, dateRangeError } from "./shared";
+import { DEFAULT_WINDOW_YEARS } from "./justice";
 
 /**
  * The case-law tools answered from the home mirror instead of the courts —
@@ -104,8 +105,12 @@ async function searchVariants(
   const perVariant: Array<number | null> = [];
   settled.forEach((result, i) => {
     if (result.status === "fulfilled") {
-      lists.push(result.value.hits);
-      perVariant.push(result.value.hits.length);
+      // The courts require every word; the mirror falls back to ANY word when
+      // no decision has them all (channel "or") — results the live tool
+      // would not return, so they are not shown either.
+      const hits = result.value.channel === "or" ? [] : result.value.hits;
+      lists.push(hits);
+      perVariant.push(hits.length);
     } else {
       perVariant.push(null);
       const reason = result.reason instanceof SourceError ? result.reason.message : String(result.reason);
@@ -142,6 +147,8 @@ async function caselawSearch(args: Args): Promise<MirrorAnswer> {
           from,
           to,
           regional: lane === "nss" && args.include_regional === true,
+          // NSS lists newest first live (no relevance there); NS and ÚS rank by their own relevance.
+          ...(lane === "nss" ? { sort: "newest" as const } : {}),
           limit,
         });
         return { lane, ok: true as const, ...run, hits: run.hits.slice(0, limit) };
@@ -186,6 +193,14 @@ interface CourtSearchSpec {
   /** Extra mirror parameters from the call; a string = fall back with that reason. */
   extra?: (args: Args) => Partial<MirrorSearchParams> | string;
   limit: (args: Args) => number;
+  /** Re-sort the hits by this date, newest first (the mirror orders by decision date only). */
+  resort?: (args: Args) => "published" | null;
+}
+
+function yearsAgo(years: number, today = new Date()): string {
+  const d = new Date(today);
+  d.setUTCFullYear(d.getUTCFullYear() - years);
+  return d.toISOString().slice(0, 10);
 }
 
 const COMMON = ["query", "queries", "case_number", "date_from", "date_to", "read_top", "limit"];
@@ -215,7 +230,8 @@ const COURT_SEARCH: Record<string, CourtSearchSpec> = {
       const court = args.court;
       // rozšířený senát, krajské and kárné soudy are lanes of their own live;
       // the mirror only knows NSS alone or NSS + the regional courts.
-      if (court === undefined || court === "nss") return {};
+      // Newest first, as NSS lists its results.
+      if (court === undefined || court === "nss") return { sort: "newest" };
       return `the mirror has no "court: ${String(court)}" filter`;
     },
     limit: () => 20,
@@ -245,9 +261,13 @@ const COURT_SEARCH: Record<string, CourtSearchSpec> = {
     handled: [...COMMON, "page", "sort"],
     defaults: { match: "all_words" },
     laterPage: (args) => num(args.page, 0) > 0,
-    extra: (args) =>
-      // Without words the live tool lists the newest; the mirror sorts by decision date.
-      ({ sort: str(args.query) ? ("relevance" as const) : ("newest" as const) }),
+    extra: (args) => ({
+      // Newest first, as rozhodnuti.justice.cz lists (by publication by default — re-sorted in courtSearch).
+      sort: "newest" as const,
+      // Without any date or sp. zn. the live tool searches the last DEFAULT_WINDOW_YEARS years.
+      ...(!str(args.date_from) && !str(args.date_to) && !str(args.case_number) ? { from: yearsAgo(DEFAULT_WINDOW_YEARS) } : {}),
+    }),
+    resort: (args) => (args.sort === "decided" ? null : "published"),
     limit: (args) => num(args.limit, 20),
   },
 };
@@ -266,6 +286,7 @@ async function courtSearch(name: string, args: Args): Promise<MirrorAnswer> {
   const to = str(args.date_to);
   if (dateRangeError(from, to)) return { fallback: "inverted date range" };
   const limit = Math.min(50, Math.max(1, spec.limit(args)));
+  const resort = spec.resort?.(args) ?? null;
   let run;
   try {
     run = await searchVariants(variants, {
@@ -273,19 +294,25 @@ async function courtSearch(name: string, args: Args): Promise<MirrorAnswer> {
       ...(caseNumber ? { caseNumber } : {}),
       from,
       to,
-      limit,
+      // Re-sorting by publication date needs a wider pool than the page: the
+      // newest by decision date are, give or take the publication lag, the
+      // newest published.
+      limit: resort ? 50 : limit,
       ...extra,
     });
   } catch (error) {
     return { fallback: `the mirror did not answer (${error instanceof Error ? error.message : String(error)})` };
   }
-  const hits = run.hits.slice(0, limit);
+  const ordered = resort
+    ? [...run.hits].sort((a, b) => (b.published ?? "").localeCompare(a.published ?? "") || (b.date ?? "").localeCompare(a.date ?? ""))
+    : run.hits;
+  const hits = ordered.slice(0, limit);
   const readTop = Math.min(3, Math.max(0, num(args.read_top, 0)));
   return text([
     MIRROR_NOTE,
     `${spec.court.toUpperCase()} in the mirror: ${hits.length} hit${hits.length === 1 ? "" : "s"} shown${
       variants.length > 1 ? ` (per variant: ${run.perVariant.map((n) => (n === null ? "✗" : String(n))).join(" · ")})` : ""
-    }${run.failures.length ? ` ⚠ ${run.failures.join("; ")}` : ""}. The mirror returns the best ${limit} — narrow the query rather than paging.`,
+    }${run.failures.length ? ` ⚠ ${run.failures.join("; ")}` : ""}. The mirror returns the first ${limit} — narrow the query rather than paging.`,
     "",
     ...(hits.length ? hits.map((hit, i) => hitLine(hit, i, false)) : ["No hits in the mirror — broaden the query or add variants."]),
     ...previewLines(hits, readTop, false),
