@@ -100,9 +100,10 @@ Návrat: `pct rollback 101 pre-<migrace>` (zahodí vše zapsané po snapshotu).
   takže se projeví i opravy u zdroje (běh `sync`). Každý běh je řádek
   `sync_run`; `mirror status` ukazuje poslední.
 - NSS se synchronizuje až po doběhnutí backfillu (sdílí s ním limit NSS).
-- `mirror-nss-texts.timer` → `mirror-nss-texts.service` denně ve 13:30: opakuje
-  frontu NSS přes den (500 rozhodnutí na běh). Noční běh dostává od NSS u části
-  dokumentů prázdnou stránku „N/A“, přes den je soud vrací (zjištěno 20. 11. 2026).
+- `mirror-nss-texts.timer` → `mirror-nss-texts.service` denně ve 13:30: druhý
+  průchod frontou NSS (500 rozhodnutí na běh), aby se nedodané texty doplnily
+  dvakrát rychleji. NSS při backfillu a začátkem listopadu 2026 vracel u tisíců
+  dokumentů (hlavně 2015–2016) prázdnou stránku „N/A“; teď je vrací.
 - Ručně: `npx tsx scripts/mirror.ts sync [--source us] [--days 7] [--no-retry]`.
 
 ### Databáze `files` (Vlastní zdroje)
@@ -177,6 +178,14 @@ neprivilegovaný, `nesting=1`, start po bootu, Node 22 (NodeSource),
   rozhraní. V kontejnerech `/etc/nftables.conf` zahazuje nová příchozí IPv6
   spojení mimo linku (LAN rozhraní má veřejnou IPv6 adresu) a běží
   `unattended-upgrades`.
+- **Start po restartu** (20. 11. 2026): Postgres v CT `pg` čeká na vnitřní
+  adresu (`/etc/systemd/system/postgresql@.service.d/wait-for-address.conf`,
+  skript `/usr/local/sbin/wait-for-pg-address`). Bez toho po restartu hostitele
+  nastartoval dřív, než `eth1` dostal `10.10.10.2`, poslouchal jen na localhostu
+  a web i zrcadlo dostávaly ECONNREFUSED.
+- **Balíčky hostitele**: repozitář `pve-no-subscription`
+  (`/etc/apt/sources.list.d/proxmox.sources`); enterprise repozitáře vypnuté
+  (`Enabled: false`), původní soubory v `/root/*.bak-2026-11-20`.
 - **Tunel**: v `/etc/cloudflared/config.yml` na `app` míří `dawmain.davidzavada.cz`
   a `dawmain-novy.davidzavada.cz` na `http://10.10.10.4:3000` (záloha
   `config.yml.bak-2026-11-16`). Obě jména bez Cloudflare Access. WAF pravidlo
