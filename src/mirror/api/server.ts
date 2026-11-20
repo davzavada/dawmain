@@ -41,6 +41,7 @@ import {
  *   GET /v1/search?q=&source=&court=&type=&category=&from=&to=&case=&limit=   (category: NS A–E, "A,B"; source: "ns,nss")
  *                  &sort=relevance|newest &regional=1 (NSS with the regional courts) &per_source=N (one lane per court)
  *                  &in=vyrok (the words in výroky only)
+ *                  &court_code=KSBR,KSBRJI (rozhodnuti.justice.cz court codes, any of them; with source=justice only)
  *   GET /v1/decisions/:source/:id[?page=N | ?format=html | ?format=original]   original: with the court's formatting (decision_raw)
  *   GET /v1/decisions/:source/:id/images/:ord
  *   GET /v1/decisions/:source/:id/provisions        the § / články it cites
@@ -83,6 +84,20 @@ function categories(value: string | undefined): string[] | undefined {
   if (!list.every((c) => /^[A-E]$/.test(c)))
     throw new BadRequest("category must be A–E, several as A,B");
   return list;
+}
+
+/** Court codes of rozhodnuti.justice.cz ("KSBR,KSBRJI", or repeated), compared with the ECLI's court part. */
+function courtCodes(values: string[] | undefined, courts: MirrorSource[] | undefined): string[] | undefined {
+  const list = (values ?? [])
+    .flatMap((v) => v.split(","))
+    .map((v) => v.trim().toUpperCase())
+    .filter(Boolean);
+  if (!list.length) return undefined;
+  if (!list.every((c) => /^[A-Z][A-Z0-9]{1,9}$/.test(c)) || list.length > 150)
+    throw new BadRequest("court_code must be court codes such as KSBR, several as KSBR,KSBRJI");
+  if (courts?.length !== 1 || courts[0] !== "justice")
+    throw new BadRequest("court_code needs source=justice");
+  return [...new Set(list)];
 }
 
 /** One court or several ("ns,nss", or source repeated); none = all. */
@@ -237,6 +252,7 @@ export function createMirrorApi(options: {
       q: q.q?.slice(0, 1000),
       sources: courts,
       court: q.court || undefined,
+      courtCodes: courtCodes(c.req.queries("court_code"), courts),
       type: (q.type || undefined) as DecisionType | undefined,
       from: date(q.from, "from"),
       to: date(q.to, "to"),

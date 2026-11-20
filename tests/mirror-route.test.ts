@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MIRROR_TOOLS } from "@/src/mcp/tools/mirror-route";
+import { JUSTICE_COURT_CODES } from "@/src/sources/justice";
 import { markedExcerpt, mirrorConfig, resetMirrorBreaker, searchMirror } from "@/src/sources/mirror";
 
 const HIT = {
@@ -82,6 +83,36 @@ describe("mirror routing", () => {
     expect(await MIRROR_TOOLS.us_search({ query: "x", judge: "Šimíček" })).toEqual({ fallback: 'the mirror has no "judge" filter' });
     expect(await MIRROR_TOOLS.justice_search({ query: "x", match: "phrase" })).toHaveProperty("fallback");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("justice_search: court_codes go to the mirror, with the other filters", async () => {
+    fetchMock.mockImplementation(async () => json({ hits: [{ ...HIT, source: "justice", id: "d2965a2d-ec0d-476b-983f-75e716972829", court: "Krajský soud v Brně" }], channel: "and", terms: [] }));
+    const out = textOf(
+      await MIRROR_TOOLS.justice_search({ query: "sazebník", match: "all_words", court_codes: ["ksbr", "KSBRJI", "KSBR"], case_number: "8 Co 60/2025", date_from: "2025-01-01", date_to: "2025-06-30", page: 0 }),
+    );
+    expect(out).toContain("justice_get_decision uuid: d2965a2d-ec0d-476b-983f-75e716972829");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const qs = new URL(fetchMock.mock.calls[0][0] as string).searchParams;
+    expect(qs.get("court_code")).toBe("KSBR,KSBRJI");
+    expect(qs.getAll("source")).toEqual(["justice"]);
+    expect(qs.get("q")).toBe("sazebník");
+    expect(qs.get("case")).toBe("8 Co 60/2025");
+    expect(qs.get("from")).toBe("2025-01-01");
+    expect(qs.get("to")).toBe("2025-06-30");
+    // No codes, no parameter.
+    await MIRROR_TOOLS.justice_search({ query: "sazebník", court_codes: [] });
+    expect(new URL(fetchMock.mock.calls[1][0] as string).searchParams.has("court_code")).toBe(false);
+  });
+
+  it("justice_search: an unknown court code answers with the whole list, as live — no request, no fallback", async () => {
+    const answer = (await MIRROR_TOOLS.justice_search({ query: "sazebník", court_codes: ["KSBR", "KSBRNO"] })) as { isError?: boolean; content: Array<{ text: string }> };
+    expect(answer).not.toHaveProperty("fallback");
+    expect(answer.isError).toBe(true);
+    expect(answer.content[0].text).toContain('"KSBRNO" is not a justice.cz court code.');
+    expect(answer.content[0].text).toContain(`Valid codes: ${JUSTICE_COURT_CODES.join(", ")}.`);
+    expect(fetchMock).not.toHaveBeenCalled();
+    // Filters the mirror lacks still go live, where the same check runs.
+    expect(await MIRROR_TOOLS.justice_search({ query: "x", court_codes: ["KSBR"], applies_act: "89/2012" })).toEqual({ fallback: 'the mirror has no "applies_act" filter' });
   });
 
   it("schema defaults do not count as filters", async () => {
