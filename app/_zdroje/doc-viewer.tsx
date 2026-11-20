@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { sanitizeRendered } from "./sanitize-rendered";
 import type { DocumentDetail, DocumentListItem } from "@/src/files/web-types";
 import { api } from "./api";
 import { docHtmlToReact } from "./doc-preview";
@@ -427,7 +428,7 @@ function DocxPages({
           experimental: false,
         });
         if (cancelled) return;
-        el.querySelectorAll("script, iframe, object, embed").forEach((n) => n.remove());
+        sanitizeRendered(el, css);
         el.querySelectorAll("a").forEach((a) => {
           const href = a.getAttribute("href")?.trim() ?? "";
           if (/^(https?:|mailto:)/i.test(href)) {
