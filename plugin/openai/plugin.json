@@ -1,0 +1,95 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "dawmain",
+  "version": "1.0.0",
+  "description": "Czech and EU legal research with live queries into the official databases.",
+  "author": { "name": "David Závada", "url": "https://dawmain.davidzavada.cz" },
+  "homepage": "https://dawmain.davidzavada.cz",
+  "repository": "https://github.com/davzavada/dawmain",
+  "license": "MIT",
+  "keywords": ["law", "legal research", "czech", "eu", "judikatura"],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Dawmain",
+        "shortDescription": "Rešerše českého a EU práva",
+        "longDescription": "Dawmain je nekomerční nástroj pro rešerši českého a unijního práva. V oficiálních databázích hledá živě a nic z nich nekopíruje: e-Sbírka (předpisy v aktuálním i historickém znění), sněmovní tisky s důvodovou zprávou, Nejvyšší soud, Nejvyšší správní soud, Ústavní soud (NALUS), obecné soudy, Soudní dvůr EU (InfoCuria), EUR-Lex a katalog UKAŽ Univerzity Karlovy pro odbornou literaturu. Každý výsledek nese veřejný odkaz na oficiální zdroj, takže odpověď jde ověřit a citovat.\n\nAsistent si na začátku rešerše vyžádá aktuální rešeršní návod (dawmain_guide), položí dotazy jazykem soudů, přečte rozhodnutí, na která se spoléhá, celá, a napíše memo – otázka, odpověď, argumentace – s citací každého pramene v textu.\n\nPřihlášení stačí e-mailem. Režim Pro (zdarma, v testovacím provozu) přidává hledání ve vlastních nahraných dokumentech a v knihovně Zotero.",
+        "developerName": "David Závada",
+        "category": "Research",
+        "capabilities": [],
+        "websiteURL": "https://dawmain.davidzavada.cz",
+        "supportURL": "https://dawmain.davidzavada.cz/#pripojeni",
+        "privacyPolicyURL": "https://dawmain.davidzavada.cz/soukromi",
+        "termsOfServiceURL": "https://dawmain.davidzavada.cz/podminky",
+        "defaultPrompt": [
+          "Najdi judikaturu NS k § 2913 občanského zákoníku",
+          "Je platná smlouva podepsaná jen elektronicky?",
+          "Co říká důvodová zpráva k zákoníku práce o home office?"
+        ],
+        "brandColor": "#241A49",
+        "brandColorDark": "#FFB547",
+        "logo": "./assets/logo.png"
+      },
+      "onboardingSkill": "./skills/dawmain-reserse/SKILL.md",
+      "review": {
+        "commerce": false,
+        "demo_recording_url": "__DEMO_RECORDING_URL__",
+        "test_cases": {
+          "positive": [
+            {
+              "description": "Supreme Court case law on a provision of the Civil Code",
+              "prompt": "Najdi rozhodnutí Nejvyššího soudu k odpovědnosti za škodu z provozu dopravního prostředku podle § 2927 občanského zákoníku.",
+              "tools_triggered": ["dawmain_guide", "ns_search", "ns_get_decision"],
+              "expected_behavior": "Calls dawmain_guide, searches NS decisions, reads at least one decision and answers in Czech citing each decision by its spisová značka with a link to rozhodnuti.nsoud.cz."
+            },
+            {
+              "description": "Current wording of a statutory provision",
+              "prompt": "Jak aktuálně zní § 52 zákoníku práce (zákon č. 262/2006 Sb.)?",
+              "tools_triggered": ["esbirka_search", "esbirka_get_text"],
+              "expected_behavior": "Finds act 262/2006 Sb. in e-Sbírka, returns the current wording of § 52 and links to e-sbirka.cz."
+            },
+            {
+              "description": "Constitutional Court case law",
+              "prompt": "Jak Ústavní soud posuzuje právo na spravedlivý proces při nepřipuštění dovolání? Najdi nálezy.",
+              "tools_triggered": ["dawmain_guide", "us_search", "us_get_decision"],
+              "expected_behavior": "Searches NALUS, reads relevant nálezy and summarises the court's view, citing sp. zn. with links to nalus.usoud.cz."
+            },
+            {
+              "description": "EU law and CJEU case law",
+              "prompt": "Najdi rozsudky Soudního dvora EU k pojmu správce osobních údajů podle čl. 4 bodu 7 GDPR.",
+              "tools_triggered": ["dawmain_guide", "sdeu_search", "sdeu_get_document"],
+              "expected_behavior": "Searches InfoCuria/EUR-Lex, returns CJEU judgments with case numbers and ECLI and links to the official text."
+            },
+            {
+              "description": "Legislative history of a Czech act",
+              "prompt": "Co říká důvodová zpráva k novele, která do zákoníku práce zavedla práci na dálku v roce 2023?",
+              "tools_triggered": ["psp_search", "psp_get_tisk", "psp_get_text"],
+              "expected_behavior": "Finds the sněmovní tisk of the 2023 amendment on psp.cz, reads the explanatory report and summarises it with a link."
+            }
+          ],
+          "negative": [
+            {
+              "description": "General non-legal question",
+              "prompt": "Napiš mi recept na svíčkovou.",
+              "expected_behavior": "The plugin is not used; the assistant answers without calling any Dawmain tool."
+            },
+            {
+              "description": "Law of an unsupported jurisdiction",
+              "prompt": "What does the German Civil Code (BGB) say about rescission for mistake?",
+              "expected_behavior": "No Dawmain tool is called, or the assistant explains that Dawmain covers Czech, Slovak and EU law only."
+            },
+            {
+              "description": "Programming question",
+              "prompt": "How do I reverse a list in Python?",
+              "expected_behavior": "The plugin is not used."
+            }
+          ]
+        }
+      },
+      "publication": {
+        "countries": [],
+        "release_notes": "First public release."
+      }
+    }
+  }
+}
