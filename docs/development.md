@@ -479,6 +479,7 @@ co čeká. Už aplikovaný soubor se nemění — oprava = nový soubor.
 | `0006_always_enabled.sql` | přepínač zapnuto/vypnuto u dokumentu zmizel z webu i API: zapne zpět všechny dříve vypnuté dokumenty (sloupec `enabled` zůstává) |
 | `0007_drop_ai_usage.sql` | odstraní sloupce `usage_daily.ai_calls` a `ai_microusd`, zbylé po zrušeném AI návrhu metadat |
 | `0008_originals_folders.sql` | původní soubory (`doc_originals` po částech, `documents.original_status`), složky (`folders`, `documents.folder_id`), RLS a granty pro obě nové tabulky, `files_library_bytes()` pro Správu |
+| `0009_upstream_daily.sql` | `upstream_daily`: jak odpovídaly živé zdroje (počty podle výsledku, odezva, fronta) po dnech a zdrojích, pro Správa → Systém; grant pro `dawmain_app` |
 
 **Tahle verze potřebuje `0003` až `0006`** — pusť `--dry-run`, pak
 migraci, a teprve potom nasazuj. `0003`–`0005` přidávají jen sloupce `IF NOT

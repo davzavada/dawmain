@@ -1,10 +1,14 @@
 import { SourceError, asSourceError } from "./errors";
 import { recordSourceResult } from "./health";
+import { acquireSlot, outcomeOfError, outcomeOfStatus, recordUpstream } from "./limits";
 
 /**
  * All upstream I/O goes through here: per-request timeout, a browser-like UA
  * (several court sites reject the default undici UA), and one bounded retry
- * for transient failures. Sources add their own headers on top.
+ * for transient failures. Sources add their own headers on top. Each request
+ * (a retry too) first takes a slot of its source's concurrency limit and is
+ * counted for the measurements (./limits.ts); the slot is held until the
+ * response headers arrive, not across the pause before a retry.
  */
 
 export const USER_AGENT =
@@ -47,14 +51,27 @@ export async function fetchUpstream(
   const retry = options.retry ?? method === "GET";
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
-  const attempt = async (): Promise<Response> =>
-    fetch(url, {
-      method,
-      headers: { "user-agent": USER_AGENT, ...options.headers },
-      body: options.body,
-      redirect: options.redirect ?? "follow",
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+  const attempt = async (): Promise<Response> => {
+    // Throws a SourceError ("busy") when the queue does not move: rethrown below as is, never retried.
+    const release = await acquireSlot(source);
+    const started = performance.now();
+    try {
+      const response = await fetch(url, {
+        method,
+        headers: { "user-agent": USER_AGENT, ...options.headers },
+        body: options.body,
+        redirect: options.redirect ?? "follow",
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      recordUpstream(source, outcomeOfStatus(response.status), performance.now() - started);
+      return response;
+    } catch (error) {
+      recordUpstream(source, outcomeOfError(error), performance.now() - started);
+      throw error;
+    } finally {
+      release();
+    }
+  };
 
   let response: Response;
   // One retry in total: a network failure followed by a 429/5xx must not
@@ -63,6 +80,8 @@ export async function fetchUpstream(
   try {
     response = await attempt();
   } catch (error) {
+    // Busy here, not down there: no retry (it would wait the queue out again) and no outage recorded.
+    if (error instanceof SourceError) throw error;
     if (!retry) {
       recordSourceResult(source, false, errorLabel(error));
       throw asSourceError(source, error);
@@ -72,6 +91,7 @@ export async function fetchUpstream(
     try {
       response = await attempt();
     } catch (secondError) {
+      if (secondError instanceof SourceError) throw secondError;
       recordSourceResult(source, false, errorLabel(secondError));
       throw asSourceError(source, secondError);
     }
@@ -90,6 +110,7 @@ export async function fetchUpstream(
     try {
       response = await attempt();
     } catch (error) {
+      if (error instanceof SourceError) throw error;
       recordSourceResult(source, false, errorLabel(error));
       throw asSourceError(source, error);
     }
