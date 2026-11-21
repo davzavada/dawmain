@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireAdmin } from "@/src/admin/server";
-import { systemSnapshot, type SystemSnapshot } from "@/src/admin/system";
+import { UPSTREAM_DAYS, systemSnapshot, type SystemSnapshot, type UpstreamRow } from "@/src/admin/system";
 import { loadDailyLimit, type LoadedDailyLimit } from "@/src/admin/daily-limit";
 import { DEFAULT_DAILY_CALL_LIMIT } from "@/src/mcp/daily-limit";
 import { formatCount, plural } from "../../_zdroje/format";
@@ -207,6 +207,8 @@ function System({ data }: { data: SystemSnapshot }) {
         )}
       </section>
 
+      <Upstream rows={data.upstream} />
+
       <section className="adm-panel" aria-label="Pravidelné úlohy">
         <div className="adm-panel-head">
           <h2>Pravidelné úlohy</h2>
@@ -253,6 +255,80 @@ function System({ data }: { data: SystemSnapshot }) {
         </div>
       </section>
     </>
+  );
+}
+
+function ms(n: number | null): string {
+  if (n === null) return "—";
+  return n >= 1000 ? `${(n / 1000).toFixed(1).replace(".", ",")} s` : `${formatCount(n)} ms`;
+}
+
+/** How the live sources answered: the numbers to tune the per-source limits (src/sources/shared/limits.ts) by. */
+function Upstream({ rows }: { rows: UpstreamRow[] | null }) {
+  return (
+    <section className="adm-panel" aria-label="Živé zdroje">
+      <div className="adm-panel-head">
+        <h2>Živé zdroje</h2>
+        <span className="adm-count">posledních {UPSTREAM_DAYS} dní</span>
+      </div>
+      {rows === null ? (
+        <p className="adm-empty">Databáze Vlastních souborů není dostupná, statistiky se nedají načíst.</p>
+      ) : rows.length === 0 ? (
+        <p className="adm-empty">Zatím žádné dotazy na živé zdroje (zapisuje se jednou za minutu).</p>
+      ) : (
+        <div className="adm-table-wrap">
+          <table className="adm-table adm-table-static">
+            <thead>
+              <tr>
+                <th>Zdroj</th>
+                <th className="r" title="Kolik dotazů na zdroj smí být otevřených najednou">Limit</th>
+                <th className="r" title="Nejvíc dotazů otevřených najednou">Max. souběžně</th>
+                <th className="r">Dotazů</th>
+                <th className="r" title="Zdroj nás odmítl: HTTP 429 (příliš mnoho dotazů) a 403 (zakázáno)">429 / 403</th>
+                <th className="r" title="HTTP 5xx, vypršený čas, chyba spojení">5xx · čas · síť</th>
+                <th className="r" title="Průměrná odezva; 95 % dotazů doběhlo pod hranici">Průměr / p95</th>
+                <th className="r" title="Dotazy, které čekaly na volný slot, a průměrné čekání">Ve frontě</th>
+                <th className="r" title="Fronta se nepohnula 20 s, dotaz jsme vůbec neposlali">Odmítnuto námi</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => {
+                const refused = r.http429 + r.http403;
+                return (
+                  <tr key={r.source}>
+                    <td>
+                      {r.source}
+                      {r.lastRefusalDay ? <span className="zd-error"> · naposledy odmítl {day(r.lastRefusalDay)}</span> : null}
+                    </td>
+                    <td className="r adm-mono">{r.limit ?? "—"}</td>
+                    <td className="r adm-mono">{formatCount(r.maxInflight)}</td>
+                    <td className="r adm-mono">{formatCount(r.requests)}</td>
+                    <td className={`r adm-mono${refused ? " zd-error" : ""}`}>
+                      {formatCount(r.http429)} / {formatCount(r.http403)}
+                    </td>
+                    <td className="r adm-mono">
+                      {formatCount(r.http5xx)} · {formatCount(r.timeouts)} · {formatCount(r.network)}
+                    </td>
+                    <td className="r adm-mono">
+                      {ms(r.avgMs)} / {r.p95UnderMs === null ? (r.requests ? "> 10 s" : "—") : `< ${ms(r.p95UnderMs)}`}
+                    </td>
+                    <td className="r adm-mono">
+                      {formatCount(r.queued)}
+                      {r.queued ? <span className="adm-dim"> · {ms(r.avgQueueMs)}</span> : null}
+                    </td>
+                    <td className={`r adm-mono${r.busy ? " zd-error" : ""}`}>{formatCount(r.busy)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="muted" style={{ margin: "12px 0 0", fontSize: 13 }}>
+        Jen počty ze skutečného provozu, žádné dotazy navíc. Limity zatím nejsou nastavené, jen se měří: „Max. souběžně“ ukazuje, kolik dotazů
+        zdroj dostal najednou, a 429 / 403, jestli se někdy bránil. Limit by se nastavil v kódu (<code>src/sources/shared/limits.ts</code>).
+      </p>
+    </section>
   );
 }
 

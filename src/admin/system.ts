@@ -3,10 +3,12 @@ import { statfs } from "node:fs/promises";
 import os from "node:os";
 import { withScope } from "@/src/files/db/client";
 import { listAllLibraries } from "@/src/files/db/libraries";
+import { upstreamSummary, type UpstreamSummary } from "@/src/files/db/upstream";
 import { dbUsage, getSystemState } from "@/src/files/db/usage";
 import { GUARDS_STATE_KEY } from "@/src/files/guards";
 import { appEnvironment, appRegion, gitCommit } from "@/src/runtime";
 import { mirrorApiStatus, mirrorConfigured, type MirrorStatusJson } from "@/src/sources/mirror";
+import { concurrencyLimit } from "@/src/sources/shared/limits";
 
 /**
  * What the Systém tab of the admin area shows (app/sprava/system/page.tsx):
@@ -58,6 +60,15 @@ export interface SystemSnapshot {
   disk: DiskInfo | null;
   files: FilesDbInfo | null;
   mirror: MirrorInfo;
+  /** How the live sources answered over the last UPSTREAM_DAYS days; null when the files database is not there. */
+  upstream: UpstreamRow[] | null;
+}
+
+export const UPSTREAM_DAYS = 7;
+
+export interface UpstreamRow extends UpstreamSummary {
+  /** The concurrency limit this process applies to the source (undefined = none). */
+  limit: number | undefined;
 }
 
 function serverInfo(now: Date): ServerInfo {
@@ -105,6 +116,15 @@ async function filesInfo(): Promise<FilesDbInfo | null> {
   }
 }
 
+async function upstreamInfo(): Promise<UpstreamRow[] | null> {
+  try {
+    const rows = await withScope([], (db) => upstreamSummary(db, UPSTREAM_DAYS));
+    return rows.map((r) => ({ ...r, limit: concurrencyLimit(r.source) }));
+  } catch {
+    return null;
+  }
+}
+
 async function mirrorInfo(): Promise<MirrorInfo> {
   if (!mirrorConfigured()) return { configured: false, status: null, problem: "Na tomto nasazení chybí MIRROR_API_URL / MIRROR_API_TOKEN." };
   try {
@@ -116,6 +136,6 @@ async function mirrorInfo(): Promise<MirrorInfo> {
 }
 
 export async function systemSnapshot(now = new Date()): Promise<SystemSnapshot> {
-  const [disk, files, mirror] = await Promise.all([diskInfo(), filesInfo(), mirrorInfo()]);
-  return { server: serverInfo(now), disk, files, mirror };
+  const [disk, files, mirror, upstream] = await Promise.all([diskInfo(), filesInfo(), mirrorInfo(), upstreamInfo()]);
+  return { server: serverInfo(now), disk, files, mirror, upstream };
 }

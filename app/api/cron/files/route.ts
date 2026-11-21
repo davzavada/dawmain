@@ -22,6 +22,7 @@ import {
   recountLibraries,
   setSystemState,
 } from "@/src/files/db/usage";
+import { pruneUpstream } from "@/src/files/db/upstream";
 import { errorCode, filesJson } from "@/src/files/errors";
 import { effectiveMode, GUARDS_STATE_KEY, measureGuards } from "@/src/files/guards";
 import { ingestDocument } from "@/src/files/ingest";
@@ -310,7 +311,7 @@ async function runMaintenance(started: number): Promise<Summary> {
       [],
       async (db) => {
         const pruned = await pruneUsage(db);
-        summary.usagePruned = pruned.usage + pruned.activity;
+        summary.usagePruned = pruned.usage + pruned.activity + (await pruneUpstream(db));
         summary.auditForgotten += await forgetPurgedAudit(db);
       },
       { statementTimeoutMs: 60_000 },
