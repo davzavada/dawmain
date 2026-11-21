@@ -18,7 +18,7 @@
  *   npx tsx scripts/mirror.ts provisions [--source us] [--limit N]  cited § / články of new, changed or stale decisions
  *                                                   (no network; sync runs it after each source)
  *   npx tsx scripts/mirror.ts status                per-source counts, last run, queue
- *   npx tsx scripts/mirror.ts api                   HTTP API on MIRROR_API_HOST:MIRROR_API_PORT
+ *   npx tsx scripts/mirror.ts api                   HTTP API on MIRROR_API_HOST:MIRROR_API_PORT (MIRROR_API_WORKERS processes, default 1)
  *                                                   (default 127.0.0.1:8080), token MIRROR_API_TOKEN
  *
  * Connection strings come from the environment or /etc/mirror/env
@@ -49,6 +49,7 @@ import { SourceStopped, pacedFetch } from "../src/mirror/http";
 import { formatStatus, mirrorStatus } from "../src/mirror/status";
 import { serve } from "@hono/node-server";
 import { createMirrorApi } from "../src/mirror/api/server";
+import { apiWorkerCount, runApiWorkers } from "../src/mirror/api/workers";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
 import { euActsYearQuery, parseCellarActs, parseEsbirkaActs } from "../src/mirror/legal/registry";
@@ -329,7 +330,7 @@ async function runApi(): Promise<number> {
 async function main(argv: string[]): Promise<number> {
   const [command, ...args] = argv;
   loadMirrorEnv();
-  if (command === "api") return runApi();
+  if (command === "api") return runApiWorkers(apiWorkerCount(process.env.MIRROR_API_WORKERS), runApi);
   try {
     if (command === "migrate") {
       await runMigrate(args);
