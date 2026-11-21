@@ -15,6 +15,10 @@ Group=mirror
 WorkingDirectory=/opt/dawmain
 EnvironmentFile=/etc/mirror/env
 Environment=NODE_ENV=production
+# Three API processes sharing the port (src/mirror/api/workers.ts): one Node
+# process tops out at one core; the fourth core stays for cloudflared and the
+# nightly sync. Each holds up to 8 reader connections to Postgres.
+Environment=MIRROR_API_WORKERS=3
 ExecStart=/opt/dawmain/node_modules/.bin/tsx scripts/mirror.ts api
 Restart=on-failure
 RestartSec=5

@@ -171,6 +171,13 @@ neprivilegovaný, `nesting=1`, start po bootu, Node 22 (NodeSource),
   pro záznam v `deploy/web/migrace/`; znovu se nespouštějí.
 - **Zrcadlo** jde z webu přes LAN: `MIRROR_API_URL=http://192.168.0.52:8080`
   (API poslouchá jen na LAN adrese), bez Cloudflare Access.
+- **API zrcadla ve více procesech** (21. 11. 2026): `MIRROR_API_WORKERS=3` v
+  `mirror-api.service`, procesy sdílí port (`src/mirror/api/workers.ts`). Jeden
+  proces narazil na jedno jádro při ~55 hledáních s otevřením rozhodnutí za
+  sekundu (Postgres přitom skoro nečinný). Každý proces drží až 8 spojení
+  `mirror_reader`. Spadlý proces se nahradí; když jich 5 po sobě spadne hned po
+  startu, služba skončí a restartuje ji systemd. Změna unitu: zkopírovat do
+  `/etc/systemd/system/`, `systemctl daemon-reload`, `restart mirror-api`.
 - **Firewall a přístup** (20. 11. 2026): firewall Proxmoxu zapnutý
   (`/etc/pve/firewall/cluster.fw`: příchozí jen SSH a 8006 z `192.168.0.0/24` a
   ping, zbytek DROP); SSH na hostiteli jen klíčem
