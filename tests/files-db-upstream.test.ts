@@ -4,7 +4,7 @@ import { addUpstreamStats, p95Bound, pruneUpstream, upstreamSummary } from "@/sr
 import { emptyCounters, type UpstreamCounters } from "@/src/sources/shared/limits";
 import { createTestDb, type TestDb } from "./helpers/pglite";
 
-/** upstream_daily (migration 0009) on PGlite, as dawmain_app. */
+/** The per-day upstream counters in system_state, on PGlite, as dawmain_app. */
 
 let t: TestDb;
 beforeAll(async () => {
@@ -29,7 +29,7 @@ function counters(over: Partial<UpstreamCounters> & { ok?: number; http429?: num
   return c;
 }
 
-describe("upstream_daily", () => {
+describe("upstream counters in system_state", () => {
   it("adds flushes up per day and source, keeps the maxima, and summarises", async () => {
     await withScope([], (db) =>
       addUpstreamStats(db, new Map([["Nejvyšší soud", counters({ ok: 10, latencyMs: 5000, latency: [2, 8, 0, 0, 0], maxInflight: 3, queued: 2, queueMs: 400 })]])),
@@ -43,9 +43,25 @@ describe("upstream_daily", () => {
     expect(ns.lastRefusalDay).toBe(new Date().toISOString().slice(0, 10));
   });
 
-  it("drops rows past the retention", async () => {
-    await t.owner.query(`INSERT INTO upstream_daily (day, source, requests) VALUES ((now() AT TIME ZONE 'UTC')::date - 91, 'old', 1)`);
+  it("sums a window of days and leaves older days and other keys out", async () => {
+    const day = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
+    await t.owner.query(
+      `INSERT INTO system_state (key, value) VALUES
+         ($1, '{"Nejvyšší soud":{"requests":5,"outcomes":{"ok":4,"http403":1},"maxInflight":7}}'),
+         ($2, '{"Nejvyšší soud":{"requests":100,"outcomes":{"ok":100}}}'),
+         ('upstreamish', '{"x":1}')`,
+      [`upstream:${day(6)}`, `upstream:${day(7)}`],
+    );
+    const [ns] = await withScope([], (db) => upstreamSummary(db, 7));
+    expect(ns).toMatchObject({ requests: 25, http403: 1, maxInflight: 7, lastRefusalDay: new Date().toISOString().slice(0, 10) });
+  });
+
+  it("drops days past the retention, and nothing else", async () => {
+    const old = new Date(Date.now() - 91 * 86_400_000).toISOString().slice(0, 10);
+    await t.owner.query(`INSERT INTO system_state (key, value) VALUES ($1, '{}')`, [`upstream:${old}`]);
     expect(await withScope([], (db) => pruneUpstream(db))).toBe(1);
+    const left = await t.owner.query("SELECT key FROM system_state WHERE key = 'upstreamish'");
+    expect(left.rows).toHaveLength(1);
   });
 });
 

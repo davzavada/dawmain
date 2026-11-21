@@ -325,8 +325,8 @@ function Upstream({ rows }: { rows: UpstreamRow[] | null }) {
         </div>
       )}
       <p className="muted" style={{ margin: "12px 0 0", fontSize: 13 }}>
-        Jen počty ze skutečného provozu, žádné dotazy navíc. Limit se mění v kódu (<code>src/sources/shared/limits.ts</code>): kde zdroj nikdy
-        neodmítl a dotazy často čekají ve frontě, dá se zvýšit; kde se objevuje 429 nebo 403, je potřeba ho snížit.
+        Jen počty ze skutečného provozu, žádné dotazy navíc. Limity zatím nejsou nastavené, jen se měří: „Max. souběžně“ ukazuje, kolik dotazů
+        zdroj dostal najednou, a 429 / 403, jestli se někdy bránil. Limit by se nastavil v kódu (<code>src/sources/shared/limits.ts</code>).
       </p>
     </section>
   );

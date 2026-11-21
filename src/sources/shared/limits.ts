@@ -3,20 +3,22 @@ import { SourceError } from "./errors";
 /**
  * Politeness toward the official databases, and the numbers to tune it by.
  *
- * Everything leaves this server from one home IP address. A limiter per
- * source caps how many requests are open against it at once; the rest wait
- * in a FIFO queue, so a burst of tool calls reaches a court's site as a
- * steady trickle instead of a spike that gets the address blocked. A
- * request that would wait longer than MAX_QUEUE_WAIT_MS is refused with a
- * "busy" error rather than eating the tool call's time budget.
+ * Everything leaves this server from one home IP address. A source listed
+ * in SOURCE_CONCURRENCY gets a limiter: at most that many requests open
+ * against it at once, the rest wait in a FIFO queue, so a burst of tool
+ * calls reaches a court's site as a steady trickle instead of a spike that
+ * gets the address blocked. A request that would wait longer than
+ * MAX_QUEUE_WAIT_MS is refused with a "busy" error rather than eating the
+ * tool call's time budget. No source is listed yet: for now this only
+ * measures.
  *
  * The same chokepoint counts, per source, what came back (ok, 429, 403,
  * other 4xx, 5xx, timeout, network failure), how long it took and how much
  * queueing there was. Nothing here makes a request of its own: the figures
- * come from real traffic only. The web process writes them to the files
- * database once a minute (src/sources/upstream-stats-flush.ts) and the
- * Správa → Systém page shows the last days, so the limits below can be
- * raised where a source never pushed back and lowered where it did.
+ * come from real traffic only. The web process adds them to the files
+ * database once a minute (system_state, one key per UTC day —
+ * src/files/db/upstream.ts) and the Správa → Systém page shows the last
+ * days: what each source took at once, and whether it ever pushed back.
  *
  * State lives on globalThis: Next compiles route handlers, pages and
  * instrumentation into separate module graphs, and one process must share
@@ -25,29 +27,14 @@ import { SourceError } from "./errors";
 
 /**
  * Open requests allowed per source label (the SOURCE constant of each
- * client). Conservative starting points, to be tuned from the measurements;
- * never below what one tool call of that source opens at once by itself, so
- * a lone user is not slowed down.
- * A label not listed (the mirror: our own API) has no limit.
+ * client). Empty for now: nothing is capped, the counters only measure how
+ * many requests each source really gets at once (maxInflight) and how it
+ * answers. Once the numbers are in, a limit goes here — never below what
+ * one tool call of that source opens at once by itself (NALUS 4 "dances",
+ * e-Sbírka batches of 5), so a lone user is not slowed down. A label not
+ * listed has no limit.
  */
-export const SOURCE_CONCURRENCY: Readonly<Record<string, number>> = Object.freeze({
-  // src/sources/ns.ts keeps its own gate of 2 on top; this one only bounds it from outside.
-  "Nejvyšší soud": 3,
-  "Nejvyšší správní soud": 3,
-  // One deep us_search already opens four "dances" at once (src/sources/nalus.ts).
-  "Ústavní soud (NALUS)": 4,
-  "rozhodnuti.justice.cz": 3,
-  // Fragment pages and section scans are read five at a time (src/sources/esbirka.ts).
-  "e-Sbírka": 5,
-  "e-Sbírka open data (SPARQL)": 2,
-  "EUR-Lex (Cellar)": 4,
-  "CJEU (InfoCuria)": 3,
-  "Poslanecká sněmovna (psp.cz)": 3,
-  "UKAŽ (Univerzita Karlova, Primo)": 3,
-  "Slov-Lex (Zbierka zákonov SR)": 3,
-  "Slov-Lex (eLegislatíva)": 3,
-  "Slov-Lex (súdne rozhodnutia)": 3,
-});
+export const SOURCE_CONCURRENCY: Readonly<Record<string, number>> = Object.freeze({});
 
 /** Longest a request waits for a free slot before it is refused as busy. */
 export const MAX_QUEUE_WAIT_MS = 20_000;
@@ -221,17 +208,21 @@ export function takeUpstreamStats(): Map<string, UpstreamCounters> {
   return out;
 }
 
+/** Add `c` into `into` (sums add up, maxima keep the larger). Missing fields of a stored record count as 0. */
+export function mergeCounters(into: UpstreamCounters, c: Partial<UpstreamCounters>): UpstreamCounters {
+  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  into.requests += n(c.requests);
+  for (const o of OUTCOMES) into.outcomes[o] += n(c.outcomes?.[o]);
+  into.latencyMs += n(c.latencyMs);
+  into.latency.forEach((_, i) => (into.latency[i] += n(c.latency?.[i])));
+  into.queued += n(c.queued);
+  into.queueMs += n(c.queueMs);
+  into.maxInflight = Math.max(into.maxInflight, n(c.maxInflight));
+  into.maxQueue = Math.max(into.maxQueue, n(c.maxQueue));
+  return into;
+}
+
 /** Put counters back after a failed write, so the next flush carries them. */
 export function restoreUpstreamStats(stats: Map<string, UpstreamCounters>): void {
-  for (const [source, c] of stats) {
-    const d = state(source).delta;
-    d.requests += c.requests;
-    for (const o of OUTCOMES) d.outcomes[o] += c.outcomes[o];
-    d.latencyMs += c.latencyMs;
-    c.latency.forEach((n, i) => (d.latency[i] += n));
-    d.queued += c.queued;
-    d.queueMs += c.queueMs;
-    d.maxInflight = Math.max(d.maxInflight, c.maxInflight);
-    d.maxQueue = Math.max(d.maxQueue, c.maxQueue);
-  }
+  for (const [source, c] of stats) mergeCounters(state(source).delta, c);
 }

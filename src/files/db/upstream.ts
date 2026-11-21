@@ -1,78 +1,41 @@
 import "server-only";
-import { LATENCY_BOUNDS_MS, type UpstreamCounters } from "@/src/sources/shared/limits";
+import { LATENCY_BOUNDS_MS, emptyCounters, mergeCounters, type UpstreamCounters } from "@/src/sources/shared/limits";
 import type { Queryable } from "./client";
-import { num } from "./codec";
 
 /**
- * upstream_daily (migration 0009): how the official databases answered, per
- * source and UTC day — counts only, from src/sources/shared/limits.ts.
+ * How the official databases answered, per source and UTC day — counts only,
+ * from src/sources/shared/limits.ts. Kept in system_state (no table of its
+ * own, no migration): one key per day, `upstream:YYYY-MM-DD`, whose value maps
+ * a source label to its counters. A dozen sources a day is a small JSON.
  */
 
 /** Kept long enough to compare a quiet month with a busy one. */
 export const UPSTREAM_KEEP_DAYS = 90;
 
-const TODAY_UTC = "(now() AT TIME ZONE 'UTC')::date";
+const PREFIX = "upstream:";
 
-/** Column per counter, in the order of the INSERT below. */
-const SUM_COLUMNS = [
-  "requests",
-  "ok",
-  "http429",
-  "http403",
-  "http4xx",
-  "http5xx",
-  "timeouts",
-  "network",
-  "busy",
-  "latency_ms",
-  "lat_250",
-  "lat_1000",
-  "lat_3000",
-  "lat_10000",
-  "lat_slow",
-  "queued",
-  "queue_ms",
-] as const;
-const MAX_COLUMNS = ["max_inflight", "max_queue"] as const;
-
-function row(c: UpstreamCounters): number[] {
-  const o = c.outcomes;
-  return [
-    c.requests,
-    o.ok,
-    o.http429,
-    o.http403,
-    o.http4xx,
-    o.http5xx,
-    o.timeout,
-    o.network,
-    o.busy,
-    c.latencyMs,
-    ...c.latency,
-    c.queued,
-    c.queueMs,
-    c.maxInflight,
-    c.maxQueue,
-  ];
+/** UTC date `daysAgo` days back, YYYY-MM-DD. */
+function utcDay(daysAgo = 0, now = new Date()): string {
+  return new Date(now.getTime() - daysAgo * 86_400_000).toISOString().slice(0, 10);
 }
 
-if (LATENCY_BOUNDS_MS.length !== 4) throw new Error("upstream_daily has five latency columns: update migration and SUM_COLUMNS");
+type DayRecord = Record<string, Partial<UpstreamCounters>>;
 
-/** Add one flush's counters to today's rows (one statement per source). */
-export async function addUpstreamStats(db: Queryable, stats: Map<string, UpstreamCounters>): Promise<void> {
-  const cols = [...SUM_COLUMNS, ...MAX_COLUMNS];
-  const placeholders = cols.map((_, i) => `$${i + 2}`).join(", ");
-  const updates = [
-    ...SUM_COLUMNS.map((c) => `${c} = upstream_daily.${c} + EXCLUDED.${c}`),
-    ...MAX_COLUMNS.map((c) => `${c} = greatest(upstream_daily.${c}, EXCLUDED.${c})`),
-  ].join(", ");
+/** Add one flush's counters to today's record (read under a row lock, merged, written back). */
+export async function addUpstreamStats(db: Queryable, stats: Map<string, UpstreamCounters>, now = new Date()): Promise<void> {
+  if (stats.size === 0) return;
+  const key = PREFIX + utcDay(0, now);
+  const { rows } = await db.query<{ value: DayRecord }>("SELECT value FROM system_state WHERE key = $1 FOR UPDATE", [key]);
+  const day: DayRecord = rows[0]?.value && typeof rows[0].value === "object" ? rows[0].value : {};
   for (const [source, counters] of stats) {
-    await db.query(
-      `INSERT INTO upstream_daily (day, source, ${cols.join(", ")}) VALUES (${TODAY_UTC}, $1, ${placeholders})
-       ON CONFLICT (day, source) DO UPDATE SET ${updates}`,
-      [source.slice(0, 80), ...row(counters).map((n) => Math.max(0, Math.round(n)))],
-    );
+    const label = source.slice(0, 80);
+    day[label] = mergeCounters(mergeCounters(emptyCounters(), day[label] ?? {}), counters);
   }
+  await db.query(
+    `INSERT INTO system_state (key, value, updated_at) VALUES ($1, $2::jsonb, now())
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+    [key, JSON.stringify(day)],
+  );
 }
 
 export interface UpstreamSummary {
@@ -91,6 +54,7 @@ export interface UpstreamSummary {
   p95UnderMs: number | null;
   queued: number;
   avgQueueMs: number | null;
+  /** Most requests open against the source at once, on any day of the window. */
   maxInflight: number;
   maxQueue: number;
   /** Last UTC day (YYYY-MM-DD) with a 429 or 403, if any. */
@@ -98,43 +62,44 @@ export interface UpstreamSummary {
 }
 
 /** Totals per source over the last `days` UTC days including today, busiest first. */
-export async function upstreamSummary(db: Queryable, days: number): Promise<UpstreamSummary[]> {
+export async function upstreamSummary(db: Queryable, days: number, now = new Date()): Promise<UpstreamSummary[]> {
   const span = Math.max(1, Math.floor(days));
-  const { rows } = await db.query(
-    `SELECT source,
-            ${SUM_COLUMNS.map((c) => `sum(${c}) AS ${c}`).join(", ")},
-            max(max_inflight) AS max_inflight, max(max_queue) AS max_queue,
-            to_char(max(day) FILTER (WHERE http429 > 0 OR http403 > 0), 'YYYY-MM-DD') AS last_refusal
-       FROM upstream_daily
-      WHERE day > ${TODAY_UTC} - $1::int
-      GROUP BY source
-      ORDER BY sum(requests) DESC, source`,
-    [span],
+  const { rows } = await db.query<{ key: string; value: DayRecord }>(
+    "SELECT key, value FROM system_state WHERE starts_with(key, $1) AND key >= $2 ORDER BY key",
+    [PREFIX, PREFIX + utcDay(span - 1, now)],
   );
-  return rows.map((r) => {
-    const requests = num(r.requests);
-    const buckets = [num(r.lat_250), num(r.lat_1000), num(r.lat_3000), num(r.lat_10000), num(r.lat_slow)];
-    const queued = num(r.queued);
-    return {
-      source: String(r.source),
-      requests,
-      ok: num(r.ok),
-      http429: num(r.http429),
-      http403: num(r.http403),
-      http4xx: num(r.http4xx),
-      http5xx: num(r.http5xx),
-      timeouts: num(r.timeouts),
-      network: num(r.network),
-      busy: num(r.busy),
-      avgMs: requests > 0 ? Math.round(num(r.latency_ms) / requests) : null,
-      p95UnderMs: p95Bound(buckets),
-      queued,
-      avgQueueMs: queued > 0 ? Math.round(num(r.queue_ms) / queued) : null,
-      maxInflight: num(r.max_inflight),
-      maxQueue: num(r.max_queue),
-      lastRefusalDay: r.last_refusal ? String(r.last_refusal) : null,
-    };
-  });
+  const totals = new Map<string, { c: UpstreamCounters; lastRefusal: string | null }>();
+  for (const row of rows) {
+    const dayStr = row.key.slice(PREFIX.length);
+    for (const [source, stored] of Object.entries(row.value ?? {})) {
+      const day = mergeCounters(emptyCounters(), stored ?? {});
+      const t = totals.get(source) ?? { c: emptyCounters(), lastRefusal: null };
+      mergeCounters(t.c, day);
+      if (day.outcomes.http429 + day.outcomes.http403 > 0) t.lastRefusal = dayStr;
+      totals.set(source, t);
+    }
+  }
+  return [...totals.entries()]
+    .map(([source, { c, lastRefusal }]) => ({
+      source,
+      requests: c.requests,
+      ok: c.outcomes.ok,
+      http429: c.outcomes.http429,
+      http403: c.outcomes.http403,
+      http4xx: c.outcomes.http4xx,
+      http5xx: c.outcomes.http5xx,
+      timeouts: c.outcomes.timeout,
+      network: c.outcomes.network,
+      busy: c.outcomes.busy,
+      avgMs: c.requests > 0 ? Math.round(c.latencyMs / c.requests) : null,
+      p95UnderMs: p95Bound(c.latency),
+      queued: c.queued,
+      avgQueueMs: c.queued > 0 ? Math.round(c.queueMs / c.queued) : null,
+      maxInflight: c.maxInflight,
+      maxQueue: c.maxQueue,
+      lastRefusalDay: lastRefusal,
+    }))
+    .sort((a, b) => b.requests - a.requests || a.source.localeCompare(b.source));
 }
 
 /** The bucket bound under which 95 % of the requests finished. */
@@ -149,8 +114,11 @@ export function p95Bound(buckets: number[]): number | null {
   return null;
 }
 
-/** Drop rows past UPSTREAM_KEEP_DAYS. Returns how many. */
-export async function pruneUpstream(db: Queryable): Promise<number> {
-  const { rows } = await db.query(`DELETE FROM upstream_daily WHERE day < ${TODAY_UTC} - $1::int RETURNING 1`, [UPSTREAM_KEEP_DAYS]);
+/** Drop day records past UPSTREAM_KEEP_DAYS. Returns how many. */
+export async function pruneUpstream(db: Queryable, now = new Date()): Promise<number> {
+  const { rows } = await db.query("DELETE FROM system_state WHERE starts_with(key, $1) AND key < $2 RETURNING 1", [
+    PREFIX,
+    PREFIX + utcDay(UPSTREAM_KEEP_DAYS, now),
+  ]);
   return rows.length;
 }
