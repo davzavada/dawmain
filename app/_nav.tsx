@@ -2,9 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState, type MouseEvent } from "react";
+import { useEffect, useState } from "react";
 import { Icon, type IconName } from "./_icons";
-import { setPlatform, usePlatform, type PlatformId } from "./_platform";
 import { LibraryMark } from "./_zdroje/library-mark";
 import { useZdroje } from "./_zdroje/store";
 
@@ -18,11 +17,6 @@ const SECTIONS: Array<{ id: string; label: string; short: string; icon: IconName
   { id: "uvod", label: "Úvod", short: "Úvod", icon: "sparkles" },
   { id: "zdroje", label: "Zdroje", short: "Zdroje", icon: "list" },
   { id: "pripojeni", label: "Jak se připojit", short: "Připojení", icon: "sliders" },
-];
-
-const GUIDES: Array<{ id: PlatformId; label: string }> = [
-  { id: "claude", label: "Claude" },
-  { id: "chatgpt", label: "ChatGPT" },
 ];
 
 const LEGAL: Array<{ href: string; label: string; icon: IconName }> = [
@@ -156,18 +150,6 @@ export function SiteNav({ sourceCount }: { sourceCount: number }) {
   const pathname = usePathname();
   const home = pathname === "/";
   const active = useActiveSection(home);
-  const platform = usePlatform();
-
-  function openGuide(id: PlatformId) {
-    return (event: MouseEvent) => {
-      // Elsewhere the link navigates home and the guide reads the hash.
-      if (!home) return;
-      event.preventDefault();
-      setPlatform(id);
-      document.getElementById("pripojeni")?.scrollIntoView({ behavior: "smooth" });
-    };
-  }
-
   const current = (on: boolean) => (on ? { "aria-current": "location" as const } : {});
 
   return (
@@ -184,22 +166,6 @@ export function SiteNav({ sourceCount }: { sourceCount: number }) {
         </div>
 
         <OwnSourcesNav pathname={pathname} />
-
-        <div className="nav-group">
-          <span className="nav-heading">Návod pro</span>
-          {GUIDES.map(({ id, label }) => (
-            <Link
-              key={id}
-              href={`/#${id}`}
-              onClick={openGuide(id)}
-              className="nav-item guide-item"
-              data-selected={platform === id}
-            >
-              <span className="nav-dot" aria-hidden="true" />
-              <span>{label}</span>
-            </Link>
-          ))}
-        </div>
 
         <div className="nav-group nav-legal">
           {LEGAL.map(({ href, label, icon }) => (

@@ -17,7 +17,9 @@ export function SiteHeader() {
     <header className="site-header">
       <Link href="/" className="site-name">
         <img src="/logo.svg" alt="" width={24} height={24} />
-        <span>Dawmain - právní rešerše s AI</span>
+        <span className="site-title">
+          Dawmain<span className="site-title-rest"> – právní rešerše s AI</span>
+        </span>
       </Link>
       <span className="site-tagline">MCP server pro české, slovenské a unijní právo · David Závada</span>
       <StatusSummary />

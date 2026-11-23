@@ -52,7 +52,7 @@ export const TEXT_FIELDS = [
     hint: "Hlavní nadpis úvodní stránky.",
     kind: "plain",
     maxChars: 120,
-    default: "MCP server pro právní systémy",
+    default: "Judikatura a právní předpisy pro vašeho AI asistenta",
   },
   {
     key: "home.lead",
@@ -62,13 +62,13 @@ export const TEXT_FIELDS = [
     kind: "block",
     maxChars: 3000,
     default:
-      "Právní rešerše s AI jsou super. Přístup k judikatuře a právním předpisům s AI by ale podle mě neměl vést jen přes komerční nástroje. Data jsou dnes dobře dostupná a provoz zvládne i server doma. Proto jsem vytvořil nekomerční alternativu. Budu rád, když ji vyzkoušíte :)\n\nV oficiálních databázích server hledá živě – funguje jako nachytřený Google. Jen judikaturu českých soudů si pravidelně kopíruje do vlastní databáze, aby v ní hledal rychleji; odkazy ale vždy vedou na originál u soudu. Kdo má režim Pro (právníky), může připojit svou knihovnu Zotero a nahrát vlastní soubory.",
+      "Dawmain připojí vašeho AI asistenta – Claude, ChatGPT a další – k oficiálním databázím české, slovenské a unijní judikatury a právních předpisů. Asistent v nich sám hledá, čte rozhodnutí i paragrafy a odkazuje na originál. Používání je zdarma.\n\nPrávní rešerše s AI jsou super. Přístup k judikatuře a předpisům by ale podle mě neměl vést jen přes komerční nástroje. Data jsou dnes dobře dostupná a provoz zvládne i server doma. Proto jsem vytvořil nekomerční alternativu. Budu rád, když ji vyzkoušíte :)",
   },
   {
     key: "home.owl",
     group: HOME,
     label: "Karta Owl",
-    hint: "Text karty s odkazem na Owl pod úvodem.",
+    hint: "Text karty s odkazem na Owl na konci úvodní stránky.",
     kind: "plain",
     maxChars: 300,
     default: "Pokud vás zajímá monitoring recentní rozhodovací praxe a doktrinálního vývoje, podívejte se na můj další projekt.",
@@ -99,6 +99,15 @@ export const TEXT_FIELDS = [
     kind: "plain",
     maxChars: 300,
     default: "Katalog literatury Univerzity Karlovy, ve kterém asistent dohledává doktrínu.",
+  },
+  {
+    key: "sources.pro",
+    group: SOURCES,
+    label: "Jak získat Pro",
+    hint: "Řádek pod nadpisem „Pro“ pro návštěvníky a účty bez Pro. Odkaz zapíšete jako [text](mailto:adresa).",
+    kind: "block",
+    maxChars: 400,
+    default: `Pro je zdarma (s dobrovolným příspěvkem) a přiděluji ho ručně: zaregistrujte se a napište mi na ${MAIL}.`,
   },
   {
     key: "legal.effective",

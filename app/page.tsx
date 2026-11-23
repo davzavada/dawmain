@@ -7,7 +7,7 @@ import { siteTexts } from "@/src/content/store";
 import { productionOrigin } from "@/src/runtime";
 import { zoteroConfigured } from "@/src/zotero/config";
 
-/** The author's other project, linked from the intro. */
+/** The author's other project, linked at the end of the page. */
 const OWL_URL = "https://owl.davidzavada.cz/";
 
 /**
@@ -32,16 +32,6 @@ export default async function Home() {
       <section id="uvod" className="intro">
         <h1>{texts["home.title"]}</h1>
         <Markdown source={texts["home.lead"]} paragraphClass="lead" />
-        <a href={OWL_URL} className="project-card">
-          <img src="/owl.svg" alt="" width={36} height={36} />
-          <span className="project-text">
-            <span className="project-name">Owl</span>
-            <span className="project-desc">{texts["home.owl"]}</span>
-          </span>
-          <span className="project-arrow" aria-hidden="true">
-            →
-          </span>
-        </a>
       </section>
 
       <section id="zdroje" className="sources">
@@ -64,16 +54,36 @@ export default async function Home() {
         <OwnSourcesGroup
           zotero={zoteroConfigured()}
           texts={{ files: texts["sources.files"], zotero: texts["sources.zotero"], ukaz: texts["sources.ukaz"] }}
+          proNote={<Markdown source={texts["sources.pro"]} paragraphClass="source-group-note" />}
         />
       </section>
 
-      <section id="pripojeni" className="connect">
-        <h2>Jak se připojit</h2>
-        <Guide endpoint={endpoint()} />
-        <p className="muted small guide-note">
-          Kdyby cokoli nešlo, napište mi na <Mail />.
-        </p>
-      </section>
+      {/*
+        The last section and what follows it fill at least a screen, so the
+        nav's "Jak se připojit" brings the section to the top like the others.
+      */}
+      <div className="home-end">
+        <section id="pripojeni" className="connect">
+          <h2>Jak se připojit</h2>
+          <Guide endpoint={endpoint()} />
+          <p className="muted small guide-note">
+            Kdyby cokoli nešlo, napište mi na <Mail />.
+          </p>
+        </section>
+
+        <aside className="more" aria-label="Další projekt">
+          <a href={OWL_URL} className="project-card">
+            <img src="/owl.svg" alt="" width={32} height={32} />
+            <span className="project-text">
+              <span className="project-name">Owl</span>
+              <span className="project-desc">{texts["home.owl"]}</span>
+            </span>
+            <span className="project-arrow" aria-hidden="true">
+              →
+            </span>
+          </a>
+        </aside>
+      </div>
     </div>
   );
 }
