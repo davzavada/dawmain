@@ -39,7 +39,7 @@ function intercept(auth: string) {
   };
 }
 
-/** How to get Pro, rendered by the home page from an editable text; shown under the heading while the group is locked. */
+/** What Pro is and how to get it, rendered by the home page from an editable text; shown under the heading. */
 const ProNoteContext = createContext<ReactNode>(null);
 
 /** `texts`: the editable lines under the rows, as the home page read them (the defaults without). */
@@ -72,7 +72,7 @@ function OwnSources({ zotero }: { zotero: boolean }) {
   }
   const signedIn = auth === "signed_in";
   return (
-    <Group signedIn={signedIn} withoutPro={signedIn && filesRowView(summary).locked}>
+    <Group signedIn={signedIn}>
       {signedIn ? <FilesRow auth={auth} summary={summary} /> : <FilesInvite auth={auth} />}
       {zotero ? <ZoteroRow signedIn={signedIn} /> : <ZoteroUnavailable signedIn={signedIn} />}
       <UkazRow signedIn={signedIn} />
@@ -80,8 +80,8 @@ function OwnSources({ zotero }: { zotero: boolean }) {
   );
 }
 
-/** `withoutPro`: a signed-in account that has no Pro, so it gets the note on how to get it, as visitors do. */
-function Group({ signedIn, withoutPro = false, className, children }: { signedIn: boolean; withoutPro?: boolean; className?: string; children: ReactNode }) {
+/** The note under the heading (what Pro is, how to get it) shows to everyone, Pro accounts included. */
+function Group({ signedIn, className, children }: { signedIn: boolean; className?: string; children: ReactNode }) {
   const classes = ["source-group", signedIn ? null : "locked", "zd-own", className].filter(Boolean).join(" ");
   const note = useContext(ProNoteContext);
   return (
@@ -90,7 +90,7 @@ function Group({ signedIn, withoutPro = false, className, children }: { signedIn
         <h3 className="source-group-name">Pro (právníky)</h3>
         {signedIn ? null : <ZIcon name="lock" size={13} className="zd-group-lock" />}
       </div>
-      {note && (!signedIn || withoutPro) ? <div className="source-group-note-wrap">{note}</div> : null}
+      {note ? <div className="source-group-note-wrap">{note}</div> : null}
       <div className="source-box">
         <ul>{children}</ul>
       </div>
