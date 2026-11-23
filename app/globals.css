@@ -294,7 +294,7 @@ main > footer a {
 
 @media (min-width: 1024px) {
   .shell {
-    grid-template-columns: calc(240px * var(--ui-zoom)) minmax(0, 1fr);
+    grid-template-columns: 240px minmax(0, 1fr);
   }
   main {
     padding: 32px 48px 64px;
@@ -310,7 +310,7 @@ main > footer a {
     position: sticky;
     top: var(--header);
     align-self: start;
-    height: calc(100vh / var(--ui-zoom) - var(--header));
+    height: calc(100vh - var(--header));
     overflow-y: auto;
     padding: 20px 12px;
     border-right: 1px solid var(--line);
@@ -419,24 +419,6 @@ main > footer a {
 
 /* Home page */
 
-/* The site scales with the screen: on large, tall displays (QHD and up at
-   100 %) the header, the sidebar and the home page are drawn a size larger,
-   as the system's own scaling would; CSS zoom, so no script and no layout
-   code of its own. Viewport heights inside them are divided by the zoom,
-   which multiplies them. */
-:root {
-  --ui-zoom: 1;
-}
-@media (min-width: 2000px) and (min-height: 1150px) {
-  :root {
-    --ui-zoom: 1.25;
-  }
-}
-.site-header,
-.sidebar,
-.home {
-  zoom: var(--ui-zoom);
-}
 .home {
   display: flex;
   flex-direction: column;
@@ -449,7 +431,7 @@ main > footer a {
 .home-top {
   display: flex;
   flex-direction: column;
-  min-height: calc((100dvh - var(--anchor-offset)) / var(--ui-zoom) + 16px);
+  min-height: calc(100dvh - var(--anchor-offset) + 16px);
 }
 .home-top > * + * {
   margin-top: 28px;
@@ -513,7 +495,7 @@ main > footer a {
 .home-tail {
   display: flex;
   flex-direction: column;
-  min-height: calc((100dvh - var(--anchor-offset)) / var(--ui-zoom) + 56px);
+  min-height: calc(100dvh - var(--anchor-offset) + 56px);
 }
 .dawn,
 .dusk {
@@ -596,7 +578,8 @@ main > footer a {
   bottom: -60px;
   height: 100px;
   margin-top: 12px;
-  overflow: hidden;
+  /* Cut only below the horizon: the glow spreads freely above the strip. */
+  clip-path: inset(-100vh -100vw 0 -100vw);
   pointer-events: none;
 }
 /* Shorter screens (most laptops: 1366×768, 1440×900, 1536×864 at 125 %):
