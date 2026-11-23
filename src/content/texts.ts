@@ -62,7 +62,7 @@ export const TEXT_FIELDS = [
     kind: "block",
     maxChars: 3000,
     default:
-      "Dawmain připojí vašeho AI asistenta – Claude, ChatGPT a další – k oficiálním databázím české, slovenské a unijní judikatury a právních předpisů. Asistent v nich sám hledá, čte rozhodnutí i paragrafy a odkazuje na originál. Používání je zdarma.\n\nPrávní rešerše s AI jsou super. Přístup k judikatuře a předpisům by ale podle mě neměl vést jen přes komerční nástroje. Data jsou dnes dobře dostupná a provoz zvládne i server doma. Proto jsem vytvořil nekomerční alternativu. Budu rád, když ji vyzkoušíte :)",
+      "Právní rešerše s AI jsou super. Přístup k judikatuře a předpisům by ale podle mě neměl vést jen přes komerční nástroje. Data jsou dnes dobře dostupná a provoz zvládne i server doma. Proto jsem vytvořil nekomerční alternativu. Budu rád, když ji vyzkoušíte :)",
   },
   {
     key: "home.owl",

@@ -24,6 +24,26 @@ const LEGAL: Array<{ href: string; label: string; icon: IconName }> = [
   { href: "/soukromi", label: "Ochrana osobních údajů", icon: "lock" },
 ];
 
+/**
+ * Which of the home page's coloured bands (.dawn, .dusk) is under the
+ * sticky header, if any: marked on <html> as data-band, so the header and
+ * the tab strip take its colour (globals.css). Hard switch, no transition.
+ */
+function markBand() {
+  const root = document.documentElement;
+  const chrome = [document.querySelector(".site-header"), document.querySelector(".topbar")]
+    .map((el) => (el ? el.getBoundingClientRect() : null))
+    .filter((r): r is DOMRect => r !== null && r.height > 0);
+  const line = Math.max(0, ...chrome.map((r) => r.bottom));
+  let band: string | null = null;
+  for (const name of ["dawn", "dusk"]) {
+    const el = document.querySelector(`.${name}`);
+    if (el && el.getBoundingClientRect().top < line) band = name;
+  }
+  if (band) root.dataset.band = band;
+  else delete root.dataset.band;
+}
+
 /** A section counts as "in view" once its top passes this line. */
 const SPY_OFFSET = 140;
 
@@ -31,7 +51,10 @@ function useActiveSection(enabled: boolean): string | null {
   const [active, setActive] = useState<string>(SECTIONS[0].id);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      delete document.documentElement.dataset.band;
+      return;
+    }
     function update() {
       let current = SECTIONS[0].id;
       for (const { id } of SECTIONS) {
@@ -43,6 +66,7 @@ function useActiveSection(enabled: boolean): string | null {
         current = SECTIONS[SECTIONS.length - 1].id;
       }
       setActive(current);
+      markBand();
     }
     update();
     window.addEventListener("scroll", update, { passive: true });
