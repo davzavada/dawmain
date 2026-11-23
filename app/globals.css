@@ -143,9 +143,9 @@ h2 {
   gap: 20px;
   padding: 0 24px;
   border-bottom: 1px solid var(--line);
-  background: rgb(255 255 255 / 0.85);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  /* Opaque: text scrolls under it and disappears. Over the dawn bands it
+     takes their colour (app/_nav.tsx marks <html> with data-band). */
+  background: var(--chrome);
 }
 .site-name {
   display: flex;
@@ -224,6 +224,15 @@ main > footer {
   border-top: 1px solid var(--line);
   font-size: 13px;
 }
+/* Narrow screens, home page: the footer continues the Pro band to the
+   bottom of the window instead of a white strip after it. */
+.shell:has(.dusk) main > footer {
+  margin-top: 0;
+  padding-top: 24px;
+  background: var(--dusk);
+  box-shadow: 0 0 0 100vmax var(--dusk);
+  clip-path: inset(0 -100vmax -100vmax);
+}
 main > footer a {
   color: var(--muted);
 }
@@ -236,7 +245,7 @@ main > footer a {
   top: var(--header);
   z-index: 30;
   padding: 8px 12px;
-  background: #ffffff;
+  background: var(--chrome);
   border-bottom: 1px solid var(--line);
 }
 .topbar nav {
@@ -285,7 +294,7 @@ main > footer a {
 
 @media (min-width: 1024px) {
   .shell {
-    grid-template-columns: 240px minmax(0, 1fr);
+    grid-template-columns: calc(240px * var(--ui-zoom)) minmax(0, 1fr);
   }
   main {
     padding: 32px 48px 64px;
@@ -301,7 +310,7 @@ main > footer a {
     position: sticky;
     top: var(--header);
     align-self: start;
-    height: calc(100vh - var(--header));
+    height: calc(100vh / var(--ui-zoom) - var(--header));
     overflow-y: auto;
     padding: 20px 12px;
     border-right: 1px solid var(--line);
@@ -410,78 +419,294 @@ main > footer a {
 
 /* Home page */
 
+/* The site scales with the screen: on large, tall displays (QHD and up at
+   100 %) the header, the sidebar and the home page are drawn a size larger,
+   as the system's own scaling would; CSS zoom, so no script and no layout
+   code of its own. Viewport heights inside them are divided by the zoom,
+   which multiplies them. */
+:root {
+  --ui-zoom: 1;
+}
+@media (min-width: 2000px) and (min-height: 1150px) {
+  :root {
+    --ui-zoom: 1.25;
+  }
+}
+.site-header,
+.sidebar,
+.home {
+  zoom: var(--ui-zoom);
+}
 .home {
   display: flex;
   flex-direction: column;
-  gap: 28px;
+  /* Its own stacking context: the sun (z-index -1) paints above the body's background, behind the content. */
+  isolation: isolate;
 }
-.home > section {
+/* The top part: at least the first screen (the header, and the tab strip
+   on narrow screens, above it), so the dawn band below always starts past
+   the bottom edge on first load; the spare room goes above the sun. */
+.home-top {
+  display: flex;
+  flex-direction: column;
+  min-height: calc((100dvh - var(--anchor-offset)) / var(--ui-zoom) + 16px);
+}
+.home-top > * + * {
+  margin-top: 28px;
+}
+.home-top > section,
+.dawn > section {
   display: flex;
   flex-direction: column;
 }
 .intro {
   gap: 14px;
 }
-/* The end of the page: the guide, then the link to Owl. At least a screen
-   tall (less the anchor offset and main's bottom padding), so "Jak se
-   připojit" scrolls to the top like the other sections. */
-.home-end {
-  display: flex;
-  flex-direction: column;
-  gap: 40px;
-  min-height: calc(100dvh - var(--anchor-offset) - 48px);
+/* The end of the home page: the logo's sun rising over two flat bands of
+   light (the guide, then Pro), hard edges, across the whole window. */
+/* The band colours live on :root: the header and the tab strip take them too. */
+:root {
+  --sun-top: #ffd75e;
+  --sun-bottom: #ff8f3c;
+  --sun-glow: rgb(255 162 63 / 0.35);
+  --dawn: #fdf6ee;
+  --dusk: #f8eddf;
+  --chrome: #ffffff;
+}
+:root[data-band="dawn"] {
+  --chrome: var(--dawn);
+}
+:root[data-band="dusk"] {
+  --chrome: var(--dusk);
+}
+/* Inside the bands the neutrals take the band's warmth: lines, the muted
+   surfaces (tabs, step numbers) and the boxes (code, cards) are tinted to
+   match instead of the zinc greys, which look cold and pasted on there.
+   The header and the tab strip follow while they sit over a band. */
+.dawn,
+:root[data-band="dawn"] :is(.site-header, .topbar) {
+  --line: #ecdfcf;
+  --hairline: #f2e7d9;
+  --surface: #f4e9db;
+  --raised: #fffdf9;
+  --well: #fffdf9;
+}
+.shell:has(.dusk) main > footer,
+.dusk,
+:root[data-band="dusk"] :is(.site-header, .topbar) {
+  --line: #e4d3be;
+  --hairline: #ecdcc8;
+  --surface: #eedfca;
+  --raised: #fffaf3;
+  --well: #fffaf3;
+}
+/* The dawn runs under the sidebar too, to both edges of the window; the
+   shell clips it there (clip, not hidden: the sidebar stays sticky). */
+.shell {
+  overflow-x: clip;
 }
 @media (min-width: 1024px) {
-  .home-end {
-    min-height: calc(100dvh - var(--anchor-offset) - 64px);
+  .sidebar {
+    z-index: 1;
   }
 }
-.more {
-  padding-top: 24px;
-  border-top: 1px solid var(--line);
-}
-.project-card {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 12px 14px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  color: var(--text);
-}
-.project-card:hover {
-  border-color: var(--faint);
-  background: var(--well);
-  text-decoration: none;
-}
-.project-card img {
-  display: block;
-  flex: none;
-  border-radius: 8px;
-}
-.project-text {
+.home-tail {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  min-width: 0;
+  min-height: calc((100dvh - var(--anchor-offset)) / var(--ui-zoom) + 56px);
 }
-.project-name {
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+.dawn,
+.dusk {
+  position: relative;
+  isolation: isolate;
 }
-.project-desc {
-  font-size: 14px;
-  line-height: 1.5;
-  color: var(--soft);
-  text-wrap: pretty;
+.dawn {
+  padding: 56px 0 72px;
 }
-.project-arrow {
-  margin-left: auto;
+/* Pro: a deeper shade of the same light, from its hard top edge to the end of the page. */
+.dusk {
+  flex: 1;
+  padding-top: 56px;
+}
+.dusk > section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.dusk-sky {
+  position: absolute;
+  z-index: -1;
+  top: 0;
+  bottom: -48px;
+  left: 50%;
+  width: 200vw;
+  translate: -50% 0;
+  pointer-events: none;
+  background: var(--dusk);
+}
+@media (min-width: 1024px) {
+  .dusk-sky {
+    bottom: -64px;
+  }
+}
+/* Pro's heading with a crown in the sun's colour: these are the paid-tier features. */
+.pro-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pro-title .icon {
+  color: #d97706;
+}
+@media (prefers-color-scheme: dark) {
+  .pro-title .icon {
+    color: #fbbf24;
+  }
+}
+/* The section's own heading names the group, so the group's small one goes. */
+.pro > .zd-own > .source-group-head {
+  display: none;
+}
+.dawn-sky {
+  position: absolute;
+  z-index: -1;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 200vw;
+  translate: -50% 0;
+  pointer-events: none;
+}
+/* The light under the horizon: one flat colour, edges hard. */
+.dawn-sky::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--dawn);
+}
+/* The sun: a strip as tall as half the disc, right above the horizon (the
+   dawn band's top edge), with the disc's centre on its bottom edge. It is
+   sticky to the bottom of the window with most of it below the edge, so on
+   any screen the top of the sun peeks up from there; scrolling brings the
+   strip to its own place and the sun stands half over the horizon. It sits
+   behind the content (the cards cover it); its bottom edge is the horizon. */
+.home-top > .sun {
+  position: sticky;
+  z-index: -1;
+  bottom: -60px;
+  height: 100px;
+  margin-top: 12px;
+  overflow: hidden;
+  pointer-events: none;
+}
+/* Shorter screens (most laptops: 1366×768, 1440×900, 1536×864 at 125 %):
+   the source list a notch denser, so it and the way down still fit the
+   first screen with the sun peeking under them. */
+@media (min-width: 1024px) and (max-height: 860px) {
+  main {
+    padding-top: 24px;
+  }
+  .home-top > * + * {
+    margin-top: 16px;
+  }
+  .home-top .intro {
+    gap: 8px;
+  }
+  .home-top > .sun {
+    bottom: -76px;
+  }
+  .home-top .sources {
+    gap: 14px;
+  }
+  .sources .source {
+    padding-block: 5px;
+  }
+  .sources .source-box-note {
+    margin-top: 6px;
+  }
+  .home-top .sources-col {
+    gap: 14px;
+  }
+}
+/* The way down to the guide: centred right above the sun at the bottom of
+   the first screen (the spare height goes above it), never over the sources. */
+.home-top > .sources {
+  padding-bottom: 16px;
+}
+.home-top > .sun-cta {
+  align-self: center;
+  gap: 6px;
+  margin-top: auto;
+}
+.sun-disc,
+.sun-glow {
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  border-radius: 50%;
+  translate: -50% -50%;
+}
+.sun-disc {
+  width: 200px;
+  height: 200px;
+  background: linear-gradient(to bottom, var(--sun-top), var(--sun-bottom));
+}
+.sun-glow {
+  width: 720px;
+  height: 260px;
+  background: radial-gradient(closest-side, var(--sun-glow), transparent);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --sun-glow: rgb(255 143 60 / 0.3);
+    --dawn: #15111a;
+    --dusk: #1c1622;
+    --chrome: #09090b;
+  }
+  :root[data-band="dawn"] {
+    --chrome: var(--dawn);
+  }
+  :root[data-band="dusk"] {
+    --chrome: var(--dusk);
+  }
+  .dawn,
+  :root[data-band="dawn"] :is(.site-header, .topbar) {
+    --line: #2c2433;
+    --hairline: #221b28;
+    --surface: #2c2433;
+    --raised: #241d2a;
+    --well: #100d14;
+  }
+  .shell:has(.dusk) main > footer,
+  .dusk,
+  :root[data-band="dusk"] :is(.site-header, .topbar) {
+    --line: #362c3f;
+    --hairline: #2a2232;
+    --surface: #362c3f;
+    --raised: #2d2535;
+    --well: #16121b;
+  }
+}
+/* The way to the guide, in the header on wide screens. */
+/* Secondary look (outlined, like the sign-in): the first screen already has the dark one over the sun. */
+.site-header .header-cta {
+  display: none;
   flex: none;
-  font-size: 14px;
-  color: var(--faint);
+  align-self: center;
+  border-color: var(--line);
+  background: transparent;
+  color: var(--text);
 }
+.site-header .header-cta:hover {
+  opacity: 1;
+  background: var(--surface);
+}
+@media (min-width: 1024px) {
+  .site-header .header-cta {
+    display: inline-flex;
+  }
+}
+
 .lead {
   font-size: 15px;
   line-height: 1.6;
@@ -494,7 +719,8 @@ main > footer a {
 .sources {
   gap: 22px;
 }
-.sources ul {
+.sources ul,
+.pro ul {
   margin: 0;
   padding: 0;
   list-style: none;
@@ -528,18 +754,18 @@ main > footer a {
   color: var(--muted);
   text-wrap: pretty;
 }
-.sources > .zd-own > .source-box {
+.zd-own-cards > .zd-own > .source-box {
   padding: 0;
   border: 0;
   background: none;
 }
-.sources > .zd-own > .source-box > ul {
+.zd-own-cards > .zd-own > .source-box > ul {
   display: grid;
   /* Two cards (UKAŽ hidden) or three: they share the row. */
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 12px;
 }
-.sources > .zd-own > .source-box > ul > .source {
+.zd-own-cards > .zd-own > .source-box > ul > .source {
   align-items: flex-start;
   flex-wrap: wrap;
   padding: 12px 14px;
@@ -547,48 +773,49 @@ main > footer a {
   border-radius: 12px;
   background: var(--well);
 }
-.sources > .zd-own > .source-box > ul > .source {
+.zd-own-cards > .zd-own > .source-box > ul > .source {
   position: relative;
   transition:
     border-color 0.15s,
     background-color 0.15s;
 }
 /* The whole card is the row's link or button (its ::after covers the card); no underline, the card lights up instead. */
-.sources > .zd-own .zd-row-button::after {
+.zd-own-cards > .zd-own .zd-row-button::after {
   content: "";
   position: absolute;
   inset: 0;
   border-radius: 12px;
 }
-.sources > .zd-own .zd-row-button:hover {
+.zd-own-cards > .zd-own .zd-row-button:hover {
   text-decoration: none;
 }
-.sources > .zd-own > .source-box > ul > .source:has(.zd-row-button:not(:disabled)):hover {
+.zd-own-cards > .zd-own > .source-box > ul > .source:has(.zd-row-button:not(:disabled)):hover {
   border-color: var(--idle);
   background: var(--surface);
 }
-.sources > .zd-own .zd-row-button:focus-visible {
+.zd-own-cards > .zd-own .zd-row-button:focus-visible {
   outline: none;
 }
-.sources > .zd-own > .source-box > ul > .source:has(.zd-row-button:focus-visible) {
+.zd-own-cards > .zd-own > .source-box > ul > .source:has(.zd-row-button:focus-visible) {
   outline: 2px solid var(--link);
   outline-offset: 2px;
 }
-.sources > .zd-own > .source-box > ul > .source > .icon {
+.zd-own-cards > .zd-own > .source-box > ul > .source > .icon {
   margin-top: 2px;
 }
-.sources > .zd-own > .source-box > ul > .source > .source-name {
+.zd-own-cards > .zd-own > .source-box > ul > .source > .source-name {
   flex: 1 1 0;
 }
-.sources > .zd-own > .source-box > ul > .source > .source-state {
+.zd-own-cards > .zd-own > .source-box > ul > .source > .source-state {
   flex-basis: 100%;
   margin-left: 0;
   padding-left: 28px;
 }
-.sources > .zd-own > .source-box > ul > .source > .source-state:empty {
+.zd-own-cards > .zd-own > .source-box > ul > .source > .source-state:empty {
   display: none;
 }
-.sources {
+.sources,
+.pro {
   container-type: inline-size;
 }
 /* By the section's own width (the sidebar takes part of the screen): one column below 640 px, Pro cards stack below 560 px. */
@@ -598,7 +825,7 @@ main > footer a {
   }
 }
 @container (max-width: 560px) {
-  .sources > .zd-own > .source-box > ul {
+  .zd-own-cards > .zd-own > .source-box > ul {
     grid-template-columns: minmax(0, 1fr);
   }
 }
@@ -809,8 +1036,56 @@ main > footer a {
   font-variant-numeric: tabular-nums;
 }
 /* The note under the steps, aligned with their text (number 28px + gap 16px). */
-.connect > .guide-note {
-  padding-left: 44px;
+/* The end of the page, in the Pro band: the contact line and the card for Owl. */
+.home-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 48px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+.project-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--well);
+  color: var(--text);
+}
+.project-card:hover {
+  border-color: var(--faint);
+  text-decoration: none;
+}
+.project-card img {
+  display: block;
+  flex: none;
+  border-radius: 8px;
+}
+.project-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.project-name {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.project-desc {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--soft);
+  text-wrap: pretty;
+}
+.project-arrow {
+  margin-left: auto;
+  flex: none;
+  font-size: 14px;
+  color: var(--faint);
 }
 .step-body {
   display: flex;
@@ -957,9 +1232,6 @@ main > footer a {
     padding: 20px 16px 32px;
   }
   /* No note under the steps and a shorter gap before the footer: no empty space at the end. */
-  .connect > .guide-note {
-    display: none;
-  }
   .steps > li:last-child {
     border-bottom: 0;
   }
@@ -1041,12 +1313,12 @@ main > footer a {
     --shadow-dialog: 0 24px 64px rgb(0 0 0 / 0.7);
   }
   html,
-  body,
-  .topbar {
+  body {
     background: var(--bg);
   }
-  .site-header {
-    background: rgb(9 9 11 / 0.85);
+  .site-header,
+  .topbar {
+    background: var(--chrome);
   }
   .copy button {
     background: var(--panel);
