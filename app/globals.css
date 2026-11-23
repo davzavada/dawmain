@@ -583,7 +583,7 @@ main > footer a {
   z-index: -1;
   bottom: calc(var(--sun) * -0.3);
   height: calc(var(--sun) / 2);
-  margin-top: 12px;
+  margin-top: auto;
   /* Cut only below the horizon: the glow spreads freely above the strip. */
   clip-path: inset(-100vh -100vw 0 -100vw);
   pointer-events: none;
@@ -620,15 +620,15 @@ main > footer a {
     padding-bottom: 16px;
   }
 }
-/* The way down to the guide: centred right above the sun at the bottom of
-   the first screen (the spare height goes above it), never over the sources. */
+/* The way down to the guide: centred right under the sources; the spare
+   height of the first screen goes between it and the sun. */
 .home-top > .sources {
   padding-bottom: 32px;
 }
 .home-top > .sun-cta {
   align-self: center;
   gap: 6px;
-  margin-top: auto;
+  margin-top: 0;
 }
 /* On tall screens part of the spare height goes above the intro too, so the
    content does not hang at the top over an empty field. */
