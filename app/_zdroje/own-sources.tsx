@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import type { MouseEvent, ReactNode } from "react";
+import { createContext, useContext, type MouseEvent, type ReactNode } from "react";
 import { Icon } from "@/app/_icons";
 import { UkazRow } from "@/app/_source-status";
 import type { SummaryResponse } from "@/src/files/web-types";
@@ -39,11 +39,16 @@ function intercept(auth: string) {
   };
 }
 
+/** How to get Pro, rendered by the home page from an editable text; shown under the heading while the group is locked. */
+const ProNoteContext = createContext<ReactNode>(null);
+
 /** `texts`: the editable lines under the rows, as the home page read them (the defaults without). */
-export function OwnSourcesGroup({ zotero, texts = DEFAULT_SOURCE_TEXTS }: { zotero: boolean; texts?: SourceTexts }) {
+export function OwnSourcesGroup({ zotero, texts = DEFAULT_SOURCE_TEXTS, proNote = null }: { zotero: boolean; texts?: SourceTexts; proNote?: ReactNode }) {
   return (
     <SourceTextsContext.Provider value={texts}>
-      <OwnSources zotero={zotero} />
+      <ProNoteContext.Provider value={proNote}>
+        <OwnSources zotero={zotero} />
+      </ProNoteContext.Provider>
     </SourceTextsContext.Provider>
   );
 }
@@ -67,7 +72,7 @@ function OwnSources({ zotero }: { zotero: boolean }) {
   }
   const signedIn = auth === "signed_in";
   return (
-    <Group signedIn={signedIn}>
+    <Group signedIn={signedIn} withoutPro={signedIn && filesRowView(summary).locked}>
       {signedIn ? <FilesRow auth={auth} summary={summary} /> : <FilesInvite auth={auth} />}
       {zotero ? <ZoteroRow signedIn={signedIn} /> : <ZoteroUnavailable signedIn={signedIn} />}
       <UkazRow signedIn={signedIn} />
@@ -75,14 +80,17 @@ function OwnSources({ zotero }: { zotero: boolean }) {
   );
 }
 
-function Group({ signedIn, className, children }: { signedIn: boolean; className?: string; children: ReactNode }) {
+/** `withoutPro`: a signed-in account that has no Pro, so it gets the note on how to get it, as visitors do. */
+function Group({ signedIn, withoutPro = false, className, children }: { signedIn: boolean; withoutPro?: boolean; className?: string; children: ReactNode }) {
   const classes = ["source-group", signedIn ? null : "locked", "zd-own", className].filter(Boolean).join(" ");
+  const note = useContext(ProNoteContext);
   return (
     <div className={classes}>
       <div className="source-group-head">
         <h3 className="source-group-name">Pro (právníky)</h3>
         {signedIn ? null : <ZIcon name="lock" size={13} className="zd-group-lock" />}
       </div>
+      {note && (!signedIn || withoutPro) ? <div className="source-group-note-wrap">{note}</div> : null}
       <div className="source-box">
         <ul>{children}</ul>
       </div>

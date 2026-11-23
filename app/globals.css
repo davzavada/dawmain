@@ -165,7 +165,7 @@ h2 {
   flex: none;
   border-radius: 6px;
 }
-.site-name span {
+.site-name > span {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -386,28 +386,6 @@ main > footer a {
   background: #ffffff;
   box-shadow: inset 0 0 0 1px var(--line);
 }
-.nav-dot {
-  width: 16px;
-  height: 16px;
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.nav-dot::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--idle);
-}
-.guide-item[data-selected="true"] {
-  color: var(--text);
-  font-weight: 500;
-}
-.guide-item[data-selected="true"] .nav-dot::before {
-  background: var(--accent);
-}
 .nav-ellipsis {
   min-width: 0;
   overflow: hidden;
@@ -444,12 +422,29 @@ main > footer a {
 .intro {
   gap: 14px;
 }
+/* The end of the page: the guide, then the link to Owl. At least a screen
+   tall (less the anchor offset and main's bottom padding), so "Jak se
+   připojit" scrolls to the top like the other sections. */
+.home-end {
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+  min-height: calc(100dvh - var(--anchor-offset) - 48px);
+}
+@media (min-width: 1024px) {
+  .home-end {
+    min-height: calc(100dvh - var(--anchor-offset) - 64px);
+  }
+}
+.more {
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
 .project-card {
   display: flex;
   align-items: center;
   gap: 14px;
-  margin-top: 6px;
-  padding: 14px 16px;
+  padding: 12px 14px;
   border: 1px solid var(--line);
   border-radius: 10px;
   color: var(--text);
@@ -524,6 +519,15 @@ main > footer a {
   flex: 1;
 }
 /* The Pro group under them: its rows as cards side by side, instead of one box. */
+.source-group-note-wrap {
+  margin: -2px 0 10px;
+}
+.source-group-note {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+  text-wrap: pretty;
+}
 .sources > .zd-own > .source-box {
   padding: 0;
   border: 0;
@@ -945,6 +949,9 @@ main > footer a {
   .site-header {
     padding: 0 16px;
     gap: 10px;
+  }
+  .site-title-rest {
+    display: none;
   }
   main {
     padding: 20px 16px 32px;
