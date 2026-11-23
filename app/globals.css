@@ -233,6 +233,15 @@ main > footer {
   box-shadow: 0 0 0 100vmax var(--dusk);
   clip-path: inset(0 -100vmax -100vmax);
 }
+/* Home page: past the end of the page (iOS overscroll, the strip under a
+   translucent toolbar) the canvas shows the Pro band's colour, not the
+   page's; the body keeps the page's own colour behind the content. */
+html:has(.dusk) {
+  background: var(--dusk);
+}
+html:has(.dusk) body {
+  background: var(--bg);
+}
 main > footer a {
   color: var(--muted);
 }
@@ -628,6 +637,15 @@ main > footer a {
   margin-top: 0;
   /* At least this much room before the sun, whatever the screen. */
   margin-bottom: 24px;
+}
+/* Phones: the link closer under the last source box. */
+@media (max-width: 640px) {
+  .home-top > .sources {
+    padding-bottom: 0;
+  }
+  .home-top > .sun-cta {
+    margin-top: 16px;
+  }
 }
 /* On tall screens part of the spare height goes above the intro too, so the
    content does not hang at the top over an empty field. */
