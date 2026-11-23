@@ -116,6 +116,8 @@ const LOOK: Record<string, { icon: IconName; color: string }> = {
 
 /** A group's flag in front of its heading (a static SVG, not an emoji: those render as letters on Windows). */
 const GROUP_FLAG: Partial<Record<DatabaseGroup, string>> = { Slovensko: "/flag-sk.svg" };
+/** A group's heading where it differs from its id. */
+const GROUP_LABEL: Partial<Record<DatabaseGroup, string>> = { Předpisy: "Právní předpisy" };
 
 /** What a row needs to render; a pending row has no status yet. */
 type Row = Pick<DatabaseStatus, "id" | "label" | "group" | "href"> & {
@@ -183,16 +185,15 @@ export function SourceList({ groups = DATABASE_GROUPS }: { groups?: readonly Dat
       <div key={group} className="source-group">
         <div className="source-group-head">
           {GROUP_FLAG[group] ? <img className="source-group-flag" src={GROUP_FLAG[group]} alt="" width={18} height={12} /> : null}
-          <h3 className="source-group-name">{group}</h3>
+          <h3 className="source-group-name">{GROUP_LABEL[group] ?? group}</h3>
         </div>
         {mirrored.length > 0 ? (
           <div className="source-box source-box-mirror">
             <div className="source-box-head">
               <Icon name="database" size={14} />
               <span className="source-box-name">Interní databáze</span>
-              <span className="source-group-count">{mirrored.length}</span>
             </div>
-            <p className="source-box-note">Rozhodnutí českých soudů hledá Dawmain ve vlastní, pravidelně aktualizované kopii. Odkaz vždy vede na originál u soudu.</p>
+            <p className="source-box-note">Rozhodnutí českých soudů hledá Dawmain ve vlastní, pravidelně aktualizované kopii.</p>
             <ul>
               {mirrored.map((row) => (
                 <DatabaseRow key={row.id} row={row} count={row.mirror ? counts?.[row.mirror] : undefined} countLoading={counts === undefined} />

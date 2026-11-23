@@ -616,6 +616,10 @@ main > footer a {
   .home-top .sources-col {
     gap: 14px;
   }
+  /* Denser rows here: the right column's groups a bit further apart, so the columns still end on one line. */
+  .home-top .sources-col + .sources-col {
+    gap: 21px;
+  }
   .home .home-top > .sources {
     padding-bottom: 16px;
   }
@@ -724,12 +728,14 @@ main > footer a {
   gap: 22px;
   min-width: 0;
 }
-/* Both columns end on one line: the last box of each stretches to the taller one. */
-.sources-col > .source-group:last-child {
-  flex: 1;
+/* Every box as tall as its rows (a stretched Soudní dvůr EU box sat half
+   empty); the right column's groups sit a little closer, so both columns
+   still end on one line. */
+.sources-cols {
+  align-items: start;
 }
-.sources-col > .source-group:last-child > .source-box:last-child {
-  flex: 1;
+.sources-col + .sources-col {
+  gap: 11px;
 }
 /* The Pro group under them: its rows as cards side by side, instead of one box. */
 .source-group-note-wrap {

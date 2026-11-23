@@ -41,7 +41,7 @@ export default async function Home() {
         </section>
 
         <section id="zdroje" className="sources">
-          <h2>Zdroje</h2>
+          <h2>Jaké zdroje má asistent k dispozici?</h2>
           {/* Client island: the status lights come from GET /api/status (static, checked hourly) after the page is up. */}
           {/* Two columns on wide screens: case law on the left, legislation and Slovakia on the right. */}
           <div className="sources-cols">
