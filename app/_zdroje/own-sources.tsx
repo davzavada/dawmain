@@ -17,7 +17,7 @@ import { useZoteroStatus } from "./zotero-status";
  * cannot connect it) and UKAŽ — a hidden feature: listed only for an account an admin
  * switched it on for (app/_source-status.tsx), never for visitors.
  * Visitors see them greyed out with a lock, each with one line on what it
- * is, and a click signs them in (01); signed in, the rows read the same
+ * is, and nothing to click (the note above them says how to get Pro); signed in, the rows read the same
  * (no counts, no account, no lights: that lives in the sidebar's pages)
  * and the whole card links to its page, a lock only without Pro. The rows read the shared summary
  * (./store.ts) and the Zotero status, so the page itself stays
@@ -60,7 +60,7 @@ function OwnSources({ zotero }: { zotero: boolean }) {
     return (
       <>
         <Group signedIn={false} className="zd-hint-out">
-          <FilesInvite auth={auth} />
+          <FilesInvite />
           {zotero ? <ZoteroRow signedIn={false} /> : <ZoteroUnavailable signedIn={false} />}
         </Group>
         <Group signedIn className="zd-hint-in">
@@ -73,7 +73,7 @@ function OwnSources({ zotero }: { zotero: boolean }) {
   const signedIn = auth === "signed_in";
   return (
     <Group signedIn={signedIn}>
-      {signedIn ? <FilesRow auth={auth} summary={summary} /> : <FilesInvite auth={auth} />}
+      {signedIn ? <FilesRow auth={auth} summary={summary} /> : <FilesInvite />}
       {zotero ? <ZoteroRow signedIn={signedIn} /> : <ZoteroUnavailable signedIn={signedIn} />}
       <UkazRow signedIn={signedIn} />
     </Group>
@@ -101,16 +101,14 @@ function Group({ signedIn, className, children }: { signedIn: boolean; className
 /** What Zotero is: the visitor's line, and the line of an account without Pro (the group's heading says Pro). Its default wording; the rows show the editable text (useSourceTexts). */
 const ZOTERO_DESC = DEFAULT_SOURCE_TEXTS.zotero;
 
-/** Visitors (and, until Clerk loads, the visitor's variant): what the files are, and a click signs in. */
-function FilesInvite({ auth }: { auth: string }) {
+/** Visitors (and, until Clerk loads, the visitor's variant): what the files are; not a link. */
+function FilesInvite() {
   const texts = useSourceTexts();
   return (
     <li className="source zd-own-row">
       <Icon name="upload" />
       <div className="source-name">
-        <button type="button" className="source-title zd-row-button" onClick={requestSignIn} disabled={auth !== "signed_out"}>
-          Vlastní soubory
-        </button>
+        <span className="source-title">Vlastní soubory</span>
         <span className="source-desc">{texts.files}</span>
       </div>
     </li>
@@ -174,7 +172,7 @@ function ZoteroRow({ signedIn }: { signedIn: boolean }) {
     else if (!ok.connection && ok.unreadable) desc = "Připojení je potřeba obnovit - připojte Zotero znovu.";
   }
 
-  return <ZoteroRowView desc={desc === ZOTERO_DESC ? texts.zotero : desc} locked={locked} onClick={visitor ? requestSignIn : ZOTERO_PAGE} />;
+  return <ZoteroRowView desc={desc === ZOTERO_DESC ? texts.zotero : desc} locked={locked} onClick={visitor ? null : ZOTERO_PAGE} />;
 }
 
 /**

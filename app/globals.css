@@ -738,6 +738,10 @@ main > footer a {
   gap: 11px;
 }
 /* The Pro group under them: its rows as cards side by side, instead of one box. */
+/* The note is plain text with a link, also in a locked (not-allowed) group. */
+.source-group.locked .source-group-note-wrap {
+  cursor: auto;
+}
 .source-group-note-wrap {
   margin: -2px 0 10px;
 }
