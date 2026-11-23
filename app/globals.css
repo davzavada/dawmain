@@ -629,6 +629,15 @@ main > footer a {
   /* At least this much room before the sun, whatever the screen. */
   margin-bottom: 24px;
 }
+/* Phones: the link closer under the last source box. */
+@media (max-width: 640px) {
+  .home-top > .sources {
+    padding-bottom: 0;
+  }
+  .home-top > .sun-cta {
+    margin-top: 16px;
+  }
+}
 /* On tall screens part of the spare height goes above the intro too, so the
    content does not hang at the top over an empty field. */
 .home-top > .intro {
