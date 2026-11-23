@@ -567,21 +567,17 @@ main > footer a {
   background: var(--dawn);
 }
 /* The sun: a strip as tall as half the disc, right above the horizon (the
-   dawn band's top edge), with the disc's centre on its bottom edge. It is
-   sticky to the bottom of the window with most of it below the edge, so on
-   any screen the top of the sun peeks up from there; scrolling brings the
-   strip to its own place and the sun stands half over the horizon. It sits
-   behind the content (the cards cover it); its bottom edge is the horizon. */
-/* The sun grows with the window's height, so it fills a tall screen as it
-   fills a laptop's; the strip is half the disc, and sticky with a fixed
-   share of it below the edge. */
+   dawn band's top edge), with the disc's centre on its bottom edge. The top
+   part is at least a screen tall and the spare room goes above the sun, so
+   on first load it stands at the bottom of the window; where the content is
+   taller, it simply follows it, always under the link. It grows with the
+   window's height, so it fills a tall screen as it fills a laptop's. */
 :root {
   --sun: clamp(180px, 24vh, 340px);
 }
 .home-top > .sun {
-  position: sticky;
+  position: relative;
   z-index: -1;
-  bottom: calc(var(--sun) * -0.3);
   height: calc(var(--sun) / 2);
   margin-top: auto;
   /* Cut only below the horizon: the glow spreads freely above the strip. */
@@ -600,9 +596,6 @@ main > footer a {
   }
   .home-top .intro {
     gap: 8px;
-  }
-  .home-top > .sun {
-    bottom: calc(var(--sun) * -0.38);
   }
   .home-top .sources {
     gap: 14px;
@@ -633,16 +626,8 @@ main > footer a {
   align-self: center;
   gap: 6px;
   margin-top: 0;
-}
-/* Phones: the sun stays put on the horizon instead of riding the bottom
-   edge; there the edge moves as the address bar slides in and out, and the
-   sun would jump behind the content. (svh above for the same reason: the
-   small viewport, which does not change while scrolling.) */
-@media (max-width: 640px) {
-  .home-top > .sun {
-    position: relative;
-    bottom: auto;
-  }
+  /* At least this much room before the sun, whatever the screen. */
+  margin-bottom: 24px;
 }
 /* On tall screens part of the spare height goes above the intro too, so the
    content does not hang at the top over an empty field. */
@@ -738,6 +723,10 @@ main > footer a {
   gap: 11px;
 }
 /* The Pro group under them: its rows as cards side by side, instead of one box. */
+/* The note is plain text with a link, also in a locked (not-allowed) group. */
+.source-group.locked .source-group-note-wrap {
+  cursor: auto;
+}
 .source-group-note-wrap {
   margin: -2px 0 10px;
 }
