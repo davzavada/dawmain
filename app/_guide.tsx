@@ -25,12 +25,6 @@ interface Platform {
 const SAMPLE_QUESTION =
   "Najdi judikaturu Nejvyššího soudu k odpovědnosti provozovatele za škodu způsobenou psem.";
 
-const skillDownload = (
-  <a className="button" href="/dawmain-reserse.md" download>
-    Stáhnout skill (SKILL.md)
-  </a>
-);
-
 const loginStep: Step = {
   title: "Přihlaste se",
   body: (
@@ -87,51 +81,80 @@ const PLATFORMS: Platform[] = [
     label: "ChatGPT",
     steps: (endpoint) => [
       {
-        title: "Zapněte režim vývojáře",
+        title: "Kdo může Dawmain přidat",
+        body: (
+          <>
+            <p>
+              Vlastní MCP konektory umí ChatGPT jen ve firemních tarifech{" "}
+              <strong>Business</strong>, <strong>Enterprise</strong> a <strong>Edu</strong>, a to
+              ve webové verzi (chatgpt.com), ne v mobilní aplikaci.
+            </p>
+            <ul>
+              <li>
+                <strong>Business:</strong> přidat a zveřejnit ho může jen{" "}
+                <strong>vlastník nebo správce</strong> pracovního prostoru. Kdo to u vás je, uvidíte
+                v <strong>Nastavení pracovního prostoru → Členové</strong>.
+              </li>
+              <li>
+                <strong>Enterprise / Edu:</strong> vlastník nebo správce, případně člen, kterému
+                správce přes role (RBAC) povolí oprávnění <em>Create plugins with MCPs</em>.
+                Zveřejnit pro celou firmu ho ale smí jen vlastník nebo správce.
+              </li>
+            </ul>
+            <p>
+              Ostatní kolegové nic nastavovat nemusí – jakmile správce Dawmain zveřejní, jen se do
+              něj jednou přihlásí (krok 4).
+            </p>
+          </>
+        ),
+      },
+      {
+        title: "Správce přidá konektor",
+        body: (
+          <>
+            <p>
+              V postranním panelu otevřete <strong>Pluginy</strong>, klikněte na{" "}
+              <strong>+</strong> a zvolte <strong>Add custom MCP server</strong>. Režim vývojáře
+              už zapínat nemusíte. Jako název napište <em>Dawmain</em>, v části{" "}
+              <strong>Connection</strong> vložte adresu níže, ověření nastavte na{" "}
+              <strong>OAuth</strong>, potvrďte upozornění (
+              <em>I understand and want to continue</em>) a klikněte na{" "}
+              <strong>Create as a plugin</strong>.
+            </p>
+            <CopyField value={endpoint} label="Zkopírovat adresu" />
+            <p>
+              Tím je konektor zatím jen pro vás – můžete si ho nejdřív vyzkoušet.
+            </p>
+          </>
+        ),
+      },
+      {
+        title: "Správce ho zveřejní pro firmu",
         body: (
           <p>
-            Klikněte vlevo dole na své jméno, otevřete{" "}
-            <strong>Nastavení → Zabezpečení a přihlášení</strong> a zapněte{" "}
-            <strong>Režim vývojáře</strong>. Bez něj vlastní konektor přidat nejde.
+            V administraci pracovního prostoru (<strong>Nastavení pracovního prostoru → Pluginy</strong>)
+            najděte koncept Dawmain a zvolte <strong>Publish</strong>. Pak se objeví mezi
+            schválenými pluginy a kolegové ho najdou v <strong>Nastavení → Pluginy</strong>. V
+            Enterprise/Edu jsou nástroje nově zveřejněného pluginu ve výchozím stavu vypnuté –
+            zapněte je u Dawmainu přes <strong>••• → Action control</strong>.
           </p>
         ),
       },
       {
-        title: "Přidejte konektor",
+        ...loginStep,
         body: (
-          <>
-            <p>
-              V postranním panelu otevřete <strong>Pluginy</strong> a klikněte na{" "}
-              <strong>+</strong>. Jako název napište <em>Dawmain</em>, do pole s adresou vložte
-              adresu níže, ověření nechte na <strong>OAuth</strong> a potvrďte.
-            </p>
-            <CopyField value={endpoint} label="Zkopírovat adresu" />
-          </>
-        ),
-      },
-      loginStep,
-      {
-        title: "Nahrajte skill",
-        body: (
-          <>
-            <p>
-              Rešeršní návod – jak s databázemi pracovat a jak citovat – nabízí konektor i sám
-              (nástroj <em>dawmain_guide</em>); ChatGPT se ale instrukcemi konektoru neřídí tak
-              spolehlivě jako Claude, proto doporučujeme nahrát ho i jako skill. Stáhněte si ho:
-            </p>
-            {skillDownload}
-            <p>
-              Pak v postranním panelu otevřete <strong>Skills</strong>, zvolte{" "}
-              <strong>Vytvořit → Nahrát z počítače</strong> a vyberte stažený soubor.
-            </p>
-          </>
+          <p>
+            Každý uživatel (i správce) se při prvním použití přihlásí svým vlastním účtem Dawmain:
+            otevře se okno Dawmain, zaregistrujte se e-mailem, nebo se přihlaste, pokud už účet
+            máte. Pak se vrátíte zpět do ChatGPT.
+          </p>
         ),
       },
       {
         ...firstQuestion(
           <>
-            Otevřete novou konverzaci, klikněte na <strong>+</strong> vedle pole pro zprávu a
-            zapněte Dawmain.
+            Otevřete novou konverzaci a do pole pro zprávu napište <strong>@</strong> a vyberte
+            Dawmain (nebo ho zapněte přes <strong>+</strong> vedle pole).
           </>,
         ),
       },
