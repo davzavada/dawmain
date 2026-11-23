@@ -190,9 +190,8 @@ export function SourceList({ groups = DATABASE_GROUPS }: { groups?: readonly Dat
             <div className="source-box-head">
               <Icon name="database" size={14} />
               <span className="source-box-name">Interní databáze</span>
-              <span className="source-group-count">{mirrored.length}</span>
             </div>
-            <p className="source-box-note">Rozhodnutí českých soudů hledá Dawmain ve vlastní, pravidelně aktualizované kopii. Odkaz vždy vede na originál u soudu.</p>
+            <p className="source-box-note">Rozhodnutí českých soudů hledá Dawmain ve vlastní, pravidelně aktualizované kopii.</p>
             <ul>
               {mirrored.map((row) => (
                 <DatabaseRow key={row.id} row={row} count={row.mirror ? counts?.[row.mirror] : undefined} countLoading={counts === undefined} />
