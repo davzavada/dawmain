@@ -431,7 +431,7 @@ main > footer a {
 .home-top {
   display: flex;
   flex-direction: column;
-  min-height: calc(100dvh - var(--anchor-offset) + 16px);
+  min-height: calc(100svh - var(--anchor-offset) + 16px);
 }
 .home-top > * + * {
   margin-top: 28px;
@@ -495,7 +495,7 @@ main > footer a {
 .home-tail {
   display: flex;
   flex-direction: column;
-  min-height: calc(100dvh - var(--anchor-offset) + 56px);
+  min-height: calc(100svh - var(--anchor-offset) + 56px);
 }
 .dawn,
 .dusk {
@@ -630,10 +630,20 @@ main > footer a {
   gap: 6px;
   margin-top: 0;
 }
+/* Phones: the sun stays put on the horizon instead of riding the bottom
+   edge; there the edge moves as the address bar slides in and out, and the
+   sun would jump behind the content. (svh above for the same reason: the
+   small viewport, which does not change while scrolling.) */
+@media (max-width: 640px) {
+  .home-top > .sun {
+    position: relative;
+    bottom: auto;
+  }
+}
 /* On tall screens part of the spare height goes above the intro too, so the
    content does not hang at the top over an empty field. */
 .home-top > .intro {
-  margin-top: clamp(0px, calc((100dvh - 1000px) / 3), 140px);
+  margin-top: clamp(0px, calc((100svh - 1000px) / 3), 140px);
 }
 .sun-disc,
 .sun-glow {
@@ -684,26 +694,6 @@ main > footer a {
     --well: #16121b;
   }
 }
-/* The way to the guide, in the header on wide screens. */
-/* Secondary look (outlined, like the sign-in): the first screen already has the dark one over the sun. */
-.site-header .header-cta {
-  display: none;
-  flex: none;
-  align-self: center;
-  border-color: var(--line);
-  background: transparent;
-  color: var(--text);
-}
-.site-header .header-cta:hover {
-  opacity: 1;
-  background: var(--surface);
-}
-@media (min-width: 1024px) {
-  .site-header .header-cta {
-    display: inline-flex;
-  }
-}
-
 .lead {
   font-size: 15px;
   line-height: 1.6;

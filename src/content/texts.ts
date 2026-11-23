@@ -103,11 +103,11 @@ export const TEXT_FIELDS = [
   {
     key: "sources.pro",
     group: SOURCES,
-    label: "Jak získat Pro",
-    hint: "Řádek pod nadpisem „Pro“ pro návštěvníky a účty bez Pro. Odkaz zapíšete jako [text](mailto:adresa).",
+    label: "Text u Pro",
+    hint: "Řádek pod nadpisem „Pro (právníky)“: co Pro je a jak ho získat. Vidí ho všichni. Odkaz zapíšete jako [text](mailto:adresa).",
     kind: "block",
     maxChars: 400,
-    default: `Pro je zdarma (s dobrovolným příspěvkem) a přiděluji ho ručně: zaregistrujte se a napište mi na ${MAIL}.`,
+    default: `Přístup k extra funkcím: asistent hledá i ve vašich vlastních souborech a v knihovně Zotero. Pokud chcete přístup, napište mi na ${MAIL}. Je zdarma, s dobrovolným příspěvkem.`,
   },
   {
     key: "legal.effective",

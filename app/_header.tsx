@@ -23,10 +23,6 @@ export function SiteHeader() {
       </Link>
       <span className="site-tagline">MCP server pro české, slovenské a unijní právo · David Závada</span>
       <StatusSummary />
-      {/* The way to the guide from anywhere; on narrow screens the tab strip's "Připojení" does it. */}
-      <Link href="/#pripojeni" className="button header-cta">
-        Jak se připojit
-      </Link>
       {/* Without Clerk there is no account at all; Zotero only where the deployment can connect it (the OAuth app and CREDENTIALS_SECRET). */}
       {clerkConfigured() ? <AccountControl zotero={zoteroConfigured()} /> : null}
     </header>
