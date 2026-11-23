@@ -126,13 +126,12 @@ const PLATFORMS: Platform[] = [
             body: (
               <>
                 <p>
-                  Na chatgpt.com (v mobilní aplikaci to nejde) otevřete v
-                  postranním panelu <strong>Pluginy</strong>, klikněte na{" "}
-                  <strong>+</strong> a zvolte{" "}
-                  <strong>Add custom MCP server</strong>. Jako název napište{" "}
-                  <em>Dawmain</em>, v části <strong>Connection</strong> vložte
-                  adresu níže, ověření nastavte na <strong>OAuth</strong>,
-                  potvrďte upozornění (
+                  Na chatgpt.com otevřete v postranním panelu{" "}
+                  <strong>Pluginy</strong>, klikněte na <strong>+</strong> a
+                  zvolte <strong>Add custom MCP server</strong>. Jako název
+                  napište <em>Dawmain</em>, v části <strong>Connection</strong>{" "}
+                  vložte adresu níže, ověření nastavte na <strong>OAuth</strong>
+                  , potvrďte upozornění (
                   <em>I understand and want to continue</em>) a klikněte na{" "}
                   <strong>Create as a plugin</strong>.
                 </p>
@@ -142,9 +141,7 @@ const PLATFORMS: Platform[] = [
                   <strong>
                     Nastavení → Zabezpečení a přihlášení → Režim vývojáře
                   </strong>
-                  . OpenAI vlastní konektory oficiálně uvádí u tarifu{" "}
-                  <strong>Pro</strong> (jen pro čtení); v tarifech Free a Plus
-                  nemusí být k dispozici.
+                  .
                 </p>
               </>
             ),
@@ -162,25 +159,11 @@ const PLATFORMS: Platform[] = [
             body: (
               <>
                 <p>
-                  Vlastní MCP konektory umí ChatGPT jen ve firemních tarifech{" "}
-                  <strong>Business</strong>, <strong>Enterprise</strong> a{" "}
-                  <strong>Edu</strong>, a to ve webové verzi (chatgpt.com), ne v
-                  mobilní aplikaci.
+                  Dawmain do firemního ChatGPT přidává a zveřejňuje{" "}
+                  <strong>vlastník nebo správce</strong> pracovního prostoru.
+                  Kdo to u vás je, uvidíte v{" "}
+                  <strong>Nastavení pracovního prostoru → Členové</strong>.
                 </p>
-                <ul>
-                  <li>
-                    <strong>Business:</strong> přidat a zveřejnit ho může jen{" "}
-                    <strong>vlastník nebo správce</strong> pracovního prostoru.
-                    Kdo to u vás je, uvidíte v{" "}
-                    <strong>Nastavení pracovního prostoru → Členové</strong>.
-                  </li>
-                  <li>
-                    <strong>Enterprise / Edu:</strong> vlastník nebo správce,
-                    případně člen, kterému správce přes role (RBAC) povolí
-                    oprávnění <em>Create plugins with MCPs</em>. Zveřejnit pro
-                    celou firmu ho ale smí jen vlastník nebo správce.
-                  </li>
-                </ul>
                 <p>
                   Ostatní kolegové nic nastavovat nemusí – jakmile správce
                   Dawmain zveřejní, jen se do něj jednou přihlásí (krok 4).
@@ -195,10 +178,10 @@ const PLATFORMS: Platform[] = [
                 <p>
                   V postranním panelu otevřete <strong>Pluginy</strong>,
                   klikněte na <strong>+</strong> a zvolte{" "}
-                  <strong>Add custom MCP server</strong>. Režim vývojáře už
-                  zapínat nemusíte. Jako název napište <em>Dawmain</em>, v části{" "}
-                  <strong>Connection</strong> vložte adresu níže, ověření
-                  nastavte na <strong>OAuth</strong>, potvrďte upozornění (
+                  <strong>Add custom MCP server</strong>. Jako název napište{" "}
+                  <em>Dawmain</em>, v části <strong>Connection</strong> vložte
+                  adresu níže, ověření nastavte na <strong>OAuth</strong>,
+                  potvrďte upozornění (
                   <em>I understand and want to continue</em>) a klikněte na{" "}
                   <strong>Create as a plugin</strong>.
                 </p>
@@ -218,10 +201,9 @@ const PLATFORMS: Platform[] = [
                 <strong>Nastavení pracovního prostoru → Pluginy</strong>)
                 najděte koncept Dawmain a zvolte <strong>Publish</strong>. Pak
                 se objeví mezi schválenými pluginy a kolegové ho najdou v{" "}
-                <strong>Nastavení → Pluginy</strong>. V Enterprise/Edu jsou
-                nástroje nově zveřejněného pluginu ve výchozím stavu vypnuté –
-                zapněte je u Dawmainu přes <strong>••• → Action control</strong>
-                .
+                <strong>Nastavení → Pluginy</strong>. Pokud jsou nástroje
+                Dawmainu vypnuté, zapněte je přes{" "}
+                <strong>••• → Action control</strong>.
               </p>
             ),
           },
