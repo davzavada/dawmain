@@ -572,11 +572,17 @@ main > footer a {
    any screen the top of the sun peeks up from there; scrolling brings the
    strip to its own place and the sun stands half over the horizon. It sits
    behind the content (the cards cover it); its bottom edge is the horizon. */
+/* The sun grows with the window's height, so it fills a tall screen as it
+   fills a laptop's; the strip is half the disc, and sticky with a fixed
+   share of it below the edge. */
+:root {
+  --sun: clamp(180px, 24vh, 340px);
+}
 .home-top > .sun {
   position: sticky;
   z-index: -1;
-  bottom: -60px;
-  height: 100px;
+  bottom: calc(var(--sun) * -0.3);
+  height: calc(var(--sun) / 2);
   margin-top: 12px;
   /* Cut only below the horizon: the glow spreads freely above the strip. */
   clip-path: inset(-100vh -100vw 0 -100vw);
@@ -596,7 +602,7 @@ main > footer a {
     gap: 8px;
   }
   .home-top > .sun {
-    bottom: -76px;
+    bottom: calc(var(--sun) * -0.38);
   }
   .home-top .sources {
     gap: 14px;
@@ -610,16 +616,24 @@ main > footer a {
   .home-top .sources-col {
     gap: 14px;
   }
+  .home .home-top > .sources {
+    padding-bottom: 16px;
+  }
 }
 /* The way down to the guide: centred right above the sun at the bottom of
    the first screen (the spare height goes above it), never over the sources. */
 .home-top > .sources {
-  padding-bottom: 16px;
+  padding-bottom: 32px;
 }
 .home-top > .sun-cta {
   align-self: center;
   gap: 6px;
   margin-top: auto;
+}
+/* On tall screens part of the spare height goes above the intro too, so the
+   content does not hang at the top over an empty field. */
+.home-top > .intro {
+  margin-top: clamp(0px, calc((100dvh - 1000px) / 3), 140px);
 }
 .sun-disc,
 .sun-glow {
@@ -630,13 +644,13 @@ main > footer a {
   translate: -50% -50%;
 }
 .sun-disc {
-  width: 200px;
-  height: 200px;
+  width: var(--sun);
+  height: var(--sun);
   background: linear-gradient(to bottom, var(--sun-top), var(--sun-bottom));
 }
 .sun-glow {
-  width: 720px;
-  height: 260px;
+  width: calc(var(--sun) * 3.6);
+  height: calc(var(--sun) * 1.3);
   background: radial-gradient(closest-side, var(--sun-glow), transparent);
 }
 @media (prefers-color-scheme: dark) {
