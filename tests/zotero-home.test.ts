@@ -114,17 +114,15 @@ function statusCalls(): number {
 }
 
 describe("the Zotero row on the home page", () => {
-  it("invites a visitor to sign in, locked, without asking the server", async () => {
-    const signIn = vi.fn();
-    store.registerClerkActions({ signIn, manageAccount: vi.fn(), signOut: vi.fn() });
+  it("shows a visitor the row locked and not clickable, without asking the server", async () => {
     await render("signed_out");
     const g = group()!;
     expect(g).not.toBeNull();
     expect(g.locked).toBe(true);
     expect(g.textContent).toContain("Vaše knihovna");
     expect(statusCalls()).toBe(0);
-    await act(async () => g.querySelector<HTMLButtonElement>("button")!.click());
-    expect(signIn).toHaveBeenCalledOnce();
+    expect(g.querySelector("button")).toBeNull();
+    expect(g.querySelector("a.source-title")).toBeNull();
   });
 
   it("stays in the group, locked and without a button, where the deployment cannot connect Zotero", async () => {
