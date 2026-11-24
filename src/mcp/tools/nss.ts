@@ -9,8 +9,9 @@ import {
   readTopSchema,
   toolFailure,
 } from "./shared";
+import { paragraphsSchema, readDecision } from "./reading";
 import { getNssDecision, getNssDecisionText, searchNss } from "@/src/sources/nss";
-import { interleave, maxTotal, pageOrExcerpt, uniqueQueries } from "@/src/sources/shared/text";
+import { interleave, maxTotal, uniqueQueries } from "@/src/sources/shared/text";
 import { buildPreviews, noTermsNote, renderPreviews } from "./previews";
 import { failureLines, runVariants, variantFailureSchema, variantTotalsSchema } from "./variants";
 
@@ -244,6 +245,7 @@ export function registerNss(server: McpServer): void {
       inputSchema: z.object({
         document_id: z.string().regex(/^\d+$/, "Numeric id from nss_search"),
         find: z.string().optional().describe(FIND_DESCRIPTION),
+        paragraphs: paragraphsSchema,
         page: z.number().int().min(1).default(1),
       }),
       outputSchema: z.object({
@@ -258,10 +260,10 @@ export function registerNss(server: McpServer): void {
       }),
       annotations: READ_ONLY,
     },
-    async ({ document_id, find, page }) => {
+    async ({ document_id, find, paragraphs, page }) => {
       try {
         const decision = await getNssDecision(document_id);
-        const paged = pageOrExcerpt(decision.text, page, find);
+        const paged = readDecision(decision.text, { page, find, paragraphs });
         const output = {
           id: decision.id,
           url: decision.url,

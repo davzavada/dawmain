@@ -28,6 +28,20 @@ describe("charPage", () => {
     expect(page2.text).toHaveLength(5);
     expect(page2.has_more).toBe(false);
   });
+  it("breaks between paragraphs, else between words — never inside one; the pages join back to the text", () => {
+    const para = `${"slovo ".repeat(15).trim()}.`;
+    const text = Array.from({ length: 12 }, () => para).join("\n");
+    const pages = Array.from({ length: charPage(text, 1, 200).total_pages }, (_, i) => charPage(text, i + 1, 200).text);
+    expect(pages.join("")).toBe(text);
+    expect(pages.length).toBeGreaterThan(2);
+    for (const page of pages.slice(0, -1)) {
+      expect(page.length).toBeLessThanOrEqual(200);
+      expect(page.endsWith("\n")).toBe(true);
+    }
+    const noLines = "slovo ".repeat(100);
+    expect(charPage(noLines, 1, 200).text.endsWith(" ")).toBe(true);
+    expect(charPage(noLines, 2, 200).text.startsWith("slovo")).toBe(true);
+  });
   it("clamps out-of-range pages", () => {
     expect(charPage("abc", 99, 25).page).toBe(1);
     expect(charPage("", 1, 25).total_pages).toBe(1);

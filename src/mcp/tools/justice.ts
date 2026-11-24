@@ -9,6 +9,7 @@ import {
   isoDate,
   toolFailure,
 } from "./shared";
+import { paragraphsSchema, readDecision } from "./reading";
 import {
   JUSTICE_COURT_CODES,
   JUSTICE_DOC_TYPES,
@@ -19,7 +20,7 @@ import {
   type JusticeCaseNumber,
   type JusticeSearchPage,
 } from "@/src/sources/justice";
-import { pageOrExcerpt, snippet } from "@/src/sources/shared/text";
+import { snippet } from "@/src/sources/shared/text";
 
 const fail = toolFailure("rozhodnuti.justice.cz");
 
@@ -311,6 +312,7 @@ export function registerJustice(server: McpServer): void {
       inputSchema: z.object({
         uuid: z.string().uuid().describe("Decision UUID from justice_search."),
         find: z.string().optional().describe(FIND_DESCRIPTION),
+        paragraphs: paragraphsSchema,
         page: z.number().int().min(1).default(1),
       }),
       outputSchema: z.object({
@@ -325,10 +327,10 @@ export function registerJustice(server: McpServer): void {
       }),
       annotations: READ_ONLY,
     },
-    async ({ uuid, find, page }) => {
+    async ({ uuid, find, paragraphs, page }) => {
       try {
         const decision = await getJusticeDecision(uuid);
-        const paged = pageOrExcerpt(decision.text, page, find);
+        const paged = readDecision(decision.text, { page, find, paragraphs });
         const output = {
           uuid: decision.uuid,
           url: decision.url,

@@ -11,6 +11,7 @@ import {
   readTopSchema,
   toolFailure,
 } from "./shared";
+import { paragraphsSchema, readDecision } from "./reading";
 import {
   ecliToSz,
   getNalusDecision,
@@ -25,7 +26,7 @@ import {
   type NalusSearchPage,
 } from "@/src/sources/nalus";
 import { SourceError } from "@/src/sources/shared/errors";
-import { interleave, maxTotal, pageOrExcerpt, uniqueQueries } from "@/src/sources/shared/text";
+import { interleave, maxTotal, uniqueQueries } from "@/src/sources/shared/text";
 import { PREVIEW_DEADLINE_MS, buildPreviews, renderPreviews, withDeadline, type ToolPreview } from "./previews";
 import { failureLines, runVariants, variantFailureSchema, variantTotalsSchema } from "./variants";
 
@@ -390,6 +391,7 @@ export function registerNalus(server: McpServer): void {
         sz: z.string().optional().describe("NALUS id: '{senát}-{číslo}-{rok}[_{pořadí}]', e.g. 'Pl-24-10_1'."),
         ecli: z.string().optional().describe("Alternative: the decision's ECLI."),
         find: z.string().optional().describe(FIND_DESCRIPTION),
+        paragraphs: paragraphsSchema,
         page: z.number().int().min(1).default(1),
       }),
       outputSchema: z.object({
@@ -409,7 +411,7 @@ export function registerNalus(server: McpServer): void {
       }),
       annotations: READ_ONLY,
     },
-    async ({ sz, ecli, find, page }) => {
+    async ({ sz, ecli, find, paragraphs, page }) => {
       try {
         let identifier = sz;
         if (!identifier && ecli) identifier = ecliToSz(ecli) ?? undefined;
@@ -422,7 +424,7 @@ export function registerNalus(server: McpServer): void {
           );
         }
         const decision = await getNalusDecision(identifier);
-        const paged = pageOrExcerpt(decision.text, page, find);
+        const paged = readDecision(decision.text, { page, find, paragraphs });
         const decisionEcli = nalusEcli(decision.sz, decision.registrySign);
         const output = {
           sz: decision.sz,
@@ -441,7 +443,7 @@ export function registerNalus(server: McpServer): void {
         };
         // The právní věta once, with the first page — not again with every
         // further page or `find` (it runs to thousands of characters).
-        const firstRead = page === 1 && !find?.trim();
+        const firstRead = page === 1 && !find?.trim() && !paragraphs?.trim();
         // NALUS fills an empty slot with a placeholder ("Právní věta není k
         // dispozici.") — parseNalusAbstract drops them; this guards a cached
         // or mocked value all the same, so no placeholder is quoted as a holding.

@@ -54,6 +54,18 @@ describe("mirror client", () => {
     });
   });
 
+  it("briefExcerpt: one line around the first match, cut at words", async () => {
+    const { briefExcerpt } = await import("@/src/mcp/tools/mirror-route");
+    expect(briefExcerpt({ excerpt: "o náhradě újmy", highlights: [[2, 9]] })).toBe("o «náhradě» újmy");
+    const long = `${"úvodní slova ".repeat(40)}výpověď z nájmu bytu ${"další text ".repeat(40)}`;
+    const at = long.indexOf("výpověď");
+    const brief = briefExcerpt({ excerpt: long, highlights: [[at, at + 7]] });
+    expect(brief.length).toBeLessThanOrEqual(222);
+    expect(brief).toContain("«výpověď» z nájmu bytu");
+    expect(brief.startsWith("…")).toBe(true);
+    expect(brief.endsWith("…")).toBe(true);
+  });
+
   it("marks highlights", () => {
     expect(markedExcerpt({ excerpt: "o náhradě újmy", highlights: [[2, 9]] })).toBe("o «náhradě» újmy");
   });
