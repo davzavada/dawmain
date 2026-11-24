@@ -1,0 +1,15 @@
+{
+  "name": "dawmain",
+  "description": "Dawmain: Czech and EU legal research for Claude (connector + research skill).",
+  "owner": {
+    "name": "David Závada",
+    "url": "https://dawmain.davidzavada.cz"
+  },
+  "plugins": [
+    {
+      "name": "dawmain",
+      "source": "./plugin/dawmain",
+      "description": "Czech and EU legal research with live queries into the official databases."
+    }
+  ]
+}
