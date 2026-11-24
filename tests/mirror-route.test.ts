@@ -97,10 +97,37 @@ describe("mirror routing", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("case_number finds THAT decision (by-case), never the ones citing it", async () => {
+    fetchMock.mockImplementation(async () =>
+      json({ decisions: [{ source: "ns", id: "BD87C5D0B5398F19C12580FF00256234", caseNumber: "26 Cdo 4249/2016", court: "Nejvyšší soud", form: "rozsudek", date: "2017-01-18" }] }),
+    );
+    const out = textOf(await MIRROR_TOOLS.ns_search({ case_number: "26 Cdo 4249/2016", limit: 20, offset: 0, read_top: 0 }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const url = new URL(fetchMock.mock.calls[0][0] as string);
+    expect(url.pathname).toBe("/v1/by-case");
+    expect(url.searchParams.get("case")).toBe("26 Cdo 4249/2016");
+    expect(url.searchParams.getAll("source")).toEqual(["ns"]);
+    expect(out).toContain("1. 26 Cdo 4249/2016 (rozsudek, 2017-01-18) — Nejvyšší soud → ns_get_decision unid: BD87C5D0B5398F19C12580FF00256234");
+  });
+
+  it("an ÚS ecli is looked up the same way; a značka the mirror lacks, or one with other filters, goes to the court", async () => {
+    fetchMock.mockImplementation(async () => json({ decisions: [{ source: "us", id: "Pl-24-10_1", caseNumber: "Pl. ÚS 24/10", court: null, form: "nalez", date: "2011-03-22" }] }));
+    expect(textOf(await MIRROR_TOOLS.us_search({ ecli: "ECLI:CZ:US:2011:Pl.US.24.10.1", page: 0 }))).toContain("us_get_decision sz: Pl-24-10_1");
+    expect(new URL(fetchMock.mock.calls[0][0] as string).pathname).toBe("/v1/by-case");
+    fetchMock.mockClear();
+    fetchMock.mockImplementation(async () => json({ decisions: [] }));
+    expect(await MIRROR_TOOLS.nss_search({ case_number: "1 As 113/2012", page: 1 })).toEqual({ fallback: 'the mirror holds no NSS decision with the spisová značka "1 As 113/2012"' });
+    fetchMock.mockClear();
+    expect(await MIRROR_TOOLS.justice_search({ case_number: "8 Co 60/2025", query: "sazebník", page: 0 })).toEqual({
+      fallback: "the mirror looks a spisová značka up on its own, without other filters",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("justice_search: court_codes go to the mirror, with the other filters", async () => {
     fetchMock.mockImplementation(async () => json({ hits: [{ ...HIT, source: "justice", id: "d2965a2d-ec0d-476b-983f-75e716972829", court: "Krajský soud v Brně" }], channel: "and", terms: [] }));
     const out = textOf(
-      await MIRROR_TOOLS.justice_search({ query: "sazebník", match: "all_words", court_codes: ["ksbr", "KSBRJI", "KSBR"], case_number: "8 Co 60/2025", date_from: "2025-01-01", date_to: "2025-06-30", page: 0 }),
+      await MIRROR_TOOLS.justice_search({ query: "sazebník", match: "all_words", court_codes: ["ksbr", "KSBRJI", "KSBR"], date_from: "2025-01-01", date_to: "2025-06-30", page: 0 }),
     );
     expect(out).toContain("justice_get_decision uuid: d2965a2d-ec0d-476b-983f-75e716972829");
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -108,7 +135,7 @@ describe("mirror routing", () => {
     expect(qs.get("court_code")).toBe("KSBR,KSBRJI");
     expect(qs.getAll("source")).toEqual(["justice"]);
     expect(qs.get("q")).toBe("sazebník");
-    expect(qs.get("case")).toBe("8 Co 60/2025");
+    expect(qs.get("case")).toBeNull();
     expect(qs.get("from")).toBe("2025-01-01");
     expect(qs.get("to")).toBe("2025-06-30");
     // No codes, no parameter.
