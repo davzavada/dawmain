@@ -4,9 +4,11 @@ import { interleave, pageOrExcerpt, uniqueQueries } from "@/src/sources/shared/t
 import {
   getMirrorDecision,
   markedExcerpt,
+  mirrorDecisionsByCase,
   searchMirror,
   type MirrorCourt,
   type MirrorHit,
+  type MirrorLinkedDecision,
   type MirrorSearchParams,
 } from "@/src/sources/mirror";
 import { continuationHint, dateRangeError } from "./shared";
@@ -266,6 +268,43 @@ const COURT_SEARCH: Record<string, CourtSearchSpec> = {
   },
 };
 
+/**
+ * case_number (or an ÚS ecli) = THAT decision, as the live tools match it
+ * field by field. /v1/search?case= finds every decision whose text names the
+ * značka — for a decision cited often, twenty citing ones, newest first, and
+ * the decision itself not among them (measured: 26 Cdo 4249/2016,
+ * 1 As 113/2012). /v1/by-case matches the decisions' own značky. Any other
+ * narrowing next to it (words, dates, a category) goes to the court, which
+ * combines them; so does a značka the mirror does not hold.
+ */
+async function byCaseNumber(
+  court: MirrorCourt,
+  caseNumber: string,
+  rest: { variants: string[]; from?: string; to?: string; extra: Partial<MirrorSearchParams>; limit: number },
+): Promise<MirrorAnswer> {
+  const { extra } = rest;
+  if (rest.variants.length || rest.from || rest.to || extra.categories?.length || extra.type || extra.courtCodes?.length) {
+    return { fallback: "the mirror looks a spisová značka up on its own, without other filters" };
+  }
+  let found: MirrorLinkedDecision[];
+  try {
+    found = await mirrorDecisionsByCase(caseNumber, [court]);
+  } catch (error) {
+    return { fallback: `the mirror did not answer (${error instanceof Error ? error.message : String(error)})` };
+  }
+  if (!found.length) return { fallback: `the mirror holds no ${court.toUpperCase()} decision with the spisová značka "${caseNumber}"` };
+  const shown = found.slice(0, rest.limit);
+  return text([
+    MIRROR_NOTE,
+    `${court.toUpperCase()} in the mirror: ${shown.length} decision${shown.length === 1 ? "" : "s"} with the spisová značka "${caseNumber}" as ${shown.length === 1 ? "its" : "their"} own (the decisions citing it: caselaw_citations).`,
+    "",
+    ...shown.map((d, i) => {
+      const facts = [d.form ? (FORM[d.form] ?? d.form) : null, d.date].filter(Boolean).join(", ");
+      return `${i + 1}. ${d.caseNumber ?? caseNumber}${facts ? ` (${facts})` : ""}${d.court ? ` — ${d.court}` : ""} → ${DETAIL[court](d.id)}`;
+    }),
+  ]);
+}
+
 async function courtSearch(name: string, args: Args): Promise<MirrorAnswer> {
   const spec = COURT_SEARCH[name];
   const refused = unsupported(args, spec.handled, spec.defaults);
@@ -281,6 +320,8 @@ async function courtSearch(name: string, args: Args): Promise<MirrorAnswer> {
   const to = str(args.date_to);
   if (dateRangeError(from, to)) return { fallback: "inverted date range" };
   const limit = Math.min(50, Math.max(1, spec.limit(args)));
+  const ownCase = caseNumber ?? extra.caseNumber;
+  if (ownCase) return byCaseNumber(spec.court, ownCase, { variants, from, to, extra, limit });
   let run;
   try {
     run = await searchVariants(variants, {
