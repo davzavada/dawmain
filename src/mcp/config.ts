@@ -3,6 +3,33 @@ import { timingSafeEqual } from "node:crypto";
 /** Identity reported to MCP clients during `initialize`. */
 export const SERVER_NAME = "dawmain-mcp-server";
 export const SERVER_VERSION = "0.1.0";
+/** Human-readable name clients show instead of `SERVER_NAME`. */
+export const SERVER_TITLE = "Dawmain";
+
+/** Where the site lives when the deployment does not say (PUBLIC_URL / Vercel). */
+export const DEFAULT_ORIGIN = "https://dawmain.davidzavada.cz";
+
+/**
+ * `serverInfo` extras from the 2025-11 spec (Implementation.title, .icons,
+ * .websiteUrl): clients such as Claude show the icon next to the connector.
+ * The files are the site's own favicon (app/icon.svg, app/apple-icon.png),
+ * served by Next at fixed paths, so the connector and the site never differ.
+ */
+export function serverBranding(origin: string): {
+  title: string;
+  websiteUrl: string;
+  icons: { src: string; mimeType: string; sizes: string[] }[];
+} {
+  return {
+    title: SERVER_TITLE,
+    websiteUrl: origin,
+    icons: [
+      { src: `${origin}/icon.svg`, mimeType: "image/svg+xml", sizes: ["any"] },
+      { src: `${origin}/apple-icon.png`, mimeType: "image/png", sizes: ["180x180"] },
+    ],
+  };
+}
+
 
 /**
  * Optional shared-secret auth. When `MCP_BEARER_TOKEN` is set the endpoint
