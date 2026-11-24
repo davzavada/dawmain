@@ -254,6 +254,7 @@ so re-running a search after reading is cheap.
 | předpis podle názvu nebo pojmu | `esbirka_search` — `match: "all_words"` (default: every word), `match: "phrase"` for a term of art, `exclude_words` to shake off a homonym |
 | citaci, účinnost, historii znění | `esbirka_get_act` — the versions newest first, a published future one included |
 | jeden paragraf | `esbirka_get_text` + `section: "§ 2201"` |
+| více paragrafů najednou (nejvýš 10) | `section: "§ 2288-2291"` nebo `section: "2235, 2291"` |
 | jeden článek (Ústava, Listina, čl. I novely) | `esbirka_get_text` + `section: "čl. 36"` |
 | znění účinné v den skutkového děje | the same + `date: "2013-06-30"` |
 
@@ -852,8 +853,9 @@ Zotero. A rate limit or a pause says when to come back; carry on without it mean
 
 Three different acts. Do not let one stand in for another.
 
-**Screen.** Every hit carries court, date, form (and at NS the category); `read_top`
-adds a few hundred characters around your terms from the leading hits. Judge from them
+**Screen.** Every hit carries court, date, form (and at NS the category), and from the mirror one
+line of the matching passage (terms marked «…»); `read_top` adds a few hundred characters around your terms from the
+leading hits. Judge from them
 whether a decision may *decide* the issue or merely mentions the term. "NO PREVIEW"
 means the terms do not occur verbatim (the court's search matched another word form) —
 judge by the hit line and read it if the line makes it look relevant. Screening picks
@@ -863,7 +865,12 @@ what to read; it never supplies a quotation.
 match — usually with the bod number at their head — at most eight passages, with the
 match count. It answers "does this decision address X at all" in one call (zero matches is a real,
 citable finding), and it finds the bod you will quote. Every `find` answer ends by
-saying it is excerpts and how many pages the whole text has.
+saying it is excerpts and how many pages the whole text has. On a short decision `find` may answer
+with the whole text and say so — that is a full reading; do not fetch page 1 again.
+
+**Go back by bod.** `paragraphs: "24"` or `"24-31"` on `ns_`/`nss_`/`us_`/
+`justice_get_decision` returns those numbered paragraphs alone — for a passage you
+already read, or the bod another decision cites. Never reload a page for one bod.
 
 **Read whole — every decision the memo cites.** `page: 1`, then `page: 2`, `3` … until
 the answer no longer ends with the continuation line "(page N/M — …)". On your own:
@@ -880,7 +887,8 @@ one, the most recent restatement, each side of a conflict. Screening and `find` 
 that number small; they do not replace the reading.
 
 **Statutes and literature have their own depth.** Read every provision you cite with
-`esbirka_get_text` (Slovak: `sk_predpis_get_text`) and `section`; read `doctrine_get_record` for the works you cite. The
+`esbirka_get_text` (Slovak: `sk_predpis_get_text`) and `section` — several provisions of one act in ONE call
+(`section: "§ 2288-2291"`, `"2235, 2291"`); read `doctrine_get_record` for the works you cite. The
 user's own documents are read in parts: `files_get_document` with the outline first,
 then the `section`, `mn` or `footnote` you cite — never cover to cover.
 

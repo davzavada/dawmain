@@ -1,6 +1,6 @@
 import { SourceError, toToolError } from "@/src/sources/shared/errors";
 import { justiceCourtCode } from "@/src/sources/justice";
-import { interleave, pageOrExcerpt, uniqueQueries } from "@/src/sources/shared/text";
+import { interleave, uniqueQueries } from "@/src/sources/shared/text";
 import {
   getMirrorDecision,
   markedExcerpt,
@@ -12,6 +12,7 @@ import {
   type MirrorSearchParams,
 } from "@/src/sources/mirror";
 import { continuationHint, dateRangeError } from "./shared";
+import { readDecision } from "./reading";
 
 /**
  * The case-law tools answered from the home mirror instead of the courts —
@@ -77,10 +78,33 @@ function num(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-function hitLine(hit: MirrorHit, index: number, withSource: boolean): string {
+/** Characters of the passage a hit line carries. */
+const BRIEF_CHARS = 220;
+
+/**
+ * The hit's passage around its first marked match, in one line. A hit line
+ * used to say which decision it is and nothing of what it says, so telling a
+ * relevant hit from a stray one meant opening it (15–45k characters); the
+ * mirror sends the best passage with every hit anyway. Cut at word
+ * boundaries. Pure — exported for the tests.
+ */
+export function briefExcerpt(hit: Pick<MirrorHit, "excerpt" | "highlights">, max = BRIEF_CHARS): string {
+  const marked = markedExcerpt(hit);
+  if (marked.length <= max) return marked;
+  const first = Math.max(0, marked.indexOf("«"));
+  let start = Math.max(0, first - Math.floor(max / 4));
+  if (start > 0) start = marked.indexOf(" ", start) + 1 || start;
+  let end = Math.min(marked.length, start + max);
+  if (end < marked.length) end = Math.max(marked.lastIndexOf(" ", end), start + Math.floor(max / 2));
+  return `${start > 0 ? "…" : ""}${marked.slice(start, end).trim()}${end < marked.length ? "…" : ""}`;
+}
+
+/** One hit; `brief` adds its passage (the hits without a read_top preview below the list). */
+function hitLine(hit: MirrorHit, index: number, withSource: boolean, brief = false): string {
   const facts = [hit.form ? (FORM[hit.form] ?? hit.form) : null, hit.date].filter(Boolean).join(", ");
   const tag = withSource ? `[${hit.source.toUpperCase()}] ` : "";
-  return `${index + 1}. ${tag}${hit.caseNumber ?? "?"}${hit.category ? ` [${hit.category}]` : ""}${facts ? ` (${facts})` : ""}${hit.court ? ` — ${hit.court}` : ""} → ${DETAIL[hit.source](hit.id)}\n   ${hit.url}`;
+  const passage = brief && hit.excerpt ? `\n   ${hit.inDissent ? "(odlišné stanovisko) " : ""}${briefExcerpt(hit)}` : "";
+  return `${index + 1}. ${tag}${hit.caseNumber ?? "?"}${hit.category ? ` [${hit.category}]` : ""}${facts ? ` (${facts})` : ""}${hit.court ? ` — ${hit.court}` : ""} → ${DETAIL[hit.source](hit.id)}\n   ${hit.url}${passage}`;
 }
 
 function previewLines(hits: MirrorHit[], readTop: number, withSource: boolean): string[] {
@@ -172,7 +196,7 @@ async function caselawSearch(args: Args): Promise<MirrorAnswer> {
     ...statusLines,
     ...(wantsEu ? ["– SDEU: not in the mirror — search it with sdeu_search."] : []),
     "",
-    ...(items.length ? items.map((hit, i) => hitLine(hit, i, true)) : ["No hits in the mirror — broaden the query or add variants."]),
+    ...(items.length ? items.map((hit, i) => hitLine(hit, i, true, i >= readTop)) : ["No hits in the mirror — broaden the query or add variants."]),
     ...previewLines(items, readTop, true),
   ]);
 }
@@ -343,7 +367,7 @@ async function courtSearch(name: string, args: Args): Promise<MirrorAnswer> {
       variants.length > 1 ? ` (per variant: ${run.perVariant.map((n) => (n === null ? "✗" : String(n))).join(" · ")})` : ""
     }${run.failures.length ? ` ⚠ ${run.failures.join("; ")}` : ""}. The mirror returns the best ${limit} — narrow the query rather than paging.`,
     "",
-    ...(hits.length ? hits.map((hit, i) => hitLine(hit, i, false)) : ["No hits in the mirror — broaden the query or add variants."]),
+    ...(hits.length ? hits.map((hit, i) => hitLine(hit, i, false, i >= readTop)) : ["No hits in the mirror — broaden the query or add variants."]),
     ...previewLines(hits, readTop, false),
   ]);
 }
@@ -375,7 +399,7 @@ async function getDecision(name: string, args: Args): Promise<MirrorAnswer> {
   if (!decision) return { fallback: "the mirror does not hold this decision (yet)" };
   if (!decision.text) return { fallback: "the mirror has no text of this decision" };
   const find = str(args.find);
-  const paged = pageOrExcerpt(decision.text, Math.max(1, num(args.page, 1)), find);
+  const paged = readDecision(decision.text, { page: Math.max(1, num(args.page, 1)), find, paragraphs: str(args.paragraphs) });
   const meta = [
     decision.caseNumbers.length ? `Spisová značka: ${decision.caseNumbers.join("; ")}` : decision.caseNumber ? `Spisová značka: ${decision.caseNumber}` : null,
     decision.court ? `Soud: ${decision.court}` : null,

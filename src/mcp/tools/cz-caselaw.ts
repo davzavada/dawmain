@@ -145,6 +145,20 @@ function followUp(hit: AggregatedHit): string {
 }
 
 /** A count as the reader should take it: "≥1000" for a floor. */
+/**
+ * The failed variants of one court in a line. Variants usually fail for one
+ * reason (the court is down, a deadlock), and the upstream's message used to
+ * be printed once per variant — the same 250 characters two or three times.
+ * Variants are grouped by their error. Pure — exported for the tests.
+ */
+export function failureNote(failures: Array<{ variant: string; error: string }>): string {
+  const byError = new Map<string, string[]>();
+  for (const failure of failures) byError.set(failure.error, [...(byError.get(failure.error) ?? []), failure.variant]);
+  return [...byError]
+    .map(([error, variants]) => `variant${variants.length > 1 ? "s" : ""} ${variants.map((v) => `"${v}"`).join(", ")} failed: ${error}`)
+    .join("; ");
+}
+
 function countText(total: number | null, atLeast: boolean | undefined): string {
   if (total === null) return "?";
   return `${atLeast ? "≥" : ""}${total}`;
@@ -450,7 +464,7 @@ export function registerCzCaselaw(server: McpServer): void {
             // instead of after the slowest court.
             if (laneIndex < read_top && hits[0] && previewable(hits[0])) void previewText(hits[0]);
             const note = failures.length
-              ? failures.map((failure) => `variant "${failure.variant}" failed: ${failure.error}`).join("; ")
+              ? failureNote(failures)
               : undefined;
             const total = maxTotal(answered.map((result) => result.total));
             const multi = variants.length > 1;

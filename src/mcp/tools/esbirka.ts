@@ -14,6 +14,7 @@ import {
   type ActVersion,
 } from "@/src/sources/esbirka";
 import { charPage, snippet } from "@/src/sources/shared/text";
+import { SourceError } from "@/src/sources/shared/errors";
 
 /** MCP tools over the e-Sbírka client. Thin: schema → client call → shaping. */
 
@@ -29,6 +30,43 @@ const actIdentity = {
 };
 
 const fail = toolFailure("e-Sbírka");
+
+/** Sections one esbirka_get_text call reads at most. */
+export const MAX_SECTIONS = 10;
+
+/**
+ * `section` as the labels to read: one ("§ 2291"), a list ("2288, 2291",
+ * "čl. 10; čl. 36") or a range of §§ ("§ 2288-2291"). Neighbouring
+ * provisions are read together — a definition and its exceptions, a rule and
+ * the §§ it refers to — and one § per call made each of them a round trip
+ * with its own header and future-version warning. A range or a list wider
+ * than MAX_SECTIONS is refused: past that the act is read by page. Pure.
+ */
+export function expandSections(section: string): string[] {
+  const out: string[] = [];
+  for (const part of section.split(/[,;]/).map((p) => p.trim()).filter(Boolean)) {
+    const range = /^(?:§+\s*)?(\d{1,5})\s*[-–]\s*(?:§\s*)?(\d{1,5})$/u.exec(part);
+    if (!range) {
+      out.push(part);
+      continue;
+    }
+    const [from, to] = [Number(range[1]), Number(range[2])];
+    if (to < from || to - from >= MAX_SECTIONS) {
+      throw new SourceError(
+        "e-Sbírka",
+        "INPUT_INVALID",
+        `"${part}" is not a range of at most ${MAX_SECTIONS} sections.`,
+        `Pass a shorter range ('§ ${from}-${from + MAX_SECTIONS - 1}'), or omit 'section' and read the act page by page.`,
+      );
+    }
+    for (let n = from; n <= to; n++) out.push(`§ ${n}`);
+  }
+  const unique = [...new Set(out)];
+  if (unique.length > MAX_SECTIONS) {
+    throw new SourceError("e-Sbírka", "INPUT_INVALID", `${unique.length} sections in one call — at most ${MAX_SECTIONS}.`, "Split the list, or omit 'section' and read the act page by page.");
+  }
+  return unique;
+}
 
 /** "in force 2026-01-01 – 2026-12-31 (AKTUALNI)" — which wording a quotation is. */
 function versionLabel(version: ActVersion | null): string | null {
@@ -204,14 +242,14 @@ export function registerEsbirka(server: McpServer): void {
     {
       title: "e-Sbírka: consolidated text",
       description:
-        "Consolidated text of a Czech act as of a date — one section (§), one article (čl.), or the whole act page by page (~45k-character pages). Pass 'section' ('§ 1721', '1721', '3a') or an article ('čl. 36' — Ústava, Listina and other acts divided into articles, or 'čl. I' of an amending act); omit it to page through the act. Without 'date' you get the version in force TODAY; pass the date of the facts to read the wording that governed them; '0000-00-00' means the as-announced version. Every answer names the version it quotes (in force from–to) and warns when a future version of the act is already published.",
+        "Consolidated text of a Czech act as of a date — one section (§), several ('§ 2288-2291', '2235, 2291'), one article (čl.), or the whole act page by page (~45k-character pages). Pass 'section' ('§ 1721', '1721', '3a') or an article ('čl. 36' — Ústava, Listina and other acts divided into articles, or 'čl. I' of an amending act); omit it to page through the act. Without 'date' you get the version in force TODAY; pass the date of the facts to read the wording that governed them; '0000-00-00' means the as-announced version. Every answer names the version it quotes (in force from–to) and warns when a future version of the act is already published.",
       inputSchema: z.object({
         ...actIdentity,
         date: isoDate.optional().describe("Time version in force on this date. Omit for the version in force today."),
         section: z
           .string()
           .optional()
-          .describe("One section — '§ 12', '12' or '3a' — or one article — 'čl. 36', 'čl. I'. Omit for the whole act."),
+          .describe("One section — '§ 12', '12' or '3a' — or one article — 'čl. 36', 'čl. I'; several in one call as a range ('§ 2288-2291') or a list ('2235, 2291', 'čl. 10, čl. 36'), at most 10. Omit for the whole act."),
         page: z.number().int().min(1).default(1).describe("Page of the act text (or of a long section)."),
       }),
       outputSchema: z.object({
@@ -235,6 +273,60 @@ export function registerEsbirka(server: McpServer): void {
     },
     async ({ year, number, collection, date, section, page }) => {
       try {
+        const labels = section ? expandSections(section) : [];
+        if (section && labels.length > 1) {
+          // Several provisions of one version: the version once, the sections
+          // three at a time (each may scan the act's fragment pages), one
+          // header and one future-version warning for all of them.
+          const version = await resolveVersionForRead(collection, year, number, date);
+          const futureRun = pendingVersions(version, collection, year, number);
+          const texts: string[] = [];
+          const missing: string[] = [];
+          for (let i = 0; i < labels.length; i += 3) {
+            const batch = await Promise.all(
+              labels.slice(i, i + 3).map((label) =>
+                getSection(collection, year, number, date, label, { version }).then(
+                  (result) => result.text,
+                  (error: unknown) => {
+                    if (error instanceof SourceError && error.kind === "NOT_FOUND") return null;
+                    throw error;
+                  },
+                ),
+              ),
+            );
+            batch.forEach((text, k) => (text === null ? missing.push(labels[i + k]) : texts.push(text)));
+          }
+          const future = await futureRun;
+          if (!texts.length) {
+            throw new SourceError("e-Sbírka", "NOT_FOUND", `None of ${labels.join(", ")} was found in this act and time version.`, "Verify the sections exist in this act and time version, or fetch the whole act page by page (omit 'section').");
+          }
+          const staleUrl = version?.staleUrl ?? buildStaleUrl(collection, year, number, date);
+          const paged = charPage(texts.join("\n\n"), page);
+          const header = [`${staleUrl} ${labels.filter((label) => !missing.includes(label)).join(", ")}`, versionLabel(version)].filter(Boolean).join(" — ");
+          const note = [futureNote(future), missing.length ? `Not in this act and time version: ${missing.join(", ")}.` : ""].filter(Boolean).join("\n");
+          const locator = [`section: ${JSON.stringify(section)}`, date ? `date: "${date}"` : ""].filter(Boolean).join(", ");
+          return {
+            content: [
+              {
+                type: "text",
+                text: `${header}:${note ? `\n${note}` : ""}\n\n${paged.text}${rangeContinuationHint(locator, paged.page, paged.total_pages)}`,
+              },
+            ],
+            structuredContent: {
+              staleUrl,
+              url: `https://e-sbirka.gov.cz${staleUrl}`,
+              section,
+              ...(version?.from ? { version_from: version.from } : {}),
+              ...(version?.to ? { version_to: version.to } : {}),
+              ...(version?.type ? { version_type: version.type } : {}),
+              ...(future.length ? { future_versions: future } : {}),
+              page: paged.page,
+              total_pages: paged.total_pages,
+              has_more: paged.has_more,
+              text: paged.text,
+            },
+          };
+        }
         if (section) {
           // The version first (one detail request, cached), then the section
           // and the future-version lookup side by side: the history needs only

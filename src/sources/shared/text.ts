@@ -18,14 +18,40 @@ export interface CharPage {
   has_more: boolean;
 }
 
-/** Slice a long text into fixed character pages (1-based `page`). */
+/** How far back from the page limit a break may be moved to land between paragraphs or words. */
+const PAGE_BREAK_REACH = 0.2;
+
+/**
+ * Where the pages of `text` start. A page holds at most `pageChars`; its end
+ * is moved back to the last line break in its final fifth, else to the last
+ * space there, so a page never ends inside a word (measured: Pl. ÚS 24/10
+ * ended page 1 on "svobodné vo" and opened page 2 with "lby chování") and
+ * rarely inside a paragraph — a quotation then does not straddle two
+ * answers. Text with neither (one unbroken run) is cut at the limit. The
+ * pages joined give the text back, character for character. Pure.
+ */
+export function pageStarts(text: string, pageChars = DOC_PAGE_CHARS): number[] {
+  const starts = [0];
+  let at = 0;
+  while (text.length - at > pageChars) {
+    const limit = at + pageChars;
+    const floor = limit - Math.floor(pageChars * PAGE_BREAK_REACH);
+    const line = text.lastIndexOf("\n", limit - 1);
+    const space = line >= floor ? line : text.lastIndexOf(" ", limit - 1);
+    at = space >= floor ? space + 1 : limit;
+    starts.push(at);
+  }
+  return starts;
+}
+
+/** Slice a long text into character pages (1-based `page`), broken between paragraphs or words (pageStarts). */
 export function charPage(text: string, page: number, pageChars = DOC_PAGE_CHARS): CharPage {
   const total_chars = text.length;
-  const total_pages = Math.max(1, Math.ceil(total_chars / pageChars));
+  const starts = pageStarts(text, pageChars);
+  const total_pages = starts.length;
   const clamped = Math.min(Math.max(1, page), total_pages);
-  const start = (clamped - 1) * pageChars;
   return {
-    text: text.slice(start, start + pageChars),
+    text: text.slice(starts[clamped - 1], starts[clamped] ?? total_chars),
     page: clamped,
     total_pages,
     total_chars,
@@ -380,6 +406,11 @@ export interface DocumentView extends CharPage {
   matches?: number;
 }
 
+/** `find` on a one-page text answers with the whole text once the excerpts would be this share of it. */
+const WHOLE_INSTEAD_SHARE = 0.5;
+/** Below this a text is a few paragraphs either way. */
+const WHOLE_INSTEAD_MIN_CHARS = 3_000;
+
 /** One entry point for *_get_* tools: full-text page, or `find` excerpts. */
 export function pageOrExcerpt(text: string, page: number, find?: string): DocumentView {
   if (find?.trim()) {
@@ -387,7 +418,26 @@ export function pageOrExcerpt(text: string, page: number, find?: string): Docume
     // Every excerpt answer says what it is and where the whole text is:
     // `find` locates passages, it does not stand in for reading a decision
     // an argument rests on.
-    const pages = Math.max(1, Math.ceil(text.length / DOC_PAGE_CHARS));
+    const pages = pageStarts(text).length;
+    // A short text most of which the excerpts would repeat: the whole text
+    // costs barely more, and the reader does not load it a second time to
+    // read it in full (measured: 9.2k of excerpts from a 15.5k decision).
+    if (
+      result.matches &&
+      pages === 1 &&
+      text.length >= WHOLE_INSTEAD_MIN_CHARS &&
+      result.text.length >= text.length * WHOLE_INSTEAD_SHARE
+    ) {
+      return {
+        mode: "page",
+        matches: result.matches,
+        text: `${text}\n\n(The whole text, not excerpts: "${find.trim()}" occurs ${result.matches}× and its passages make up most of this short document.)`,
+        page: 1,
+        total_pages: 1,
+        total_chars: text.length,
+        has_more: false,
+      };
+    }
     const whole = `the whole text: page 1${pages > 1 ? ` of ${pages}` : ""}`;
     const rest = result.truncated
       ? `\n\n(${result.shown} of ${result.windows} passages shown${result.cut ? ", cut short" : ""}, ${result.matches} matches in all — narrow the term, or read ${whole}.)`

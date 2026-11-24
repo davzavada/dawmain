@@ -11,8 +11,9 @@ import {
   readTopSchema,
   toolFailure,
 } from "./shared";
+import { paragraphsSchema, readDecision } from "./reading";
 import { getNsDecision, nsBodyMissing, searchNs, withHighlight } from "@/src/sources/ns";
-import { interleave, maxTotal, pageOrExcerpt, uniqueQueries } from "@/src/sources/shared/text";
+import { interleave, maxTotal, uniqueQueries } from "@/src/sources/shared/text";
 import { PREVIEW_DEADLINE_MS, buildPreviews, renderPreviews, withDeadline, type ToolPreview } from "./previews";
 import { failureLines, runVariants, variantFailureSchema, variantTotalsSchema } from "./variants";
 
@@ -320,6 +321,7 @@ export function registerNs(server: McpServer): void {
       inputSchema: z.object({
         unid: z.string().regex(/^[0-9A-Fa-f]{32}$/, "32-hex UNID from ns_search"),
         find: z.string().optional().describe(FIND_DESCRIPTION),
+        paragraphs: paragraphsSchema,
         page: z.number().int().min(1).default(1),
       }),
       outputSchema: z.object({
@@ -334,10 +336,10 @@ export function registerNs(server: McpServer): void {
       }),
       annotations: READ_ONLY,
     },
-    async ({ unid, find, page }) => {
+    async ({ unid, find, paragraphs, page }) => {
       try {
         const decision = await getNsDecision(unid);
-        const paged = pageOrExcerpt(decision.text, page, find);
+        const paged = readDecision(decision.text, { page, find, paragraphs });
         // With 'find', hand back a link that opens the document scrolled to the
         // term — a citation the reader can check in one click. Only when the
         // term is there: a highlight of nothing would promise a passage.

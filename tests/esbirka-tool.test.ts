@@ -140,6 +140,29 @@ describe("esbirka_get_text section read", () => {
   });
 });
 
+describe("esbirka_get_text several sections", () => {
+  it("a range and a list read in one answer, under one header; a missing § is named", async () => {
+    serve();
+    const handler = await getTextTool();
+    const text = (await handler({ ...base, section: "§ 28-30" })).content[0].text;
+    expect(text.split("\n")[0]).toContain("§ 28, § 29, § 30");
+    expect(text).toContain("Text 28/1.");
+    expect(text).toContain("Text 30/1.");
+    expect(text.match(/A future version/g)).toHaveLength(1);
+    const listed = (await handler({ ...base, section: "29, 31" })).content[0].text;
+    expect(listed).toContain("Text 29/1.");
+    expect(listed).toContain("Not in this act and time version: 31.");
+  });
+
+  it("expandSections: ranges, lists, the cap", async () => {
+    const { expandSections } = await import("@/src/mcp/tools/esbirka");
+    expect(expandSections("§ 2288-2291")).toEqual(["§ 2288", "§ 2289", "§ 2290", "§ 2291"]);
+    expect(expandSections("2235, 2291; čl. 36")).toEqual(["2235", "2291", "čl. 36"]);
+    expect(expandSections("§ 12")).toEqual(["§ 12"]);
+    expect(() => expandSections("§ 1-30")).toThrow(/at most 10/);
+  });
+});
+
 describe("esbirka_get_text whole act", () => {
   it("the continuation of a dated read repeats the date (finding 10)", async () => {
     const big = Array.from({ length: 70 }, (_, i) => ({ kodTypuFragmentu: "Odstavec_Dc", xhtml: `${i} ${"x".repeat(990)}` }));
