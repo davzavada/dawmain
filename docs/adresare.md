@@ -56,8 +56,10 @@ Předem:
 - **Ověření identity** v platform.openai.com/settings/organization/general
   (individual verification, publikuje se pod jménem). Projekt nesmí mít
   EU data residency.
-- **Demo video** dostupné recenzentům (průchod pozitivními testy), adresa jde
-  do `DEMO_RECORDING_URL` při stavbě ZIPu.
+- **Demo video**: `public/demo/dawmain-chatgpt-demo.mp4`, na webu
+  `https://dawmain.davidzavada.cz/demo/dawmain-chatgpt-demo.mp4` (ChatGPT s Dawmainem:
+  judikatura NS k § 2927 o. z. a znění § 52 zákoníku práce). Adresa jde do
+  `DEMO_RECORDING_URL` při stavbě ZIPu.
 - **Testovací účet** bez MFA, kódů a magic linků (Clerk: e-mail + heslo),
   vyplňuje se jen v portálu v „Review details“, nikdy ne do ZIPu.
 - **Ověření domény**: token z portálu („Connect MCP server“) nastavit jako
