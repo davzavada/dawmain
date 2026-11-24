@@ -55,7 +55,7 @@ export default async function Home() {
         </section>
 
         {/* The way down to the guide, right under the sources. */}
-        <a href="#pripojeni" className="button sun-cta">
+        <a href="#pripojeni" className="button button-primary sun-cta">
           Jak se připojit <span aria-hidden="true">↓</span>
         </a>
 

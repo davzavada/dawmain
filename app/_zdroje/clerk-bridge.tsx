@@ -21,6 +21,10 @@ export function ClerkBridge() {
         const back = window.location.href;
         clerk.openSignIn({ forceRedirectUrl: back, signUpForceRedirectUrl: back });
       },
+      signUp: () => {
+        const back = window.location.href;
+        clerk.openSignUp({ forceRedirectUrl: back, signInForceRedirectUrl: back });
+      },
       manageAccount: () => clerk.openUserProfile(),
       signOut: () => {
         void clerk.signOut({ redirectUrl: "/" });
