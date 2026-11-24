@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { CopyField } from "./_copy";
+import { AccountNote } from "./_zdroje/account-note";
 import { claudeInstallLink } from "./_install-link";
 import {
   platformFromHash,
@@ -266,6 +267,7 @@ export function Guide({ endpoint: fallback }: { endpoint: string }) {
 
   return (
     <div className="guide">
+      <AccountNote />
       <div
         className="tabs"
         role="tablist"

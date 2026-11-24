@@ -203,6 +203,7 @@ export function setAuth(auth: AuthState): void {
 
 export interface ClerkActions {
   signIn(): void;
+  signUp(): void;
   manageAccount(): void;
   signOut(): void;
 }
@@ -216,6 +217,11 @@ export function registerClerkActions(next: ClerkActions | null): void {
 /** Open Clerk's sign-in (back to this page afterwards); a no-op without Clerk. */
 export function requestSignIn(): void {
   actions?.signIn();
+}
+
+/** Open Clerk's sign-up (back to this page afterwards); a no-op without Clerk. */
+export function requestSignUp(): void {
+  actions?.signUp();
 }
 
 export function manageAccount(): void {
