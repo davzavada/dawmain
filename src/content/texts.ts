@@ -147,7 +147,7 @@ Nahráním dokumentu potvrzujete, že pravidla v tomto oddílu dodržíte - web 
 
 **Kvóty.** Místo se počítá podle velikosti nahraných souborů: osobní knihovna má 100 MB, týmová 1 GB a jeden soubor může mít nejvýš 100 MB. Kolik místa vám zbývá, vidíte na stránce souborů. Kvóty můžu podle kapacity měnit, už nahrané dokumenty kvůli tomu ale nemažu. Když se blíží technické limity, které pro ně mám nastavené, přepnou se samy do režimu jen pro čtení (hledat, číst a mazat jde, nahrávat ne), případně se na čas vypnou.
 
-**AI a citace.** Typ dokumentu (komentář, článek, kniha…), název, autory a další metadata navrhne server podle začátku dokumentu a asistent v dokumentu hledá hned po zpracování. Návrh se může splést: po rozkliknutí dokumentu v seznamu souborů ho kdykoli opravíte.
+**Metadata.** Typ dokumentu (komentář, článek, kniha…), název, autory a další metadata navrhne server podle začátku dokumentu a asistent v dokumentu hledá hned po zpracování. Návrh se může splést: po rozkliknutí dokumentu v seznamu souborů ho kdykoli opravíte.
 
 **Záloha není.** Server ukládá nahraný soubor i jeho převedený text, ve kterém asistent hledá. Nic z toho nezálohuji a za ztrátu, třeba při výpadku nebo ukončení služby, neručím, takže si originály nechte i u sebe. Originál i text si můžete kdykoli stáhnout na stránce souborů (text s denním limitem).
 
@@ -191,17 +191,16 @@ Podmínky můžu přiměřeně změnit, když se změní fungování služby neb
 | # | Co a proč | Jaké údaje | Právní základ | Jak dlouho |
 |---|---|---|---|---|
 | 1 | Účet a přihlášení | e-mail, jméno, identifikátor účtu (při přihlášení účtem Google je předá Google) | plnění smlouvy ([čl. 6 odst. 1 písm. b) GDPR](${GDPR})) | dokud účet trvá |
-| 2 | Provoz a ochrana služby: chyby, limity, zneužití | čas požadavku, volaný nástroj, výsledek, IP adresa | oprávněný zájem ([čl. 6 odst. 1 písm. f) GDPR](${GDPR})) | jen po dobu potřebnou k řešení chyb a ochraně služby |
+| 2 | Provoz a ochrana služby: chyby, limity, zneužití | čas požadavku, volaný nástroj, výsledek, identifikátor účtu | oprávněný zájem ([čl. 6 odst. 1 písm. f) GDPR](${GDPR})) | 30 dní |
 | 3 | Přehled o tom, kdo službu používá, jak často a které nástroje, abych ji mohl rozvíjet; je jen pro mě, k marketingu ho nepoužívám | počty volání u účtu | oprávněný zájem ([čl. 6 odst. 1 písm. f) GDPR](${GDPR})) | počty volání u účtu nejdéle 12 měsíců |
 
 **Nástavba Pro (právníky)**
 
 | # | Co a proč | Jaké údaje | Právní základ | Jak dlouho |
 |---|---|---|---|---|
-| 4 | Vlastní soubory | soubory, které nahrajete (originál i převedený text), metadata (název, autoři, rok, typ, název souboru a složky), záznam o nahrání, úpravách, stažení a smazání | plnění smlouvy ([čl. 6 odst. 1 písm. b) GDPR](${GDPR})) | dokud dokument nesmažete, nejdéle však do zrušení účtu nebo odebrání Pro. Pak knihovnu do týdne smažu (předtím si soubory můžete stáhnout). Týmové dokumenty do týdne po vypnutí nebo zrušení týmu je smažu |
+| 4 | Vlastní soubory | soubory, které nahrajete (originál i převedený text), metadata (název, autoři, rok, typ, název souboru a složky), záznam o nahrání, úpravách, stažení a smazání | plnění smlouvy ([čl. 6 odst. 1 písm. b) GDPR](${GDPR})) | dokud dokument nesmažete, nejdéle však do zrušení účtu nebo odebrání Pro. Pak knihovnu do týdne smažu (předtím si soubory můžete stáhnout). Týmové dokumenty smažu do týdne po vypnutí nebo zrušení týmu. Po výmazu si nenechávám nic, ani záznam o něm |
 | 5 | Osobní údaje jiných lidí v nahraných dokumentech (třeba jména autorů), aby v nich asistent mohl hledat | to, co dokument obsahuje | oprávněný zájem ([čl. 6 odst. 1 písm. f) GDPR](${GDPR})) | jako dokument |
 | 6 | Zotero | zašifrovaný klíč k vaší knihovně, uživatelské jméno a identifikátor v Zoteru | plnění smlouvy ([čl. 6 odst. 1 písm. b) GDPR](${GDPR})) | dokud Zotero neodpojíte nebo nezrušíte účet; neplatný klíč smažu hned |
-| 7 | Doložení výmazu knihovny | identifikátor knihovny, datum, počet smazaných dokumentů | oprávněný zájem ([čl. 6 odst. 1 písm. f) GDPR](${GDPR})) | dokud může být potřeba výmaz doložit |
 
 Údaje o účtu jsou pro poskytování služby nezbytné; bez nich účet nelze vytvořit. Provozní záznamy vznikají automaticky při každém použití služby. Nahrávání dokumentů a připojení Zotera jsou dobrovolné.
 
@@ -214,7 +213,7 @@ Dawmain běží na mém vlastním serveru v České republice. Na provozu se pod
 - **Clerk, Inc.** - přihlašování a správa účtů,
 - **Cloudflare, Inc.** - síť, přes kterou vede komunikace s webem (ochrana před útoky, šifrované spojení); zpracovává proto IP adresu při přenosu.
 
-Clerk i Cloudflare jsou americké společnosti; předávání do USA se opírá o EU-US Data Privacy Framework. Metadata dokumentu navrhne po nahrání server sám podle začátku dokumentu; text dokumentu přitom žádnému poskytovateli AI neposílám. Co z dokumentu přečte váš asistent, dostane poskytovatel asistenta, kterého používáte. Dokumenty nahrané do týmové knihovny vidí členové toho týmu. Jinak údaje předám jen orgánům veřejné moci, ukládá-li mi to zákon. Přihlášení účtem Google se řídí [zásadami Google](https://policies.google.com/privacy).
+Clerk i Cloudflare jsou americké společnosti; předávání do USA se opírá o EU-US Data Privacy Framework. Text nahraných dokumentů žádnému poskytovateli AI neposílám. Co z dokumentu přečte váš asistent, dostane poskytovatel asistenta, kterého používáte. Dokumenty nahrané do týmové knihovny vidí členové toho týmu. Jinak údaje předám jen orgánům veřejné moci, ukládá-li mi to zákon. Přihlášení účtem Google se řídí [zásadami Google](https://policies.google.com/privacy).
 
 ## 4. Zabezpečení
 
@@ -222,7 +221,7 @@ Jen HTTPS a šifrovaný tunel k serveru, knihovny oddělené v databázi, klíč
 
 ## 5. Vaše práva
 
-Máte právo na přístup ke svým údajům, jejich opravu a výmaz, omezení zpracování a přenositelnost, vznést námitku proti zpracování na základě oprávněného zájmu (řádky 2, 3, 5 a 7) a podat stížnost u Úřadu pro ochranu osobních údajů ([uoou.gov.cz](https://uoou.gov.cz)). Napište mi na ${MAIL}; odpovím do měsíce.`,
+Máte právo na přístup ke svým údajům, jejich opravu a výmaz, omezení zpracování a přenositelnost, vznést námitku proti zpracování na základě oprávněného zájmu (řádky 2, 3 a 5) a podat stížnost u Úřadu pro ochranu osobních údajů ([uoou.gov.cz](https://uoou.gov.cz)). Napište mi na ${MAIL}; odpovím do měsíce.`,
   },
 ] as const satisfies readonly TextField[];
 

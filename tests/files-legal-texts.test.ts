@@ -92,9 +92,16 @@ describe("privacy policy (/soukromi)", () => {
     expect(privacy).toContain("Nahrávání dokumentů a připojení Zotera jsou dobrovolné");
   });
 
-  it("says the server proposes the metadata itself and sends the text to no AI provider", () => {
-    expect(privacy).toContain("navrhne po nahrání server sám podle začátku dokumentu");
-    expect(privacy).toContain("text dokumentu přitom žádnému poskytovateli AI neposílám");
+  it("gives every row a period, keeps no purge record and names no IP address the server never stores", () => {
+    expect(privacy).toContain("identifikátor účtu oprávněný zájem ( čl. 6 odst. 1 písm. f) GDPR ) 30 dní");
+    expect(privacy).not.toContain("po dobu potřebnou");
+    expect(privacy).not.toContain("Doložení výmazu");
+    expect(privacy).toContain("Po výmazu si nenechávám nic, ani záznam o něm");
+    expect(privacy).toContain("(řádky 2, 3 a 5)");
+  });
+
+  it("sends the text to no AI provider", () => {
+    expect(privacy).toContain("Text nahraných dokumentů žádnému poskytovateli AI neposílám.");
     // …which does not cover the user's own assistant: it gets what the tools return.
     expect(privacy).toContain("dostane poskytovatel asistenta, kterého používáte");
   });
@@ -134,7 +141,7 @@ describe("terms of use (/podminky)", () => {
     expect(terms).toContain("dokumenty nahrané do ní vidí a prohledávají všichni jeho členové");
     expect(terms).toContain("Členy týmů přiděluji a měním já.");
     expect(privacy).toContain("Dokumenty nahrané do týmové knihovny vidí členové toho týmu.");
-    expect(privacy).toContain("do týdne po vypnutí nebo zrušení týmu je smažu");
+    expect(privacy).toContain("Týmové dokumenty smažu do týdne po vypnutí nebo zrušení týmu.");
   });
 
   it("states the storage quotas the code defaults to (originals, MB)", () => {
