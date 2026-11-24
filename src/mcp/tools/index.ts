@@ -162,11 +162,24 @@ async function routed(name: string, handler: ToolHandler, args: unknown[]): Prom
   return { ...live, content: [note, ...content] };
 }
 
+/**
+ * The tool's title repeated as annotations.title. The spec allows the title
+ * in both places; the Claude connector directory reads the annotation one
+ * (its review flags every tool without it), older clients the top-level one.
+ * Copied at this boundary so no tool file has to restate its title. Pure.
+ */
+export function withAnnotationTitle<T extends { title?: unknown; annotations?: unknown }>(config: T): T {
+  if (typeof config.title !== "string") return config;
+  const annotations = (config.annotations ?? {}) as Record<string, unknown>;
+  if (typeof annotations.title === "string") return config;
+  return { ...config, annotations: { title: config.title, ...annotations } };
+}
+
 function textOnly(server: McpServer): McpServer {
   return {
     registerTool(name: string, config: ToolConfig, handler: ToolHandler) {
       const { outputSchema: _structured, ...bare } = config;
-      const rest = withGuideHint(name, bare);
+      const rest = withAnnotationTitle(withGuideHint(name, bare));
       // A method call on the real server — registerTool relies on `this`.
       return (server as unknown as { registerTool: (...args: unknown[]) => unknown }).registerTool(
         name,

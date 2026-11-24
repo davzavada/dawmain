@@ -1,7 +1,7 @@
 import { createMcpHandler } from "mcp-handler";
-import { appEnvironment } from "@/src/runtime";
+import { appEnvironment, productionOrigin } from "@/src/runtime";
 import { zoteroConfigured } from "@/src/zotero/config";
-import { SERVER_NAME, SERVER_VERSION } from "./config";
+import { DEFAULT_ORIGIN, SERVER_NAME, SERVER_VERSION, serverBranding } from "./config";
 import { registerAllTools } from "./tools";
 
 /**
@@ -88,12 +88,23 @@ const ZOTERO = zoteroConfigured();
 /** The instructions this deployment serves (Zotero only when configured). */
 export const INSTRUCTIONS = buildInstructions(ZOTERO);
 
+/**
+ * name/version plus title, icons and websiteUrl. mcp-handler types serverInfo
+ * as {name, version} but hands the object to the SDK's McpServer as is, whose
+ * Implementation schema carries the extras — hence a variable, not a literal.
+ */
+const SERVER_INFO = {
+  name: SERVER_NAME,
+  version: SERVER_VERSION,
+  ...serverBranding(productionOrigin() ?? DEFAULT_ORIGIN),
+};
+
 export const mcpHandler = createMcpHandler(
   (server) => {
     registerAllTools(server, { zotero: ZOTERO });
   },
   {
-    serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
+    serverInfo: SERVER_INFO,
     instructions: INSTRUCTIONS,
     verboseLogs: appEnvironment() !== "production",
   },
