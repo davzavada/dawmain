@@ -11,7 +11,6 @@ const html = await import("@/src/sources/shared/html");
 const htmlToText = vi.mocked(html.htmlToText);
 
 beforeEach(() => {
-  delete process.env.ESBIRKA_API_KEY;
   vi.resetModules();
   htmlToText.mockClear();
 });

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
-import { ESBIRKA_CACHE_BASE, getEsbirkaApiBase, getEsbirkaApiKey } from "../config";
+import { getEsbirkaApiBase, getEsbirkaApiKey } from "../config";
 import { USER_AGENT } from "@/src/sources/shared/http";
 import { PRIMO_PAGE_SIZE, buildPrimoUrl } from "@/src/sources/primo";
 import { READ_ONLY } from "./shared";
@@ -59,16 +59,6 @@ export function canaries(): Canary[] {
       request: () => ({
         url: `${getEsbirkaApiBase()}/dokumenty-sbirky/${oz}`,
         init: { headers: { accept: "application/json", ...keyHeader } },
-      }),
-      marker: /"nazev"|"staleUrl"/,
-    },
-    {
-      id: "esbirka-cache",
-      source: "e-Sbírka",
-      note: "keyless SPA gateway (fallback channel)",
-      request: () => ({
-        url: `${ESBIRKA_CACHE_BASE}/dokumenty-sbirky/${oz}`,
-        init: { headers: { accept: "application/json" } },
       }),
       marker: /"nazev"|"staleUrl"/,
     },
@@ -532,7 +522,7 @@ const inputSchema = z.object({
     .array(z.string())
     .optional()
     .describe(
-      "Limit to these canary ids: esbirka-api, esbirka-cache, ns, nalus, nss, justice, psp, curia, cellar-sparql, cellar, primo, slovlex-zbierka, slovlex-static, slovlex-lp, slovlex-sudy (zotero where configured). Default: all.",
+      "Limit to these canary ids: esbirka-api, ns, nalus, nss, justice, psp, curia, cellar-sparql, cellar, primo, slovlex-zbierka, slovlex-static, slovlex-lp, slovlex-sudy (zotero where configured). Default: all.",
     ),
   include_raw: z
     .boolean()

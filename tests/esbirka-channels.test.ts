@@ -2,10 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { asSourceError } from "@/src/sources/shared/errors";
 
 /**
- * Keyed API → keyless gateway, inside the 60 s function budget. Measured
- * before the fix (stubbed hosts that never answer): one getAct took 63 s with
- * both hosts hanging, and every request paid ~31 s while only the keyed host
- * hung. Fake timers drive fetchUpstream's timeout and retry delay.
+ * e-Sbírka goes through the registered API only — never the SPA's keyless
+ * gateway (sbr-cache) — and still answers inside the 60 s function budget.
+ * Fake timers drive fetchUpstream's timeout and retry delay.
  */
 
 const KEYED = "api.e-sbirka.gov.cz";
@@ -48,78 +47,71 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("a hanging keyed host (finding 2)", () => {
-  it("costs one short try, then the breaker sends requests straight to the gateway", async () => {
+describe("the registered API only", () => {
+  it("never asks the keyless gateway, whatever the API answers", async () => {
     const calls: string[] = [];
-    vi.stubGlobal("fetch", (input: string, init?: { signal?: AbortSignal }) => {
-      calls.push(String(input));
-      return String(input).includes(KEYED) ? hang(init) : Promise.resolve(new Response(act("/sb/2012/89")));
-    });
-    const { getAct, getFragmentsPage } = await import("@/src/sources/esbirka");
-    const first = await settle(getAct("/sb/2012/89"));
-    expect(first.value?.nazev).toBe("Občanský zákoník");
-    expect(first.at).toBeLessThan(11_000);
-    expect(calls.filter((url) => url.includes(KEYED))).toHaveLength(1); // no retry on a non-last channel
-
-    calls.length = 0;
-    vi.stubGlobal("fetch", (input: string, init?: { signal?: AbortSignal }) => {
-      calls.push(String(input));
-      if (String(input).includes(KEYED)) return hang(init);
-      return Promise.resolve(new Response(JSON.stringify({ pocetStranek: 1, seznam: [] })));
-    });
-    const page = await settle(getFragmentsPage("/sb/2012/89", 0));
-    expect(page.at).toBeLessThan(1_000);
-    expect(calls.some((url) => url.includes(KEYED))).toBe(false);
-
-    // Past the breaker window the keyed host is tried again.
-    vi.setSystemTime(Date.now() + 5 * 60 * 1000 + 1);
-    await settle(getFragmentsPage("/sb/2012/89", 1));
-    expect(calls.some((url) => url.includes(KEYED))).toBe(true);
+    for (const answer of [() => new Response("no", { status: 401 }), () => new Response("boom", { status: 500 })]) {
+      vi.stubGlobal("fetch", async (input: string) => {
+        calls.push(String(input));
+        return answer();
+      });
+      const { getAct } = await import("@/src/sources/esbirka");
+      const outcome = await settle(getAct("/sb/2012/89"));
+      expect(outcome.error).toMatchObject({ kind: "UPSTREAM_ERROR" });
+    }
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls.every((url) => url.includes(KEYED))).toBe(true);
+    expect(calls.some((url) => url.includes(GATEWAY))).toBe(false);
   });
 
-  it("fails inside the 60 s budget when both hosts hang", async () => {
+  it("sends the key and never follows a redirect while carrying it", async () => {
+    const inits: RequestInit[] = [];
+    vi.stubGlobal("fetch", async (_input: string, init: RequestInit) => {
+      inits.push(init);
+      return new Response(null, { status: 302, headers: { location: "https://elsewhere.test/" } });
+    });
+    const { getAct } = await import("@/src/sources/esbirka");
+    const outcome = await settle(getAct("/sb/2012/89"));
+    expect(outcome.error).toMatchObject({ kind: "UPSTREAM_ERROR" });
+    expect(inits).toHaveLength(1);
+    expect(inits[0].redirect).toBe("manual");
+    expect((inits[0].headers as Record<string, string>)["esel-api-access-key"]).toBe("test-key");
+  });
+
+  it("without a key says e-Sbírka is not configured and makes no request", async () => {
+    delete process.env.ESBIRKA_API_KEY;
+    const fetchSpy = vi.fn(async () => new Response(act("/sb/2012/89")));
+    vi.stubGlobal("fetch", fetchSpy);
+    const { getAct } = await import("@/src/sources/esbirka");
+    const outcome = await settle(getAct("/sb/2012/89"));
+    expect((outcome.error as Error).message).toContain("not configured");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("fails inside the 60 s budget when the API hangs", async () => {
     vi.stubGlobal("fetch", (_input: string, init?: { signal?: AbortSignal }) => hang(init));
     const { getAct } = await import("@/src/sources/esbirka");
     const outcome = await settle(getAct("/sb/2012/89"));
-    expect(outcome.error).toBeDefined();
     expect(asSourceError("e-Sbírka", outcome.error).kind).toBe("UPSTREAM_UNREACHABLE");
-    // 10 s keyed + 15 s gateway + ≤1.5 s retry delay + 15 s gateway retry.
-    expect(outcome.at).toBeLessThan(45_000);
+    // 15 s + ≤1.5 s retry delay + 15 s retry.
+    expect(outcome.at).toBeLessThan(35_000);
   });
 
-  it("does not trip the breaker on a 404 — that is about the document, not the host", async () => {
+  it("a 404 is NOT_FOUND, asked once", async () => {
     const calls: string[] = [];
     vi.stubGlobal("fetch", async (input: string) => {
       calls.push(String(input));
-      return String(input).includes("99999") ? new Response("missing", { status: 404 }) : new Response(act("/sb/2012/89"));
+      return new Response("missing", { status: 404 });
     });
     const { getAct } = await import("@/src/sources/esbirka");
     const missing = await settle(getAct("/sb/2012/99999"));
     expect(missing.error).toMatchObject({ kind: "NOT_FOUND" });
-    calls.length = 0;
-    await settle(getAct("/sb/2012/89"));
-    expect(calls[0]).toContain(KEYED);
-  });
-  it("does not trip the breaker on a 5xx to the search POST — measured, a query can cause that", async () => {
-    const calls: string[] = [];
-    vi.stubGlobal("fetch", async (input: string, init?: { method?: string }) => {
-      calls.push(`${init?.method ?? "GET"} ${String(input)}`);
-      if (init?.method === "POST") return new Response("boom", { status: 500 });
-      return new Response(act("/sb/2012/89"));
-    });
-    const { getAct, searchActs } = await import("@/src/sources/esbirka");
-    const failed = await settle(searchActs("zákon č. 89/2012 Sb.", 0, 10));
-    expect(failed.error).toMatchObject({ kind: "UPSTREAM_ERROR" });
-    expect(calls.filter((call) => call.startsWith("POST"))).toHaveLength(2); // keyed, then the gateway
-    calls.length = 0;
-    await settle(getAct("/sb/2012/89"));
-    expect(calls[0]).toContain(KEYED);
+    expect(calls).toHaveLength(1);
   });
 });
 
 describe("resolveVersion failures are not paid twice (finding 2)", () => {
   it("a missing act (404) reads no fragments", async () => {
-    delete process.env.ESBIRKA_API_KEY;
     const calls: string[] = [];
     vi.stubGlobal("fetch", async (input: string) => {
       calls.push(decodeURIComponent(String(input)));
@@ -132,7 +124,6 @@ describe("resolveVersion failures are not paid twice (finding 2)", () => {
   });
 
   it("an unreachable service reads no fragments", async () => {
-    delete process.env.ESBIRKA_API_KEY;
     const calls: string[] = [];
     vi.stubGlobal("fetch", (input: string, init?: { signal?: AbortSignal }) => {
       calls.push(decodeURIComponent(String(input)));
@@ -145,7 +136,6 @@ describe("resolveVersion failures are not paid twice (finding 2)", () => {
   });
 
   it("a detail that answers with an error still leaves the plain staleUrl readable", async () => {
-    delete process.env.ESBIRKA_API_KEY;
     vi.stubGlobal("fetch", async (input: string) => {
       const url = decodeURIComponent(String(input));
       if (url.includes("/sparql?")) return new Response("blocked", { status: 403 });
@@ -168,8 +158,7 @@ describe("resolveVersion failures are not paid twice (finding 2)", () => {
 describe("a 200 that is not JSON (finding 11)", () => {
   const html = () => new Response("<!DOCTYPE html><html><body>e-Sbírka</body></html>", { headers: { "content-type": "text/html" } });
 
-  it("is PARSE_DRIFT, not 'did not respond', when the gateway serves it", async () => {
-    delete process.env.ESBIRKA_API_KEY;
+  it("is PARSE_DRIFT, not 'did not respond'", async () => {
     vi.stubGlobal("fetch", async () => html());
     const { getAct } = await import("@/src/sources/esbirka");
     const outcome = await settle(getAct("/sb/2012/89"));
@@ -177,21 +166,7 @@ describe("a 200 that is not JSON (finding 11)", () => {
     expect((outcome.error as Error).message).toContain("non-JSON body");
   });
 
-  it("hands the request to the gateway when the keyed host serves it — and trips the breaker", async () => {
-    const calls: string[] = [];
-    vi.stubGlobal("fetch", async (input: string) => {
-      calls.push(String(input));
-      return String(input).includes(KEYED) ? html() : new Response(act("/sb/2012/89"));
-    });
-    const { getAct } = await import("@/src/sources/esbirka");
-    expect((await settle(getAct("/sb/2012/89"))).value?.nazev).toBe("Občanský zákoník");
-    expect(calls.filter((url) => url.includes(GATEWAY))).toHaveLength(1);
-    calls.length = 0;
-    await settle(getAct("/sb/2012/90"));
-    expect(calls.some((url) => url.includes(KEYED))).toBe(false);
-  });
-
-  it("a body that stalls past the timeout stays a network failure, retried on the next channel", async () => {
+  it("a body that stalls past the timeout stays a network failure", async () => {
     const stalling = (init?: { signal?: AbortSignal }) =>
       new Response(
         new ReadableStream({
@@ -201,17 +176,9 @@ describe("a 200 that is not JSON (finding 11)", () => {
           },
         }),
       );
-    vi.stubGlobal("fetch", async (input: string, init?: { signal?: AbortSignal }) =>
-      String(input).includes(KEYED) ? stalling(init) : new Response(act("/sb/2012/89")),
-    );
-    const { getAct } = await import("@/src/sources/esbirka");
-    expect((await settle(getAct("/sb/2012/89"))).value?.nazev).toBe("Občanský zákoník");
-
-    delete process.env.ESBIRKA_API_KEY;
-    vi.resetModules();
     vi.stubGlobal("fetch", async (_input: string, init?: { signal?: AbortSignal }) => stalling(init));
-    const fresh = await import("@/src/sources/esbirka");
-    const outcome = await settle(fresh.getAct("/sb/2012/89"));
+    const { getAct } = await import("@/src/sources/esbirka");
+    const outcome = await settle(getAct("/sb/2012/89"));
     expect(outcome.error).toBeDefined();
     expect(asSourceError("e-Sbírka", outcome.error).kind).toBe("UPSTREAM_UNREACHABLE");
   });

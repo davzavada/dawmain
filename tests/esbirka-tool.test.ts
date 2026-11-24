@@ -73,7 +73,6 @@ function serve(options: { delayMs?: number; seznam?: unknown[]; pages?: number; 
 const base = { year: 2012, number: 89, collection: "sb", page: 1 };
 
 beforeEach(() => {
-  delete process.env.ESBIRKA_API_KEY;
   vi.resetModules();
 });
 afterEach(() => {
