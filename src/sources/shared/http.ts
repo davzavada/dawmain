@@ -3,16 +3,17 @@ import { recordSourceResult } from "./health";
 import { acquireSlot, outcomeOfError, outcomeOfStatus, recordUpstream } from "./limits";
 
 /**
- * All upstream I/O goes through here: per-request timeout, a browser-like UA
- * (several court sites reject the default undici UA), and one bounded retry
+ * All upstream I/O goes through here: per-request timeout, an honest UA that
+ * names the service and where to reach its operator (the default undici UA is
+ * rejected by several court sites; e-Sbírka's llms.txt asks for a contact;
+ * verified 2026-11 that every source answers it), and one bounded retry
  * for transient failures. Sources add their own headers on top. Each request
  * (a retry too) first takes a slot of its source's concurrency limit and is
  * counted for the measurements (./limits.ts); the slot is held until the
  * response headers arrive, not across the pause before a retry.
  */
 
-export const USER_AGENT =
-  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 dawmain-mcp/0.2";
+export const USER_AGENT = "dawmain-mcp/0.2 (+https://dawmain.davidzavada.cz)";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 /** Nothing legitimate here is bigger; a runaway body would exhaust the heap. */

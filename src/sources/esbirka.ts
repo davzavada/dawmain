@@ -1,4 +1,4 @@
-import { ESBIRKA_CACHE_BASE, getEsbirkaApiBase, getEsbirkaApiKey } from "@/src/mcp/config";
+import { getEsbirkaApiBase, getEsbirkaApiKey } from "@/src/mcp/config";
 import { SourceError } from "./shared/errors";
 import { fetchUpstream } from "./shared/http";
 import { htmlToText } from "./shared/html";
@@ -8,9 +8,8 @@ import { DOC_PAGE_CHARS } from "./shared/text";
 /**
  * e-Sbírka — the official Czech electronic Collection of Laws.
  *
- * Primary channel: the registered public REST API (key in header
- * `esel-api-access-key`). Fallback: the SPA's keyless gateway (sbr-cache),
- * which serves the SAME paths and response shapes. Everything is addressed by
+ * Channel: the registered public REST API only (key in header
+ * `esel-api-access-key`). Everything is addressed by
  * `staleUrl` = `/sb/{rok}/{cislo}` optionally + `/{YYYY-MM-DD}` for a time
  * version; as a path parameter it must be percent-encoded whole (slashes too).
  *
@@ -50,32 +49,13 @@ export function buildStaleUrl(collection: string, year: number, number: number, 
   return `/${collection}/${year}/${number}${date ? `/${date}` : ""}`;
 }
 
-// ---------- upstream fetch with official→keyless fallback ----------
+// ---------- upstream fetch (registered API only) ----------
 
 interface EsbirkaRequest {
   path: string;
   method?: "GET" | "POST";
   body?: unknown;
 }
-
-/**
- * A channel with another one behind it gets one shorter try and no retry:
- * the next channel is its retry. With fetchUpstream's defaults (15 s, one GET
- * retry) a hanging channel cost ~31 s before the next was asked, and with
- * both hosts hanging one request took 63 s (measured with a stub) — past the
- * 60 s function limit, so the model got no error text at all. 10 s still
- * covers a ~1 MB fragments page: the timeout runs over the body read too.
- */
-const NEXT_CHANNEL_AFTER_MS = 10_000;
-/**
- * After the keyed channel fails AS A CHANNEL — unreachable, timed out,
- * 5xx/429 (to a GET), 401/403, a redirect, a body that is not JSON — requests go
- * straight to the gateway for this long instead of paying that failure again
- * on every detail, page and history request. Never after a 404 or a `chyby`
- * rejection: those are about one request, not about the host.
- */
-const KEYED_BREAKER_MS = 5 * 60 * 1000;
-let keyedDownUntil = 0;
 
 /** Release a body nobody will read — unread, it holds its connection until GC. */
 function discard(response: Response): void {
@@ -92,122 +72,74 @@ function parseJsonBody(raw: string): Record<string, unknown> | null {
   }
 }
 
+/**
+ * Only the registered API, with its key. The SPA's keyless gateway
+ * (e-sbirka.gov.cz/sbr-cache) answers the same paths, but e-Sbírka's own
+ * guidance for automated clients is the keyed API — so there is no fallback:
+ * without a key, or with the API down, the tool says so.
+ */
 async function esbirkaFetch(request: EsbirkaRequest): Promise<unknown> {
   const key = getEsbirkaApiKey();
-  const attempts: Array<{ base: string; headers: Record<string, string>; keyed: boolean }> = [];
-  if (key && Date.now() >= keyedDownUntil) {
-    attempts.push({ base: getEsbirkaApiBase(), headers: { "esel-api-access-key": key }, keyed: true });
+  if (!key) {
+    throw new SourceError(
+      SOURCE,
+      "UPSTREAM_ERROR",
+      "e-Sbírka is not configured on this server (no API key).",
+      "Tell the user e-Sbírka is unavailable here for now; cite acts from memory only as unverified, or point them to https://www.e-sbirka.cz.",
+    );
   }
-  attempts.push({ base: ESBIRKA_CACHE_BASE, headers: {}, keyed: false });
+  const base = getEsbirkaApiBase();
+  const response = await fetchUpstream(SOURCE, `${base}${request.path}`, {
+    method: request.method ?? "GET",
+    headers: {
+      accept: "application/json",
+      ...(request.body !== undefined ? { "content-type": "application/json" } : {}),
+      "esel-api-access-key": key,
+    },
+    body: request.body !== undefined ? JSON.stringify(request.body) : undefined,
+    // undici strips cookie/authorization across origins but FORWARDS custom
+    // headers — a cross-origin 302 would hand our registered API key to the
+    // redirect target. Never follow a redirect while carrying the key.
+    redirect: "manual",
+  });
 
-  let lastError: unknown;
-  for (const [index, attempt] of attempts.entries()) {
-    const isLast = index === attempts.length - 1;
-    const channelFailed = (error: unknown) => {
-      lastError = error;
-      if (attempt.keyed) keyedDownUntil = Date.now() + KEYED_BREAKER_MS;
-    };
-    try {
-      const response = await fetchUpstream(SOURCE, `${attempt.base}${request.path}`, {
-        method: request.method ?? "GET",
-        headers: {
-          accept: "application/json",
-          ...(request.body !== undefined ? { "content-type": "application/json" } : {}),
-          ...attempt.headers,
-        },
-        body: request.body !== undefined ? JSON.stringify(request.body) : undefined,
-        // undici strips cookie/authorization across origins but FORWARDS custom
-        // headers — a cross-origin 302 would hand our registered API key to the
-        // redirect target. Never follow a redirect while carrying the key.
-        redirect: attempt.headers["esel-api-access-key"] ? "manual" : "follow",
-        ...(isLast ? {} : { retry: false, timeoutMs: NEXT_CHANNEL_AFTER_MS }),
-      });
-
-      // Any refusal by a channel that is not the last one hands the request to
-      // the next channel: a bad key (401/403), a redirect we refuse to follow
-      // while carrying the key (3xx under redirect:"manual"), a gateway hiccup.
-      // Only 404 is terminal — "no such document" is the same answer on both.
-      if (!response.ok && response.status !== 404 && !isLast) {
-        discard(response);
-        const refusal = new Error(`HTTP ${response.status} from ${attempt.base}`);
-        // A refused key or a redirect refuses every request; another 4xx is
-        // about this one.
-        if (response.status < 400 || response.status === 401 || response.status === 403) channelFailed(refusal);
-        else lastError = refusal;
-        continue;
-      }
-      if (response.status === 404) {
-        discard(response);
-        throw new SourceError(
-          SOURCE,
-          "NOT_FOUND",
-          `e-Sbírka has no document at ${request.path}.`,
-          "Check the collection/year/number (e.g. 89/2012 Sb. = year 2012, number 89). For a time version, the date must fall within the act's existence.",
-        );
-      }
-      if (!response.ok) {
-        discard(response);
-        throw new SourceError(
-          SOURCE,
-          "UPSTREAM_ERROR",
-          `e-Sbírka answered HTTP ${response.status} for ${request.path}.`,
-          "Try again; if it persists, run dawmain_probe_sources.",
-        );
-      }
-
-      // Read first, parse second: a body that stalls or breaks off is a
-      // network failure (the catch below treats it as one), while a body that
-      // arrives but is not JSON is the service answering with something else —
-      // the SPA's index.html, a maintenance page. Retrying will not help that.
-      const json = parseJsonBody(await response.text());
-      if (!json) {
-        const drift = new SourceError(
-          SOURCE,
-          "PARSE_DRIFT",
-          `e-Sbírka answered HTTP ${response.status} with a non-JSON body from ${attempt.base}.`,
-          "The service answered, but not with its API data — run dawmain_probe_sources; retrying will not help.",
-        );
-        if (!isLast) {
-          channelFailed(drift);
-          continue;
-        }
-        throw drift;
-      }
-      // Error shape used by the gateway: {"chyby":[{popis}]}
-      if (Array.isArray(json.chyby) && json.chyby.length) {
-        const popis = (json.chyby as Array<{ popis?: string }>).map((ch) => ch.popis).join("; ");
-        const rejection = new SourceError(
-          SOURCE,
-          "UPSTREAM_ERROR",
-          `e-Sbírka rejected the request: ${popis}`,
-          "Adjust the input (identifier or date) and retry.",
-        );
-        if (!isLast) {
-          lastError = rejection;
-          continue;
-        }
-        throw rejection;
-      }
-      return json;
-    } catch (error) {
-      // Terminal verdicts stand whichever channel produced them; an outage or
-      // an unreachable host is exactly what the other channel is there for.
-      // (fetchUpstream turns 429/5xx into UPSTREAM_ERROR before we see the
-      // response, so that kind has to fall through here, not above.)
-      const retriable =
-        !(error instanceof SourceError) ||
-        error.kind === "UPSTREAM_UNREACHABLE" ||
-        error.kind === "UPSTREAM_ERROR";
-      if (!retriable) throw error;
-      // A 5xx to the search POST is the query's, not the host's (measured: a
-      // phrase with "č." and "Sb." got HTTP 500 while everything else
-      // answered) — it must not send every request to the gateway for minutes.
-      if (request.method === "POST" && error instanceof SourceError && error.kind === "UPSTREAM_ERROR") lastError = error;
-      else channelFailed(error);
-      if (isLast) throw error;
-    }
+  if (response.status === 404) {
+    discard(response);
+    throw new SourceError(
+      SOURCE,
+      "NOT_FOUND",
+      `e-Sbírka has no document at ${request.path}.`,
+      "Check the collection/year/number (e.g. 89/2012 Sb. = year 2012, number 89). For a time version, the date must fall within the act's existence.",
+    );
   }
-  throw lastError;
+  if (!response.ok) {
+    discard(response);
+    throw new SourceError(
+      SOURCE,
+      "UPSTREAM_ERROR",
+      `e-Sbírka answered HTTP ${response.status} for ${request.path}.`,
+      "Try again; if it persists, run dawmain_probe_sources.",
+    );
+  }
+
+  // Read first, parse second: a body that stalls or breaks off is a network
+  // failure, while a body that arrives but is not JSON is the service
+  // answering with something else — a maintenance page. Retrying will not help that.
+  const json = parseJsonBody(await response.text());
+  if (!json) {
+    throw new SourceError(
+      SOURCE,
+      "PARSE_DRIFT",
+      `e-Sbírka answered HTTP ${response.status} with a non-JSON body from ${base}.`,
+      "The service answered, but not with its API data — run dawmain_probe_sources; retrying will not help.",
+    );
+  }
+  // Error shape of the API: {"chyby":[{popis}]}
+  if (Array.isArray(json.chyby) && json.chyby.length) {
+    const popis = (json.chyby as Array<{ popis?: string }>).map((ch) => ch.popis).join("; ");
+    throw new SourceError(SOURCE, "UPSTREAM_ERROR", `e-Sbírka rejected the request: ${popis}`, "Adjust the input (identifier or date) and retry.");
+  }
+  return json;
 }
 
 // ---------- parse (pure) ----------

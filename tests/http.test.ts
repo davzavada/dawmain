@@ -35,7 +35,7 @@ describe("fetchUpstream", () => {
     return value;
   }
 
-  it("sends a browser-like UA and the caller's headers", async () => {
+  it("sends an honest UA with a contact and the caller's headers", async () => {
     const seen: RequestInit[] = [];
     vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
       seen.push(init);
@@ -45,7 +45,7 @@ describe("fetchUpstream", () => {
       fetchUpstream("UA-src", "https://example.test/", { headers: { referer: "https://x.test/" } }),
     );
     const headers = seen[0].headers as Record<string, string>;
-    expect(headers["user-agent"]).toMatch(/^Mozilla\/5\.0 /);
+    expect(headers["user-agent"]).toBe("dawmain-mcp/0.2 (+https://dawmain.davidzavada.cz)");
     expect(headers.referer).toBe("https://x.test/");
   });
 

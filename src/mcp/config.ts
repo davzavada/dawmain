@@ -71,8 +71,8 @@ export function tokenMatches(expected: string, provided: string): boolean {
   return timingSafeEqual(a, b);
 }
 
-/** e-Sbírka registered-API key (header `esel-api-access-key`). Optional — the
- * client falls back to the keyless SPA gateway when unset. */
+/** e-Sbírka registered-API key (header `esel-api-access-key`). Required for
+ * e-Sbírka: without it the esbirka_* tools answer that the source is not configured. */
 export function getEsbirkaApiKey(): string | undefined {
   const key = process.env.ESBIRKA_API_KEY?.trim();
   return key ? key : undefined;
@@ -86,6 +86,3 @@ export function getEsbirkaApiKey(): string | undefined {
 export function getEsbirkaApiBase(): string {
   return (process.env.ESBIRKA_API_BASE?.trim() || "https://api.e-sbirka.gov.cz").replace(/\/+$/, "");
 }
-
-/** Keyless gateway of the e-Sbírka SPA — same paths and response shapes. */
-export const ESBIRKA_CACHE_BASE = "https://e-sbirka.gov.cz/sbr-cache";

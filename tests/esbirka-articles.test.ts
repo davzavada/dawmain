@@ -56,7 +56,6 @@ function serve(pages: unknown[][]): number[] {
 }
 
 beforeEach(() => {
-  delete process.env.ESBIRKA_API_KEY;
   vi.resetModules();
 });
 afterEach(() => {

@@ -20,7 +20,6 @@ function serveRanking(total = RANKING.length): Array<{ start: number; pocet: num
 }
 
 beforeEach(() => {
-  delete process.env.ESBIRKA_API_KEY;
   vi.resetModules();
 });
 afterEach(() => {
