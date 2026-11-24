@@ -22,9 +22,9 @@
       "interface": {
         "displayName": "Dawmain",
         "shortDescription": "Rešerše českého a EU práva",
-        "longDescription": "Dawmain je nekomerční nástroj pro rešerši českého a unijního práva. V oficiálních databázích hledá živě: e-Sbírka (předpisy v aktuálním i historickém znění), sněmovní tisky s důvodovou zprávou, Nejvyšší soud, Nejvyšší správní soud, Ústavní soud (NALUS), obecné soudy, Soudní dvůr EU (InfoCuria), EUR-Lex a katalog UKAŽ Univerzity Karlovy pro odbornou literaturu; na požádání i slovenské předpisy, judikaturu a legislativní procesy (Slov-Lex). Každý výsledek nese veřejný odkaz na oficiální zdroj, takže odpověď jde ověřit a citovat.\n\nAsistent si na začátku rešerše vyžádá aktuální rešeršní návod (dawmain_guide), položí dotazy jazykem soudů, přečte rozhodnutí, na která se spoléhá, celá, a napíše memo – otázka, odpověď, argumentace – s citací každého pramene v textu.\n\nPřihlášení stačí e-mailem. Uživatelé s přístupem Pro mohou hledat i ve vlastních nahraných dokumentech a ve své knihovně Zotero.",
+        "longDescription": "Dawmain je nekomerční nástroj pro rešerši českého a unijního práva. V oficiálních databázích hledá živě: e-Sbírka (předpisy v aktuálním i historickém znění), sněmovní tisky s důvodovou zprávou, Nejvyšší soud, Nejvyšší správní soud, Ústavní soud (NALUS), obecné soudy, Soudní dvůr EU (InfoCuria), EUR-Lex a katalog UKAŽ Univerzity Karlovy pro odbornou literaturu; na požádání i slovenské předpisy, judikaturu a legislativní procesy (Slov-Lex). Každý výsledek nese veřejný odkaz na oficiální zdroj, takže odpověď jde ověřit a citovat.\n\nAsistent si na začátku rešerše vyžádá aktuální rešeršní návod (dawmain_guide), položí dotazy jazykem soudů, přečte rozhodnutí, na která se spoléhá, celá, a napíše memo – otázka, odpověď, argumentace – s citací každého pramene v textu.\n\nPřihlášení stačí e-mailem. Účtům, kterým to správce zpřístupní, umí hledat i ve vlastních nahraných dokumentech a v jejich knihovně Zotero.",
         "developerName": "David Závada",
-        "category": "Research",
+        "category": "Education & Research",
         "capabilities": [],
         "websiteURL": "https://dawmain.davidzavada.cz",
         "supportURL": "https://dawmain.davidzavada.cz/#pripojeni",
@@ -48,50 +48,31 @@
             {
               "description": "Supreme Court case law on a provision of the Civil Code",
               "prompt": "Najdi rozhodnutí Nejvyššího soudu k odpovědnosti za škodu z provozu dopravního prostředku podle § 2927 občanského zákoníku.",
-              "tools_triggered": [
-                "dawmain_guide",
-                "ns_search",
-                "ns_get_decision"
-              ],
+              "tools_triggered": "dawmain_guide, ns_search, ns_get_decision",
               "expected_behavior": "Calls dawmain_guide, searches NS decisions, reads at least one decision and answers in Czech citing each decision by its spisová značka with a link to rozhodnuti.nsoud.cz."
             },
             {
               "description": "Current wording of a statutory provision",
               "prompt": "Jak aktuálně zní § 52 zákoníku práce (zákon č. 262/2006 Sb.)?",
-              "tools_triggered": [
-                "esbirka_search",
-                "esbirka_get_text"
-              ],
+              "tools_triggered": "esbirka_search, esbirka_get_text",
               "expected_behavior": "Finds act 262/2006 Sb. in e-Sbírka, returns the current wording of § 52 and links to e-sbirka.cz."
             },
             {
               "description": "Constitutional Court case law",
               "prompt": "Jak Ústavní soud posuzuje právo na spravedlivý proces při nepřipuštění dovolání? Najdi nálezy.",
-              "tools_triggered": [
-                "dawmain_guide",
-                "us_search",
-                "us_get_decision"
-              ],
+              "tools_triggered": "dawmain_guide, us_search, us_get_decision",
               "expected_behavior": "Searches NALUS, reads relevant nálezy and summarises the court's view, citing sp. zn. with links to nalus.usoud.cz."
             },
             {
               "description": "EU law and CJEU case law",
               "prompt": "Najdi rozsudky Soudního dvora EU k pojmu správce osobních údajů podle čl. 4 bodu 7 GDPR.",
-              "tools_triggered": [
-                "dawmain_guide",
-                "sdeu_search",
-                "sdeu_get_document"
-              ],
+              "tools_triggered": "dawmain_guide, sdeu_search, sdeu_get_document",
               "expected_behavior": "Searches InfoCuria/EUR-Lex, returns CJEU judgments with case numbers and ECLI and links to the official text."
             },
             {
               "description": "Legislative history of a Czech act",
               "prompt": "Co říká důvodová zpráva k novele, která do zákoníku práce zavedla práci na dálku v roce 2023?",
-              "tools_triggered": [
-                "psp_search",
-                "psp_get_tisk",
-                "psp_get_text"
-              ],
+              "tools_triggered": "psp_search, psp_get_tisk, psp_get_text",
               "expected_behavior": "Finds the sněmovní tisk of the 2023 amendment on psp.cz, reads the explanatory report and summarises it with a link."
             }
           ],
