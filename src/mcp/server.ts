@@ -2,6 +2,7 @@ import { createMcpHandler } from "mcp-handler";
 import { appEnvironment, productionOrigin } from "@/src/runtime";
 import { zoteroConfigured } from "@/src/zotero/config";
 import { DEFAULT_ORIGIN, SERVER_NAME, SERVER_VERSION, serverBranding } from "./config";
+import type { DescriptionStyle } from "./guide-hint";
 import { registerAllTools } from "./tools";
 
 /**
@@ -99,13 +100,31 @@ const SERVER_INFO = {
   ...serverBranding(productionOrigin() ?? DEFAULT_ORIGIN),
 };
 
-export const mcpHandler = createMcpHandler(
-  (server) => {
-    registerAllTools(server, { zotero: ZOTERO });
-  },
-  {
-    serverInfo: SERVER_INFO,
-    instructions: INSTRUCTIONS,
-    verboseLogs: appEnvironment() !== "production",
-  },
-);
+function handlerFor(style: DescriptionStyle): (request: Request) => Promise<Response> {
+  return createMcpHandler(
+    (server) => {
+      registerAllTools(server, { zotero: ZOTERO, style });
+    },
+    {
+      serverInfo: SERVER_INFO,
+      instructions: INSTRUCTIONS,
+      verboseLogs: appEnvironment() !== "production",
+    },
+  );
+}
+
+const plainHandler = handlerFor("plain");
+const hintedHandler = handlerFor("hinted");
+
+/**
+ * Whether the request comes from ChatGPT's connector. It identifies itself in
+ * User-Agent (openai-mcp/…); every other client, Claude among them, gets the
+ * plain descriptions. Pure.
+ */
+export function isChatGpt(request: Request): boolean {
+  return /\b(openai|chatgpt)\b/i.test(request.headers.get("user-agent") ?? "");
+}
+
+/** The MCP server: plain tool descriptions, or the hinted ones for ChatGPT (src/mcp/guide-hint.ts). */
+export const mcpHandler = (request: Request): Promise<Response> =>
+  (isChatGpt(request) ? hintedHandler : plainHandler)(request);

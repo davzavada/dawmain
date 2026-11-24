@@ -20,7 +20,7 @@ import { registerDoctrine } from "./doctrine";
 import { registerFiles } from "./files";
 import { registerZotero } from "./zotero";
 import { zoteroConfigured } from "@/src/zotero/config";
-import { withGuideHint } from "../guide-hint";
+import { styled, type DescriptionStyle } from "../guide-hint";
 import { trackToolCall } from "../usage";
 import { admitToolCall, dailyLimitRefusal } from "../daily-limit";
 import { mirrorConfigured } from "@/src/sources/mirror";
@@ -175,11 +175,11 @@ export function withAnnotationTitle<T extends { title?: unknown; annotations?: u
   return { ...config, annotations: { title: config.title, ...annotations } };
 }
 
-function textOnly(server: McpServer): McpServer {
+function textOnly(server: McpServer, style: DescriptionStyle): McpServer {
   return {
     registerTool(name: string, config: ToolConfig, handler: ToolHandler) {
       const { outputSchema: _structured, ...bare } = config;
-      const rest = withAnnotationTitle(withGuideHint(name, bare));
+      const rest = withAnnotationTitle(styled(name, bare, style));
       // A method call on the real server — registerTool relies on `this`.
       return (server as unknown as { registerTool: (...args: unknown[]) => unknown }).registerTool(
         name,
@@ -212,19 +212,20 @@ type Registration = [name: string, config: Record<string, unknown>, handler: Too
  * read only inside handlers), and the SDK never mutates the config or schema
  * objects it is handed.
  */
-const recorded = new Map<boolean, Registration[]>();
+const recorded = new Map<string, Registration[]>();
 
-function registrations(zotero: boolean): Registration[] {
-  let list = recorded.get(zotero);
+function registrations(zotero: boolean, style: DescriptionStyle): Registration[] {
+  const key = `${zotero}:${style}`;
+  let list = recorded.get(key);
   if (!list) {
     const acc: Registration[] = [];
     const recorder = textOnly({
       registerTool: (name: string, config: Record<string, unknown>, handler: ToolHandler) =>
         void acc.push([name, config, handler]),
-    } as unknown as McpServer);
+    } as unknown as McpServer, style);
     for (const register of registrars) register(recorder);
     if (zotero) registerZotero(recorder);
-    recorded.set(zotero, (list = acc));
+    recorded.set(key, (list = acc));
   }
   return list;
 }
@@ -236,9 +237,14 @@ function registrations(zotero: boolean): Registration[] {
  * CREDENTIALS_SECRET can connect a library at all;
  * elsewhere the tools stay out of tools/list, as their lines stay out of the
  * server instructions (buildInstructions in src/mcp/server.ts).
+ * `style`: the wording of the descriptions (src/mcp/guide-hint.ts) — "plain"
+ * unless the caller is ChatGPT.
  */
-export function registerAllTools(server: McpServer, opts: { zotero: boolean } = { zotero: zoteroConfigured() }): void {
-  for (const [name, config, handler] of registrations(opts.zotero)) {
+export function registerAllTools(
+  server: McpServer,
+  opts: { zotero: boolean; style?: DescriptionStyle } = { zotero: zoteroConfigured() },
+): void {
+  for (const [name, config, handler] of registrations(opts.zotero, opts.style ?? "plain")) {
     // A method call on the real server — registerTool relies on `this`.
     (server as unknown as { registerTool: (...args: unknown[]) => unknown }).registerTool(name, config, handler);
   }
