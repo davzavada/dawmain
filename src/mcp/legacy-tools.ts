@@ -17,6 +17,8 @@
 
 type Json = Record<string, unknown>;
 
+const CURRENT_GET = "caselaw_get_decision";
+
 const LEGACY_GET: Record<string, { source: string; ids: readonly string[] }> = {
   ns_get_decision: { source: "ns", ids: ["unid"] },
   nss_get_decision: { source: "nss", ids: ["document_id"] },
@@ -39,7 +41,7 @@ export function currentCall(name: string, args: unknown): { name: string; argume
       rest[key] = value;
     }
   }
-  return { name: "caselaw_get_decision", arguments: { source: legacy.source, ...(id !== undefined ? { id } : {}), ...rest } };
+  return { name: CURRENT_GET, arguments: { source: legacy.source, ...(id !== undefined ? { id } : {}), ...rest } };
 }
 
 /** One JSON-RPC message with a legacy tools/call rewritten; `changed` says whether it was. Pure. */
@@ -83,5 +85,8 @@ export async function withCurrentToolNames(request: Request): Promise<Request> {
   if (rewritten === null) return request;
   const headers = new Headers(request.headers);
   headers.delete("content-length");
+  // The 2026-07-28 transport names the tool in a header too and refuses a request whose header and
+  // body disagree (-32020, measured on the first deploy of this rewrite): the header follows the body.
+  if (headers.has("mcp-name")) headers.set("mcp-name", CURRENT_GET);
   return new Request(request.url, { method: "POST", headers, body: rewritten, signal: request.signal });
 }

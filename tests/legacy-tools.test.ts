@@ -57,6 +57,34 @@ describe("calls by a retired tool name", () => {
     expect(current).not.toBe(old);
     expect(current.headers.get("authorization")).toBe("Bearer t");
     expect((await current.json()).params).toEqual({ name: "caselaw_get_decision", arguments: { source: "nss", id: "1" } });
+    expect(current.headers.has("mcp-name")).toBe(false);
+  });
+
+  it("the Mcp-Name header of the 2026-07-28 transport follows the body — the SDK refuses a request where they disagree", async () => {
+    // The per-request envelope the 2026-07-28 revision requires.
+    const META = {
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+      "io.modelcontextprotocol/clientInfo": { name: "test", version: "1" },
+      "io.modelcontextprotocol/clientCapabilities": {},
+    };
+    const rpc = (name: string, args: unknown) =>
+      new Request("https://dawmain.test/api/mcp", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+          "mcp-protocol-version": "2026-07-28",
+          "mcp-method": "tools/call",
+          "mcp-name": name,
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args, _meta: META } }),
+      });
+    expect((await withCurrentToolNames(rpc("ns_get_decision", { unid: "AB" }))).headers.get("mcp-name")).toBe("caselaw_get_decision");
+    vi.stubEnv("MIRROR_API_URL", "");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("unused")));
+    const answer = await (await mcpHandler(rpc("ns_get_decision", { unid: "not-a-unid" }))).text();
+    expect(answer).not.toContain("disagree");
+    expect(answer).toContain("is not an NS id");
   });
 
   it("end to end: the server answers an old name as caselaw_get_decision does, and lists only the new one", async () => {
