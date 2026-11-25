@@ -283,6 +283,18 @@ describe("fetch_queue and runs", () => {
     expect((await pg.query("SELECT 1 FROM mirror.fetch_queue")).rows).toHaveLength(0);
   });
 
+  it("a decision that has failed dozens of times still gets its next try — a week on, never 'interval out of range'", async () => {
+    await enqueue(db, "us", "9-9-26_1", "decision", "carries no case number nor ECLI");
+    // The state two NSS rows had reached on production: 2^32 hours overflowed the interval before least() applied.
+    await pg.query("UPDATE mirror.fetch_queue SET attempts = 32 WHERE source_id = '9-9-26_1'");
+    await enqueue(db, "us", "9-9-26_1", "decision", "carries no case number nor ECLI");
+    const { rows } = await pg.query<{ attempts: number; days: number }>(
+      "SELECT attempts, round(extract(epoch FROM next_try_at - now()) / 86400)::int AS days FROM mirror.fetch_queue WHERE source_id = '9-9-26_1'",
+    );
+    expect(rows[0]).toEqual({ attempts: 33, days: 7 });
+    await dequeue(db, "us", "9-9-26_1");
+  });
+
   it("reports per-source status with the last run", async () => {
     await enqueue(db, "us", "3-9-26_1", "text", "empty body");
     const id = await startRun(db, "us", "backfill");

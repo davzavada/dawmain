@@ -1,5 +1,6 @@
 import { withMcpAuth } from "mcp-handler";
 import { authRequired, challengeOrigin, verifyRequestAuth } from "@/src/mcp/auth";
+import { withCurrentToolNames } from "@/src/mcp/legacy-tools";
 import { mcpHandler } from "@/src/mcp/server";
 import { runWithCallClock } from "@/src/mcp/tools";
 
@@ -20,6 +21,14 @@ const authed = withMcpAuth(mcpHandler, verifyRequestAuth, {
 
 /** Each request runs with its arrival time on record: every tool answers in
  * text within the 60 s call ceiling, counted from here (CALL_BUDGET_MS). */
-const handler = (request: Request): Promise<Response> => runWithCallClock(() => authed(request));
+/**
+ * A call by a retired tool name becomes the current call BEFORE authentication:
+ * withMcpAuth hands the verified caller to the handler on the request object
+ * itself, so a request rebuilt after it arrived at the tools as nobody — not
+ * counted against the account's daily limit, and refused by the user's own
+ * sources (found by the pre-release audit, 11/2026).
+ */
+const handler = (request: Request): Promise<Response> =>
+  runWithCallClock(async () => authed(await withCurrentToolNames(request)));
 
 export { handler as GET, handler as POST, handler as DELETE };

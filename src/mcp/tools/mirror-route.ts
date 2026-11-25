@@ -1,6 +1,6 @@
 import { SourceError, toToolError } from "@/src/sources/shared/errors";
 import { justiceCourtCode } from "@/src/sources/justice";
-import { DOC_PAGE_CHARS, interleave, uniqueQueries } from "@/src/sources/shared/text";
+import { DOC_PAGE_CHARS, SEARCH_OPERATORS, interleave, uniqueQueries } from "@/src/sources/shared/text";
 import {
   getMirrorDecision,
   markedExcerpt,
@@ -37,6 +37,22 @@ import { readDecision } from "./reading";
 export type ToolText = { content: Array<{ type: "text"; text: string }>; isError?: boolean };
 export type MirrorAnswer = ToolText | { fallback: string };
 type Args = Record<string, unknown>;
+/** The live tool of the same name, for the part of a call the mirror does not hold (the CJEU lane). */
+export type LiveCall = (args: Args) => Promise<Record<string, unknown>>;
+
+/**
+ * Whether a query speaks the courts' search syntax: AND / OR / NOT / NEAR …
+ * in capitals, a wildcard, or brackets. The mirror reads words and "phrases"
+ * only — it took `"smluvní pokuta" NOT nájem` for three words to find and
+ * answered with a decision on nájemné, without a word (pre-release audit,
+ * 11/2026). Such a query goes to the court, which reads it as written. Pure.
+ */
+export function hasSearchOperators(variants: string[]): boolean {
+  return variants.some(
+    (variant) => /[*?()]/.test(variant.replace(/"[^"]*"/g, " ")) || variant.split(/\s+/).some((token) => SEARCH_OPERATORS.has(token.replace(/[()]/g, ""))),
+  );
+}
+const OPERATORS_FALLBACK = "the mirror reads words and \"phrases\" only, not search operators (AND, OR, NOT, NEAR, *, brackets)";
 
 /** One short line: it heads every answer from the mirror, a dozen times in one research. */
 export const MIRROR_NOTE = "[Dawmain mirror: nightly copy of NS, NSS, ÚS and justice.cz — the last day may be missing.]";
@@ -430,12 +446,21 @@ async function justiceByProvision(args: Args, act: string, section: string): Pro
 
 const CASELAW_LANES: MirrorCourt[] = ["nss", "ns", "us"];
 
-async function caselawSearch(args: Args): Promise<MirrorAnswer> {
+/** The text of a live tool's answer, or null when it failed or carried none. */
+function liveText(result: Record<string, unknown> | null): string | null {
+  if (!result || result.isError) return null;
+  const parts = Array.isArray(result.content) ? (result.content as Array<{ type?: string; text?: string }>) : [];
+  const joined = parts.map((part) => (part.type === "text" && typeof part.text === "string" ? part.text : "")).join("\n").trim();
+  return joined || null;
+}
+
+async function caselawSearch(args: Args, live?: LiveCall): Promise<MirrorAnswer> {
   const act = str(args.applies_act);
   const provision = str(args.applies_provision);
   if (act || provision) return caselawByProvision(args, act, provision);
   const variants = uniqueQueries(str(args.query), args.queries as string[] | undefined);
   if (!variants.length) return { fallback: "no query" };
+  if (hasSearchOperators(variants)) return { fallback: OPERATORS_FALLBACK };
   const from = str(args.date_from);
   const to = str(args.date_to);
   if (dateRangeError(from, to)) return { fallback: "inverted date range" };
@@ -446,6 +471,9 @@ async function caselawSearch(args: Args): Promise<MirrorAnswer> {
   if (!lanes.length) return { fallback: "the mirror does not hold the CJEU" };
   const limit = Math.min(10, Math.max(1, num(args.per_source_limit, 5)));
   const readTop = Math.min(3, Math.max(0, num(args.read_top, 0)));
+  // The CJEU is not mirrored: its lane is asked of the court itself, alongside the mirror's lanes, so
+  // include_eu still means one call (it used to answer "search it with sdeu_search" — a round of its own).
+  const cjeu = wantsEu && live ? live({ ...args, sources: ["sdeu"], include_eu: true }).catch(() => null) : null;
 
   const settled = await Promise.all(
     lanes.map(async (lane) => {
@@ -476,15 +504,17 @@ async function caselawSearch(args: Args): Promise<MirrorAnswer> {
   for (let rank = 0; rank < limit; rank++) {
     for (const lane of settled) if (lane.ok && lane.hits[rank]) items.push(lane.hits[rank]);
   }
+  const cjeuText = cjeu ? liveText(await cjeu) : null;
   return text([
     MIRROR_NOTE,
     `Variants searched in parallel: ${variants.map((v) => `"${v}"`).join(", ")}`,
     ...statusLines,
-    ...(wantsEu ? ["– SDEU: not in the mirror — search it with sdeu_search."] : []),
+    ...(wantsEu && !cjeuText ? ["– SDEU: did not answer just now — search it with sdeu_search."] : []),
     "",
     ...(items.length ? items.map((hit, i) => hitLine(hit, i, true, i >= readTop)) : ["No hits in the mirror — broaden the query or add variants."]),
     ...previewLines(items, readTop, true),
     ...(items.length ? ["", HIT_LEGEND] : []),
+    ...(cjeuText ? ["", "── SDEU — answered live by the court (its own numbering; read with sdeu_get_document):", cjeuText] : []),
   ]);
 }
 
@@ -630,6 +660,7 @@ async function courtSearch(name: string, args: Args): Promise<MirrorAnswer> {
   if (refused) return { fallback: refused };
   if (spec.laterPage(args)) return { fallback: "the mirror answers the first page only" };
   const variants = uniqueQueries(str(args.query), args.queries as string[] | undefined);
+  if (hasSearchOperators(variants)) return { fallback: OPERATORS_FALLBACK };
   const caseNumber = str(args.case_number);
   const extra = spec.extra?.(args) ?? {};
   if (typeof extra === "string") return { fallback: extra };
@@ -741,7 +772,7 @@ async function getDecision(args: Args): Promise<MirrorAnswer> {
 
 // ── the routing table ───────────────────────────────────────────────────────
 
-export const MIRROR_TOOLS: Record<string, (args: Args) => Promise<MirrorAnswer>> = {
+export const MIRROR_TOOLS: Record<string, (args: Args, live?: LiveCall) => Promise<MirrorAnswer>> = {
   caselaw_search: caselawSearch,
   ...Object.fromEntries(Object.keys(COURT_SEARCH).map((name) => [name, (args: Args) => courtSearch(name, args)])),
   caselaw_get_decision: getDecision,

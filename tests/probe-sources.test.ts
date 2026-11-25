@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { canaries, registerProbe } from "@/src/mcp/tools/probe";
 
 /**
@@ -8,7 +8,7 @@ import { canaries, registerProbe } from "@/src/mcp/tools/probe";
  */
 
 type Result = { isError?: boolean; content: Array<{ text: string }> };
-type Handler = (args: Record<string, unknown>) => Promise<Result>;
+type Handler = (args: Record<string, unknown>, ctx?: unknown) => Promise<Result>;
 
 function probe(): { handler: Handler; description: string } {
   let handler: Handler | undefined;
@@ -23,10 +23,18 @@ function probe(): { handler: Handler; description: string } {
 }
 
 const DEFAULTS = { include_raw: false, discover: false };
+/** The maintenance options (discover, include_raw, fetch_url) answer the operator's account only. */
+const OPERATOR = "user_operator1";
+const OPERATOR_CTX = { http: { authInfo: { token: "t", clientId: "client_1", scopes: [], extra: { userId: OPERATOR } } } };
+
+beforeEach(() => {
+  vi.stubEnv("ADMIN_USER_IDS", OPERATOR);
+});
 
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe("unknown canary ids", () => {
@@ -87,7 +95,7 @@ describe("discover", () => {
     );
     let result: Result | undefined;
     void probe()
-      .handler({ ...DEFAULTS, discover: true, sources: ["justice"] })
+      .handler({ ...DEFAULTS, discover: true, sources: ["justice"] }, OPERATOR_CTX)
       .then((r) => (result = r));
     // Sequentially: canary 5 s, then home 5 s + bundle 5 s, then the NSS form 5 s, then the psp.cz form 5 s = 25 s.
     await vi.advanceTimersByTimeAsync(10_000);
@@ -111,9 +119,25 @@ describe("discover", () => {
         return new Response("<form></form>", { status: 200 });
       }),
     );
-    const result = await probe().handler({ ...DEFAULTS, discover: true, sources: ["nss"] });
+    const result = await probe().handler({ ...DEFAULTS, discover: true, sources: ["nss"] }, OPERATOR_CTX);
     const text = result.content[0].text;
     const json = JSON.parse(text.slice(text.indexOf("Discoveries:\n") + "Discoveries:\n".length));
     expect(json).toEqual({ justice: { error: "boom" }, nss: { conditions: [] }, psp: { error: "psp down" } });
+  });
+});
+
+describe("maintenance options are the operator's", () => {
+  it("discover, include_raw and fetch_url are refused for any other caller, before a single request", async () => {
+    const fetchSpy = vi.fn(async () => new Response("unused"));
+    vi.stubGlobal("fetch", fetchSpy);
+    const other = { http: { authInfo: { token: "t", clientId: "client_1", scopes: [], extra: { userId: "user_someoneelse" } } } };
+    for (const args of [{ ...DEFAULTS, discover: true }, { ...DEFAULTS, include_raw: true }, { ...DEFAULTS, fetch_url: "https://www.psp.cz/" }]) {
+      for (const ctx of [other, undefined]) {
+        const result = (await probe().handler(args, ctx)) as { isError?: boolean; content: Array<{ text: string }> };
+        expect(result.isError).toBe(true);
+        expect(result.content[0].text).toContain("maintenance options for the operator's account");
+      }
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

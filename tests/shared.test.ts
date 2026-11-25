@@ -335,6 +335,17 @@ describe("findExcerpts / pageOrExcerpt", () => {
     expect(view.text).toContain("8 of 12 passages shown");
   });
 
+  it("a match in a heading brings the text under it; a short sentence stays a passage of its own", async () => {
+    const { findExcerpts } = await import("@/src/sources/shared/text");
+    const report = ["K § 2290:", "Navrhuje se lhůta dvou měsíců.", "", "K § 2291:", "Výpověď bez výpovědní doby se připouští při zvlášť závažném porušení povinnosti nájemce.", "Zejména při neplacení nájemného.", "", "K § 2292:", "Další text."].join("\n");
+    const heading = findExcerpts(report, "K § 2291");
+    expect(heading.matches).toBe(1);
+    expect(heading.text).toContain("K § 2291:\nVýpověď bez výpovědní doby se připouští při zvlášť závažném porušení povinnosti nájemce.");
+    // A short line that ends like a sentence is a paragraph, not a heading: it is not run together with the next.
+    const sentence = findExcerpts("Nájem zaniká.\nDalší odstavec o něčem jiném, který s tím nesouvisí.", "zaniká");
+    expect(sentence.text).toBe("Nájem zaniká.");
+  });
+
   it("folds Czech diacritics in the needle", async () => {
     const { findExcerpts } = await import("@/src/sources/shared/text");
     expect(findExcerpts("Nejvyšší soud o vydržení rozhodl.", "VYDRZENI", 20).matches).toBe(1);

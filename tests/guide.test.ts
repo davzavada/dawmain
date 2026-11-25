@@ -184,9 +184,18 @@ describe("the manual is fitted to what the caller can use", () => {
 
   it("a heading that is missing leaves the text alone and still adds the note", () => {
     const text = tailorManual("# T\n\nintro\n\n## A\n\na\n\n## Zotero (zotero_*): x\n\nz\n\n## B\n\nb", ["files", "zotero"]);
-    expect(text).toBe(
-      "# T\n\n> **Not available on this connection: Vlastní soubory (files_*), Zotero (zotero_*).** Their sections are left out of this manual. Do not call these tools in this conversation and skip every step below that names them — the first round is the official sources only. If the user asks for one of them, say it is switched on per account on the Dawmain website.\n\nintro\n\n## A\n\na\n\n## B\n\nb",
-    );
+    expect(text.startsWith("# T\n\n> **Not available on this connection: Vlastní soubory (files_*), Zotero (zotero_*).** Their sections are left out of this manual.")).toBe(true);
+    expect(text.endsWith("\n\nintro\n\n## A\n\na\n\n## B\n\nb")).toBe(true);
+  });
+
+  it("the note also says what the connection HAS — the instructions tell the model to search exactly those", () => {
+    const body = "# T\n\nintro";
+    expect(tailorManual(body, ["files", "zotero"])).toContain("**Available here: doktrína — UKAŽ (doctrine_*)** — search it in your next turn.");
+    expect(tailorManual(body, ["zotero"])).toContain("**Available here: Vlastní soubory (files_*), doktrína — UKAŽ (doctrine_*)** — search them in your next turn.");
+    const none = tailorManual(body, ["files", "zotero", "ukaz"]);
+    expect(none).not.toContain("Available here");
+    expect(none).toContain("the research runs on the official sources only");
+    expect(none).toContain("no „Další zdroje“ literature section");
   });
 
   const everythingConfigured = () => {

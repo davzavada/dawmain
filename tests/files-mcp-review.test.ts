@@ -330,8 +330,10 @@ function parseCall(line: string): { tool: string; args: Record<string, unknown> 
 
 describe("own documents first (MCP-4)", () => {
   it("the server instructions search files_* in every rešerše and stop after a 'no library' answer", () => {
-    expect(INSTRUCTIONS).toMatch(/^- Vlastní soubory .*In legal research call files_search in the first round of every question/m);
-    expect(INSTRUCTIONS).toContain("do not call files_* again in this conversation");
+    expect(INSTRUCTIONS).toMatch(/^- Vlastní soubory .*the user's own documents come first — where this account has a library/m);
+    // Searched only where dawmain_guide's opening note says the connection has them.
+    expect(INSTRUCTIONS).toMatch(/^- OWN SOURCES — .*never call one it lists as unavailable/m);
+    expect(INSTRUCTIONS).not.toContain("in the first round of every question");
     expect(INSTRUCTIONS).toMatch(/^- Literature: .*close the answer with the most relevant works as further sources/m);
   });
 });

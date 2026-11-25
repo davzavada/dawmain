@@ -60,6 +60,38 @@ export const MODEL_INSTRUCTIONS: ReadonlyArray<readonly [string, string]> = [
     " It covers Czech and EU law, and Slovak law on request.",
   ],
   [" — ask for it in the same turn as your first in-depth search of that source", ""],
+  // Found by the pre-release audit (11/2026): sentences that tell the model what to do or which tool to
+  // prefer, in descriptions written before or after the list above. What a tool IS stays; how to behave goes.
+  ["; keep them unless the user asked for NS only", ""],
+  [
+    " For deeper digging use nss_search/ns_search/us_search/sdeu_search; fetch full texts with the *_get_* tool named in each hit.",
+    " Each court's own filters are in nss_search/ns_search/us_search/sdeu_search.",
+  ],
+  [" — cite that link, never a search URL (for ns", " (for ns"],
+  [" Use it to check a decision is still good law —", " It shows whether a decision is still good law —"],
+  [" — open it with find: the cited spisová značka to see what it did with the decision", ""],
+  [" For NS/NSS/ÚS case law prefer caselaw_search, whose indexes are richer.", " NS/NSS/ÚS case law has richer indexes in caselaw_search."],
+  [" For a known act number, prefer esbirka_get_act.", " A known act number is read by esbirka_get_act."],
+  [", never the default for Czech research", ""],
+  [" Cite the literature by author, title, year and the record link.", ""],
+  [" This is how you tell whether a monograph, commentary or article is on point before citing it.", ""],
+  [
+    " Own documents have no public URL: cite them as „vlastní dokument“ with the pinpoint, quote only from a files_get_document read, and cite a decision found in them from its official text. If the answer says the account has no library, do not call files_* again.",
+    " Own documents have no public URL.",
+  ],
+  [" — in bounded parts, never whole.", " — in bounded parts."],
+  [" — take it first, then read what you cite:", " — and its parts:"],
+  [
+    ": this is NOT an official source — cite it as „vlastní dokument“ with the pinpoint (§, m. č., s., pozn.), quote only text you read here, and cite any decision it mentions from the official text.",
+    ": this is NOT an official source.",
+  ],
+  [
+    " — cite the decision from there, never from Zotero. If the answer says Zotero is not connected or needs a personal sign-in, do not call zotero_* again.",
+    ".",
+  ],
+  [": cite the work itself (zotero_cite formats it), a decision from its official text — never a zotero.org link.", "."],
+  [": quote and cite it from its official text.", "."],
+  [" If it says Zotero is read-only or not connected, tell the user (the answer has the Czech sentence) and do not call zotero_save again.", ""],
 ];
 
 /** The plain wording of one description: the model instructions taken out. Pure. */

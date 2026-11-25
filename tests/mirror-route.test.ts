@@ -273,6 +273,43 @@ describe("mirror routing", () => {
     expect(await MIRROR_TOOLS.caselaw_search({ query: "újma", sources: ["sdeu"] })).toHaveProperty("fallback");
   });
 
+  it("include_eu: the CJEU lane is asked of the court in the same call, beside the mirror's lanes", async () => {
+    fetchMock.mockImplementation(async () => json({ hits: [HIT], channel: "and", terms: [] }));
+    const live = vi.fn(async (_args: Record<string, unknown>) => ({ content: [{ type: "text", text: "✓ SDEU: 12 matches\n1. [SDEU] C-311/18 (judgment, 2020-07-16) → sdeu_get_document ecli: ECLI:EU:C:2020:559" }] }));
+    const out = textOf(await MIRROR_TOOLS.caselaw_search({ query: "předávání osobních údajů", include_eu: true, eu_court: "C", per_source_limit: 3 }, live));
+    // The live tool is asked for the CJEU alone, with the call's own arguments.
+    expect(live).toHaveBeenCalledTimes(1);
+    expect(live.mock.calls[0][0]).toMatchObject({ query: "předávání osobních údajů", sources: ["sdeu"], include_eu: true, eu_court: "C", per_source_limit: 3 });
+    expect(out).toContain("✓ NS:");
+    expect(out).toContain("── SDEU — answered live by the court");
+    expect(out).toContain("sdeu_get_document ecli: ECLI:EU:C:2020:559");
+    expect(out).not.toContain("did not answer");
+    // The court failing costs the lane, not the answer.
+    const failing = vi.fn(async () => ({ isError: true, content: [{ type: "text", text: "InfoCuria is down" }] }));
+    const partial = textOf(await MIRROR_TOOLS.caselaw_search({ query: "újma", include_eu: true }, failing));
+    expect(partial).toContain("– SDEU: did not answer just now — search it with sdeu_search.");
+    expect(partial).toContain("✓ NS:");
+    // Without include_eu nobody asks the court.
+    const untouched = vi.fn();
+    await MIRROR_TOOLS.caselaw_search({ query: "újma" }, untouched);
+    expect(untouched).not.toHaveBeenCalled();
+  });
+
+  it("a query in the courts' search syntax goes to the court: the mirror reads words and phrases only", async () => {
+    const { hasSearchOperators } = await import("@/src/mcp/tools/mirror-route");
+    expect(hasSearchOperators(['"smluvní pokuta" NOT nájem'])).toBe(true);
+    expect(hasSearchOperators(["nájem AND (výpověď OR odstoupení)"])).toBe(true);
+    expect(hasSearchOperators(["nájem*"])).toBe(true);
+    expect(hasSearchOperators(["újma NEAR pozůstalý"])).toBe(true);
+    // Plain words, phrases, lower-case "not"/"or" and a question mark inside a phrase are not syntax.
+    expect(hasSearchOperators(['"náhrada újmy" pozůstalým', "výpověď z nájmu bytu", "or not and", '"co je to?" výklad'])).toBe(false);
+    expect(await MIRROR_TOOLS.ns_search({ query: '"smluvní pokuta" NOT nájem' })).toEqual({
+      fallback: 'the mirror reads words and "phrases" only, not search operators (AND, OR, NOT, NEAR, *, brackets)',
+    });
+    expect(await MIRROR_TOOLS.caselaw_search({ queries: ["újma", "nájem*"] })).toHaveProperty("fallback");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("falls back on what the mirror cannot do, before any request", async () => {
     expect(await MIRROR_TOOLS.ns_search({ query: "x", offset: 20 })).toEqual({ fallback: "the mirror answers the first page only" });
     expect(await MIRROR_TOOLS.nss_search({ query: "x", court: "krajske" })).toHaveProperty("fallback");

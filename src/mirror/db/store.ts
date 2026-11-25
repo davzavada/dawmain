@@ -237,14 +237,21 @@ export async function idsWithText(db: Queryable, source: MirrorSource, ids: stri
 
 export type QueueKind = "decision" | "text";
 
-/** Retry after 1 h, 2 h, 4 h … capped at 7 days. */
+/**
+ * Retry after 1 h, 2 h, 4 h … capped at 7 days. The exponent is capped, not
+ * only the result: `interval '1 hour' * power(2, attempts)` overflows the
+ * interval type before least() ever sees it — at 32 attempts Postgres throws
+ * "interval out of range", and a decision that fails forever (two NSS rows
+ * with no case number, 11/2026) took the whole nightly retry run down with it.
+ * 2^8 hours is already past the 7 days.
+ */
 export async function enqueue(db: Queryable, source: MirrorSource, sourceId: string, kind: QueueKind, error: string): Promise<void> {
   await db.query(
     `INSERT INTO mirror.fetch_queue AS q (source, source_id, kind, attempts, next_try_at, last_error)
      VALUES ($1, $2, $3, 1, now() + interval '1 hour', $4)
      ON CONFLICT (source, source_id, kind) DO UPDATE SET
        attempts = q.attempts + 1,
-       next_try_at = now() + least(interval '1 hour' * power(2, q.attempts), interval '7 days'),
+       next_try_at = now() + least(interval '1 hour' * power(2, least(q.attempts, 8)), interval '7 days'),
        last_error = EXCLUDED.last_error`,
     [source, sourceId, kind, error.slice(0, 1000)],
   );

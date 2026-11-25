@@ -50,8 +50,8 @@ zda je dílo k věci. Text díla se nestahuje; k němu vede odkaz na záznam
 byla vyřazena: její WorldCat Discovery blokuje adresy serverů.)
 
 **Vlastní zdroje (Pro).** Kdo má režim Pro (je zdarma, v testovacím provozu ho přiděluji ručně), si
-na webu nahraje vlastní knihy, články, komentáře a vzory. Dokument se převede na text přímo v prohlížeči, takže originál
-počítač neopustí; na server jde jen text. Asistent v dokumentech pak hledá a
+na webu nahraje vlastní knihy, články, komentáře a vzory. Na server se ukládá nahraný soubor i jeho převedený text
+(podrobnosti a doby uchování jsou v zásadách na webu). Asistent v dokumentech pak hledá a
 čte vedle oficiálních databází. Funguje to jen s přihlášením vlastním účtem.
 Záloha to není, text svých dokumentů si ale
 můžete stáhnout. Pravidla jsou v

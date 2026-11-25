@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { adminEnvIds } from "@/src/files/config";
+import { callerFromCtx } from "../caller";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { getEsbirkaApiBase, getEsbirkaApiKey } from "../config";
 import { USER_AGENT } from "@/src/sources/shared/http";
@@ -543,17 +545,37 @@ const inputSchema = z.object({
     ),
 });
 
+/** Whether the call comes from an account the deployment names as its operator (ADMIN_USER_IDS / FILES_OPERATOR_IDS). */
+function isOperator(ctx: unknown): boolean {
+  const caller = callerFromCtx(ctx);
+  return caller.kind === "user" && adminEnvIds().includes(caller.userId);
+}
+
 export function registerProbe(server: McpServer): void {
   server.registerTool(
     "dawmain_probe_sources",
     {
       title: "Probe upstream sources",
       description:
-        "Diagnose connectivity to the legal databases this server scrapes/queries, from the deployment itself. Each canary makes one real request and checks the response for a marker the parsers rely on. Use when any source tool fails unexpectedly, after deploying, or to capture raw upstream bodies as fixtures (include_raw). The discover mode scans for endpoints not yet wired up (justice.cz search, NSS form fields, the psp.cz tisky form).",
+        "Check whether the legal databases behind this connector answer, from the deployment itself: one small request to each source and a check that the answer has the expected shape. For when a source tool fails unexpectedly. The operator's options (include_raw, discover, fetch_url) return raw upstream bodies for maintenance and are answered for the operator's account only.",
       inputSchema,
       annotations: READ_ONLY,
     },
-    async ({ sources, include_raw, discover: discoverMode, fetch_url }) => {
+    async ({ sources, include_raw, discover: discoverMode, fetch_url }, ctx?: unknown) => {
+      // The maintenance options fetch whole upstream bodies and scan sites for endpoints: dozens of
+      // requests to the courts from the one address every user shares. Any account could ask for them
+      // (pre-release audit, 11/2026); they are the operator's.
+      if ((fetch_url || include_raw || discoverMode) && !isOperator(ctx)) {
+        return {
+          isError: true as const,
+          content: [
+            {
+              type: "text" as const,
+              text: "include_raw, discover and fetch_url are maintenance options for the operator's account. Call dawmain_probe_sources without them to see whether the sources answer.",
+            },
+          ],
+        };
+      }
       if (fetch_url) {
         try {
           const response = await fetchAllowedUrl(fetch_url);
