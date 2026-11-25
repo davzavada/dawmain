@@ -15,7 +15,7 @@ import {
   MAX_LIMIT,
 } from "./queries";
 import { renderDecisionHtml } from "./render";
-import { CITED_BY_MAX_LIMIT, decisionsByCaseNumber, linksOfDecision } from "./citations";
+import { CITED_BY_MAX_LIMIT, citedBySummary, decisionsByCaseNumber, factsOfDecisions, linksOfDecision } from "./citations";
 import { originalOf } from "./original";
 import {
   ACT_GROUPS,
@@ -47,7 +47,7 @@ import {
  *   GET /v1/decisions/:source/:id/images/:ord
  *   GET /v1/decisions/:source/:id/provisions        the § / články it cites
  *   GET /v1/decisions/:source/:id/citations[?limit=&offset=&source=]   the decisions it cites, and those citing it
- *   GET /v1/provisions?cite= | act=&provision= [&source=&category=&from=&to=&limit=&offset=]
+ *   GET /v1/provisions?cite= | act=&provision= [&source=&category=&from=&to=&sort=newest|cited&limit=&offset=]
  *                                                   decisions citing a provision
  *   GET /v1/acts?q=&group=cz|eu|intl&limit=          the act registry, for a picker
  *   GET /v1/status                                  cached: answers with the last count (asOf), recounts after 5 min
@@ -268,11 +268,26 @@ export function createMirrorApi(options: {
     };
     const run = (one: SearchInput) =>
       slow(db, (conn) => searchDecisions(conn, one), SEARCH_TIMEOUT_MS, SEARCH_WORK_MEM);
+    // Length and citing count of the hits shown — one more query, and a failure leaves the hits as they are.
+    const withFacts = async <T extends { source: MirrorSource; id: string }>(hits: T[]): Promise<T[]> => {
+      try {
+        const facts = await factsOfDecisions(db, hits);
+        return hits.map((hit) => ({ ...hit, ...(facts.get(`${hit.source}:${hit.id}`) ?? {}) }));
+      } catch (error) {
+        console.error(`mirror-api: hit facts: ${error}`);
+        return hits;
+      }
+    };
     const started = performance.now();
     if (perSource !== undefined) {
       // One lane per court, as caselaw_search: a court with many matches does not push the others out.
       const lanes = courts ?? MIRROR_SOURCES;
-      const results = await Promise.all(lanes.map((s) => run({ ...input, sources: [s], limit: perSource })));
+      const results = await Promise.all(
+        lanes.map(async (s) => {
+          const one = await run({ ...input, sources: [s], limit: perSource });
+          return { ...one, hits: await withFacts(one.hits) };
+        }),
+      );
       return c.json({
         lanes: Object.fromEntries(lanes.map((s, i) => [s, { hits: results[i].hits, channel: results[i].channel }])),
         terms: results[0]?.terms ?? [],
@@ -283,6 +298,7 @@ export function createMirrorApi(options: {
     const result = await run(input);
     return c.json({
       ...result,
+      hits: await withFacts(result.hits),
       tookMs: Math.round(performance.now() - started),
     });
   });
@@ -303,7 +319,9 @@ export function createMirrorApi(options: {
     const page = Number(c.req.query("page") ?? "1");
     if (!(Number.isInteger(page) && page >= 1))
       throw new BadRequest("page must be a positive integer");
-    return c.json(decisionPage(decision, page));
+    // Page 1 says who cites the decision (a line of the reader's header); a failure costs the line, not the text.
+    const citedBy = page === 1 ? await citedBySummary(db, source, id).catch(() => null) : null;
+    return c.json({ ...decisionPage(decision, page), ...(citedBy ? { citedBy } : {}) });
   });
 
   app.get("/v1/decisions/:source/:id/images/:ord", async (c) => {
@@ -337,7 +355,13 @@ export function createMirrorApi(options: {
     const offset = q.offset ? Number(q.offset) : undefined;
     if (offset !== undefined && !(Number.isInteger(offset) && offset >= 0))
       throw new BadRequest("offset must be 0 or more");
-    const links = await linksOfDecision(db, source, id, { limit, offset, citedBySource: sources(c.req.queries("source")) });
+    if (q.order && q.order !== "newest" && q.order !== "courts") throw new BadRequest("order must be newest or courts");
+    const links = await linksOfDecision(db, source, id, {
+      limit,
+      offset,
+      citedBySource: sources(c.req.queries("source")),
+      order: (q.order || undefined) as "newest" | "courts" | undefined,
+    });
     if (!links) return c.json({ error: "not found" }, 404);
     return c.json(links);
   });
@@ -393,10 +417,12 @@ export function createMirrorApi(options: {
     const offset = q.offset ? Number(q.offset) : 0;
     if (!(Number.isInteger(offset) && offset >= 0 && offset <= 10_000))
       throw new BadRequest("offset must be 0–10000");
+    if (q.sort && q.sort !== "newest" && q.sort !== "cited") throw new BadRequest("sort must be newest or cited");
     const started = performance.now();
     const result = await decisionsByProvision(db, {
       act,
       provision,
+      sort: (q.sort || undefined) as "newest" | "cited" | undefined,
       sources: courts,
       categories: categories(q.category),
       from: date(q.from, "from"),

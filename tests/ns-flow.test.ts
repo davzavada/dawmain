@@ -66,13 +66,15 @@ type Handler = (args: Record<string, unknown>) => Promise<{
 }>;
 
 async function loadTools(): Promise<Record<string, Handler>> {
-  const { registerNs } = await import("@/src/mcp/tools/ns");
+  const { registerNs, readNsDecision } = await import("@/src/mcp/tools/ns");
   const tools: Record<string, Handler> = {};
   registerNs({
     registerTool(name: string, _config: unknown, handler: Handler) {
       tools[name] = handler;
     },
   } as never);
+  // The court's reader behind caselaw_get_decision (one read tool for the four sources).
+  tools.read_decision = readNsDecision as never;
   return tools;
 }
 
@@ -241,7 +243,7 @@ describe("getNsDecision", () => {
       return webSearchUp ? new Response(PROJEDNAL) : new Response("down", { status: 503 });
     });
     const tools = await loadTools();
-    const firstCall = tools.ns_get_decision({ unid: PROJEDNAL_UNID, page: 1 });
+    const firstCall = tools.read_decision({ unid: PROJEDNAL_UNID, page: 1 });
     await vi.advanceTimersByTimeAsync(10_000);
     const first = (await firstCall).content[0].text;
     expect(first).toContain("could not be read just now");
@@ -249,7 +251,7 @@ describe("getNsDecision", () => {
 
     webSearchUp = true;
     const before = calls.length;
-    const second = (await tools.ns_get_decision({ unid: PROJEDNAL_UNID, page: 1 })).content[0].text;
+    const second = (await tools.read_decision({ unid: PROJEDNAL_UNID, page: 1 })).content[0].text;
     expect(calls.length).toBeGreaterThan(before);
     expect(second).toContain("a rozhodl takto");
   });
@@ -257,7 +259,7 @@ describe("getNsDecision", () => {
   it("asserts 'no body' only when both renditions were read", async () => {
     stubFetch(() => new Response(METADATA_ONLY));
     const tools = await loadTools();
-    const text = (await tools.ns_get_decision({ unid: PROJEDNAL_UNID, page: 1 })).content[0].text;
+    const text = (await tools.read_decision({ unid: PROJEDNAL_UNID, page: 1 })).content[0].text;
     expect(text).toContain("neither the WebPrint nor the WebSearch rendition carries it");
     expect(calls).toHaveLength(2);
   });
@@ -267,11 +269,11 @@ describe("getNsDecision", () => {
       url.pathname.includes("/WebPrint/") ? new Response(METADATA_ONLY) : new Response("<html><body></body></html>"),
     );
     const tools = await loadTools();
-    const text = (await tools.ns_get_decision({ unid: PROJEDNAL_UNID, page: 1 })).content[0].text;
+    const text = (await tools.read_decision({ unid: PROJEDNAL_UNID, page: 1 })).content[0].text;
     expect(text).toContain("neither the WebPrint nor the WebSearch rendition carries it");
     expect(text).not.toContain("could not be read just now");
     // Confirmed, so cached: the second call asks NS nothing.
-    await tools.ns_get_decision({ unid: PROJEDNAL_UNID, page: 1 });
+    await tools.read_decision({ unid: PROJEDNAL_UNID, page: 1 });
     expect(calls).toHaveLength(2);
   });
 });
@@ -312,15 +314,15 @@ describe("ns_search tool", () => {
   });
 });
 
-describe("ns_get_decision tool", () => {
+describe("caselaw_get_decision, source ns", () => {
   it("labels a link as opening at the passage only when it carries a highlight", async () => {
     stubFetch(() => new Response(PROJEDNAL));
     const tools = await loadTools();
     // "P. Š." matches the text, but every word is under 3 characters — no Highlight.
-    const short = (await tools.ns_get_decision({ unid: PROJEDNAL_UNID, find: "P. Š.", page: 1 })).content[0].text;
+    const short = (await tools.read_decision({ unid: PROJEDNAL_UNID, find: "P. Š.", page: 1 })).content[0].text;
     expect(short).not.toContain("opens at the found passage");
     expect(short).not.toContain("Highlight=");
-    const long = (await tools.ns_get_decision({ unid: PROJEDNAL_UNID, find: "dovolání", page: 1 })).content[0].text;
+    const long = (await tools.read_decision({ unid: PROJEDNAL_UNID, find: "dovolání", page: 1 })).content[0].text;
     expect(long).toMatch(/&Highlight=0,dovol%C3%A1n%C3%AD \(opens at the found passage\)/);
   });
 });

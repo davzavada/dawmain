@@ -2,7 +2,7 @@ import { SourceError } from "./shared/errors";
 import { CookieSession, fetchUpstream } from "./shared/http";
 import { decodeBody, htmlToText, loadHtml, looksLikeHtml } from "./shared/html";
 import { czechToIso } from "./shared/text";
-import { DOCUMENT_TTL_MS, SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
+import { DECISION_TTL_MS, DOCUMENT_TTL_MS, SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
 
 /**
  * Nejvyšší správní soud — vyhledavac.nssoud.cz (server-rendered ASP.NET Core
@@ -909,7 +909,7 @@ export interface NssSearchOptions {
 
 const searchCache = new TtlCache<NssSearchResult>(SEARCH_TTL_MS);
 /** Decision texts are big — a couple of dozen at most; metadata is small. */
-const textCache = new TtlCache<string>(DOCUMENT_TTL_MS, 24);
+const textCache = new TtlCache<string>(DECISION_TTL_MS, 24);
 const metadataCache = new TtlCache<Record<string, string>>(DOCUMENT_TTL_MS);
 
 /** Rows on the inline first page; every MyResTRowsCont page carries 20. */
@@ -1128,7 +1128,7 @@ export async function getNssDecision(id: string): Promise<NssDecision> {
 /**
  * The decision text alone — for read_top previews, which must never wait on
  * the detail page. The detail is still requested (not awaited), so the
- * nss_get_decision a preview usually leads to finds its metadata cached.
+ * caselaw_get_decision (source: nss) a preview usually leads to finds its metadata cached.
  */
 export async function getNssDecisionText(id: string): Promise<string> {
   assertNssId(id);
@@ -1157,7 +1157,7 @@ async function loadNssMetadata(id: string): Promise<Record<string, string>> {
       SOURCE,
       "UPSTREAM_ERROR",
       `NSS detail page answered HTTP ${response.status}.`,
-      "Call nss_get_decision again for the metadata.",
+      "Call caselaw_get_decision (source: nss) again for the metadata.",
     );
   }
   return parseNssDetail(await response.text());

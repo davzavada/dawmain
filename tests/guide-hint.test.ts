@@ -37,7 +37,7 @@ describe("dawmain_guide pointer", () => {
     const once = withGuideHint("ns_search", { description: "Search NS." });
     expect(withGuideHint("ns_search", once)).toBe(once);
     const read = { description: "Read a decision." };
-    expect(withGuideHint("ns_get_decision", read)).toBe(read);
+    expect(withGuideHint("caselaw_get_decision", read)).toBe(read);
     const noText = {};
     expect(withGuideHint("ns_search", noText)).toBe(noText);
   });

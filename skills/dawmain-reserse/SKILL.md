@@ -83,7 +83,7 @@ whether it carries the argument or is mentioned in passing:
 4. **Odkaz** — the `url` the tool gave you, opening the decision itself. Record it the
    moment it appears (going back for links after the memo is written is how they get
    invented). Never a search URL or a database homepage: the reader must land on the
-   text. For NS, `ns_get_decision` with `find` returns a link that opens scrolled to
+   text. For NS, `caselaw_get_decision` with `find` returns a link that opens scrolled to
    the found passage — cite that one for the passage you quote.
    **The link sits on the spisová značka itself**: write `[23 Cdo 1240/2024](url)`
    (for SDEU on the case number or ECLI) every time the decision is named — in the
@@ -138,10 +138,10 @@ Names follow one pattern: `<zdroj>_search` finds, `<zdroj>_get_*` reads.
 |---|---|
 | Case law on a topic (start here) | `caselaw_search` — NSS + NS + ÚS in parallel; `include_eu` adds the CJEU, `include_regional` the krajské správní soudy |
 | Deeper digging in one court | `ns_search`, `nss_search`, `us_search` (Ústavní soud), `sdeu_search` (CJEU) |
-| Who cites a decision, and what it cites (the citator) | `caselaw_citations {source, id}` or `{source, case_number}` — later decisions of NS, NSS, ÚS and obecné soudy naming it, newest first; `direction: "cites"` for what it relies on |
-| Full text of a decision | `ns_get_decision {unid}`, `nss_get_decision {document_id}`, `us_get_decision {sz}`, `sdeu_get_document {ecli}`, `justice_get_decision {uuid}` |
+| Who cites a decision, and what it cites (the citator) | `caselaw_citations {source, id}` or `{source, case_number}` — later decisions of NS, NSS, ÚS and obecné soudy naming it, the courts that bind first, each with the citing passage; `direction: "cites"` for what it relies on |
+| Full text of a decision | `caselaw_get_decision {source, id}` — source `ns` / `nss` / `us` / `justice`, the id as the hit gives it; CJEU: `sdeu_get_document {ecli}` |
 | Which act, and its wording | `esbirka_search` → `esbirka_get_act` → `esbirka_get_text` (one § via `section: "§ 12"`, one article via `section: "čl. 36"`; any date) |
-| Lower courts (okresní/krajské/vrchní) | `justice_search` → `justice_get_decision` — full text, spisová značka, soud, druh, data, and applied provision |
+| Lower courts (okresní/krajské/vrchní) | `justice_search` → `caselaw_get_decision` — full text, spisová značka, soud, druh, data, and applied provision |
 | CJEU | `sdeu_search` → `sdeu_get_document` (`language: "cs"` falls back to English) |
 | Czech legislative history — důvodová zpráva, rozdílová tabulka, RIA, platné znění s vyznačením změn, usnesení výborů, the readings | `psp_search` (by the Sbírka number of the act — `act: "89/2012"`, across periods — or titles of sněmovní tisky, by `period` or `year`) → `psp_get_tisk {period, number}` (the process with dates + every document, each with its reading call) → `psp_get_text` (`part: 0` = the bill with its důvodová zpráva; `document_id` = an attached PDF/DOCX) |
 | EU legislation | `eurlex_search` (titles/CELEX/ECLI only, NOT full text) → `eurlex_get_document` |
@@ -429,7 +429,7 @@ publication date as the decision date.
 
 `us_search` exposes the NALUS form's main dimensions. Czech queries. Every hit carries
 its citation as NALUS gives it (a published decision with its SbNU or Sb. reference)
-and the `sz` that `us_get_decision` takes; the first page of a decision opens with its
+and the id (`sz`) that `caselaw_get_decision` takes; the first page of a decision opens with its
 právní věta (and the abstract, where NALUS has one).
 
 | Chci | Parametr |
@@ -509,7 +509,7 @@ and the rarer `CORRECT`, `COMPLETE`, `REPLACE`, each with the lower court and it
 zn. So an appellate hit tells you the fate of the first-instance decision without a
 second search — and a first-instance decision you are about to cite deserves a check
 that no odvolací soud changed it. Cite a reversed decision as reversed, or not at all.
-`justice_get_decision` opens with the same facts: soudce, výsledek, the provisions
+`caselaw_get_decision` opens with the same facts: soudce, výsledek, the provisions
 applied and the decisions it changed or confirmed.
 
 **Court codes follow a pattern**: `OS…` okresní, `OSPH01`–`OSPH10` obvodní soudy pro
@@ -854,7 +854,8 @@ Zotero. A rate limit or a pause says when to come back; carry on without it mean
 Three different acts. Do not let one stand in for another.
 
 **Screen.** Every hit carries court, date, form (and at NS the category), and from the mirror one
-line of the matching passage (terms marked «…»); `read_top` adds a few hundred characters around your terms from the
+line of the matching passage (terms marked «…»), its length ("~3 str.") and citing count
+("cit. 37×"). A lane marked "no decision holds ALL the words" holds strays: shorten the query; `read_top` adds a few hundred characters around your terms from the
 leading hits. Judge from them
 whether a decision may *decide* the issue or merely mentions the term. "NO PREVIEW"
 means the terms do not occur verbatim (the court's search matched another word form) —
@@ -868,9 +869,10 @@ citable finding), and it finds the bod you will quote. Every `find` answer ends 
 saying it is excerpts and how many pages the whole text has. On a short decision `find` may answer
 with the whole text and say so — that is a full reading; do not fetch page 1 again.
 
-**Go back by bod.** `paragraphs: "24"` or `"24-31"` on `ns_`/`nss_`/`us_`/
-`justice_get_decision` returns those numbered paragraphs alone — for a passage you
+**Go back by bod.** `paragraphs: "24"` or `"24-31"` on
+`caselaw_get_decision` returns those numbered paragraphs alone — for a passage you
 already read, or the bod another decision cites. Never reload a page for one bod.
+`outline: true` lists the headings with their body — not a reading.
 
 **Read whole — every decision the memo cites.** `page: 1`, then `page: 2`, `3` … until
 the answer no longer ends with the continuation line "(page N/M — …)". On your own:
@@ -878,9 +880,8 @@ never ask the user whether to go on. Only the whole text shows what an excerpt h
 that the passage restates a party's submission rather than the court's view, that the
 holding is limited by the facts or distinguished three pages later, which wording of
 the statute the court applied, and how the case actually ended (výrok). Read in
-parallel: page 1 of every decision you picked in one turn; page 1 says how many pages
-each has ("page 1/M"), so the next turn asks for **all** the remaining pages of
-**all** of them at once (pages 2…M of each) — never one page per round.
+parallel, in ONE turn: the hit line gives the pages ("~3 str."), so ask for **all** pages
+of **all** the decisions you picked at once — never one page per round.
 
 **Spend the reading where it decides.** Typically two to five decisions — the leading
 one, the most recent restatement, each side of a conflict. Screening and `find` keep
@@ -931,13 +932,13 @@ Precision has a time dimension — check it before you cite:
   "mění/potvrzuje" line of an appellate hit names the decision below and what happened
   to it (CONFIRM / CHANGE / CANCEL). Do not cite a first-instance rozsudek as practice
   without checking that it stood.
-- **Later authority.** Run `caselaw_citations {source: "ns", case_number: "31 Cdo
-  1945/2010"}` (or `id` from the hit) on every decision the answer rests on: the
-  later decisions of NS, NSS, ÚS and obecné soudy that name it, newest first
-  (`cited_by_sources: ["us"]` for the Ústavní soud alone). Look for a velký senát
-  decision, a sjednocující stanovisko and an ÚS nález, and open those with `find`
-  set to the cited značka to see what they did with it — a citation is not
-  approval, never write "potvrzeno" from the list. An empty list is not proof that
+- **Later authority.** Every `caselaw_get_decision` header counts who cites the decision.
+  For one the answer rests on, run
+  `caselaw_citations {source: "ns", id}` (or `case_number: "31 Cdo 1945/2010"`):
+  stanoviska, plénum and velký senát first, each with the citing passage
+  (`cited_by_sources: ["us"]` for the Ústavní soud alone). Open those that matter
+  with `find` set to the cited značka — a citation is not approval, never write
+  "potvrzeno" from the list. An empty list is not proof that
   nobody cites it: where it matters, also full-text search the whole značka
   (`ns_search {query: "31 Cdo 1945/2010"}`; `us_search`, `nss_search` alike).
 - **Právní moc and pending appeals — not checkable here.** Only InfoSoud
@@ -975,7 +976,8 @@ Stopping the search never shortens the reading: what you cite, you have read who
 2. **Open wide, in one turn.** If you do not have this manual yet, `dawmain_guide` goes
    into this same turn — not into a round of its own. Then `caselaw_search` with
    variants (the user's terms, the court's terms, your remembered term of art) and
-   `read_top`; any sp. zn. you remember as a direct lookup; plus
+   `read_top`; a second one with `applies_act: "89/2012"` + `applies_provision: "§ 2291"`
+   (most cited first, no query) when you know the provision; any sp. zn. you remember as a direct lookup; plus
    `esbirka_search` for the governing provision if wording matters. Add
    `justice_search` to the same turn when the question is about everyday practice
    rather than doctrine ("jak to soudy běžně řeší", "co dostanu za…"), or when you
@@ -1002,7 +1004,7 @@ Stopping the search never shortens the reading: what you cite, you have read who
    the purpose of the provision decides the point, read its důvodová zpráva too
    (`psp_search` → `psp_get_tisk` → `psp_get_text`).
 5. **Read whole the decisions you will cite.** Every page, in parallel, without asking:
-   page 1 of all of them in one turn, all remaining pages of all of them in the next.
+   all pages of all of them in one turn (else page 1 first, the rest next).
    Then the reading check (Reading, above).
 6. **Check it is still good law — and whether it is about to change.** Section above:
    the wording that governed, the fate of the decisions, and the amendment on its way

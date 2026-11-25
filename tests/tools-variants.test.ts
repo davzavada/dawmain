@@ -121,6 +121,23 @@ describe("caselaw_search", () => {
     expect(vi.mocked(searchNalus).mock.calls[0][0]).toMatchObject({ sort: "relevance" });
   });
 
+  it("without the mirror, applies_act / applies_provision say where to go instead of searching nothing", async () => {
+    vi.mocked(searchNss).mockClear();
+    vi.mocked(searchNs).mockClear();
+    vi.mocked(searchNalus).mockClear();
+    const handler = handlerOf(registerCzCaselaw as never, "caselaw_search");
+    const result = (await handler({ applies_act: "89/2012", applies_provision: "§ 2291", per_source_limit: 5, include_eu: false, include_regional: false, read_top: 0 })) as {
+      isError?: boolean;
+      content: Array<{ text: string }>;
+    };
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Dawmain case-law mirror");
+    expect(result.content[0].text).toContain("justice_search");
+    expect(searchNss).not.toHaveBeenCalled();
+    expect(searchNs).not.toHaveBeenCalled();
+    expect(searchNalus).not.toHaveBeenCalled();
+  });
+
   it("lets the regional courts in only on request, and then names them", async () => {
     vi.mocked(searchNss).mockResolvedValue({
       total: 1,
@@ -204,9 +221,9 @@ describe("caselaw_search", () => {
       hits: [nalusHit("Pl-6-25_1", { form: "nález", citation: "Pl.ÚS 6/25, nález ze dne 22. 10. 2025 (N 1/1 SbNU 1; 1/2025 Sb.)" })],
     } as never);
     const text = (await caselaw({ query: "zásahová žaloba" })).content[0].text;
-    expect(text).toContain("1 As 1/2026 (rozsudek, 2026-01-01) → nss_get_decision document_id: 1");
-    expect(text).toMatch(/ns_get_decision unid: A0+/);
-    expect(text).toContain("Pl.ÚS Pl-6-25_1 (nález, 2025-10-22) — N 1/1 SbNU 1; 1/2025 Sb. → us_get_decision sz: Pl-6-25_1");
+    expect(text).toContain("1 As 1/2026 (rozsudek, 2026-01-01) → caselaw_get_decision source: nss, id: 1");
+    expect(text).toMatch(/caselaw_get_decision source: ns, id: A0+/);
+    expect(text).toContain("Pl.ÚS Pl-6-25_1 (nález, 2025-10-22) — N 1/1 SbNU 1; 1/2025 Sb. → caselaw_get_decision source: us, id: Pl-6-25_1");
     expect(text).not.toContain("id/sz");
   });
 
@@ -215,7 +232,7 @@ describe("caselaw_search", () => {
     vi.mocked(searchNss).mockResolvedValue(nssPage([nssHit("5", "")]));
     const result = await caselaw({ query: "kárné provinění", sources: ["nss"] });
     expect((result.structuredContent?.items as Array<{ court?: string }>)[0].court).toBe("");
-    expect(result.content[0].text).toContain("— court not stated (see nss_get_decision)");
+    expect(result.content[0].text).toContain("— court not stated (see caselaw_get_decision (source: nss))");
   });
 
   it("prints the NS relevance floor as ≥, and '?' (not ✗) for a count a variant did not report", async () => {
@@ -376,3 +393,27 @@ describe("caselaw_search", () => {
   });
 });
 
+describe("caselaw_get_decision", () => {
+  it("takes each court's id in its own shape and refuses another court's before any request", async () => {
+    const { decisionId, GET_SOURCES } = await import("@/src/mcp/tools/caselaw-get");
+    expect(GET_SOURCES).toEqual(["ns", "nss", "us", "justice"]);
+    expect(decisionId("ns", " ABAC1831AC9B92B5C125824E0041B784 ")).toEqual({ unid: "ABAC1831AC9B92B5C125824E0041B784" });
+    expect(decisionId("nss", "652443")).toEqual({ document_id: "652443" });
+    expect(decisionId("us", "Pl-24-10_1")).toEqual({ sz: "Pl-24-10_1" });
+    expect(decisionId("us", "ECLI:CZ:US:2026:1.US.1169.26.1")).toEqual({ ecli: "ECLI:CZ:US:2026:1.US.1169.26.1" });
+    expect(decisionId("justice", "4e502717-2849-483c-b8d3-9788adf87196")).toEqual({ uuid: "4e502717-2849-483c-b8d3-9788adf87196" });
+    // An NS unid sent with another court's source: said at once, not after a "not found" from the court.
+    expect(decisionId("nss", "ABAC1831AC9B92B5C125824E0041B784")).toEqual(expect.stringContaining("not an NSS id"));
+    expect(decisionId("ns", "652443")).toEqual(expect.stringContaining("32-hex unid"));
+    expect(decisionId("justice", "652443")).toEqual(expect.stringContaining("uuid"));
+  });
+
+  it("is one tool where there were four, and none of the old names is listed", async () => {
+    const { registerAllTools } = await import("@/src/mcp/tools");
+    const names: string[] = [];
+    registerAllTools({ registerTool: (name: string) => void names.push(name) } as never, { zotero: true } as never);
+    expect(names).toContain("caselaw_get_decision");
+    for (const old of ["ns_get_decision", "nss_get_decision", "us_get_decision", "justice_get_decision"]) expect(names).not.toContain(old);
+    expect(names).toHaveLength(40);
+  });
+});

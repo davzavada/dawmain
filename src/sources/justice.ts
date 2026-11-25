@@ -1,7 +1,7 @@
 import { SourceError } from "./shared/errors";
 import { fetchUpstream } from "./shared/http";
 import { parseCaseNumber } from "./shared/text";
-import { DOCUMENT_TTL_MS, SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
+import { DECISION_TTL_MS, SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
 
 /**
  * rozhodnuti.justice.cz — decisions of obecné soudy (okresní, krajské,
@@ -35,7 +35,7 @@ const SEARCH_TIMEOUT_MS = 45_000;
 const RETRY_WINDOW_MS = 5_000;
 
 const searchCache = new TtlCache<JusticeSearchPage>(SEARCH_TTL_MS);
-const decisionCache = new TtlCache<JusticeDecision>(DOCUMENT_TTL_MS, 24);
+const decisionCache = new TtlCache<JusticeDecision>(DECISION_TTL_MS, 24);
 
 /**
  * Court codes the `courtCodes` filter accepts — the complete list the SPA
@@ -181,7 +181,7 @@ export function parseJusticeSearch(json: unknown): JusticeSearchPage {
   const hits: JusticeHit[] = [];
   for (const item of data.items) {
     const uuid = typeof item.uuid === "string" ? item.uuid : "";
-    // The uuid is the ONLY handle justice_get_decision accepts, so a row
+    // The uuid is the ONLY handle caselaw_get_decision (source: justice) accepts, so a row
     // without one would hand the model an id its next call must reject.
     if (!uuid) continue;
     const meta = (item.metadata ?? {}) as Record<string, unknown>;

@@ -293,13 +293,15 @@ type Handler = (args: Record<string, unknown>) => Promise<{
 }>;
 
 async function loadTools(): Promise<Record<string, Handler>> {
-  const { registerNss } = await import("@/src/mcp/tools/nss");
+  const { registerNss, readNssDecision } = await import("@/src/mcp/tools/nss");
   const tools: Record<string, Handler> = {};
   registerNss({
     registerTool(name: string, _config: unknown, handler: Handler) {
       tools[name] = handler;
     },
   } as never);
+  // The court's reader behind caselaw_get_decision (one read tool for the four sources).
+  tools.read_decision = readNssDecision as never;
   return tools;
 }
 
@@ -483,16 +485,16 @@ describe("getNssDecision", () => {
     expect(calls).toHaveLength(2); // one Text, one detail — both reused
   });
 
-  it("nss_get_decision says when the metadata is missing for this answer only", async () => {
+  it("caselaw_get_decision says when the metadata is missing for this answer only", async () => {
     stubFetch((call) =>
       call.path.startsWith("/DokumentDetail/")
         ? new Response("", { status: 403 })
         : new Response(utf16(DECISION, true)),
     );
     const tools = await loadTools();
-    const text = (await tools.nss_get_decision({ document_id: "784744", page: 1 })).content[0].text;
+    const text = (await tools.read_decision({ document_id: "784744", page: 1 })).content[0].text;
     expect(text).toMatch(/^\(The NSS metadata page did not answer — ECLI, spisová značka and soud are missing/);
-    expect(text).toContain("call nss_get_decision again");
+    expect(text).toContain("call caselaw_get_decision (source: nss) again");
     expect(text).toContain("https://vyhledavac.nssoud.cz/DokumentDetail/Index/784744");
   });
 });

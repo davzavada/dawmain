@@ -110,3 +110,6 @@ export const readTopSchema = z
   .max(3)
   .default(0)
   .describe("Fetch the N best hits' texts in parallel and return excerpts around the query.");
+
+/** What a tool's reader hands back: the text every client reads, and the structured half the registration boundary strips (./index.ts). */
+export type ToolAnswer = { content: Array<{ type: "text"; text: string }>; isError?: boolean; structuredContent?: unknown };

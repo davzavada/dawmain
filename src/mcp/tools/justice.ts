@@ -1,15 +1,12 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import {
-  FIND_DESCRIPTION,
-  READING_DESCRIPTION,
   READ_ONLY,
   assertDateRange,
   continuationHint,
   isoDate,
-  toolFailure,
-} from "./shared";
-import { paragraphsSchema, readDecision } from "./reading";
+  toolFailure, type ToolAnswer } from "./shared";
+import { readDecision } from "./reading";
 import {
   JUSTICE_COURT_CODES,
   JUSTICE_DOC_TYPES,
@@ -130,7 +127,7 @@ export function justiceSearchText(
       hit.subject ? `   ${snippet(hit.subject, 120)}` : null,
       affects ? `   mění/potvrzuje: ${affects}` : null,
       hit.verdict ? `   výrok: ${snippet(hit.verdict, 220)}` : null,
-      `   uuid ${hit.uuid}\n   ${hit.url}`,
+      `   id ${hit.uuid}\n   ${hit.url}`,
     ]
       .filter(Boolean)
       .join("\n");
@@ -140,7 +137,7 @@ export function justiceSearchText(
     `${result.total} decisions by ${order}, newest first — hits ${first}–${first + result.hits.length - 1} (page: ${page}, last page: ${Math.max(0, result.totalPages - 1)}):`,
     ...lines,
     ...(page + 1 < result.totalPages ? [`More: page: ${page + 1} (same arguments).`] : []),
-    "Full text: justice_get_decision {uuid}.",
+    "Full text: caselaw_get_decision {source: 'justice', id}.",
   ].join("\n");
 }
 
@@ -150,7 +147,7 @@ export function registerJustice(server: McpServer): void {
     {
       title: "Obecné soudy: search decisions",
       description:
-        "FULL-TEXT search of Czech general-court decisions (okresní, krajské, vrchní — plus NS/NSS/ÚS copies) in the Ministry of Justice database. Czech queries; match: all_words (default), any_word, phrase. Also filters by spisová značka, court (court_codes), decision type, decision date, publication date, and — the citator these courts otherwise lack — applies_act '89/2012' + applies_section '§ 2201' finds decisions that APPLIED that provision, with no keywords at all. Hits carry a uuid for justice_get_decision, the výrok, and 'affects': what the decision did to the lower court's ruling (CHANGE/CONFIRM/CANCEL…). Data starts 2020-10, mostly first-instance civil decisions; party names are anonymized. With no date and no case_number the search covers only the LAST 5 YEARS of decisions (the response says so) — pass date_from: '2020-10-01' for the whole archive. Full text is SLOW upstream: multi-word queries and large result sets can exceed the time limit even with a date range, while one distinctive word plus a date window of months answers in about a second — search with 1–2 key terms, not a sentence, and narrow with dates/court_codes. Numbers and act citations in query ('89/2012', '§ 2201') time out whatever the dates — they belong in applies_act/applies_section. For NS/NSS/ÚS case law prefer caselaw_search, whose indexes are richer.",
+        "FULL-TEXT search of Czech general-court decisions (okresní, krajské, vrchní — plus NS/NSS/ÚS copies) in the Ministry of Justice database. Czech queries; match: all_words (default), any_word, phrase. Also filters by spisová značka, court (court_codes), decision type, decision date, publication date, and — the citator these courts otherwise lack — applies_act '89/2012' + applies_section '§ 2201' finds decisions that APPLIED that provision, with no keywords at all. Hits carry a uuid for caselaw_get_decision (source: justice), the výrok, and 'affects': what the decision did to the lower court's ruling (CHANGE/CONFIRM/CANCEL…). Data starts 2020-10, mostly first-instance civil decisions; party names are anonymized. With no date and no case_number the search covers only the LAST 5 YEARS of decisions (the response says so) — pass date_from: '2020-10-01' for the whole archive. Full text is SLOW upstream: multi-word queries and large result sets can exceed the time limit even with a date range, while one distinctive word plus a date window of months answers in about a second — search with 1–2 key terms, not a sentence, and narrow with dates/court_codes. Numbers and act citations in query ('89/2012', '§ 2201') time out whatever the dates — they belong in applies_act/applies_section. For NS/NSS/ÚS case law prefer caselaw_search, whose indexes are richer.",
       inputSchema: z.object({
         query: z.string().optional().describe("Czech full-text query over the decision texts."),
         match: z
@@ -284,7 +281,7 @@ export function registerJustice(server: McpServer): void {
           has_more: page + 1 < result.totalPages,
           ...(defaultFrom ? { default_date_from: defaultFrom } : {}),
           // The výrok is often longer than a search result should carry; the
-          // full text is one justice_get_decision away.
+          // full text is one caselaw_get_decision (source: justice) away.
           items: result.hits.map(({ verdict: _verdict, ...hit }) => hit),
         };
         const windowNote = defaultFrom
@@ -303,56 +300,37 @@ export function registerJustice(server: McpServer): void {
       }
     },
   );
+}
 
-  server.registerTool(
-    "justice_get_decision",
-    {
-      title: "Obecné soudy: decision text",
-      description: `Full anonymized text of one general-court decision by its UUID from justice_search. ${READING_DESCRIPTION}`,
-      inputSchema: z.object({
-        uuid: z.string().uuid().describe("Decision UUID from justice_search."),
-        find: z.string().optional().describe(FIND_DESCRIPTION),
-        paragraphs: paragraphsSchema,
-        page: z.number().int().min(1).default(1),
-      }),
-      outputSchema: z.object({
-        uuid: z.string(),
-        url: z.string(),
-        metadata: z.record(z.string(), z.unknown()),
-        page: z.number(),
-        total_pages: z.number(),
-        has_more: z.boolean(),
-        matches: z.number().optional().describe("Match count when 'find' was used."),
-        text: z.string(),
-      }),
-      annotations: READ_ONLY,
-    },
-    async ({ uuid, find, paragraphs, page }) => {
-      try {
-        const decision = await getJusticeDecision(uuid);
-        const paged = readDecision(decision.text, { page, find, paragraphs });
-        const output = {
-          uuid: decision.uuid,
-          url: decision.url,
-          metadata: decision.metadata,
-          page: paged.page,
-          total_pages: paged.total_pages,
-          has_more: paged.has_more,
-          matches: paged.matches,
-          text: paged.text,
-        };
-        return {
-          content: [
-            {
-              type: "text",
-              text: `${[...justiceDecisionHeader(decision.metadata), decision.url].join("\n")}\n\n${paged.text}${continuationHint(paged)}`,
-            },
-          ],
-          structuredContent: output,
-        };
-      } catch (error) {
-        return fail(error);
-      }
-    },
-  );
+/**
+ * One obecné soudy (rozhodnuti.justice.cz) decision: a page of its text, `find` excerpts, numbered
+ * paragraphs or the outline. caselaw_get_decision (./caselaw-get.ts) is the
+ * tool that calls it — one read tool for the four Czech sources.
+ */
+export async function readJusticeDecision({ uuid, find, paragraphs, outline, page }: { uuid: string; find?: string; paragraphs?: string; outline?: boolean; page: number }): Promise<ToolAnswer> {
+  try {
+    const decision = await getJusticeDecision(uuid);
+    const paged = readDecision(decision.text, { page, find, paragraphs, outline });
+    const output = {
+      uuid: decision.uuid,
+      url: decision.url,
+      metadata: decision.metadata,
+      page: paged.page,
+      total_pages: paged.total_pages,
+      has_more: paged.has_more,
+      matches: paged.matches,
+      text: paged.text,
+    };
+    return {
+      content: [
+        {
+          type: "text",
+          text: `${[...justiceDecisionHeader(decision.metadata), decision.url].join("\n")}\n\n${paged.text}${continuationHint(paged)}`,
+        },
+      ],
+      structuredContent: output,
+    };
+  } catch (error) {
+    return fail(error);
+  }
 }

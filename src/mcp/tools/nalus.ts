@@ -2,16 +2,13 @@ import { z } from "zod";
 import { callDeadline } from "@/src/sources/shared/clock";
 import type { McpServer } from "@modelcontextprotocol/server";
 import {
-  FIND_DESCRIPTION,
-  READING_DESCRIPTION,
   READ_ONLY,
   assertDateRange,
   continuationHint,
   isoDate,
   readTopSchema,
-  toolFailure,
-} from "./shared";
-import { paragraphsSchema, readDecision } from "./reading";
+  toolFailure, type ToolAnswer } from "./shared";
+import { readDecision } from "./reading";
 import {
   ecliToSz,
   getNalusDecision,
@@ -118,16 +115,17 @@ async function summaryPreviews(
 
 function summaryBlock(preview: SummaryPreview): string {
   if (preview.kind === "none") {
-    return `— NO PREVIEW ${preview.caseNumber}: NALUS has neither a právní věta nor an abstrakt for it, and a text excerpt needs a query — read it via us_get_decision.`;
+    return `— NO PREVIEW ${preview.caseNumber}: NALUS has neither a právní věta nor an abstrakt for it, and a text excerpt needs a query — read it via caselaw_get_decision (source: us).`;
   }
   const label = preview.kind === "právní věta" ? "PRÁVNÍ VĚTA" : "ABSTRAKT";
-  return `— ${label} ${preview.caseNumber} (no query to excerpt around):\n${preview.excerpt}\n(${preview.kind} only — the whole decision via us_get_decision)`;
+  return `— ${label} ${preview.caseNumber} (no query to excerpt around):\n${preview.excerpt}\n(${preview.kind} only — the whole decision via caselaw_get_decision (source: us))`;
 }
 
 /** Kept in the schema — dropped, zod would strip the key and the call would
- * run unfiltered without a word. */
+ * run unfiltered without a word. One short line: six parameters carry it, and
+ * the refusal itself (nalusPickerError) says what to use instead. */
 const UNSUPPORTED =
-  "NOT SUPPORTED — NALUS ignores this číselník filter, so a call that sets it is refused. Use query / case_number / contested_act_* / dates instead.";
+  "Not supported: NALUS ignores this filter, so a call that sets it is refused.";
 
 export function registerNalus(server: McpServer): void {
   server.registerTool(
@@ -135,7 +133,7 @@ export function registerNalus(server: McpServer): void {
     {
       title: "Ústavní soud: search NALUS",
       description:
-        "FULL-TEXT search of Czech Constitutional Court decisions (nálezy, usnesení, stanoviska pléna) in NALUS — plus citace (sp. zn. like 'Pl. ÚS 24/10'), ECLI, populární název, contested act (číslo/název/ustanovení — e.g. every decision reviewing zákon č. 106/1999), contested organ, decision/publication dates, only-published filter, relevance sort, and dissent-scope full text. NALUS's číselník filters (judge, dissenting_judge, outcome, petitioner, contested_organ_type, contested_act_kind) do NOT work — NALUS ignores them — and a call that sets one is refused; each hit line names its soudce zpravodaj instead. Czech queries ('§' in a query is dropped — NALUS finds nothing with it). 'queries' searches up to 3 variants IN PARALLEL and merges them round-robin, so every variant is represented ('variant_totals' says what each found; a failed variant is named in 'failed_variants'). Each hit carries an 'sz' identifier for us_get_decision. read_top: N also returns previews of the N best hits (excerpts around the query; without a query their právní věta). Costs 3 upstream requests per variant; the next page of a single-query search usually 1.",
+        "FULL-TEXT search of Czech Constitutional Court decisions (nálezy, usnesení, stanoviska pléna) in NALUS — plus citace (sp. zn. like 'Pl. ÚS 24/10'), ECLI, populární název, contested act (číslo/název/ustanovení — e.g. every decision reviewing zákon č. 106/1999), contested organ, decision/publication dates, only-published filter, relevance sort, and dissent-scope full text. NALUS's číselník filters (judge, dissenting_judge, outcome, petitioner, contested_organ_type, contested_act_kind) do NOT work — NALUS ignores them — and a call that sets one is refused; each hit line names its soudce zpravodaj instead. Czech queries ('§' in a query is dropped — NALUS finds nothing with it). 'queries' searches up to 3 variants IN PARALLEL and merges them round-robin, so every variant is represented ('variant_totals' says what each found; a failed variant is named in 'failed_variants'). Each hit carries an 'sz' identifier for caselaw_get_decision (source: us). read_top: N also returns previews of the N best hits (excerpts around the query; without a query their právní věta). Costs 3 upstream requests per variant; the next page of a single-query search usually 1.",
       inputSchema: z.object({
         query: z.string().optional().describe("Czech full-text query (právní věta, výrok, odůvodnění…)."),
         queries: z
@@ -310,13 +308,13 @@ export function registerNalus(server: McpServer): void {
             },
             variants,
           );
-          previewLines = renderPreviews(previews, "us_get_decision");
+          previewLines = renderPreviews(previews, "caselaw_get_decision (source: us)");
         } else if (!previewsSkipped) {
           const summaries = await summaryPreviews(targets, previewDeadline);
           previews = summaries?.map(({ kind: _kind, ...preview }) => preview);
           previewLines = summaries ? ["", ...summaries.map(summaryBlock)] : [];
         } else {
-          previewLines = ["", "(read_top previews skipped — the search used up this call's time; read the hits via us_get_decision.)"];
+          previewLines = ["", "(read_top previews skipped — the search used up this call's time; read the hits via caselaw_get_decision (source: us).)"];
         }
 
         const hasMore = multi
@@ -338,7 +336,7 @@ export function registerNalus(server: McpServer): void {
         // along: no filter can select by judge, so the reader screens here.
         const lines = hits.map(
           (hit, i) =>
-            `${start + i + 1}. ${hit.citation ?? `${hit.caseNumber}${hit.form ? ` (${hit.form})` : ""}${hit.date ? ` ${hit.date}` : ""}`} — sz ${hit.sz ?? "?"}${hit.judge ? ` · zpravodaj ${hit.judge}` : ""}${hit.url ? `\n   ${hit.url}` : ""}`,
+            `${start + i + 1}. ${hit.citation ?? `${hit.caseNumber}${hit.form ? ` (${hit.form})` : ""}${hit.date ? ` ${hit.date}` : ""}`} — id ${hit.sz ?? "?"}${hit.judge ? ` · zpravodaj ${hit.judge}` : ""}${hit.url ? `\n   ${hit.url}` : ""}`,
         );
         const variantLine = variantTotals
           ? `Variants: ${keyed.map((v, i) => `"${v}" ${variantTotals[i] ?? "✗"}`).join(" · ")} (merged round-robin)`
@@ -368,7 +366,7 @@ export function registerNalus(server: McpServer): void {
             `${decisions(total)}${multi ? " (best variant)" : ""}:`,
             ...lines,
             hasMore ? `More: page ${page + 1}.` : page > 0 || multi ? "Last page." : null,
-            "Full text: us_get_decision {sz}.",
+            "Full text: caselaw_get_decision {source: 'us', id}.",
             ...previewLines,
           ]
             .filter((line) => line !== null)
@@ -380,109 +378,83 @@ export function registerNalus(server: McpServer): void {
       }
     },
   );
+}
 
-  server.registerTool(
-    "us_get_decision",
-    {
-      title: "Ústavní soud: decision text",
-      description:
-        `Full text, abstract and právní věta of one Constitutional Court decision. Identify it by the NALUS 'sz' (e.g. '1-1169-26_1' from us_search) or by ECLI. ${READING_DESCRIPTION}`,
-      inputSchema: z.object({
-        sz: z.string().optional().describe("NALUS id: '{senát}-{číslo}-{rok}[_{pořadí}]', e.g. 'Pl-24-10_1'."),
-        ecli: z.string().optional().describe("Alternative: the decision's ECLI."),
-        find: z.string().optional().describe(FIND_DESCRIPTION),
-        paragraphs: paragraphsSchema,
-        page: z.number().int().min(1).default(1),
-      }),
-      outputSchema: z.object({
-        sz: z.string(),
-        url: z.string(),
-        ecli: z.string().optional(),
-        registrySign: z.string().optional(),
-        form: z.string().optional(),
-        popularName: z.string().optional(),
-        legalSentence: z.string().optional(),
-        abstract: z.string().optional(),
-        page: z.number(),
-        total_pages: z.number(),
-        has_more: z.boolean(),
-        matches: z.number().optional().describe("Match count when 'find' was used."),
-        text: z.string(),
-      }),
-      annotations: READ_ONLY,
-    },
-    async ({ sz, ecli, find, paragraphs, page }) => {
-      try {
-        let identifier = sz;
-        if (!identifier && ecli) identifier = ecliToSz(ecli) ?? undefined;
-        if (!identifier) {
-          throw new SourceError(
-            "Ústavní soud (NALUS)",
-            "INPUT_INVALID",
-            "Neither a valid sz nor a resolvable ECLI was provided.",
-            "Pass sz from us_search (e.g. '1-1169-26_1') or a full ECLI:CZ:US:… identifier.",
-          );
-        }
-        const decision = await getNalusDecision(identifier);
-        const paged = readDecision(decision.text, { page, find, paragraphs });
-        const decisionEcli = nalusEcli(decision.sz, decision.registrySign);
-        const output = {
-          sz: decision.sz,
-          url: decision.url,
-          ...(decisionEcli ? { ecli: decisionEcli } : {}),
-          registrySign: decision.registrySign,
-          form: decision.form,
-          popularName: decision.popularName,
-          legalSentence: decision.legalSentence,
-          abstract: decision.abstract,
-          page: paged.page,
-          total_pages: paged.total_pages,
-          has_more: paged.has_more,
-          matches: paged.matches,
-          text: paged.text,
-        };
-        // The právní věta once, with the first page — not again with every
-        // further page or `find` (it runs to thousands of characters).
-        const firstRead = page === 1 && !find?.trim() && !paragraphs?.trim();
-        // NALUS fills an empty slot with a placeholder ("Právní věta není k
-        // dispozici.") — parseNalusAbstract drops them; this guards a cached
-        // or mocked value all the same, so no placeholder is quoted as a holding.
-        const placeholder = (value: string | undefined) =>
-          value && !/^(?:Abstrakt|Právní věta) není k dispozici\.?$/i.test(value.trim()) ? value : undefined;
-        const abstract = placeholder(decision.abstract);
-        const legalSentence = placeholder(decision.legalSentence);
-        const header = [
-          decision.registrySign,
-          decision.form,
-          // GetText prints no ECLI; rebuilt from sz + year, it is what a formal citation needs.
-          decisionEcli,
-          decision.popularName ? `Populární název: ${decision.popularName}` : null,
-          decision.url,
-          firstRead && legalSentence
-            ? `Právní věta:\n${legalSentence
-                .split("\n")
-                .map((line) => `> ${line}`)
-                .join("\n")}`
-            : null,
-          firstRead && abstract ? `Abstrakt:\n${abstract}` : null,
-          firstRead && decision.abstractUnavailable
-            ? "(Právní věta and abstrakt could not be loaded — NALUS's GetAbstract did not answer; ask again for them.)"
-            : null,
-        ]
-          .filter(Boolean)
-          .join("\n");
-        return {
-          content: [
-            {
-              type: "text",
-              text: `${header}\n\n${paged.text}${continuationHint(paged)}`,
-            },
-          ],
-          structuredContent: output,
-        };
-      } catch (error) {
-        return fail(error);
-      }
-    },
-  );
+/**
+ * One Ústavní soud decision: a page of its text, `find` excerpts, numbered
+ * paragraphs or the outline. caselaw_get_decision (./caselaw-get.ts) is the
+ * tool that calls it — one read tool for the four Czech sources.
+ */
+export async function readUsDecision({ sz, ecli, find, paragraphs, outline, page }: { sz?: string; ecli?: string; find?: string; paragraphs?: string; outline?: boolean; page: number }): Promise<ToolAnswer> {
+  try {
+    let identifier = sz;
+    if (!identifier && ecli) identifier = ecliToSz(ecli) ?? undefined;
+    if (!identifier) {
+      throw new SourceError(
+        "Ústavní soud (NALUS)",
+        "INPUT_INVALID",
+        "Neither a valid sz nor a resolvable ECLI was provided.",
+        "Pass sz from us_search (e.g. '1-1169-26_1') or a full ECLI:CZ:US:… identifier.",
+      );
+    }
+    const decision = await getNalusDecision(identifier);
+    const paged = readDecision(decision.text, { page, find, paragraphs, outline });
+    const decisionEcli = nalusEcli(decision.sz, decision.registrySign);
+    const output = {
+      sz: decision.sz,
+      url: decision.url,
+      ...(decisionEcli ? { ecli: decisionEcli } : {}),
+      registrySign: decision.registrySign,
+      form: decision.form,
+      popularName: decision.popularName,
+      legalSentence: decision.legalSentence,
+      abstract: decision.abstract,
+      page: paged.page,
+      total_pages: paged.total_pages,
+      has_more: paged.has_more,
+      matches: paged.matches,
+      text: paged.text,
+    };
+    // The právní věta once, with the first page — not again with every
+    // further page or `find` (it runs to thousands of characters).
+    const firstRead = page === 1 && !find?.trim() && !paragraphs?.trim() && !outline;
+    // NALUS fills an empty slot with a placeholder ("Právní věta není k
+    // dispozici.") — parseNalusAbstract drops them; this guards a cached
+    // or mocked value all the same, so no placeholder is quoted as a holding.
+    const placeholder = (value: string | undefined) =>
+      value && !/^(?:Abstrakt|Právní věta) není k dispozici\.?$/i.test(value.trim()) ? value : undefined;
+    const abstract = placeholder(decision.abstract);
+    const legalSentence = placeholder(decision.legalSentence);
+    const header = [
+      decision.registrySign,
+      decision.form,
+      // GetText prints no ECLI; rebuilt from sz + year, it is what a formal citation needs.
+      decisionEcli,
+      decision.popularName ? `Populární název: ${decision.popularName}` : null,
+      decision.url,
+      firstRead && legalSentence
+        ? `Právní věta:\n${legalSentence
+            .split("\n")
+            .map((line) => `> ${line}`)
+            .join("\n")}`
+        : null,
+      firstRead && abstract ? `Abstrakt:\n${abstract}` : null,
+      firstRead && decision.abstractUnavailable
+        ? "(Právní věta and abstrakt could not be loaded — NALUS's GetAbstract did not answer; ask again for them.)"
+        : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    return {
+      content: [
+        {
+          type: "text",
+          text: `${header}\n\n${paged.text}${continuationHint(paged)}`,
+        },
+      ],
+      structuredContent: output,
+    };
+  } catch (error) {
+    return fail(error);
+  }
 }

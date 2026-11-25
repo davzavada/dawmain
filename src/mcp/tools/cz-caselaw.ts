@@ -114,7 +114,7 @@ function publishedRef(citation: string | undefined): string | undefined {
 function foreignCourt(hit: AggregatedHit): string | undefined {
   // The NSS index lists some benches (kárné senáty, Ds) with no court at
   // all — say so rather than let them pass as plain NSS decisions.
-  if (hit.source === "nss" && hit.court === "") return "court not stated (see nss_get_decision)";
+  if (hit.source === "nss" && hit.court === "") return "court not stated (see caselaw_get_decision (source: nss))";
   if (!hit.court) return undefined;
   if (hit.source === "ns" && hit.court === "Nejvyšší soud") return undefined;
   if (hit.source === "nss" && /nejvyšší(ho)? správní(ho)? soud/i.test(hit.court) && !/rozšířen/i.test(hit.court)) {
@@ -128,11 +128,11 @@ function foreignCourt(hit: AggregatedHit): string | undefined {
 function followUp(hit: AggregatedHit): string {
   switch (hit.source) {
     case "nss":
-      return `nss_get_decision document_id: ${hit.id}`;
+      return `caselaw_get_decision source: nss, id: ${hit.id}`;
     case "ns":
-      return `ns_get_decision unid: ${hit.id}`;
+      return `caselaw_get_decision source: ns, id: ${hit.id}`;
     case "us":
-      return `us_get_decision sz: ${hit.id}`;
+      return `caselaw_get_decision source: us, id: ${hit.id}`;
     case "sdeu": {
       const more = hit.more ? ` (+${hit.more} more document${hit.more === 1 ? "" : "s"}: sdeu_search {case_number})` : "";
       if (hit.ecli) {
@@ -170,7 +170,7 @@ export function registerCzCaselaw(server: McpServer): void {
     {
       title: "Case law: search all top courts at once",
       description:
-        "FULL-TEXT search across NSS (administrative), NS (civil/criminal) and Ústavní soud (constitutional) in parallel — optionally also the CJEU (include_eu). Takes up to 3 query variants at once ('queries' — Czech inflects, so pass stems/synonyms: [\"bezpečný přístav\", \"bezpečného přístavu\", \"safe harbour\"]); each court's variants are merged round-robin, so every variant is represented, and each court reports what every variant found (variant_totals). Plain words are all required; \"quotes\" make a phrase. NS and ÚS hits come by relevance, NSS hits newest first; CJEU hits one per case (its judgment, else its best document). The NSS lane holds NSS decisions only (incl. the grand chamber) unless include_regional adds the regional administrative courts; every hit names its court where that is not obvious. With read_top: N the response ALSO carries excerpt previews of the N leading hits — search + first reading in one call. A court or a variant that fails or times out is reported by name while the rest still answer. Every court is searched across its whole archive — pass date_from/date_to only when the question has a time frame. For deeper digging use nss_search/ns_search/us_search/sdeu_search; fetch full texts with the *_get_* tool named in each hit.",
+        "FULL-TEXT search across NSS (administrative), NS (civil/criminal) and Ústavní soud (constitutional) in parallel — optionally also the CJEU (include_eu). Takes up to 3 query variants at once ('queries' — Czech inflects, so pass stems/synonyms: [\"bezpečný přístav\", \"bezpečného přístavu\", \"safe harbour\"]); each court's variants are merged round-robin, so every variant is represented, and each court reports what every variant found (variant_totals). Plain words are all required; \"quotes\" make a phrase. NS and ÚS hits come by relevance, NSS hits newest first; CJEU hits one per case (its judgment, else its best document). The NSS lane holds NSS decisions only (incl. the grand chamber) unless include_regional adds the regional administrative courts; every hit names its court where that is not obvious. With read_top: N the response ALSO carries excerpt previews of the N leading hits — search + first reading in one call. A court or a variant that fails or times out is reported by name while the rest still answer. Every court is searched across its whole archive — pass date_from/date_to only when the question has a time frame. Case law on ONE provision, Czech or EU: applies_act + applies_provision ('89/2012' + '§ 2291', 'GDPR' + 'čl. 6') return the decisions citing it, the most cited first, without any query. For deeper digging use nss_search/ns_search/us_search/sdeu_search; fetch full texts with the *_get_* tool named in each hit.",
       inputSchema: z.object({
         query: z.string().min(2).optional().describe("Czech full-text query."),
         queries: z
@@ -178,6 +178,20 @@ export function registerCzCaselaw(server: McpServer): void {
           .max(3)
           .optional()
           .describe("Up to 3 query variants searched in parallel (inflections, synonyms, EN term)."),
+        applies_act: z
+          .string()
+          .max(120)
+          .optional()
+          .describe(
+            "Instead of words: the act whose provision the decisions cite. A Czech act as číslo/rok — '89/2012' (o. z.), '99/1963' (o. s. ř.); EU law as the courts cite it or by CELEX — 'GDPR', 'nařízení (EU) 2016/679', 'směrnice 2004/48/ES', '32016R0679', 'SFEU', 'Listina EU'; also 'Listina', 'Ústava', 'Úmluva'. With applies_provision.",
+          ),
+        applies_provision: z
+          .string()
+          .max(80)
+          .optional()
+          .describe(
+            "The provision of applies_act: '§ 2291', '§ 2291 odst. 2', 'čl. 6 odst. 1'. Returns each Czech court's decisions citing it, the most cited first — no query needed, and query words are not combined with it.",
+          ),
         date_from: isoDate.optional(),
         date_to: isoDate.optional(),
         per_source_limit: z.number().int().min(1).max(10).default(5),
@@ -257,7 +271,20 @@ export function registerCzCaselaw(server: McpServer): void {
       }),
       annotations: READ_ONLY,
     },
-    async ({ query, queries, date_from, date_to, per_source_limit, sources, include_eu, eu_court, include_regional, read_top }) => {
+    async ({ query, queries, applies_act, applies_provision, date_from, date_to, per_source_limit, sources, include_eu, eu_court, include_regional, read_top }) => {
+      // The index of cited provisions lives in the mirror (./mirror-route.ts answers these calls there);
+      // the courts' own sites have none to fan out to, so without the mirror the call says where to go.
+      if (applies_act?.trim() || applies_provision?.trim()) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: 'applies_act / applies_provision are answered from the Dawmain case-law mirror, which this deployment does not have. Put the provision into the query as a phrase instead (query: \'"§ 2291" výpověď\'), or use nss_search / justice_search with their own applies_act.',
+            },
+          ],
+          isError: true,
+        };
+      }
       const variants = uniqueQueries(query, queries);
       if (!variants.length) {
         return {
@@ -303,7 +330,7 @@ export function registerCzCaselaw(server: McpServer): void {
               ...(hit.court !== undefined ? { court: hit.court } : {}),
               ...(hit.form ? { form: hit.form } : {}),
               date: hit.date,
-              detail_tool: "nss_get_decision",
+              detail_tool: "caselaw_get_decision (source: nss)",
               url: hit.url,
             })),
           };
@@ -323,7 +350,7 @@ export function registerCzCaselaw(server: McpServer): void {
               caseNumber: hit.caseNumbers.join("; "),
               ...(hit.court ? { court: hit.court } : {}),
               ...(hit.category ? { category: hit.category } : {}),
-              detail_tool: "ns_get_decision",
+              detail_tool: "caselaw_get_decision (source: ns)",
               url: hit.url,
             })),
           };
@@ -339,7 +366,7 @@ export function registerCzCaselaw(server: McpServer): void {
           );
           return {
             total: result.total,
-            // Hits without an sz cannot be fetched by us_get_decision —
+            // Hits without an sz cannot be fetched by caselaw_get_decision (source: us) —
             // never hand the model an id that the next tool will reject.
             hits: result.hits
               .filter((hit) => hit.sz)
@@ -352,7 +379,7 @@ export function registerCzCaselaw(server: McpServer): void {
                   ...(hit.form ? { form: hit.form } : {}),
                   ...(published ? { published } : {}),
                   date: hit.date,
-                  detail_tool: "us_get_decision",
+                  detail_tool: "caselaw_get_decision (source: us)",
                   url: hit.url,
                 };
               }),

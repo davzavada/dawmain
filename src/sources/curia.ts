@@ -13,7 +13,7 @@ import {
   requireCellarLanguage,
   resolveCellarLanguage,
 } from "./cellar";
-import { DOCUMENT_TTL_MS, SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
+import { DECISION_TTL_MS, SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
 
 /**
  * CJEU case law.
@@ -593,7 +593,7 @@ export interface CuriaDocument {
 }
 
 /** Blob texts, like Cellar's: big — few entries; the TTL bounds memory. */
-const blobCache = new TtlCache<string>(DOCUMENT_TTL_MS, 24);
+const blobCache = new TtlCache<string>(DECISION_TTL_MS, 24);
 const BLOB_TIMEOUT_MS = 25_000;
 
 /** Thrown inside a cache load so a miss stays uncached (through() stores

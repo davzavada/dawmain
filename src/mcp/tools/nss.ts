@@ -1,15 +1,12 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import {
-  FIND_DESCRIPTION,
-  READING_DESCRIPTION,
   READ_ONLY,
   continuationHint,
   isoDate,
   readTopSchema,
-  toolFailure,
-} from "./shared";
-import { paragraphsSchema, readDecision } from "./reading";
+  toolFailure, type ToolAnswer } from "./shared";
+import { readDecision } from "./reading";
 import { getNssDecision, getNssDecisionText, searchNss } from "@/src/sources/nss";
 import { interleave, maxTotal, uniqueQueries } from "@/src/sources/shared/text";
 import { buildPreviews, noTermsNote, renderPreviews } from "./previews";
@@ -29,7 +26,7 @@ function lastPage(count: number): number {
  * dne …") — printed as nothing, such a hit read as an NSS decision.
  */
 function courtNote(court: string | undefined): string {
-  if (court === "") return " — court not named in the citation (not necessarily NSS; nss_get_decision names it)";
+  if (court === "") return " — court not named in the citation (not necessarily NSS; caselaw_get_decision (source: nss) names it)";
   if (!court || /^Nejvyššího správního soudu$/i.test(court)) return "";
   return ` — ${court}`;
 }
@@ -40,7 +37,7 @@ export function registerNss(server: McpServer): void {
     {
       title: "Nejvyšší správní soud: search decisions",
       description:
-        "FULL-TEXT search of Czech Supreme Administrative Court decisions (kasační stížnosti — tax, immigration, public procurement, administrative law) — plus spisová značka/čj., decision/publication date ranges, court/senate (incl. rozšířený senát and KRAJSKÉ SOUDY — the index covers regional administrative courts too), rejstřík code, oblast úpravy, and applied-provision filters: applies_act '106/1999' + applies_provision '§ 17 odst. 2' finds decisions that APPLIED that provision (metadata-based — works without keywords; the citator Czech courts lack). Czech queries. 'queries' searches up to 3 variants IN PARALLEL in one call (Czech inflects — pass stems/synonyms) and merges them round-robin, so every variant is represented; 'variant_totals' says what each found, and a variant that fails or times out is named in 'failed_variants' while the others still answer. Results are ordered by DECISION DATE, newest first — the NSS index has no relevance order, so distinctive terms and filters (court, registry, applies_*) decide what comes first. Page 1 returns up to 40 hits, later pages 20. Results carry a numeric document_id for nss_get_decision. read_top: N also returns excerpt previews of the N best hits — search + first reading in one call.",
+        "FULL-TEXT search of Czech Supreme Administrative Court decisions (kasační stížnosti — tax, immigration, public procurement, administrative law) — plus spisová značka/čj., decision/publication date ranges, court/senate (incl. rozšířený senát and KRAJSKÉ SOUDY — the index covers regional administrative courts too), rejstřík code, oblast úpravy, and applied-provision filters: applies_act '106/1999' + applies_provision '§ 17 odst. 2' finds decisions that APPLIED that provision (metadata-based — works without keywords; the citator Czech courts lack). Czech queries. 'queries' searches up to 3 variants IN PARALLEL in one call (Czech inflects — pass stems/synonyms) and merges them round-robin, so every variant is represented; 'variant_totals' says what each found, and a variant that fails or times out is named in 'failed_variants' while the others still answer. Results are ordered by DECISION DATE, newest first — the NSS index has no relevance order, so distinctive terms and filters (court, registry, applies_*) decide what comes first. Page 1 returns up to 40 hits, later pages 20. Results carry a numeric document_id for caselaw_get_decision (source: nss). read_top: N also returns excerpt previews of the N best hits — search + first reading in one call.",
       inputSchema: z.object({
         query: z.string().optional().describe("Czech full-text query."),
         queries: z
@@ -225,9 +222,9 @@ export function registerNss(server: McpServer): void {
               ...(variantLine ? [variantLine] : []),
               `${total ?? "?"} decisions${multi ? " (best variant)" : ""}, newest first (page ${page}):`,
               ...lines,
-              "Full text: nss_get_decision {document_id}.",
-              ...renderPreviews(previews, "nss_get_decision"),
-              ...noTermsNote(read_top, variants, "nss_get_decision"),
+              "Full text: caselaw_get_decision {source: 'nss', id}.",
+              ...renderPreviews(previews, "caselaw_get_decision (source: nss)"),
+              ...noTermsNote(read_top, variants, "caselaw_get_decision (source: nss)"),
             ].join("\n");
         return { content: [{ type: "text", text }], structuredContent: output };
       } catch (error) {
@@ -235,65 +232,45 @@ export function registerNss(server: McpServer): void {
       }
     },
   );
+}
 
-  server.registerTool(
-    "nss_get_decision",
-    {
-      title: "Nejvyšší správní soud: decision text",
-      description:
-        `Full text and metadata (ECLI, soudce zpravodaj, výrok, oblast úpravy) of one Supreme Administrative Court decision, by the numeric id from nss_search. ${READING_DESCRIPTION}`,
-      inputSchema: z.object({
-        document_id: z.string().regex(/^\d+$/, "Numeric id from nss_search"),
-        find: z.string().optional().describe(FIND_DESCRIPTION),
-        paragraphs: paragraphsSchema,
-        page: z.number().int().min(1).default(1),
-      }),
-      outputSchema: z.object({
-        id: z.string(),
-        url: z.string(),
-        metadata: z.record(z.string(), z.string()),
-        page: z.number(),
-        total_pages: z.number(),
-        has_more: z.boolean(),
-        matches: z.number().optional().describe("Match count when 'find' was used."),
-        text: z.string(),
-      }),
-      annotations: READ_ONLY,
-    },
-    async ({ document_id, find, paragraphs, page }) => {
-      try {
-        const decision = await getNssDecision(document_id);
-        const paged = readDecision(decision.text, { page, find, paragraphs });
-        const output = {
-          id: decision.id,
-          url: decision.url,
-          metadata: decision.metadata,
-          page: paged.page,
-          total_pages: paged.total_pages,
-          has_more: paged.has_more,
-          matches: paged.matches,
-          text: paged.text,
-        };
-        // The link to cite rides in the text: clients read nothing else.
-        const meta = [
-          ...Object.entries(decision.metadata).map(([key, value]) => `${key}: ${value}`),
-          ...(decision.metadataUnavailable
-            ? ["(The NSS metadata page did not answer — ECLI, spisová značka and soud are missing from this answer, not from the decision; call nss_get_decision again to retry.)"]
-            : []),
-          decision.url,
-        ].join("\n");
-        return {
-          content: [
-            {
-              type: "text",
-              text: `${meta}\n\n${paged.text}${continuationHint(paged)}`,
-            },
-          ],
-          structuredContent: output,
-        };
-      } catch (error) {
-        return fail(error);
-      }
-    },
-  );
+/**
+ * One Nejvyšší správní soud decision: a page of its text, `find` excerpts, numbered
+ * paragraphs or the outline. caselaw_get_decision (./caselaw-get.ts) is the
+ * tool that calls it — one read tool for the four Czech sources.
+ */
+export async function readNssDecision({ document_id, find, paragraphs, outline, page }: { document_id: string; find?: string; paragraphs?: string; outline?: boolean; page: number }): Promise<ToolAnswer> {
+  try {
+    const decision = await getNssDecision(document_id);
+    const paged = readDecision(decision.text, { page, find, paragraphs, outline });
+    const output = {
+      id: decision.id,
+      url: decision.url,
+      metadata: decision.metadata,
+      page: paged.page,
+      total_pages: paged.total_pages,
+      has_more: paged.has_more,
+      matches: paged.matches,
+      text: paged.text,
+    };
+    // The link to cite rides in the text: clients read nothing else.
+    const meta = [
+      ...Object.entries(decision.metadata).map(([key, value]) => `${key}: ${value}`),
+      ...(decision.metadataUnavailable
+        ? ["(The NSS metadata page did not answer — ECLI, spisová značka and soud are missing from this answer, not from the decision; call caselaw_get_decision (source: nss) again to retry.)"]
+        : []),
+      decision.url,
+    ].join("\n");
+    return {
+      content: [
+        {
+          type: "text",
+          text: `${meta}\n\n${paged.text}${continuationHint(paged)}`,
+        },
+      ],
+      structuredContent: output,
+    };
+  } catch (error) {
+    return fail(error);
+  }
 }

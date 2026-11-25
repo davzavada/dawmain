@@ -144,7 +144,7 @@ describe("justice_search text: what each hit carries", () => {
     expect(text).toContain("1. 8 Co 60/2025-174 — KSOS (rozsudek) 2025-06-02, zveř. 2025-07-23");
     expect(text).toContain("\n   ECLI:CZ:KSOS:2025:8.Co.60.2025.1\n");
     expect(text).toContain("mění/potvrzuje: CHANGE 12 C 2/2024-144 (OSNJ, 2024-11-08)");
-    expect(text).toContain("uuid 0de9a948-38d8-4d00-8010-cf5a2e086f73");
+    expect(text).toContain("id 0de9a948-38d8-4d00-8010-cf5a2e086f73");
   });
 });
 

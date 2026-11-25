@@ -22,9 +22,9 @@ vi.mock("@/src/sources/nalus", async () => ({
 import { getNsDecision } from "@/src/sources/ns";
 import { getNssDecision } from "@/src/sources/nss";
 import { getNalusDecision } from "@/src/sources/nalus";
-import { registerNs } from "@/src/mcp/tools/ns";
-import { registerNss } from "@/src/mcp/tools/nss";
-import { registerNalus } from "@/src/mcp/tools/nalus";
+import { readNsDecision } from "@/src/mcp/tools/ns";
+import { readNssDecision } from "@/src/mcp/tools/nss";
+import { readUsDecision } from "@/src/mcp/tools/nalus";
 
 type Handler = (args: Record<string, unknown>) => Promise<{ content: Array<{ text: string }> }>;
 
@@ -46,7 +46,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("ns_get_decision", () => {
+describe("caselaw_get_decision, source ns", () => {
   it("carries the link to cite — and with find, the one that opens at the passage", async () => {
     vi.mocked(getNsDecision).mockResolvedValue({
       unid: UNID,
@@ -54,7 +54,7 @@ describe("ns_get_decision", () => {
       metadata: { "Spisová značka": "22 Cdo 1234/2025" },
       text: reasoning,
     } as never);
-    const handler = handlerOf(registerNs as never, "ns_get_decision");
+    const handler = (readNsDecision as never as Handler);
 
     const plain = (await handler({ unid: UNID, page: 1 })).content[0].text;
     expect(plain).toContain(`Spisová značka: 22 Cdo 1234/2025\n${NS_URL}\n`);
@@ -76,12 +76,12 @@ describe("ns_get_decision", () => {
       metadata: {},
       text: "Odstavec odůvodnění. ".repeat(4_000),
     } as never);
-    const text = (await handlerOf(registerNs as never, "ns_get_decision")({ unid: UNID, page: 1 })).content[0].text;
+    const text = (await (readNsDecision as never as Handler)({ unid: UNID, page: 1 })).content[0].text;
     expect(text).toContain("(page 1/2 — continue without asking the user: page: 2. A decision you rely on is read to its last page");
   });
 });
 
-describe("nss_get_decision", () => {
+describe("caselaw_get_decision, source nss", () => {
   it("carries the link to cite", async () => {
     vi.mocked(getNssDecision).mockResolvedValue({
       id: "784744",
@@ -89,12 +89,12 @@ describe("nss_get_decision", () => {
       metadata: { "Spisová značka": "1 As 25/2024" },
       text: reasoning,
     } as never);
-    const text = (await handlerOf(registerNss as never, "nss_get_decision")({ document_id: "784744", page: 1 })).content[0].text;
+    const text = (await (readNssDecision as never as Handler)({ document_id: "784744", page: 1 })).content[0].text;
     expect(text).toContain("Spisová značka: 1 As 25/2024\nhttps://vyhledavac.nssoud.cz/DokumentDetail/Index/784744\n");
   });
 });
 
-describe("us_get_decision", () => {
+describe("caselaw_get_decision, source us", () => {
   const decision = {
     sz: "1-709-05",
     url: "https://nalus.usoud.cz/Search/GetText.aspx?sz=1-709-05",
@@ -106,7 +106,7 @@ describe("us_get_decision", () => {
 
   it("carries the link, the právní věta and a real abstract on the first read", async () => {
     vi.mocked(getNalusDecision).mockResolvedValue({ ...decision, abstract: "Stěžovatel napadl usnesení o vykonatelnosti." } as never);
-    const handler = handlerOf(registerNalus as never, "us_get_decision");
+    const handler = (readUsDecision as never as Handler);
     const first = (await handler({ sz: "1-709-05", page: 1 })).content[0].text;
     expect(first).toContain("I.ÚS 709/05 ze dne 25. 4. 2006\nNÁLEZ\nhttps://nalus.usoud.cz/Search/GetText.aspx?sz=1-709-05");
     expect(first).toContain("Právní věta:\n> Přistoupení");
@@ -121,7 +121,21 @@ describe("us_get_decision", () => {
 
   it("skips NALUS's placeholder for a missing abstract", async () => {
     vi.mocked(getNalusDecision).mockResolvedValue({ ...decision, abstract: "Abstrakt není k dispozici." } as never);
-    const text = (await handlerOf(registerNalus as never, "us_get_decision")({ sz: "1-709-05", page: 1 })).content[0].text;
+    const text = (await (readUsDecision as never as Handler)({ sz: "1-709-05", page: 1 })).content[0].text;
     expect(text).not.toContain("Abstrakt");
+  });
+});
+
+describe("readOutline", () => {
+  it("says so when a text has no parts to tell apart, and how to read it instead", async () => {
+    const { readOutline, readDecision } = await import("@/src/mcp/tools/reading");
+    const flat = "Soud rozhodl bez členění. ".repeat(30);
+    const view = readOutline(flat);
+    expect(view.mode).toBe("excerpt");
+    expect(view.has_more).toBe(false);
+    expect(view.text).toContain("No parts the tool can tell apart");
+    expect(view.text).toContain('find: "term"');
+    // outline wins over the other ways of reading: it is a different answer, not a narrowing.
+    expect(readDecision(flat, { page: 1, find: "soud", outline: true }).text).toBe(view.text);
   });
 });

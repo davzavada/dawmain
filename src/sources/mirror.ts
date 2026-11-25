@@ -38,6 +38,27 @@ export const MIRROR_PAUSE_MS = 60_000;
 let pausedUntil = 0;
 let pauseReason = "";
 
+/**
+ * The mirror answered and refused this one call: HTTP 400 (a parameter it
+ * cannot read — the message says which) or 504 (this query ran past its
+ * statement timeout). The mirror is up, so the breaker stays shut: one
+ * unreadable § or one heavy query must not send every account live for a
+ * minute.
+ */
+export class MirrorRefusal extends SourceError {
+  constructor(
+    readonly status: number,
+    readonly reason: string,
+  ) {
+    super(
+      MIRROR_SOURCE_LABEL,
+      status === 400 ? "INPUT_INVALID" : "UPSTREAM_ERROR",
+      status === 400 ? `The case-law mirror could not read the request: ${reason}.` : "The case-law mirror ran out of time on this query.",
+      status === 400 ? "Correct the parameter and call again." : "Narrow the call (a date range, one court) and call again.",
+    );
+  }
+}
+
 /** Tests only. */
 export function resetMirrorBreaker(): void {
   pausedUntil = 0;
@@ -89,6 +110,7 @@ async function getJson<T>(path: string, timeoutMs: number, opts: { probe?: boole
     if (opts.probe) pausedUntil = 0;
     return result;
   } catch (error) {
+    if (error instanceof MirrorRefusal) throw error;
     pausedUntil = Date.now() + MIRROR_PAUSE_MS;
     pauseReason = error instanceof Error ? error.message.replace(/^The case-law mirror did not answer: /, "").replace(/\.$/, "") : String(error);
     throw error;
@@ -109,10 +131,15 @@ async function fetchJson<T>(path: string, timeoutMs: number): Promise<T | null> 
     headers: headers(config),
     timeoutMs,
     retry: false,
-    // A 404 is an answer (no such decision), not the mirror being down.
-    passStatus: () => false,
+    // 400 and 504 are answers about this one call (MirrorRefusal), read below.
+    passStatus: (status) => status === 400 || status === 504,
   });
+  // A 404 is an answer (no such decision), not the mirror being down.
   if (response.status === 404) return null;
+  if (response.status === 400 || response.status === 504) {
+    const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
+    throw new MirrorRefusal(response.status, typeof body?.error === "string" ? body.error : `HTTP ${response.status}`);
+  }
   const type = response.headers.get("content-type") ?? "";
   if (!response.ok || !type.includes("application/json")) {
     // Cloudflare Access answers a missing/wrong service token with its own
@@ -164,6 +191,9 @@ export interface MirrorHit {
   excerpt: string;
   highlights: Array<[number, number]>;
   inDissent?: boolean;
+  /** Length of the text and how many mirrored decisions cite it — absent from an API that predates them. */
+  chars?: number | null;
+  citedBy?: number;
 }
 
 export interface MirrorSearchResult {
@@ -207,8 +237,17 @@ export interface MirrorDecision {
   legalSentence: string | null;
   url: string;
   goneAt: string | null;
+  /** Who cites it, by court (page 1 of the API's answer; absent from an API that predates it). */
+  citedBy?: MirrorCitedBySummary;
   /** The whole text, every page joined; null = the mirror has no text. */
   text: string | null;
+}
+
+export interface MirrorCitedBySummary {
+  total: number;
+  bySource: Partial<Record<MirrorCourt, number>>;
+  /** Of them: stanoviska, plenum ÚS, velký senát NS, rozšířený senát NSS. */
+  top: number;
 }
 
 interface DecisionPageJson extends Omit<MirrorDecision, "text"> {
@@ -243,8 +282,14 @@ export interface MirrorLinkedDecision {
 export interface MirrorCitations {
   /** What the decision cites: each cited sp. zn. / ECLI with the mirrored decisions carrying it (none = a court the mirror does not hold). */
   cites: Array<{ key: string; display: string; mentions: number; firstAt: number; decisions: MirrorLinkedDecision[] }>;
-  /** Who cites it, newest first; `total` counts all, `hits` is the page asked for. */
-  citedBy: { total: number; hits: Array<MirrorLinkedDecision & { mentions: number }> };
+  /** Who cites it; `total` counts all, `hits` is the page asked for. bySource, top, order and the excerpts are absent from an API that predates them (then newest first). */
+  citedBy: {
+    total: number;
+    bySource?: Partial<Record<MirrorCourt, number>>;
+    top?: number;
+    order?: "newest" | "courts";
+    hits: Array<MirrorLinkedDecision & { mentions: number; excerpt?: string }>;
+  };
 }
 
 /** The decisions carrying `caseNumber` (sp. zn. or ECLI) as their own — exact, newest first. */
@@ -259,13 +304,72 @@ export async function mirrorDecisionsByCase(caseNumber: string, sources?: Mirror
 export async function getMirrorCitations(
   source: MirrorCourt,
   id: string,
-  options: { limit?: number; offset?: number; citedBySources?: MirrorCourt[] } = {},
+  options: { limit?: number; offset?: number; citedBySources?: MirrorCourt[]; order?: "newest" | "courts" } = {},
 ): Promise<MirrorCitations | null> {
   const qs = new URLSearchParams();
+  if (options.order) qs.set("order", options.order);
   qs.set("limit", String(Math.min(100, Math.max(1, options.limit ?? 20))));
   if (options.offset) qs.set("offset", String(Math.max(0, options.offset)));
   for (const court of options.citedBySources ?? []) qs.append("source", court);
   return getJson<MirrorCitations>(`/v1/decisions/${source}/${encodeURIComponent(id)}/citations?${qs}`, READ_TIMEOUT_MS);
+}
+
+export interface MirrorProvisionHit {
+  source: MirrorCourt;
+  id: string;
+  caseNumber: string | null;
+  court: string | null;
+  form: string | null;
+  category: string | null;
+  date: string | null;
+  url: string;
+  /** How often the decision names the provision. */
+  mentions: number;
+  /** The text around the first citation of it. */
+  excerpt: string;
+  citedBy?: number;
+  chars?: number | null;
+}
+
+export interface MirrorProvisionResult {
+  act: string;
+  provision: string;
+  total: number;
+  /** Absent from an API that predates the order: newest first. */
+  sortedBy?: "newest" | "cited";
+  hits: MirrorProvisionHit[];
+}
+
+/**
+ * The decisions citing one provision (GET /v1/provisions): `act` as "89/2012",
+ * `provision` as the user writes it ("§ 2291 odst. 2"). A citation the API
+ * cannot parse is a SourceError (HTTP 400) — the caller tells the model.
+ */
+export async function mirrorProvisions(
+  params: (
+    | { act: string; provision: string }
+    /** A whole citation the API reads itself: "čl. 6 odst. 1 GDPR", "čl. 17 směrnice 2004/48/ES", "§ 2291 o. z.". */
+    | { cite: string }
+  ) & {
+    sources?: MirrorCourt[];
+    categories?: string[];
+    from?: string;
+    to?: string;
+    sort?: "newest" | "cited";
+    limit?: number;
+    offset?: number;
+  },
+): Promise<MirrorProvisionResult> {
+  const qs = new URLSearchParams("cite" in params ? { cite: params.cite.trim() } : { act: params.act.trim(), provision: params.provision.trim() });
+  for (const court of params.sources ?? []) qs.append("source", court);
+  if (params.categories?.length) qs.set("category", params.categories.join(","));
+  if (params.from) qs.set("from", params.from);
+  if (params.to) qs.set("to", params.to);
+  if (params.sort) qs.set("sort", params.sort);
+  qs.set("limit", String(Math.min(50, Math.max(1, params.limit ?? 20))));
+  if (params.offset) qs.set("offset", String(Math.max(0, params.offset)));
+  const result = await getJson<MirrorProvisionResult>(`/v1/provisions?${qs}`, SEARCH_TIMEOUT_MS);
+  return result ?? { act: "act" in params ? params.act : "", provision: "provision" in params ? params.provision : "", total: 0, hits: [] };
 }
 
 export interface MirrorStatusJson {

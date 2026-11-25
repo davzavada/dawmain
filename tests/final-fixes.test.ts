@@ -95,9 +95,9 @@ describe("query-less previews", () => {
     const getText = vi.fn(async () => "text");
     expect(await buildPreviews([{ id: "1", caseNumber: "A" }], getText, [])).toBeUndefined();
     expect(getText).not.toHaveBeenCalled();
-    expect(noTermsNote(2, [], "nss_get_decision").join("\n")).toContain("read_top previews need query/queries");
-    expect(noTermsNote(2, ["azyl"], "nss_get_decision")).toEqual([]);
-    expect(noTermsNote(0, [], "nss_get_decision")).toEqual([]);
+    expect(noTermsNote(2, [], "caselaw_get_decision (source: nss)").join("\n")).toContain("read_top previews need query/queries");
+    expect(noTermsNote(2, ["azyl"], "caselaw_get_decision (source: nss)")).toEqual([]);
+    expect(noTermsNote(0, [], "caselaw_get_decision (source: nss)")).toEqual([]);
   });
 });
 
