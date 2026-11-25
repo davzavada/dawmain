@@ -26,8 +26,14 @@ import { readDecision } from "./reading";
  * Same tool names, same parameters: a handler here
  * either answers the call or returns `{ fallback }` with the reason, and the
  * registration wrapper (./index.ts) then runs the live tool, telling the
- * model why. Falls back on what the mirror cannot do: filters it does not
- * index, pages past the first, a decision it does not hold (yet), CJEU.
+ * model why. The Czech courts are answered here whenever the mirror can
+ * answer: words, operators, every filter the mirror holds data for (form,
+ * senate, registry, area, web date, cited provision, own značka), any page.
+ * The live court answers only what the mirror cannot: the three NALUS fields
+ * it never downloaded (populární název, napadený akt, napadený orgán), two
+ * filters whose metadata it holds for part of the decisions only (NSS oblast
+ * úpravy, ÚS "published in a Sbírka" — see the specs below), a decision it
+ * does not hold (yet), the CJEU — and an outage.
  * Search operators (AND / OR / NOT, NEAR, prefix*, brackets) are NOT among
  * those: the mirror reads them itself (src/mirror/api/boolean.ts) — the
  * Czech courts are answered from the mirror whenever it can answer.
@@ -242,14 +248,16 @@ function syntaxAnswer(error: QuerySyntaxError): ToolText {
 async function searchVariants(
   variants: string[],
   base: Omit<MirrorSearchParams, "q">,
-): Promise<{ hits: MirrorHit[]; failures: string[]; perVariant: Array<VariantCount | null> }> {
+): Promise<{ hits: MirrorHit[]; failures: string[]; perVariant: Array<VariantCount | null>; total?: number }> {
   const runs = variants.length ? variants : [undefined];
   const settled = await Promise.allSettled(runs.map((q) => searchMirror({ ...base, ...(q ? { q } : {}) })));
   const lists: MirrorHit[][] = [];
   const failures: string[] = [];
   const perVariant: Array<VariantCount | null> = [];
+  let total: number | undefined;
   settled.forEach((result, i) => {
     if (result.status === "fulfilled") {
+      if (typeof result.value.total === "number") total = result.value.total;
       lists.push(result.value.hits);
       perVariant.push({ hits: result.value.hits.length, anyWord: result.value.channel === "or" });
     } else {
@@ -268,7 +276,7 @@ async function searchVariants(
     if (unreadable.length) throw new QuerySyntaxError(unreadable.join("; "));
     throw new Error(failures.join("; ") || "the mirror did not answer");
   }
-  return { hits: interleave(lists, (hit) => `${hit.source}:${hit.id}`), failures, perVariant };
+  return { hits: interleave(lists, (hit) => `${hit.source}:${hit.id}`), failures, perVariant, ...(total !== undefined ? { total } : {}) };
 }
 
 // ── decisions citing one provision ──────────────────────────────────────────
@@ -425,44 +433,13 @@ async function caselawByProvision(args: Args, act: string | undefined, provision
   for (let rank = 0; rank < limit; rank++) {
     for (const lane of settled) if (lane.ok && lane.result.hits[rank]) items.push(lane.result.hits[rank]);
   }
-  const words = uniqueQueries(str(args.query), args.queries as string[] | undefined);
   return text([
     MIRROR_NOTE,
     `Decisions citing ${provisionName(request, settled.find((lane) => lane.ok)?.result)}${from || to ? ` (decided ${from ?? "…"} – ${to ?? "…"})` : ""}:`,
     ...statusLines,
-    ...(words.length
-      ? [`The query words were NOT applied — this is every decision citing the provision. To combine, search the words with the provision as a phrase: query: '"${/^(?:§|čl\.)\s*\S+/.exec("cite" in request ? request.cite : request.provision)?.[0] ?? provision}" ${words[0]}'.`]
-      : []),
     "",
     ...(items.length ? items.map((hit, i) => provisionLine(hit, i, true)) : ["No mirrored decision of these courts cites it — check the act and the provision, or search the provision as a phrase in the query."]),
     ...(items.length ? ["", HIT_LEGEND] : []),
-  ]);
-}
-
-/** justice_search with applies_act + applies_section and nothing else to match: the obecné soudy citing the provision. */
-async function justiceByProvision(args: Args, act: string, section: string): Promise<MirrorAnswer> {
-  const from = str(args.date_from);
-  const to = str(args.date_to);
-  if (dateRangeError(from, to)) return { fallback: "inverted date range" };
-  const limit = Math.min(50, Math.max(1, num(args.limit, 20)));
-  const page = Math.max(0, num(args.page, 0));
-  const request = provisionRequest(act, section);
-  if (typeof request === "string") return { fallback: "the mirror cannot tell which act applies_act names" };
-  let result: MirrorProvisionResult;
-  try {
-    result = await provisionLane("justice", { ...request, from, to, limit, offset: page * limit }, "newest");
-  } catch (error) {
-    return { fallback: error instanceof MirrorRefusal ? error.reason : `the mirror did not answer (${error instanceof Error ? error.message : String(error)})` };
-  }
-  const first = page * limit + 1;
-  const last = page * limit + result.hits.length;
-  return text([
-    MIRROR_NOTE,
-    `Obecné soudy citing ${provisionName(request, result)}${from || to ? ` (decided ${from ?? "…"} – ${to ?? "…"})` : ""}: ${result.total} decision${result.total === 1 ? "" : "s"}, newest first${result.hits.length ? ` — ${first}–${last}` : ""}. The whole archive (from 10/2020), cited anywhere in the text.`,
-    "",
-    ...(result.hits.length ? result.hits.map((hit, i) => provisionLine(hit, page * limit + i, false)) : ["None in the mirror — check the act's number and the §."]),
-    ...(last < result.total ? [`More: page: ${page + 1} (same arguments).`] : []),
-    ...(result.hits.length ? ["", HIT_LEGEND] : []),
   ]);
 }
 
@@ -481,8 +458,17 @@ function liveText(result: Record<string, unknown> | null): string | null {
 async function caselawSearch(args: Args, live?: LiveCall): Promise<MirrorAnswer> {
   const act = str(args.applies_act);
   const provision = str(args.applies_provision);
-  if (act || provision) return caselawByProvision(args, act, provision);
   const variants = uniqueQueries(str(args.query), args.queries as string[] | undefined);
+  // The provision alone: each court's decisions citing it, the most cited first. With words beside
+  // it, it is a filter of the search — the words are looked for among the decisions citing it.
+  if ((act || provision) && !variants.length) return caselawByProvision(args, act, provision);
+  let applies: Partial<MirrorSearchParams> = {};
+  if (act || provision) {
+    if (!act || !provision) return text([`applies_act and applies_provision go together — one provision of one act. ${PROVISION_FORMS}`], true);
+    const request = provisionRequest(act, provision);
+    if (typeof request === "string") return text([request], true);
+    applies = request;
+  }
   if (!variants.length) return { fallback: "no query" };
   const from = str(args.date_from);
   const to = str(args.date_to);
@@ -507,6 +493,7 @@ async function caselawSearch(args: Args, live?: LiveCall): Promise<MirrorAnswer>
           to,
           regional: lane === "nss" && args.include_regional === true,
           limit,
+          ...applies,
         });
         return { lane, ok: true as const, ...run, hits: run.hits.slice(0, limit) };
       } catch (error) {
@@ -533,7 +520,7 @@ async function caselawSearch(args: Args, live?: LiveCall): Promise<MirrorAnswer>
   const cjeuText = cjeu ? liveText(await cjeu) : null;
   return text([
     MIRROR_NOTE,
-    `Variants searched in parallel: ${variants.map((v) => `"${v}"`).join(", ")}`,
+    `Variants searched in parallel: ${variants.map((v) => `"${v}"`).join(", ")}${act && provision ? ` — among the decisions citing ${"cite" in applies ? applies.cite : `${applies.provision} of ${applies.act}`}` : ""}`,
     ...statusLines,
     ...(wantsEu && !cjeuText ? ["– SDEU: did not answer just now — search it with sdeu_search."] : []),
     "",
@@ -546,75 +533,181 @@ async function caselawSearch(args: Args, live?: LiveCall): Promise<MirrorAnswer>
 
 // ── per-court search tools ──────────────────────────────────────────────────
 
-interface CourtSearchSpec {
-  court: MirrorCourt;
-  /** Parameters the mirror honours (everything else must be unset). */
-  handled: readonly string[];
-  defaults: Record<string, unknown>;
-  /** Whether the call asks for a page past the first. */
-  laterPage: (args: Args) => boolean;
-  /** Extra mirror parameters from the call; a string = fall back with that reason; a ToolText = the answer (an input error). */
-  extra?: (args: Args) => Partial<MirrorSearchParams> | string | ToolText;
-  limit: (args: Args) => number;
+/** One page of a court's list: its size, the hits before it, and the call that asks for the next. */
+interface PageSpec {
+  limit: number;
+  offset: number;
+  next: (shown: number) => string;
 }
 
-const COMMON = ["query", "queries", "case_number", "date_from", "date_to", "read_top", "limit"];
+interface CourtSearchSpec {
+  court: MirrorCourt;
+  /**
+   * Parameters the mirror answers. Anything else that is set sends the call to
+   * the live court — only for what the mirror holds no data for at all (the
+   * NALUS číselník fields: populární název, napadený akt, napadený orgán).
+   */
+  handled: readonly string[];
+  defaults: Record<string, unknown>;
+  /** Mirror parameters from the call; a string = fall back with that reason; a ToolText = the answer (an input error). */
+  extra?: (args: Args) => Partial<MirrorSearchParams> | string | ToolText;
+  page: (args: Args) => PageSpec;
+}
+
+const COMMON = ["query", "queries", "case_number", "date_from", "date_to", "published_from", "published_to", "read_top", "limit"];
 
 const NS_CATEGORIES = /^[A-E]$/;
+const NS_TYPES: Record<string, string> = { rozsudek: "rozsudek", usnesení: "usneseni", stanovisko: "stanovisko" };
 const US_TYPES: Record<string, string> = { nález: "nalez", usnesení: "usneseni", stanovisko: "stanovisko" };
+/** justice.cz document types as the mirror stores the form (a trestní příkaz is among "jiné"). */
+const JUSTICE_TYPES: Record<string, string> = { JUDGEMENT: "rozsudek", RESOLUTION: "usneseni", ORDER_T: "jine" };
+const NSS_COURTS: Record<string, MirrorSearchParams["courtClass"]> = { nss: "nss", "rozsireny-senat": "rozsireny", krajske: "krajske", karne: "karne" };
+const JUSTICE_MATCH: Record<string, MirrorSearchParams["match"]> = { all_words: "all", any_word: "any", phrase: "phrase" };
+
+/**
+ * The CELEX id of an EU act from the number the courts write: "2016/679",
+ * "1049/2001" (a regulation before 2015 is number/year), "2004/48/ES". The
+ * four-digit part that can be a year of the Communities is the year; when
+ * both can (2015/2283), the first is — the form in use since 2015 and the
+ * only one directives ever had. null = not a number of that shape. Pure —
+ * exported for the tests.
+ */
+export function euCelex(kind: "R" | "L", value: string): string | null {
+  const m = /^\s*(\d{1,4})\s*\/\s*(\d{1,4})\b/.exec(value);
+  if (!m) return null;
+  const isYear = (n: string): boolean => n.length === 4 && Number(n) >= 1958 && Number(n) <= 2100;
+  // "95/46": acts of the last century carry a two-digit year first.
+  const short = m[1].length === 2 && Number(m[1]) >= 58 ? `19${m[1]}` : null;
+  const [year, number] = isYear(m[1]) ? [m[1], m[2]] : isYear(m[2]) ? [m[2], m[1]] : short ? [short, m[2]] : [null, null];
+  if (!year || !number) return null;
+  return `3${year}${kind}${number.padStart(4, "0")}`;
+}
+
+/**
+ * "17(2)(a)" → "17 odst. 2 písm. a)" — the compact form nss_search takes for a
+ * provision; anything else as it is. Pure.
+ */
+function expandCompactProvision(value: string): string {
+  const m = /^\s*(\d+[a-z]?)\s*(?:\((\d+)\))?\s*(?:\(([a-z]{1,2})\))?\s*$/i.exec(value);
+  if (!m || (!m[2] && !m[3])) return value.trim();
+  return `${m[1]}${m[2] ? ` odst. ${m[2]}` : ""}${m[3] ? ` písm. ${m[3]})` : ""}`;
+}
+
+/** The provision with the mark its act uses, when the caller gave none. */
+function markedProvision(value: string, article: boolean): string {
+  const text = expandCompactProvision(value);
+  if (/^\s*§/.test(text)) return text;
+  if (ARTICLE_WORD.test(text)) return text.replace(ARTICLE_WORD, "čl. ");
+  return `${article ? "čl." : "§"} ${text}`;
+}
+
+/**
+ * nss_search's applies_* filters as the mirror's cited-provision filter. The
+ * NSS form names the applied act by its kind (a Sb. act, a treaty, an EU
+ * regulation or directive); the mirror indexes every act a decision cites
+ * under one id. A treaty is in the Sbírka mezinárodních smluv since 2000 and
+ * in the Sbírka zákonů before (the Úmluva: 209/1992 Sb.).
+ */
+function nssApplies(args: Args): Partial<MirrorSearchParams> | string {
+  const given = (["applies_act", "applies_treaty", "applies_eu_regulation", "applies_eu_directive"] as const).filter((key) => str(args[key]));
+  const provision = str(args.applies_provision);
+  if (!given.length) return provision ? "applies_provision without an applies_* act" : {};
+  if (given.length > 1) return "several applies_* filters at once";
+  const key = given[0];
+  const value = str(args[key]) as string;
+  let act: string | null;
+  if (key === "applies_eu_regulation") act = euCelex("R", value);
+  else if (key === "applies_eu_directive") act = euCelex("L", value);
+  else {
+    const m = /^\s*(\d{1,4})\s*\/\s*(\d{4})\b/.exec(value);
+    act = m ? `${key === "applies_treaty" && Number(m[2]) >= 2000 ? "sm:" : ""}${Number(m[1])}/${m[2]}` : null;
+  }
+  if (!act) return `the mirror could not read ${key}: "${value}"`;
+  return { act, ...(provision ? { provision: markedProvision(provision, key !== "applies_act") } : {}) };
+}
 
 const COURT_SEARCH: Record<string, CourtSearchSpec> = {
   ns_search: {
     court: "ns",
-    handled: [...COMMON, "offset", "category"],
+    handled: [...COMMON, "offset", "category", "type", "court"],
     defaults: {},
-    laterPage: (args) => num(args.offset, 0) > 0,
+    page: (args) => {
+      const limit = Math.min(50, Math.max(1, num(args.limit, 20)));
+      const offset = Math.max(0, num(args.offset, 0));
+      return { limit, offset, next: (shown) => `offset: ${offset + shown}` };
+    },
     extra: (args) => {
       const category = str(args.category)?.toUpperCase();
       if (category && !NS_CATEGORIES.test(category)) return "unknown NS category";
-      return category ? { categories: [category] } : {};
+      const type = str(args.type);
+      if (type && !NS_TYPES[type]) return `unknown type ${type}`;
+      const court = str(args.court);
+      return {
+        ...(category ? { categories: [category] } : {}),
+        ...(type ? { type: NS_TYPES[type] } : {}),
+        ...(court ? { court } : {}),
+      };
     },
-    limit: (args) => num(args.limit, 20),
   },
   nss_search: {
     court: "nss",
-    handled: [...COMMON, "page", "court"],
+    // `area` (oblast úpravy) is not here yet: the mirror reads it from the court's own metadata, which it
+    // holds for 86 % of the NSS decisions only (11/2026: those fetched before the column existed lack it,
+    // though the raw pages are stored). Until that is rebuilt a search by area would silently miss the rest.
+    handled: [...COMMON, "page", "court", "registry", "applies_act", "applies_treaty", "applies_eu_regulation", "applies_eu_directive", "applies_provision"],
     defaults: {},
-    laterPage: (args) => num(args.page, 1) > 1,
-    extra: (args) => {
-      const court = args.court;
-      // rozšířený senát, krajské and kárné soudy are lanes of their own live;
-      // the mirror only knows NSS alone or NSS + the regional courts.
-      if (court === undefined || court === "nss") return {};
-      return `the mirror has no "court: ${String(court)}" filter`;
+    page: (args) => {
+      const page = Math.max(1, num(args.page, 1));
+      return { limit: 20, offset: (page - 1) * 20, next: () => `page: ${page + 1}` };
     },
-    limit: () => 20,
+    extra: (args) => {
+      const court = str(args.court);
+      if (court && !NSS_COURTS[court]) return `unknown court ${court}`;
+      const applies = nssApplies(args);
+      if (typeof applies === "string") return applies;
+      const registry = str(args.registry);
+      return {
+        // A class of the NSS index is asked for by name; without one the search is the NSS itself.
+        ...(court ? { courtClass: NSS_COURTS[court], regional: true } : {}),
+        ...(registry ? { registry } : {}),
+        ...applies,
+      };
+    },
   },
   us_search: {
     court: "us",
-    handled: [...COMMON, "page", "sort", "types", "ecli"],
+    // `only_published` is not here yet: whether a decision is in a Sbírka stands in NALUS's citation line,
+    // which the mirror holds for a few hundred decisions only (same cause as the NSS `area`).
+    handled: [...COMMON, "page", "sort", "types", "ecli", "include_dissents"],
     defaults: {},
-    laterPage: (args) => num(args.page, 0) > 0,
+    page: (args) => {
+      const page = Math.max(0, num(args.page, 0));
+      return { limit: 20, offset: page * 20, next: () => `page: ${page + 1}` };
+    },
     extra: (args) => {
       const types = Array.isArray(args.types) ? (args.types as string[]) : [];
-      if (types.length > 1) return "the mirror filters one decision type at a time";
-      const type = types[0] ? US_TYPES[types[0]] : undefined;
-      if (types[0] && !type) return `unknown type ${types[0]}`;
+      const unknown = types.find((type) => !US_TYPES[type]);
+      if (unknown) return `unknown type ${unknown}`;
       const ecli = str(args.ecli);
       return {
         sort: args.sort === "relevance" ? ("relevance" as const) : ("newest" as const),
-        ...(type ? { type } : {}),
-        // An ECLI is an identifier the mirror indexes like a sp. zn.
-        ...(ecli ? { caseNumber: ecli } : {}),
+        ...(types.length ? { types: types.map((type) => US_TYPES[type]) } : {}),
+        // An ECLI names one decision, like its spisová značka.
+        ...(ecli ? { ownCase: ecli } : {}),
+        // include_dissents: the mirror's text of a decision holds its odlišná stanoviska, and a hit
+        // found in one says so — there is nothing to switch on.
       };
     },
-    limit: () => 20,
   },
   justice_search: {
     court: "justice",
-    handled: [...COMMON, "page", "sort", "court_codes"],
-    defaults: { match: "all_words" },
-    laterPage: (args) => num(args.page, 0) > 0,
+    handled: [...COMMON, "page", "sort", "court_codes", "match", "types", "applies_act", "applies_section"],
+    defaults: {},
+    page: (args) => {
+      const limit = Math.min(50, Math.max(1, num(args.limit, 20)));
+      const page = Math.max(0, num(args.page, 0));
+      return { limit, offset: page * limit, next: () => `page: ${page + 1}` };
+    },
     extra: (args) => {
       let courtCodes: string[];
       try {
@@ -625,34 +718,47 @@ const COURT_SEARCH: Record<string, CourtSearchSpec> = {
         const { content, isError } = toToolError(error);
         return { content, isError };
       }
+      const types = Array.isArray(args.types) ? (args.types as string[]) : [];
+      const unknown = types.find((type) => !JUSTICE_TYPES[type]);
+      if (unknown) return `unknown type ${unknown}`;
+      const match = str(args.match);
+      if (match && !JUSTICE_MATCH[match]) return `unknown match ${match}`;
+      const act = str(args.applies_act);
+      const section = str(args.applies_section);
+      if (section && !act) return text(["applies_section needs applies_act (číslo/rok, e.g. '89/2012')."], true);
+      let applies: Partial<MirrorSearchParams> = {};
+      if (act && section) {
+        const request = provisionRequest(act, section);
+        if (typeof request === "string") return text([request], true);
+        applies = request;
+      } else if (act) {
+        applies = { act };
+      }
       return {
-        // Without words the live tool lists the newest; the mirror sorts by decision date.
-        sort: str(args.query) ? ("relevance" as const) : ("newest" as const),
+        // With words the list is by relevance; without, newest first — by the day of publication
+        // (the live tool's default) or of the decision.
+        sort: str(args.query) || (Array.isArray(args.queries) && args.queries.length) ? ("relevance" as const) : ("newest" as const),
+        newestBy: args.sort === "decided" ? ("decided" as const) : ("published" as const),
         ...(courtCodes.length ? { courtCodes } : {}),
+        ...(types.length ? { types: [...new Set(types.map((type) => JUSTICE_TYPES[type]))] } : {}),
+        ...(match && JUSTICE_MATCH[match] !== "all" ? { match: JUSTICE_MATCH[match] } : {}),
+        ...applies,
       };
     },
-    limit: (args) => num(args.limit, 20),
   },
 };
 
 /**
- * case_number (or an ÚS ecli) = THAT decision, as the live tools match it
- * field by field. /v1/search?case= finds every decision whose text names the
- * značka — for a decision cited often, twenty citing ones, newest first, and
- * the decision itself not among them (measured: 26 Cdo 4249/2016,
- * 1 As 113/2012). /v1/by-case matches the decisions' own značky. Any other
- * narrowing next to it (words, dates, a category) goes to the court, which
- * combines them; so does a značka the mirror does not hold.
+ * case_number alone (or an ÚS ecli) = THAT decision, as the live tools match
+ * it field by field: /v1/by-case lists the decisions carrying the značka as
+ * their own — several where one case has more decisions — where
+ * /v1/search?case= would find every decision whose text names it (measured:
+ * 26 Cdo 4249/2016, 1 As 113/2012: twenty citing decisions, the decision
+ * itself not among them). With words or filters beside it the značka becomes
+ * the search's own_case filter (courtSearch). A značka the mirror does not
+ * hold goes to the court: a decision of the last day is there first.
  */
-async function byCaseNumber(
-  court: MirrorCourt,
-  caseNumber: string,
-  rest: { variants: string[]; from?: string; to?: string; extra: Partial<MirrorSearchParams>; limit: number },
-): Promise<MirrorAnswer> {
-  const { extra } = rest;
-  if (rest.variants.length || rest.from || rest.to || extra.categories?.length || extra.type || extra.courtCodes?.length) {
-    return { fallback: "the mirror looks a spisová značka up on its own, without other filters" };
-  }
+async function byCaseNumber(court: MirrorCourt, caseNumber: string, limit: number): Promise<MirrorAnswer> {
   let found: MirrorLinkedDecision[];
   try {
     found = await mirrorDecisionsByCase(caseNumber, [court]);
@@ -660,67 +766,79 @@ async function byCaseNumber(
     return { fallback: `the mirror did not answer (${error instanceof Error ? error.message : String(error)})` };
   }
   if (!found.length) return { fallback: `the mirror holds no ${court.toUpperCase()} decision with the spisová značka "${caseNumber}"` };
-  const shown = found.slice(0, rest.limit);
+  const shown = found.slice(0, limit);
   return text([
     MIRROR_NOTE,
     `${court.toUpperCase()} in the mirror: ${shown.length} decision${shown.length === 1 ? "" : "s"} with the spisová značka "${caseNumber}" as ${shown.length === 1 ? "its" : "their"} own (the decisions citing it: caselaw_citations).`,
     "",
     ...shown.map((d, i) => {
       const facts = [d.form ? (FORM[d.form] ?? d.form) : null, d.date].filter(Boolean).join(", ");
-      return `${i + 1}. ${d.caseNumber ?? caseNumber}${facts ? ` (${facts})` : ""}${d.court ? ` — ${d.court}` : ""} → ${readCall(court, d.id)}`;
+      const named = courtLabel({ source: court, court: d.court });
+      return `${i + 1}. ${d.caseNumber ?? caseNumber}${facts ? ` (${facts})` : ""}${named ? ` — ${named}` : ""} → ${readCall(court, d.id)}`;
     }),
   ]);
 }
 
-/** What justice_search may carry next to applies_act + applies_section for the mirror to answer it. */
-const JUSTICE_PROVISION_ARGS = ["applies_act", "applies_section", "date_from", "date_to", "limit", "page", "sort"];
-
 async function courtSearch(name: string, args: Args): Promise<MirrorAnswer> {
   const spec = COURT_SEARCH[name];
-  if (name === "justice_search" && str(args.applies_act) && str(args.applies_section)) {
-    // Words, a značka, courts or types next to the provision: the court's own index combines them.
-    const other = unsupported(args, JUSTICE_PROVISION_ARGS, { match: "all_words" });
-    if (!other) return justiceByProvision(args, str(args.applies_act) as string, str(args.applies_section) as string);
-  }
   const refused = unsupported(args, spec.handled, spec.defaults);
   if (refused) return { fallback: refused };
-  if (spec.laterPage(args)) return { fallback: "the mirror answers the first page only" };
   const variants = uniqueQueries(str(args.query), args.queries as string[] | undefined);
   const caseNumber = str(args.case_number);
   const extra = spec.extra?.(args) ?? {};
   if (typeof extra === "string") return { fallback: extra };
   if ("content" in extra) return extra;
-  if (!variants.length && !caseNumber && !extra.caseNumber) return { fallback: "no query or spisová značka" };
   const from = str(args.date_from);
   const to = str(args.date_to);
   if (dateRangeError(from, to)) return { fallback: "inverted date range" };
-  const limit = Math.min(50, Math.max(1, spec.limit(args)));
-  const ownCase = caseNumber ?? extra.caseNumber;
-  if (ownCase) return byCaseNumber(spec.court, ownCase, { variants, from, to, extra, limit });
+  const publishedFrom = str(args.published_from);
+  const publishedTo = str(args.published_to);
+  if (dateRangeError(publishedFrom, publishedTo, "published")) return { fallback: "inverted date range" };
+  const page = spec.page(args);
+  const { sort: _sort, newestBy: _newestBy, ownCase: extraCase, ...filters } = extra;
+  const ownCase = caseNumber ?? extraCase;
+  const filtered = Boolean(from || to || publishedFrom || publishedTo || Object.keys(filters).length);
+  // Nothing to search for and nothing to filter by: the live tool says what a call needs.
+  if (!variants.length && !ownCase && !filtered) return { fallback: "no query, spisová značka or filter" };
+  if (ownCase && !variants.length && !filtered && page.offset === 0) return byCaseNumber(spec.court, ownCase, page.limit);
   let run;
   try {
     run = await searchVariants(variants, {
       sources: [spec.court],
-      ...(caseNumber ? { caseNumber } : {}),
       from,
       to,
-      limit,
+      ...(publishedFrom ? { publishedFrom } : {}),
+      ...(publishedTo ? { publishedTo } : {}),
+      limit: page.limit,
+      ...(page.offset ? { offset: page.offset } : {}),
       ...extra,
+      ...(ownCase ? { ownCase } : {}),
     });
   } catch (error) {
     if (error instanceof QuerySyntaxError) return syntaxAnswer(error);
     return { fallback: `the mirror did not answer (${error instanceof Error ? error.message : String(error)})` };
   }
-  const hits = run.hits.slice(0, limit);
+  const hits = run.hits.slice(0, page.limit);
   const readTop = Math.min(3, Math.max(0, num(args.read_top, 0)));
+  const first = page.offset + 1;
+  const last = page.offset + hits.length;
+  // Without words the mirror lists what passes the filters and counts it; with words it returns the best.
+  const listing = !variants.length && typeof run.total === "number";
+  const head = listing
+    ? `${spec.court.toUpperCase()}: ${run.total} decision${run.total === 1 ? "" : "s"}, newest first${hits.length ? ` — ${first}–${last}` : ""}`
+    : `${spec.court.toUpperCase()}: ${countNote(hits.length, page.limit, run.perVariant)}${page.offset ? ` — hits ${first}–${last}` : ""}${
+        variants.length > 1 ? ` (per variant: ${perVariantNote(run.perVariant)})` : ""
+      }`;
+  const more = listing ? last < (run.total as number) : hits.length >= page.limit;
   return text([
     MIRROR_NOTE,
-    `${spec.court.toUpperCase()}: ${countNote(hits.length, limit, run.perVariant)}${
-      variants.length > 1 ? ` (per variant: ${perVariantNote(run.perVariant)})` : ""
-    }${run.failures.length ? ` ⚠ ${run.failures.join("; ")}` : ""}`,
+    `${head}${run.failures.length ? ` ⚠ ${run.failures.join("; ")}` : ""}`,
     "",
-    ...(hits.length ? hits.map((hit, i) => hitLine(hit, i, false, i >= readTop)) : ["No hits in the mirror — broaden the query or add variants."]),
-    ...previewLines(hits, readTop, false),
+    ...(hits.length
+      ? hits.map((hit, i) => hitLine(hit, page.offset + i, false, i >= readTop || listing))
+      : [page.offset ? "No further hits — the list ends before this page." : listing ? "No decision in the mirror passes these filters." : "No hits in the mirror — broaden the query or add variants."]),
+    ...previewLines(hits, listing ? 0 : readTop, false),
+    ...(more && hits.length ? [`More: ${page.next(hits.length)} (same arguments).`] : []),
     ...(hits.length ? ["", HIT_LEGEND] : []),
   ]);
 }

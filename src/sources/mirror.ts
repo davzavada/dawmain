@@ -171,9 +171,35 @@ export interface MirrorSearchParams {
   courtCodes?: string[];
   /** rozsudek | usneseni | nalez | stanovisko | jine */
   type?: string;
+  /** Several forms at once. */
+  types?: string[];
   regional?: boolean;
   sort?: "relevance" | "newest";
+  /** With sort "newest": by the decision date (default) or by the day it was put on the web. */
+  newestBy?: "decided" | "published";
+  /** How bare words combine: every word (default), any word, the words as one phrase. */
+  match?: "all" | "any" | "phrase";
   limit?: number;
+  /** Hits to skip (paging). */
+  offset?: number;
+  /** The court's name, a substring (NS database: "Vrchní soud v Praze"). */
+  court?: string;
+  /** NSS index: nss | rozsireny | krajske | karne. */
+  courtClass?: "nss" | "rozsireny" | "krajske" | "karne";
+  /** Docket registry: "Afs", "Cdo". */
+  registry?: string;
+  /** NSS oblast úpravy, a substring. */
+  area?: string;
+  publishedFrom?: string;
+  publishedTo?: string;
+  /** The decision's own spisová značka or ECLI (caseNumber also finds the decisions citing it). */
+  ownCase?: string;
+  /** ÚS: published in a Sbírka only. */
+  inCollection?: boolean;
+  /** A cited provision: the act ("89/2012", "32016R0679") with an optional provision ("§ 2291"), or one citation the mirror reads ("čl. 6 GDPR"). */
+  act?: string;
+  provision?: string;
+  cite?: string;
 }
 
 export interface MirrorHit {
@@ -200,6 +226,8 @@ export interface MirrorSearchResult {
   hits: MirrorHit[];
   channel: "and" | "or" | "ident" | null;
   terms: string[];
+  /** How many decisions pass the filters — given for a listing without words. */
+  total?: number;
 }
 
 function searchQuery(params: MirrorSearchParams): URLSearchParams {
@@ -211,10 +239,25 @@ function searchQuery(params: MirrorSearchParams): URLSearchParams {
   if (params.to) qs.set("to", params.to);
   if (params.categories?.length) qs.set("category", params.categories.join(","));
   if (params.courtCodes?.length) qs.set("court_code", params.courtCodes.join(","));
-  if (params.type) qs.set("type", params.type);
+  const types = [...(params.types ?? []), ...(params.type ? [params.type] : [])];
+  if (types.length) qs.set("type", [...new Set(types)].join(","));
   if (params.regional) qs.set("regional", "1");
   if (params.sort) qs.set("sort", params.sort);
+  if (params.newestBy) qs.set("newest_by", params.newestBy);
+  if (params.match && params.match !== "all") qs.set("match", params.match);
   qs.set("limit", String(Math.min(50, Math.max(1, params.limit ?? 20))));
+  if (params.offset) qs.set("offset", String(Math.max(0, Math.floor(params.offset))));
+  if (params.court?.trim()) qs.set("court", params.court.trim());
+  if (params.courtClass) qs.set("court_class", params.courtClass);
+  if (params.registry?.trim()) qs.set("registry", params.registry.trim());
+  if (params.area?.trim()) qs.set("area", params.area.trim());
+  if (params.publishedFrom) qs.set("published_from", params.publishedFrom);
+  if (params.publishedTo) qs.set("published_to", params.publishedTo);
+  if (params.ownCase?.trim()) qs.set("own_case", params.ownCase.trim());
+  if (params.inCollection) qs.set("collection", "1");
+  if (params.cite?.trim()) qs.set("cite", params.cite.trim());
+  if (params.act?.trim()) qs.set("act", params.act.trim());
+  if (params.provision?.trim()) qs.set("provision", params.provision.trim());
   return qs;
 }
 
