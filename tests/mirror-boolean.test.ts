@@ -57,6 +57,13 @@ describe("parseBoolean", () => {
     expect(parseBoolean("nájem újma NEAR pozůstalý")).toMatchObject({ kind: "and", nodes: [{ kind: "words", text: "nájem" }, { kind: "near" }] });
   });
 
+  it("the NS box's ranking operators are not searched for as words: TERMWEIGHT n and EXACTCASE are dropped, ACCRUE is OR", () => {
+    expect(hasOperators("TERMWEIGHT 80 moderace pokuta")).toBe(true);
+    expect(parseBoolean("TERMWEIGHT 80 moderace pokuta")).toEqual({ kind: "words", text: "moderace pokuta" });
+    expect(parseBoolean("EXACTCASE Listina NOT charta")).toMatchObject({ kind: "and", nodes: [{ kind: "words", text: "Listina" }, { kind: "not" }] });
+    expect(parseBoolean("nájem ACCRUE pacht")).toEqual({ kind: "or", nodes: [{ kind: "words", text: "nájem" }, { kind: "words", text: "pacht" }] });
+  });
+
   it("says what is wrong, in the reader's terms", () => {
     const refused = (query: string): string => {
       try {

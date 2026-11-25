@@ -66,6 +66,8 @@ const INDEX_TOKENIZER = "'stemmer=czech', 'ascii_folding=true'";
 /** Most stored terms a prefix inside a proximity clause is expanded to. */
 const PREFIX_EXPANSIONS = 200;
 
+const OPERATOR_WORDS = new Set(["AND", "OR", "NOT", "NEAR", "SENTENCE", "PARAGRAPH", "ACCRUE", "TERMWEIGHT", "EXACTCASE"]);
+
 export class BooleanSyntaxError extends Error {}
 
 type Token =
@@ -98,7 +100,17 @@ function tokenize(query: string): Token[] {
       while (end < query.length && !/[\s()]/.test(query[end]) && !QUOTES.test(query[end])) end++;
       const raw = query.slice(i, end);
       i = end;
-      if (raw === "AND" || raw === "OR" || raw === "NOT") tokens.push({ t: raw });
+      // The NS box's other capitals: ACCRUE is an OR that ranks by how many terms match (BM25 does that
+      // anyway); TERMWEIGHT n and EXACTCASE tune ranking and case, which the index does its own way — they
+      // are dropped, with TERMWEIGHT's number, so they are not searched for as words.
+      if (raw === "EXACTCASE") continue;
+      if (raw === "TERMWEIGHT") {
+        const number = /^\s*\d+/.exec(query.slice(i));
+        if (number) i += number[0].length;
+        continue;
+      }
+      if (raw === "ACCRUE") tokens.push({ t: "OR" });
+      else if (raw === "AND" || raw === "OR" || raw === "NOT") tokens.push({ t: raw });
       else if (raw === "NEAR" || raw === "SENTENCE" || raw === "PARAGRAPH") tokens.push({ t: "PROX", op: raw });
       else if (/^[^*?]+\*$/.test(raw)) tokens.push({ t: "prefix", text: raw.slice(0, -1) });
       else {
@@ -118,7 +130,7 @@ function tokenize(query: string): Token[] {
  */
 export function hasOperators(query: string): boolean {
   const bare = query.replace(/["„“”‟«»][^"„“”‟«»]*["„“”‟«»]/g, " ");
-  return /[()*?]/.test(bare) || bare.split(/\s+/).some((word) => word === "AND" || word === "OR" || word === "NOT" || word in PROXIMITY_WORDS);
+  return /[()*?]/.test(bare) || bare.split(/\s+/).some((word) => OPERATOR_WORDS.has(word));
 }
 
 /** The query as a tree; throws BooleanSyntaxError with what is wrong, in the reader's terms. Pure. */

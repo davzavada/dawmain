@@ -65,6 +65,7 @@ TOOLS — <source>_search finds, <source>_get_* reads
 
 SEARCHING
 - Czech queries in the courts' terms of art, not the client's words. Czech inflects: the case-law search tools take up to 3 variants in queries (stems, synonyms, the English term), merge them round-robin and report what each variant found; a variant or court that failed is named while the rest answer. doctrine_search takes variants too (a Czech and an English term).
+- Plain words are all required; "quotes" make a phrase. Every Czech case-law search also reads AND / OR / NOT (capitals), brackets, a prefix* and NEAR (within ten words): "smluvní pokuta" NOT nájem; nájem AND (výpověď OR odstoupení).
 - Narrow with the filters (dates, type, category, court, applied provision) rather than paging deep.
 - Batch independent calls into one turn; go serial only when a call needs an earlier result. Identical calls within ~5 minutes come from cache.
 
