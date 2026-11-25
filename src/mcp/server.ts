@@ -3,6 +3,7 @@ import { appEnvironment, productionOrigin } from "@/src/runtime";
 import { zoteroConfigured } from "@/src/zotero/config";
 import { DEFAULT_ORIGIN, SERVER_NAME, SERVER_VERSION, serverBranding } from "./config";
 import type { DescriptionStyle } from "./guide-hint";
+import { withCurrentToolNames } from "./legacy-tools";
 import { registerAllTools } from "./tools";
 
 /**
@@ -131,6 +132,6 @@ export function isChatGpt(request: Request): boolean {
   return /\b(openai|chatgpt)\b/i.test(request.headers.get("user-agent") ?? "");
 }
 
-/** The MCP server: plain tool descriptions, or the hinted ones for ChatGPT (src/mcp/guide-hint.ts). */
-export const mcpHandler = (request: Request): Promise<Response> =>
-  (isChatGpt(request) ? hintedHandler : plainHandler)(request);
+/** The MCP server: plain tool descriptions, or the hinted ones for ChatGPT (src/mcp/guide-hint.ts); calls by a retired tool name are served as the current call (./legacy-tools.ts). */
+export const mcpHandler = async (request: Request): Promise<Response> =>
+  (isChatGpt(request) ? hintedHandler : plainHandler)(await withCurrentToolNames(request));

@@ -192,7 +192,13 @@ function textOnly(server: McpServer, style: DescriptionStyle): McpServer {
           if (!(await admitToolCall(name, args[1]))) return dailyLimitRefusal();
           // Counted once per call that runs, whatever its outcome.
           void trackToolCall(name, args[1]);
+          // One line per call in the service log: how long the request waited before the tool started
+          // (auth, the transport's handshake) and how long the tool took. "It is slow" could not be
+          // placed without it — the sources answer in under a second, yet a call takes seconds end to end.
+          const startedAt = Date.now();
+          const waited = startedAt - callStartedAt();
           const { structuredContent: _dropped, ...result } = await withinBudget(name, () => routed(name, handler, args));
+          console.info(`mcp tool ${name}: ${Date.now() - startedAt} ms (waited ${waited} ms before it)${result.isError ? " error" : ""}`);
           return result;
         },
       );
