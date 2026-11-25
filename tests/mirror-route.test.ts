@@ -295,19 +295,21 @@ describe("mirror routing", () => {
     expect(untouched).not.toHaveBeenCalled();
   });
 
-  it("a query in the courts' search syntax goes to the court: the mirror reads words and phrases only", async () => {
-    const { hasSearchOperators } = await import("@/src/mcp/tools/mirror-route");
-    expect(hasSearchOperators(['"smluvní pokuta" NOT nájem'])).toBe(true);
-    expect(hasSearchOperators(["nájem AND (výpověď OR odstoupení)"])).toBe(true);
-    expect(hasSearchOperators(["nájem*"])).toBe(true);
-    expect(hasSearchOperators(["újma NEAR pozůstalý"])).toBe(true);
-    // Plain words, phrases, lower-case "not"/"or" and a question mark inside a phrase are not syntax.
-    expect(hasSearchOperators(['"náhrada újmy" pozůstalým', "výpověď z nájmu bytu", "or not and", '"co je to?" výklad'])).toBe(false);
-    expect(await MIRROR_TOOLS.ns_search({ query: '"smluvní pokuta" NOT nájem' })).toEqual({
-      fallback: 'the mirror reads words and "phrases" only, not search operators (AND, OR, NOT, NEAR, *, brackets)',
+  it("a query with search operators is the mirror's too: it is sent on as written, never to the live court", async () => {
+    fetchMock.mockImplementation(async () => json({ hits: [HIT], channel: "and", terms: [] }));
+    const out = textOf(await MIRROR_TOOLS.ns_search({ query: '"smluvní pokuta" NOT nájem' }));
+    expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.get("q")).toBe('"smluvní pokuta" NOT nájem');
+    expect(out).toContain("7 Tdo 1517/2017");
+    fetchMock.mockClear();
+    textOf(await MIRROR_TOOLS.caselaw_search({ queries: ["nájem AND (výpověď OR odstoupení)", "promlč* NEAR námitka"], sources: ["ns"] }));
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get("q")).sort()).toEqual(["nájem AND (výpověď OR odstoupení)", "promlč* NEAR námitka"]);
+    // A query the mirror cannot read (HTTP 400 with the reason) goes to the court with that reason — and the mirror stays in use.
+    fetchMock.mockImplementation(async () => json({ error: "the query could not be read: a bracket is not closed" }, 400));
+    expect(await MIRROR_TOOLS.ns_search({ query: "nájem AND (výpověď" })).toEqual({
+      fallback: expect.stringContaining("a bracket is not closed"),
     });
-    expect(await MIRROR_TOOLS.caselaw_search({ queries: ["újma", "nájem*"] })).toHaveProperty("fallback");
-    expect(fetchMock).not.toHaveBeenCalled();
+    fetchMock.mockImplementation(async () => json({ hits: [HIT], channel: "and", terms: [] }));
+    textOf(await MIRROR_TOOLS.ns_search({ query: "újma" }));
   });
 
   it("falls back on what the mirror cannot do, before any request", async () => {
