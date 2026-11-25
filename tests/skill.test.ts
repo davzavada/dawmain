@@ -113,9 +113,9 @@ describe("SKILL.md is pinned to the registered tool surface", () => {
     // Own sources are searched only where the connection has them: most accounts have none, and three
     // refused calls opened every research (pre-release audit, 11/2026).
     expect(SKILL).toContain("**Own sources — only those this connection has**");
-    expect(SKILL).toContain("never call those");
+    expect(SKILL).toContain("never call the others");
     expect(SKILL).not.toContain("Always add `files_search`");
-    expect(SKILL).toContain("`doctrine_search` — the UKAŽ catalogue");
+    expect(SKILL).toContain("`doctrine_search` — UKAŽ gives the works for");
     expect(SKILL).toContain("**Answered \"není zapnutá\"? Stop.**");
     expect(SKILL).toMatch(/\*\*Další zdroje\*\* — "Bylo by dobré projít i tyto zdroje:"/);
     expect(SKILL).toContain("never summarise what they say from an abstract");

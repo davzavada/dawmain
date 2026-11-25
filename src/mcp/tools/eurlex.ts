@@ -6,16 +6,20 @@ import {
   READ_ONLY,
   continuationHint,
   isoDate,
+  rangeContinuationHint,
   toolFailure,
 } from "./shared";
 import {
+  EU_ARTICLES_MAX,
   type EurlexSearchPage,
+  extractEuArticles,
   getEurlexDocument,
+  parseEuArticles,
   getLegislativeHistory,
   searchEurlex,
 } from "@/src/sources/eurlex";
 import { SourceError } from "@/src/sources/shared/errors";
-import { pageOrExcerpt, snippet } from "@/src/sources/shared/text";
+import { charPage, pageOrExcerpt, snippet } from "@/src/sources/shared/text";
 
 const fail = toolFailure("EUR-Lex (Cellar)");
 
@@ -160,16 +164,22 @@ export function registerEurlex(server: McpServer): void {
     {
       title: "EUR-Lex: document text",
       description:
-        `Full text of an EU legal act, judgment or legislative material from the official Cellar dissemination API, by CELEX (e.g. '32016R0679' for GDPR, '52012PC0011' for its proposal — a proposal's text opens with the explanatory memorandum) or ECLI. Prefers the requested language and falls back to English, saying so. ${READING_DESCRIPTION}`,
+        `Full text of an EU legal act, judgment or legislative material from the official Cellar dissemination API, by CELEX (e.g. '32016R0679' for GDPR, '52012PC0011' for its proposal — a proposal's text opens with the explanatory memorandum) or ECLI. Prefers the requested language and falls back to English, saying so. 'article' returns just the articles named ('6', '5-7', '6, 83') instead of pages. ${READING_DESCRIPTION}`,
       inputSchema: z.object({
         celex: z.string().optional().describe("CELEX, e.g. '32016R0679', '62018CJ0311' or '52012PC0011'."),
         ecli: z.string().optional().describe("ECLI, e.g. 'ECLI:EU:C:2020:559'."),
         language: z.string().default("en").describe("Preferred language — any EU language (cs, en, de, …)."),
+        article: z
+          .string()
+          .max(80)
+          .optional()
+          .describe(`Only these articles of an act, whole: '6', 'čl. 83', '12-14', '6, 83' (at most ${EU_ARTICLES_MAX}). Not for judgments — their points are found with 'find'.`),
         find: z.string().optional().describe(FIND_DESCRIPTION),
         page: z.number().int().min(1).default(1),
       }),
       outputSchema: z.object({
         url: z.string(),
+        article: z.string().optional().describe("The articles returned, when 'article' was passed."),
         language: z.string().describe("Language of the text served — English when the requested one has none."),
         page: z.number(),
         total_pages: z.number(),
@@ -179,7 +189,7 @@ export function registerEurlex(server: McpServer): void {
       }),
       annotations: READ_ONLY,
     },
-    async ({ celex, ecli, language, find, page }) => {
+    async ({ celex, ecli, language, article, find, page }) => {
       try {
         if (!celex && !ecli) {
           throw new SourceError(
@@ -190,6 +200,48 @@ export function registerEurlex(server: McpServer): void {
           );
         }
         const document = await getEurlexDocument({ celex, ecli, language });
+        if (article?.trim()) {
+          const labels = parseEuArticles(article);
+          if (!labels.length || labels.length > EU_ARTICLES_MAX) {
+            throw new SourceError(
+              "EUR-Lex (Cellar)",
+              "INPUT_INVALID",
+              labels.length ? `${labels.length} articles were asked for — at most ${EU_ARTICLES_MAX} in one call.` : `"${article}" names no article number.`,
+              "Pass article numbers: '6', '12-14', '6, 83'.",
+            );
+          }
+          const { found, missing } = extractEuArticles(document.text, labels);
+          if (!found.length) {
+            throw new SourceError(
+              "EUR-Lex (Cellar)",
+              "NOT_FOUND",
+              `No heading of article ${labels.join(", ")} was found in this text.`,
+              "Check the number; in a judgment or a document without article headings use 'find' instead (e.g. find: \"Article 6\").",
+            );
+          }
+          const shown = found.map((a) => a.label).join(", ");
+          const paged = charPage(found.map((a) => a.text).join("\n\n"), page);
+          const fallbackNote = document.fallback ? "\n(Cellar has no text of this document in the requested language — this is the English version.)" : "";
+          const missingNote = missing.length ? `\nNo heading found for article ${missing.join(", ")}.` : "";
+          const locator = [celex ? `celex: "${celex}"` : `ecli: "${ecli}"`, `article: ${JSON.stringify(article)}`, language !== "en" ? `language: "${language}"` : ""].filter(Boolean).join(", ");
+          return {
+            content: [
+              {
+                type: "text",
+                text: `${document.url} — article ${shown}${fallbackNote}${missingNote}\n\n${paged.text}${rangeContinuationHint(locator, paged.page, paged.total_pages)}`,
+              },
+            ],
+            structuredContent: {
+              url: document.url,
+              article: shown,
+              language: document.language,
+              page: paged.page,
+              total_pages: paged.total_pages,
+              has_more: paged.has_more,
+              text: paged.text,
+            },
+          };
+        }
         const paged = pageOrExcerpt(document.text, page, find);
         const output = {
           url: document.url,

@@ -6,7 +6,8 @@ import type { Hono } from "hono";
 import type { Db } from "@/src/mirror/db/client";
 import { saveDecision } from "@/src/mirror/db/store";
 import { createMirrorApi } from "@/src/mirror/api/server";
-import { BM25_CANDIDATES, COURT_EXACT_MAX, searchDecisions } from "@/src/mirror/api/queries";
+import { passageAround } from "@/src/mirror/api/citations";
+import { AUTHORITY_GATE, AUTHORITY_WEIGHT, BM25_CANDIDATES, COURT_EXACT_MAX, searchDecisions } from "@/src/mirror/api/queries";
 import { buildActLookup } from "@/src/mirror/legal/lookup";
 import { provisionsSource } from "@/src/mirror/provisions";
 import type { DecisionRecord } from "@/src/mirror/types";
@@ -93,7 +94,7 @@ beforeAll(async () => {
       sourceId: "1-10-25_1",
       caseNumber: "I. ÚS 10/25",
       caseNumbers: ["I. ÚS 10/25"],
-      decidedOn: "2025-03-01",
+      decidedOn: "2025-07-01",
       text: { body: "Ústavní stížnost se odmítá. Stěžovatel odkazuje na nález sp. zn. IV. ÚS 296/24 o promlčení. Namítá porušení § 2913 odst. 1 písm. b) zákona č. 89/2012 Sb. a čl. 36 odst. 1 Listiny.", source: "us:gettext-hidden" },
     }),
   );
@@ -155,7 +156,7 @@ describe("GET /v1/search", () => {
       ((await (await get(`/v1/search?q=${q}${extra}`)).json()).hits as Array<{ id: string }>).map((h) => h.id).sort();
     expect(await ids("")).toEqual(["1-10-25_1", "4-296-24_1"]);
     expect(await ids("&type=nalez")).toEqual(["4-296-24_1"]);
-    expect(await ids("&to=2025-04-01")).toEqual(["1-10-25_1"]);
+    expect(await ids("&from=2025-06-19")).toEqual(["1-10-25_1"]);
     expect(await ids("&source=ns")).toEqual([]);
     expect(await ids("&source=ns,us")).toEqual(["1-10-25_1", "4-296-24_1"]);
     expect(await ids("&source=ns&source=us")).toEqual(["1-10-25_1", "4-296-24_1"]);
@@ -308,6 +309,26 @@ describe("searchDecisions with BM25: court codes", () => {
     expect(first.text).toContain(`LIMIT ${BM25_CANDIDATES}`);
     expect(first.text).not.toContain("OSPV");
     expect(first.params).toContainEqual(["OSPV"]);
+  });
+
+  it("weighs the best-matching candidates by how often the courts cite them, and takes the excerpt from the reasoning", async () => {
+    const { db, calls } = fake([]);
+    await searchDecisions(db, { q: "smluvní pokuta moderace", sources: ["ns" as const, "us" as const], bm25: true });
+    const all = calls[0].text;
+    // Only decisions within a tenth of the best text score are weighed: the much-cited decisions of a
+    // whole field otherwise rise over the ones on the question (set on the production index, 11/2026).
+    expect(all).toContain(`CASE WHEN f.score >= ${AUTHORITY_GATE} * max(f.score) OVER () THEN (1 + ${AUTHORITY_WEIGHT} * ln(1 + `);
+    expect(all).toContain("c.citing_id <> f.decision_id");
+    expect(all).toMatch(/weighed AS \([\s\S]*FROM filtered f[\s\S]*kept AS \(\s*SELECT \* FROM weighed/);
+    // A chunk of the letterhead counts for a fraction when the passage is chosen.
+    expect(all).toContain("x->>'kind' IN ('vyrok', 'oduvodneni')");
+    expect(all).toContain("CASE WHEN c.char_end <= coalesce(body.at, 0) THEN 0.2 ELSE 1 END DESC");
+    // Every word: a nález and a plenary case are lifted. Any word: they are not (one shared common word is no match).
+    expect(all).toContain("d.decision_type = 'nalez' THEN 2");
+    const any = calls.filter((c) => c.text.includes("pdb.score"))[1].text;
+    expect(any).not.toContain("'nalez' THEN 2");
+    expect(any).not.toContain("LIKE 'Pl.%'");
+    expect(any).toContain("d.decision_type = 'stanovisko' THEN 1.5");
   });
 
   it("searches a small court whole when the candidates fall short", async () => {
@@ -532,6 +553,45 @@ describe("filters outside the index, paging and listings (GET /v1/search)", () =
 });
 
 describe("GET /v1/decisions/:source/:id/citations", () => {
+  it("the citing passage is cut around the citation, wherever in the chunk it stands", () => {
+    const window = `${"Úvodní část odůvodnění bez citace. ".repeat(40)}Jak dovodil Ústavní soud v nálezu sp. zn. IV. ÚS 296/24, promlčení se posuzuje jinak. ${"Další text. ".repeat(40)}`;
+    const passage = passageAround(window, new Set(["sz:4us296-2024"]));
+    expect(passage).toContain("v nálezu sp. zn. IV. ÚS 296/24, promlčení se posuzuje jinak.");
+    expect(passage.length).toBeLessThanOrEqual(360);
+    // No such citation in the window (an ECLI the chunker read differently): its head, as before.
+    expect(passageAround(window, new Set(["sz:1us1-2001"])).startsWith("Úvodní část odůvodnění")).toBe(true);
+  });
+
+  it("a decision older than the cited one does not cite it; a značka shared with another court is named", async () => {
+    const dates = await pg.query<{ source_id: string; decided_on: string | null }>(
+      "SELECT source_id, decided_on::text AS decided_on FROM mirror.decision WHERE source = 'us' AND source_id IN ('1-10-25_1', '4-296-24_1')",
+    );
+    const citedOn = dates.rows.find((r) => r.source_id === "4-296-24_1")!.decided_on;
+    const citingOn = dates.rows.find((r) => r.source_id === "1-10-25_1")!.decided_on;
+    try {
+      // The same značka at a court deciding a year EARLIER: that decision cannot be the one cited.
+      await pg.query("UPDATE mirror.decision SET decided_on = $1::date + 400 WHERE source = 'us' AND source_id = '4-296-24_1'", [citingOn]);
+      const later = await (await get("/v1/decisions/us/4-296-24_1/citations")).json();
+      expect(later.citedBy.total).toBe(0);
+      expect((await (await get(`/v1/by-case?case=${encodeURIComponent("IV. ÚS 296/24")}`)).json()).decisions[0].citedBy).toBe(0);
+      // An unknown date keeps the link.
+      await pg.query("UPDATE mirror.decision SET decided_on = NULL WHERE source = 'us' AND source_id = '4-296-24_1'");
+      expect((await (await get("/v1/decisions/us/4-296-24_1/citations")).json()).citedBy.total).toBe(1);
+    } finally {
+      await pg.query("UPDATE mirror.decision SET decided_on = $1 WHERE source = 'us' AND source_id = '4-296-24_1'", [citedOn]);
+    }
+    expect((await (await get("/v1/decisions/us/4-296-24_1/citations")).json()).sameCaseNumber).toBeUndefined();
+    const other = (await pg.query<{ id: string; source_id: string }>("SELECT id::text, source_id FROM mirror.decision WHERE source <> 'us' ORDER BY id LIMIT 1")).rows[0];
+    await pg.query("INSERT INTO mirror.decision_key (key, decision_id) VALUES ('sz:4us296-2024', $1)", [other.id]);
+    try {
+      const shared = await (await get("/v1/decisions/us/4-296-24_1/citations")).json();
+      expect(shared.sameCaseNumber.total).toBe(1);
+      expect(shared.sameCaseNumber.decisions.map((d: { id: string }) => d.id)).toEqual([other.source_id]);
+    } finally {
+      await pg.query("DELETE FROM mirror.decision_key WHERE key = 'sz:4us296-2024' AND decision_id = $1", [other.id]);
+    }
+  });
+
   it("links the citing decision and the cited one, both ways", async () => {
     const citing = await (await get("/v1/decisions/us/1-10-25_1/citations")).json();
     const cited = citing.cites.find((c: { display: string }) => c.display === "IV. ÚS 296/24");
@@ -573,6 +633,8 @@ describe("GET /v1/decisions/:source/:id/citations", () => {
   it("GET /v1/by-case names the decision carrying the značka, not the ones citing it", async () => {
     const own = await (await get(`/v1/by-case?case=${encodeURIComponent("IV. ÚS 296/24")}`)).json();
     expect(own.decisions.map((d: { id: string }) => d.id)).toEqual(["4-296-24_1"]);
+    // Length and citing count come along, as on a search hit: the značka is read next.
+    expect(own.decisions[0]).toMatchObject({ citedBy: 1, chars: nalezBody.length });
     expect((await (await get(`/v1/by-case?case=${encodeURIComponent("IV. ÚS 296/24")}&source=ns`)).json()).decisions).toEqual([]);
     expect((await (await get("/v1/by-case?case=nic")).json()).decisions).toEqual([]);
     expect((await get("/v1/by-case")).status).toBe(400);

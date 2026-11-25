@@ -73,7 +73,13 @@ describe("skillBody", () => {
 
 describe("dawmain_guide", () => {
   it("answers with the core manual by default — the source references are listed, not served", async () => {
-    expect(tailorManual(skillBody(SKILL), [])).toBe(skillBody(SKILL));
+    // An account with every own source still gets the note: it names what to search (and what to do
+    // when the tool list is older than the manual), under the title, the manual itself untouched.
+    const all = tailorManual(skillBody(SKILL), []);
+    expect(all).toMatch(/^# Rešerše přes Dawmain\n\n> \*\*Own sources on this connection: Vlastní soubory \(files_\*\), Zotero \(zotero_\*\), doktrína — UKAŽ \(doctrine_\*\)\*\* — search them in your next turn\. /);
+    expect(all).toContain("reconnect the Dawmain connector");
+    expect(all.length - skillBody(SKILL).length).toBeLessThan(400);
+    for (const { heading } of Object.values(GATED_SECTIONS)) expect(all).toContain(heading);
     // The shared access code: no Vlastní soubory, no Zotero, UKAŽ as before.
     const result = await guide().handler({}, SHARED_CTX);
     expect(result.isError).toBeUndefined();
@@ -170,7 +176,8 @@ describe("the manual is fitted to what the caller can use", () => {
     for (const { heading } of Object.values(GATED_SECTIONS)) expect(text).not.toContain(heading);
     for (const kept of ["## SDEU (InfoCuria)", "## Reading: screen, locate, then read whole", "## The memo"]) expect(text).toContain(kept);
     expect(text).toMatch(/^# Rešerše přes Dawmain\n\n> \*\*Not available on this connection: Vlastní soubory \(files_\*\), Zotero \(zotero_\*\), doktrína — UKAŽ \(doctrine_\*\)\.\*\*/);
-    expect(text).toContain("Do not call these tools in this conversation");
+    expect(text).toContain("Do not call these tools and skip every step that names them");
+    expect(text).toContain("the old *_get_decision names still answer");
     expect(text).toContain("no „Další zdroje“ literature section");
     // A quarter of the manual: what an account with none of the three no longer reads.
     expect(body.length - text.length).toBeGreaterThan(12_000);
@@ -194,6 +201,10 @@ describe("the manual is fitted to what the caller can use", () => {
     expect(tailorManual(body, ["zotero"])).toContain("**Available here: Vlastní soubory (files_*), doktrína — UKAŽ (doctrine_*)** — search them in your next turn.");
     const none = tailorManual(body, ["files", "zotero", "ukaz"]);
     expect(none).not.toContain("Available here");
+    // An empty library is said as such: the tools exist, there is just nothing to search yet.
+    const empty = tailorManual(body, ["files"], { emptyLibrary: true });
+    expect(empty).toContain("**Not available on this connection: Vlastní soubory (files_*) — the library holds no document yet.** Its section is left out");
+    expect(empty).toContain("**Available here: Zotero (zotero_*), doktrína — UKAŽ (doctrine_*)**");
     expect(none).toContain("the research runs on the official sources only");
     expect(none).toContain("no „Další zdroje“ literature section");
   });

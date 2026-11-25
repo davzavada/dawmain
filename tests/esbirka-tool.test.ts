@@ -46,7 +46,7 @@ interface Event {
 }
 
 /** Every upstream request, each answered after `delayMs`. */
-function serve(options: { delayMs?: number; seznam?: unknown[]; pages?: number; detail?: () => Response } = {}): Event[] {
+function serve(options: { delayMs?: number; seznam?: unknown[]; pages?: number; detail?: () => Response; future?: unknown[] } = {}): Event[] {
   const events: Event[] = [];
   vi.stubGlobal("fetch", async (input: string) => {
     const url = decodeURIComponent(String(input));
@@ -62,6 +62,11 @@ function serve(options: { delayMs?: number; seznam?: unknown[]; pages?: number; 
     events.push({ kind, at: "end" });
     if (kind === "sparql") return new Response("blocked", { status: 403, headers: { "content-type": "text/html" } });
     if (kind === "historie") return new Response(JSON.stringify(HISTORY));
+    // The future version, when a test gives it its own wording: its own detail and fragments.
+    if (options.future && url.includes("2027-01-01")) {
+      if (kind === "fragmenty") return new Response(JSON.stringify({ pocetStranek: 1, seznam: options.future }));
+      return new Response(JSON.stringify({ ...DETAIL, staleUrl: "/sb/2012/89/2027-01-01", datumUcinnostiZneniOd: "2027-01-01", typZneni: "BUDOUCI" }));
+    }
     if (kind === "fragmenty") {
       return new Response(JSON.stringify({ pocetStranek: options.pages ?? 1, seznam: options.seznam ?? fragmentsOf(["28", "29", "30"]) }));
     }
@@ -86,12 +91,27 @@ describe("esbirka_get_text section read", () => {
     const result = await handler({ ...base, section: "§ 29" });
     const text = result.content[0].text;
     expect(text).toContain("(1) Text 29/1.");
-    expect(text).toContain('⚠ A future version of this act is already published and takes effect 2027-01-01');
+    // The section is compared with the future version: here it reads the same, and the answer says so.
+    expect(text).toContain("A future version of this act is already published (effective 2027-01-01): § 29 reads the same in it");
+    expect(text).not.toContain("⚠");
     const historyStart = events.findIndex((e) => e.kind === "historie" && e.at === "start");
     const lastFragmentEnd = events.map((e) => e.kind === "fragmenty" && e.at === "end").lastIndexOf(true);
     expect(historyStart).toBeGreaterThanOrEqual(0);
     expect(historyStart).toBeLessThan(lastFragmentEnd);
-    expect(events.filter((e) => e.kind === "detail" && e.at === "start")).toHaveLength(1);
+    // One detail for the version read, one for the future version it is compared with.
+    expect(events.filter((e) => e.kind === "detail" && e.at === "start")).toHaveLength(2);
+  });
+
+  it("says which of the sections read differ in the published future version", async () => {
+    // § 29 gets a second paragraph from 2027, § 30 is repealed, § 28 stays.
+    serve({ future: [...fragmentsOf(["28"]), ...fragmentsOf(["29"], 2)] });
+    const handler = await getTextTool();
+    const one = (await handler({ ...base, section: "§ 29" })).content[0].text;
+    expect(one).toContain('⚠ A future version of this act is already published (effective 2027-01-01): § 29 DIFFERS in it (changed or no longer there) — read the new wording with date: "2027-01-01".');
+    expect(one).toContain("(1) Text 29/1.");
+    expect(one).not.toContain("Text 29/2.");
+    const several = (await handler({ ...base, section: "§ 28-30" })).content[0].text;
+    expect(several).toContain('§ 29, § 30 DIFFER in it (changed or no longer there) — read the new wording with date: "2027-01-01". § 28 reads the same.');
   });
 
   it("asks the detail once even when it fails, and still reads the text", async () => {
@@ -149,6 +169,7 @@ describe("esbirka_get_text several sections", () => {
     expect(text).toContain("Text 28/1.");
     expect(text).toContain("Text 30/1.");
     expect(text.match(/A future version/g)).toHaveLength(1);
+    expect(text).toContain("§ 28, § 29, § 30 read the same in it");
     const listed = (await handler({ ...base, section: "29, 31" })).content[0].text;
     expect(listed).toContain("Text 29/1.");
     expect(listed).toContain("Not in this act and time version: 31.");

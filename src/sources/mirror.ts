@@ -320,9 +320,14 @@ export interface MirrorLinkedDecision {
   court: string | null;
   form: string | null;
   date: string | null;
+  /** Given by /v1/by-case (absent from an API that predates them, and from citation links). */
+  chars?: number | null;
+  citedBy?: number;
 }
 
 export interface MirrorCitations {
+  /** Decisions of another court carrying the same spisová značka (absent when none, and from an API that predates it). */
+  sameCaseNumber?: { total: number; decisions: MirrorLinkedDecision[] };
   /** What the decision cites: each cited sp. zn. / ECLI with the mirrored decisions carrying it (none = a court the mirror does not hold). */
   cites: Array<{ key: string; display: string; mentions: number; firstAt: number; decisions: MirrorLinkedDecision[] }>;
   /** Who cites it; `total` counts all, `hits` is the page asked for. bySource, top, order and the excerpts are absent from an API that predates them (then newest first). */

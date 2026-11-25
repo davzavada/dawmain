@@ -139,12 +139,12 @@ Names follow one pattern: `<zdroj>_search` finds, `<zdroj>_get_*` reads.
 | Case law on a topic (start here) | `caselaw_search` — NSS + NS + ÚS in parallel; `include_eu` adds the CJEU, `include_regional` the krajské správní soudy |
 | Deeper digging in one court | `ns_search`, `nss_search`, `us_search` (Ústavní soud), `sdeu_search` (CJEU) |
 | Who cites a decision, and what it cites (the citator) | `caselaw_citations {source, id}` or `{source, case_number}` — later decisions of NS, NSS, ÚS and obecné soudy naming it, the courts that bind first, each with the citing passage; `direction: "cites"` for what it relies on |
-| Full text of a decision | `caselaw_get_decision {source, id}` — source `ns` / `nss` / `us` / `justice`, the id as the hit gives it; CJEU: `sdeu_get_document {ecli}` |
+| Full text of a decision | `caselaw_get_decision {source, id}` — `ns` / `nss` / `us` / `justice`, the id as the hit gives it, or `case_number`; CJEU: `sdeu_get_document {ecli}` |
 | Which act, and its wording | `esbirka_search` → `esbirka_get_act` → `esbirka_get_text` (one § via `section: "§ 12"`, one article via `section: "čl. 36"`; any date) |
 | Lower courts (okresní/krajské/vrchní) | `justice_search` → `caselaw_get_decision` — full text, spisová značka, soud, druh, data, and applied provision |
 | CJEU | `sdeu_search` → `sdeu_get_document` (`language: "cs"` falls back to English) |
 | Czech legislative history — důvodová zpráva, rozdílová tabulka, RIA, platné znění s vyznačením změn, usnesení výborů, the readings | `psp_search` (by the Sbírka number of the act — `act: "89/2012"`, across periods — or titles of sněmovní tisky, by `period` or `year`) → `psp_get_tisk {period, number}` (the process with dates + every document, each with its reading call) → `psp_get_text` (`part: 0` = the bill with its důvodová zpráva; `document_id` = an attached PDF/DOCX) |
-| EU legislation | `eurlex_search` (titles/CELEX/ECLI only, NOT full text) → `eurlex_get_document` |
+| EU legislation | `eurlex_search` (titles/CELEX/ECLI only, NOT full text) → `eurlex_get_document` (`article: "6"` = that article only) |
 | EU legislative materials (travaux) | `eurlex_get_history {celex}` — the act's whole dossier: proposal + explanatory memorandum, impact assessments, EESC/CoR opinions, EP/Council positions; or `eurlex_search` with `types: ["proposal", "opinion", …]` |
 | Literature — monographs, commentaries, articles (doctrine; an admin switches UKAŽ on per account) | `doctrine_search` — UKAŽ (Univerzita Karlova, Primo: the UK catalogue + the Central Discovery Index) → `doctrine_get_record {id}` for the record in full: the whole abstract and table of contents |
 | The user's own books, commentaries, articles and templates (Vlastní soubory — Pro, personal sign-in) | `files_search` → `files_get_document` (the outline first, then `section` / `mn` / `footnote`); `files_list` lists the documents |
@@ -987,16 +987,13 @@ Stopping the search never shortens the reading: what you cite, you have read who
    `justice_search` to the same turn when the question is about everyday practice
    rather than doctrine ("jak to soudy běžně řeší", "co dostanu za…"), or when you
    already know the provision — `applies_act` + `applies_section` costs nothing extra
-   and needs no keywords. **Own sources — only those this connection has** (the note
-   at the top of this manual lists the unavailable ones; never call those): `files_search`
-   — the user's own books, commentaries and articles come first: read what they hold on
-   the point (`files_get_document`) and build the argument on it where it fits;
-   `zotero_search` — the works, decisions and notes the user collected
-   (`zotero_get_item` for the ones on point); `doctrine_search` — the UKAŽ catalogue
-   gives the works worth going through next (**Další zdroje** in the memo), and where
-   case law is thin or the topic is international law, doctrine may carry the argument
-   itself. Send them with this turn when you already have the manual, else with the
-   next one, beside your reading. Without UKAŽ the memo has no **Další zdroje**.
+   and needs no keywords. **Own sources — only those this connection has** (the
+   note under the title says which; never call the others): `files_search` — the user's own
+   books and commentaries come first: read what they hold on the point
+   (`files_get_document`) and build on it; `zotero_search` — works, decisions and notes
+   the user collected (`zotero_get_item`); `doctrine_search` — UKAŽ gives the works for
+   **Další zdroje**, and where case law is thin, doctrine may carry the argument. Send
+   them with this turn when you already have the manual, else with the next one.
 3. **Screen and aim.** From the hit lines and previews pick the decisions that may
    decide the issue; `find` in the doubtful ones; a court-specific search where the
    fan-out was too coarse — with that court's reference (`dawmain_guide {topics: [...]}`)

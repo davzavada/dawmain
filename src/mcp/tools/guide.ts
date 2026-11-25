@@ -3,6 +3,8 @@ import path from "node:path";
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { getAccess } from "@/src/files/access";
+import { withScope } from "@/src/files/db/client";
+import { pendingCounts } from "@/src/files/db/documents";
 import { envOnlyMode } from "@/src/files/guards";
 import { zoteroConfigured } from "@/src/zotero/config";
 import { callerFromCtx } from "../caller";
@@ -73,8 +75,7 @@ export type GatedSource = keyof typeof GATED_SECTIONS;
  * next one. A heading that is not found leaves the text as it is (the note
  * still goes in); tests/guide.test.ts pins the headings to SKILL.md. Pure.
  */
-export function tailorManual(body: string, off: GatedSource[]): string {
-  if (!off.length) return body;
+export function tailorManual(body: string, off: GatedSource[], opts: { emptyLibrary?: boolean } = {}): string {
   let text = body;
   for (const source of off) {
     const start = text.indexOf(`\n${GATED_SECTIONS[source].heading}`);
@@ -82,22 +83,38 @@ export function tailorManual(body: string, off: GatedSource[]): string {
     const next = text.indexOf("\n## ", start + 1);
     text = text.slice(0, start) + (next < 0 ? "" : text.slice(next));
   }
-  const names = off.map((source) => GATED_SECTIONS[source].label).join(", ");
-  // What the connection DOES have, said outright: the server instructions tell the model to search
-  // exactly the own sources this note names as available, so a silent omission would read as "none".
+  // The note is ALWAYS there, and says what the connection HAS as well as what it lacks: the server
+  // instructions and the workflow below tell the model to search exactly the own sources this note
+  // names. Without one (an account with all three) five test researches out of five reported "the
+  // manual refers to a note that is absent" and searched an empty library (11/2026).
   const on = (Object.keys(GATED_SECTIONS) as GatedSource[]).filter((source) => !off.includes(source));
-  const available = on.length
-    ? ` **Available here: ${on.map((source) => GATED_SECTIONS[source].label).join(", ")}** — search ${on.length > 1 ? "them" : "it"} in your next turn.`
+  const label = (source: GatedSource): string =>
+    source === "files" && opts.emptyLibrary ? `${GATED_SECTIONS.files.label} — the library holds no document yet` : GATED_SECTIONS[source].label;
+  const lacking = off.length
+    ? `**Not available on this connection: ${off.map(label).join(", ")}.** ${
+        opts.emptyLibrary && off.length === 1 ? "Its section is" : "Their sections are"
+      } left out of this manual. Do not call these tools and skip every step that names them` +
+      (on.length ? "" : " — the research runs on the official sources only") +
+      (off.includes("ukaz") ? "; the memo then has no „Další zdroje“ literature section" : "") +
+      ". "
     : "";
-  const note =
-    `> **Not available on this connection: ${names}.** Their sections are left out of this manual. ` +
-    "Do not call these tools in this conversation and skip every step below that names them" +
-    (on.length ? "" : " — the research runs on the official sources only") +
-    (off.includes("ukaz") ? "; the memo then has no „Další zdroje“ literature section" : "") +
-    `.${available} If the user asks for one that is unavailable, say it is switched on per account on the Dawmain website.`;
+  const available = on.length
+    ? `**${off.length ? "Available here" : "Own sources on this connection"}: ${on.map(label).join(", ")}** — search ${on.length > 1 ? "them" : "it"} in your next turn. `
+    : "";
+  const asked = off.length ? "An unavailable one is switched on per account on the Dawmain website. " : "";
+  const note = `> ${lacking}${available}${asked}${STALE_TOOLS_NOTE}`;
   const titleEnd = text.indexOf("\n");
   return titleEnd < 0 ? `${note}\n\n${text}` : `${text.slice(0, titleEnd)}\n\n${note}${text.slice(titleEnd)}`;
 }
+
+/**
+ * A client reads the connector's tool list when it connects and keeps it; this
+ * manual is always the deployed one. After a change of tools the two disagree
+ * until the user reconnects — every test research met "the manual names a tool
+ * I do not have" (11/2026). The retired names still answer (src/mcp/legacy-tools.ts).
+ */
+export const STALE_TOOLS_NOTE =
+  "If this manual names a tool or parameter your tool list lacks, the list is old: use what you have (the old *_get_decision names still answer) and tell the user once to reconnect the Dawmain connector.";
 
 /**
  * The source references of the manual: a section each, served apart as
@@ -193,23 +210,61 @@ export function topicSections(body: string, topics: Topic[]): string {
  * caller needed.
  */
 export async function unavailableSources(ctx: unknown): Promise<GatedSource[]> {
+  return (await sourcesFor(ctx)).off;
+}
+
+/** How long one account's "is the library empty" answer is kept. */
+const EMPTY_LIBRARY_TTL_MS = 60_000;
+const emptyLibraryCache = new Map<string, { at: number; empty: boolean }>();
+
+/** Tests: forget the kept answers. */
+export function resetEmptyLibraryCache(): void {
+  emptyLibraryCache.clear();
+}
+
+/**
+ * Whether none of the account's libraries holds a document ready to search.
+ * A library that exists but is empty made every research open with a
+ * files_search that could only answer "no searchable document yet". Kept for
+ * a minute per account; a failure reads as "not empty" (the search then says
+ * what is there).
+ */
+async function libraryIsEmpty(userId: string, libraryIds: string[]): Promise<boolean> {
+  const kept = emptyLibraryCache.get(userId);
+  if (kept && Date.now() - kept.at < EMPTY_LIBRARY_TTL_MS) return kept.empty;
+  let empty = false;
+  try {
+    const counts = await withScope(libraryIds, (db) => pendingCounts(db, libraryIds));
+    empty = Object.values(counts).every((c) => c.ready === 0);
+  } catch {
+    return false;
+  }
+  if (emptyLibraryCache.size > 5_000) emptyLibraryCache.clear();
+  emptyLibraryCache.set(userId, { at: Date.now(), empty });
+  return empty;
+}
+
+/** The gated sources the caller cannot use, and whether Vlastní soubory is among them only because the library is empty. */
+export async function sourcesFor(ctx: unknown): Promise<{ off: GatedSource[]; emptyLibrary: boolean }> {
   const caller = callerFromCtx(ctx);
   const filesMode = envOnlyMode();
   const filesOff = filesMode === "off" || filesMode === "unconfigured";
   const zoteroOff = !zoteroConfigured();
-  if (caller.kind !== "user") return ["files", "zotero"];
+  if (caller.kind !== "user") return { off: ["files", "zotero"], emptyLibrary: false };
   try {
     const access = await getAccess(caller.userId);
     const off: GatedSource[] = [];
-    if (filesOff || access.banned || !access.libraries.length) off.push("files");
+    const hasLibrary = !filesOff && !access.banned && access.libraries.length > 0;
+    const emptyLibrary = hasLibrary && (await libraryIsEmpty(caller.userId, access.libraries.map((l) => l.id)));
+    if (!hasLibrary || emptyLibrary) off.push("files");
     if (zoteroOff || access.banned || !access.zotero) off.push("zotero");
     if (access.banned || access.ukaz !== true) off.push("ukaz");
-    return off;
+    return { off, emptyLibrary };
   } catch {
     const off: GatedSource[] = [];
     if (filesOff) off.push("files");
     if (zoteroOff) off.push("zotero");
-    return off;
+    return { off, emptyLibrary: false };
   }
 }
 
@@ -238,8 +293,8 @@ export function registerGuide(server: McpServer): void {
     async (args: unknown, ctx?: unknown) => {
       try {
         const asked = ((args as { topics?: string[] } | undefined)?.topics ?? []).filter(Boolean);
-        const [body, off] = await Promise.all([loadSkill(), unavailableSources(ctx)]);
-        const manual = tailorManual(body, off);
+        const [body, sources] = await Promise.all([loadSkill(), sourcesFor(ctx)]);
+        const manual = tailorManual(body, sources.off, { emptyLibrary: sources.emptyLibrary });
         if (asked.includes("all")) return { content: [{ type: "text" as const, text: manual }] };
         const topics = TOPIC_NAMES.filter((topic) => asked.includes(topic));
         const text = topics.length ? topicSections(manual, topics) : coreManual(manual);

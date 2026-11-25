@@ -406,7 +406,10 @@ export function createMirrorApi(options: {
   app.get("/v1/by-case", async (c) => {
     const value = c.req.query("case")?.trim();
     if (!value || value.length > 120) throw new BadRequest("case is required (a spisová značka or ECLI, at most 120 characters)");
-    return c.json({ decisions: await decisionsByCaseNumber(db, value, sources(c.req.queries("source"))) });
+    const decisions = await decisionsByCaseNumber(db, value, sources(c.req.queries("source")));
+    // Length and citing count, as on a search hit: a značka looked up is read next, and its pages are asked for at once.
+    const facts = await factsOfDecisions(db, decisions).catch(() => new Map<string, { chars: number | null; citedBy: number }>());
+    return c.json({ decisions: decisions.map((d) => ({ ...d, ...(facts.get(`${d.source}:${d.id}`) ?? {}) })) });
   });
 
   app.get("/v1/decisions/:source/:id/citations", async (c) => {

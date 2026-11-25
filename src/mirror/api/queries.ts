@@ -5,6 +5,7 @@ import { DOC_PAGE_CHARS, charPage } from "@/src/sources/shared/text";
 import type { Queryable } from "../db/client";
 import type { Structure } from "../structure";
 import { BooleanSyntaxError, booleanSql, hasOperators, parseBoolean, positiveText } from "./boolean";
+import { citedCount } from "./citations";
 import { basePredicates, hasMeta, metaPredicates, resolveMetaIds, type MetaFilters } from "./filters";
 import { MIRROR_SOURCES, type DecisionType, type MirrorSource } from "../types";
 
@@ -28,6 +29,8 @@ export const MAX_LIMIT = 50;
 export const MAX_OFFSET = 2000;
 export const EXCERPT_CHARS = 400;
 const RANK_WEIGHTS = "{0.05,0.12,0.2,1.0}";
+/** What a match in the letterhead of a decision is worth beside one in its výrok or reasoning, when the excerpt is chosen. */
+const HEADER_CHUNK_WEIGHT = 0.2;
 /** One identifier match counts like a strong lexical match. */
 const IDENT_SCORE = 0.5;
 /** The court-name filter: applied to this many BM25-first decisions. */
@@ -45,10 +48,33 @@ const RERANK_CANDIDATES = 200;
  * NALUS ranking: ÚS parity 4 % → 20 % (top 10), NS unchanged; the NS categories (A–E) made NS worse, so
  * they weigh nothing.
  */
-function prior(d: string): string {
-  return `(CASE WHEN ${d}.decision_type = 'stanovisko' THEN 1.5 ELSE 1 END
-    * CASE WHEN ${d}.source = 'us' AND ${d}.decision_type = 'nalez' THEN 2 ELSE 1 END
-    * CASE WHEN ${d}.source = 'us' AND ${d}.case_number LIKE 'Pl.%' THEN 1.3 ELSE 1 END)`;
+function prior(d: string, all = true): string {
+  // The form of a decision says something only about decisions that are about the question: under
+  // "any word" (no decision holds all the words) the boost lifted plenary nálezy that share one
+  // common word with the query to the top of the ÚS lane (seven of ten hits in a test research, 11/2026).
+  const us = all
+    ? ` * CASE WHEN ${d}.source = 'us' AND ${d}.decision_type = 'nalez' THEN 2 ELSE 1 END
+    * CASE WHEN ${d}.source = 'us' AND ${d}.case_number LIKE 'Pl.%' THEN 1.3 ELSE 1 END`
+    : "";
+  return `(CASE WHEN ${d}.decision_type = 'stanovisko' THEN 1.5 ELSE 1 END${us})`;
+}
+
+/**
+ * How much the courts themselves rely on a decision, as a factor on its text score: 1 for a decision
+ * nobody cites, growing with the logarithm of the mirrored decisions citing it. BM25 alone ranks by the
+ * words: the velký senát judgment on moderace smluvní pokuty (417 citing decisions) was not among 16 hits
+ * while a decision cited 8 times led, R 122/2012 (1 050) came eleventh (five test researches, 11/2026).
+ *
+ * Only decisions whose text score is within a tenth of the best one are weighed (AUTHORITY_GATE). Without
+ * the gate the much-cited decisions of a whole field rose over the ones on the question: for "zneužití
+ * práva na informace" 8 As 22/2010 and 1 As 27/2011 led and 1 As 96/2021 fell from fifth to tenth; with
+ * it 1 As 96/2021 is second, 31 Cdo 2273/2022 and 30 Cdo 2813/2011 first in their queries. Both numbers
+ * were set on the production index over six queries (11/2026) — tests/mirror-api.test.ts pins the SQL.
+ */
+export const AUTHORITY_WEIGHT = 0.35;
+export const AUTHORITY_GATE = 0.9;
+function authority(score: string, id: string): string {
+  return `CASE WHEN ${score} >= ${AUTHORITY_GATE} * max(${score}) OVER () THEN (1 + ${AUTHORITY_WEIGHT} * ln(1 + ${citedCount(id)})) ELSE 1 END`;
 }
 
 /** Mirror NSS holds the regional administrative courts too; caselaw_search's NSS lane does not. */
@@ -374,19 +400,32 @@ async function runBm25(
        LIMIT ${courts.length ? BM25_CANDIDATES : pool}
      ),
      filtered AS (
-       SELECT top.decision_id, top.score * ${prior("d")} AS score, d.decided_on
+       SELECT top.decision_id, top.score * ${prior("d", all)} AS score, d.decided_on
        FROM top JOIN mirror.decision d ON d.id = top.decision_id
        ${courts.length ? `WHERE ${courts.join(" AND ")}` : ""}
        ORDER BY ${newest ? "d.decided_on DESC NULLS LAST" : "top.score DESC"} LIMIT ${pool}
      ),
+     -- The citing count is looked up for the candidates kept so far only (at most the pool).
+     weighed AS (
+       SELECT f.decision_id, f.score * ${authority("f.score", "f.decision_id")} AS score, f.decided_on FROM filtered f
+     ),
      kept AS (
-       SELECT * FROM filtered ORDER BY ${newest ? "decided_on DESC NULLS LAST, score DESC" : "score DESC"} LIMIT $3
+       SELECT * FROM weighed ORDER BY ${newest ? "decided_on DESC NULLS LAST, score DESC" : "score DESC"} LIMIT $3
      ),
      best AS (
+       -- The passage shown: the best-matching chunk — one from the letterhead (the bench, the parties and
+       -- their addresses, before the reasoning starts) counts for a fraction, so "výše" is not found in
+       -- "Vyšehradská 16" while the reasoning speaks of the amount.
        SELECT DISTINCT ON (c.decision_id) c.decision_id, c.char_start, c.char_end
        FROM kept top JOIN mirror.decision_chunk c ON c.decision_id = top.decision_id
+       LEFT JOIN LATERAL (
+         SELECT min((x->>'start')::int) AS at FROM mirror.decision_structure st, jsonb_array_elements(st.sections) x
+         WHERE st.decision_id = top.decision_id AND x->>'kind' IN ('vyrok', 'oduvodneni')
+       ) body ON true
        ORDER BY c.decision_id,
-                coalesce(ts_rank_cd('${RANK_WEIGHTS}'::float4[], c.tsv, to_tsquery('simple', $2::text)), 0) DESC, c.char_start
+                coalesce(ts_rank_cd('${RANK_WEIGHTS}'::float4[], c.tsv, to_tsquery('simple', $2::text)), 0)
+                  * CASE WHEN c.char_end <= coalesce(body.at, 0) THEN ${HEADER_CHUNK_WEIGHT} ELSE 1 END DESC,
+                c.char_start
      )
      SELECT d.source, d.source_id, d.case_number, d.court, d.decision_type, d.category, d.decided_on::text, d.published_on::text, d.ecli, d.url,
             top.score::float8 AS score, coalesce(b.char_start, 0) AS char_start,
