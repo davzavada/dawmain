@@ -185,18 +185,26 @@ describe("mirror routing", () => {
     expect(out).not.toContain("NOT applied");
   });
 
-  it("caselaw_search by provision: words next to it are named as not applied; half a pair and an unreadable § are input errors", async () => {
-    fetchMock.mockImplementation(async () => json({ act: "a", provision: "p", total: 1, sortedBy: "cited", hits: [PROVISION_HIT] }));
-    const withWords = textOf(await MIRROR_TOOLS.caselaw_search({ query: "neplacení nájemného", applies_act: "89/2012", applies_provision: "2291", sources: ["ns"] }));
-    expect(withWords).toContain("The query words were NOT applied");
-    expect(withWords).toContain(`query: '"§ 2291" neplacení nájemného'`);
-    // A provision without its mark takes the one the act uses.
-    expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.get("provision")).toBe("§ 2291");
+  it("caselaw_search: a provision WITH words narrows the search to the decisions citing it; half a pair and an unreadable § are input errors", async () => {
+    fetchMock.mockImplementation(async () => json({ hits: [HIT], channel: "and", terms: [] }));
+    const out = textOf(await MIRROR_TOOLS.caselaw_search({ query: "neplacení nájemného", applies_act: "89/2012", applies_provision: "2291", sources: ["ns"] }));
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    // One search: the words, with the cited provision as its filter — not a list of every citing decision.
+    expect(url.pathname).toBe("/v1/search");
+    expect(Object.fromEntries(url.searchParams)).toMatchObject({ q: "neplacení nájemného", act: "89/2012", provision: "§ 2291", source: "ns" });
+    expect(out).toContain('"neplacení nájemného" — among the decisions citing § 2291 of 89/2012');
+    expect(out).toContain("7 Tdo 1517/2017");
+    // EU law by name goes as one citation the mirror reads.
     fetchMock.mockClear();
-    const half = (await MIRROR_TOOLS.caselaw_search({ applies_act: "89/2012" })) as { isError?: boolean; content: Array<{ text: string }> };
-    expect(half.isError).toBe(true);
-    expect(half.content[0].text).toContain("go together");
+    textOf(await MIRROR_TOOLS.caselaw_search({ query: "oprávněný zájem", applies_act: "GDPR", applies_provision: "čl. 6", sources: ["nss"] }));
+    expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.get("cite")).toBe("čl. 6 GDPR");
+    fetchMock.mockClear();
+    for (const args of [{ applies_act: "89/2012" }, { query: "nájem", applies_act: "89/2012" }]) {
+      const half = (await MIRROR_TOOLS.caselaw_search(args)) as { isError?: boolean; content: Array<{ text: string }> };
+      expect(half.isError).toBe(true);
+      expect(half.content[0].text).toContain("go together");
+    }
     expect(fetchMock).not.toHaveBeenCalled();
     fetchMock.mockImplementation(async () => json({ error: "provision must be like par:2913/o1 or § 2913 odst. 1" }, 400));
     const bad = (await MIRROR_TOOLS.caselaw_search({ applies_act: "89/2012", applies_provision: "???" })) as { isError?: boolean; content: Array<{ text: string }> };
@@ -251,20 +259,36 @@ describe("mirror routing", () => {
     expect(out).toContain("✓ NS: 90000 decisions cite it — newest first (too many to order by citations — narrow with dates)");
   });
 
-  it("justice_search by provision alone is answered from the mirror; with words it goes to the court", async () => {
-    fetchMock.mockImplementation(async () =>
-      json({ act: "a", provision: "p", total: 956, sortedBy: "newest", hits: [{ ...PROVISION_HIT, source: "justice", id: "u-1", caseNumber: "17 C 82/2026", court: "Okresní soud ve Vsetíně", category: null }] }),
-    );
+  it("justice_search: applies_act + applies_section is the mirror's cited-provision filter — alone a counted list, with words a search", async () => {
+    const hit = { ...HIT, source: "justice", id: "u-1", caseNumber: "17 C 82/2026", court: "Okresní soud ve Vsetíně", category: null, form: "rozsudek", chars: 20_000, citedBy: 37 };
+    fetchMock.mockImplementation(async () => json({ hits: [hit], channel: "ident", terms: [], total: 956 }));
     const out = textOf(await MIRROR_TOOLS.justice_search({ applies_act: "89/2012", applies_section: "§ 2291", limit: 1, page: 2, match: "all_words", sort: "published" }));
     const url = new URL(String(fetchMock.mock.calls[0][0]));
-    expect(url.pathname).toBe("/v1/provisions");
-    expect(Object.fromEntries(url.searchParams)).toMatchObject({ act: "89/2012", provision: "§ 2291", source: "justice", sort: "newest", limit: "1", offset: "2" });
-    expect(out).toContain("Obecné soudy citing § 2291 of 89/2012: 956 decisions, newest first — 3–3.");
-    expect(out).toContain("3. 17 C 82/2026 (rozsudek, 2017-12-13) — Okresní soud ve Vsetíně · 1 str. · cit. 37× · names the provision 3× → caselaw_get_decision source: justice, id: u-1");
+    expect(url.pathname).toBe("/v1/search");
+    expect(Object.fromEntries(url.searchParams)).toMatchObject({ act: "89/2012", provision: "§ 2291", source: "justice", sort: "newest", newest_by: "published", limit: "1", offset: "2" });
+    expect(url.searchParams.has("q")).toBe(false);
+    expect(out).toContain("JUSTICE: 956 decisions, newest first — 3–3");
+    expect(out).toContain("3. 7 Tdo 1517/2017".replace("7 Tdo 1517/2017", "17 C 82/2026") + " (rozsudek, 2017-12-13) — Okresní soud ve Vsetíně · 1 str. · cit. 37× → caselaw_get_decision source: justice, id: u-1");
     expect(out).toContain("More: page: 3 (same arguments).");
-    expect(await MIRROR_TOOLS.justice_search({ query: "výpověď", applies_act: "89/2012", applies_section: "§ 2291" })).toEqual({
-      fallback: 'the mirror has no "applies_act" filter',
+    // With words: the same filter on a search by relevance.
+    fetchMock.mockClear();
+    fetchMock.mockImplementation(async () => json({ hits: [hit], channel: "and", terms: [] }));
+    textOf(await MIRROR_TOOLS.justice_search({ query: "výpověď", applies_act: "89/2012", applies_section: "§ 2291", court_codes: ["KSBR"], types: ["JUDGEMENT", "RESOLUTION"], match: "phrase" }));
+    expect(Object.fromEntries(new URL(String(fetchMock.mock.calls[0][0])).searchParams)).toMatchObject({
+      q: "výpověď",
+      act: "89/2012",
+      provision: "§ 2291",
+      court_code: "KSBR",
+      type: "rozsudek,usneseni",
+      match: "phrase",
+      sort: "relevance",
     });
+    // The act alone: every decision citing any provision of it.
+    fetchMock.mockClear();
+    textOf(await MIRROR_TOOLS.justice_search({ applies_act: "262/2006" }));
+    const actOnly = new URL(String(fetchMock.mock.calls[0][0])).searchParams;
+    expect(actOnly.get("act")).toBe("262/2006");
+    expect(actOnly.has("provision")).toBe(false);
   });
 
   it("caselaw_search notes the CJEU instead of dropping it silently; CJEU alone goes live", async () => {
@@ -328,12 +352,72 @@ describe("mirror routing", () => {
     textOf(await MIRROR_TOOLS.ns_search({ query: "újma" }));
   });
 
-  it("falls back on what the mirror cannot do, before any request", async () => {
-    expect(await MIRROR_TOOLS.ns_search({ query: "x", offset: 20 })).toEqual({ fallback: "the mirror answers the first page only" });
-    expect(await MIRROR_TOOLS.nss_search({ query: "x", court: "krajske" })).toHaveProperty("fallback");
+  it("the mirror answers the courts' own filters and any page — the live court only what the mirror holds no data for", async () => {
+    fetchMock.mockImplementation(async () => json({ hits: [HIT], channel: "and", terms: [] }));
+    const sent = async (call: Promise<unknown>): Promise<Record<string, string>> => {
+      fetchMock.mockClear();
+      textOf(await call);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      return Object.fromEntries(new URL(String(fetchMock.mock.calls[0][0])).searchParams);
+    };
+    // NS: a later page, the form, a lower court of its database, the web date.
+    expect(await sent(MIRROR_TOOLS.ns_search({ query: "x", offset: 20, type: "usnesení", court: "Vrchní soud v Praze", published_from: "2026-11-01" }))).toMatchObject({
+      offset: "20",
+      type: "usneseni",
+      court: "Vrchní soud v Praze",
+      published_from: "2026-11-01",
+    });
+    // NSS: the kind of court, the registry, the area, the applied provision in each of its four kinds.
+    expect(await sent(MIRROR_TOOLS.nss_search({ query: "x", court: "rozsireny-senat", registry: "Afs", page: 3 }))).toMatchObject({
+      court_class: "rozsireny",
+      regional: "1",
+      registry: "Afs",
+      offset: "40",
+    });
+    expect(await sent(MIRROR_TOOLS.nss_search({ applies_act: "150/2002", applies_provision: "82" }))).toMatchObject({ act: "150/2002", provision: "§ 82" });
+    expect(await sent(MIRROR_TOOLS.nss_search({ applies_act: "280/2009", applies_provision: "17(2)(a)" }))).toMatchObject({ provision: "§ 17 odst. 2 písm. a)" });
+    expect(await sent(MIRROR_TOOLS.nss_search({ query: "x", applies_eu_regulation: "2016/679", applies_provision: "čl. 6 odst. 1" }))).toMatchObject({ act: "32016R0679", provision: "čl. 6 odst. 1" });
+    expect(await sent(MIRROR_TOOLS.nss_search({ applies_eu_regulation: "1049/2001" }))).toMatchObject({ act: "32001R1049" });
+    expect(await sent(MIRROR_TOOLS.nss_search({ applies_eu_directive: "2004/48/ES", applies_provision: "8" }))).toMatchObject({ act: "32004L0048", provision: "čl. 8" });
+    expect(await sent(MIRROR_TOOLS.nss_search({ applies_treaty: "209/1992" }))).toMatchObject({ act: "209/1992" });
+    expect(await sent(MIRROR_TOOLS.nss_search({ applies_treaty: "10/2010", applies_provision: "3" }))).toMatchObject({ act: "sm:10/2010", provision: "čl. 3" });
+    // ÚS: several forms, the collection, the web date, a later page.
+    expect(await sent(MIRROR_TOOLS.us_search({ query: "x", types: ["nález", "stanovisko"], include_dissents: true, published_to: "2026-01-31", page: 2 }))).toMatchObject({
+      type: "nalez,stanovisko",
+      published_to: "2026-01-31",
+      offset: "40",
+    });
+    // justice: how the words combine, the forms, a later page.
+    expect(await sent(MIRROR_TOOLS.justice_search({ query: "x y", match: "any_word", types: ["ORDER_T"], limit: 10, page: 4 }))).toMatchObject({ match: "any", type: "jine", offset: "40", limit: "10" });
+    // What the mirror never downloaded: the NALUS číselník fields. Those go to the court, before any request.
+    fetchMock.mockClear();
+    expect(await MIRROR_TOOLS.us_search({ query: "x", popular_name: "Data retention" })).toEqual({ fallback: 'the mirror has no "popular_name" filter' });
+    expect(await MIRROR_TOOLS.us_search({ contested_act_number: "106/1999" })).toEqual({ fallback: 'the mirror has no "contested_act_number" filter' });
     expect(await MIRROR_TOOLS.us_search({ query: "x", judge: "Šimíček" })).toEqual({ fallback: 'the mirror has no "judge" filter' });
-    expect(await MIRROR_TOOLS.justice_search({ query: "x", match: "phrase" })).toHaveProperty("fallback");
+    // And two filters whose metadata the mirror holds for part of the decisions only: answering them
+    // from it would silently leave the rest out.
+    expect(await MIRROR_TOOLS.nss_search({ query: "x", area: "Pobyt cizinců" })).toEqual({ fallback: 'the mirror has no "area" filter' });
+    expect(await MIRROR_TOOLS.us_search({ query: "x", only_published: true })).toEqual({ fallback: 'the mirror has no "only_published" filter' });
+    // A call with nothing to search for and nothing to filter by: the live tool says what it needs.
+    expect(await MIRROR_TOOLS.ns_search({ limit: 20, offset: 0 })).toEqual({ fallback: "no query, spisová značka or filter" });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("a filter-only call is a counted list, newest first, with the call for the next page", async () => {
+    fetchMock.mockImplementation(async () => json({ hits: [HIT, { ...HIT, id: "B".repeat(32), caseNumber: "31 Cdo 1/2024" }], channel: "ident", terms: [], total: 352 }));
+    const out = textOf(await MIRROR_TOOLS.ns_search({ category: "A", date_from: "2024-01-01", limit: 2, offset: 4 }));
+    const qs = new URL(String(fetchMock.mock.calls[0][0])).searchParams;
+    expect(qs.has("q")).toBe(false);
+    expect(Object.fromEntries(qs)).toMatchObject({ category: "A", from: "2024-01-01", limit: "2", offset: "4" });
+    expect(out).toContain("NS: 352 decisions, newest first — 5–6");
+    expect(out).toContain("5. 7 Tdo 1517/2017");
+    expect(out).toContain("6. 31 Cdo 1/2024");
+    expect(out).toContain("More: offset: 6 (same arguments).");
+    // The last page says nothing of a next one; an empty one says the list ended.
+    fetchMock.mockImplementation(async () => json({ hits: [HIT], channel: "ident", terms: [], total: 5 }));
+    expect(textOf(await MIRROR_TOOLS.ns_search({ category: "A", limit: 2, offset: 4 }))).not.toContain("More:");
+    fetchMock.mockImplementation(async () => json({ hits: [], channel: "ident", terms: [], total: 5 }));
+    expect(textOf(await MIRROR_TOOLS.ns_search({ category: "A", limit: 2, offset: 6 }))).toContain("No further hits");
   });
 
   it("case_number finds THAT decision (by-case), never the ones citing it", async () => {
@@ -346,7 +430,7 @@ describe("mirror routing", () => {
     expect(url.pathname).toBe("/v1/by-case");
     expect(url.searchParams.get("case")).toBe("26 Cdo 4249/2016");
     expect(url.searchParams.getAll("source")).toEqual(["ns"]);
-    expect(out).toContain("1. 26 Cdo 4249/2016 (rozsudek, 2017-01-18) — Nejvyšší soud → caselaw_get_decision source: ns, id: BD87C5D0B5398F19C12580FF00256234");
+    expect(out).toContain("1. 26 Cdo 4249/2016 (rozsudek, 2017-01-18) → caselaw_get_decision source: ns, id: BD87C5D0B5398F19C12580FF00256234");
   });
 
   it("an ÚS ecli is looked up the same way; a značka the mirror lacks, or one with other filters, goes to the court", async () => {
@@ -356,11 +440,19 @@ describe("mirror routing", () => {
     fetchMock.mockClear();
     fetchMock.mockImplementation(async () => json({ decisions: [] }));
     expect(await MIRROR_TOOLS.nss_search({ case_number: "1 As 113/2012", page: 1 })).toEqual({ fallback: 'the mirror holds no NSS decision with the spisová značka "1 As 113/2012"' });
+    // A značka WITH words or filters stays in the mirror: it becomes the search's own-case filter.
     fetchMock.mockClear();
-    expect(await MIRROR_TOOLS.justice_search({ case_number: "8 Co 60/2025", query: "sazebník", page: 0 })).toEqual({
-      fallback: "the mirror looks a spisová značka up on its own, without other filters",
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
+    fetchMock.mockImplementation(async () => json({ hits: [{ ...HIT, source: "justice", id: "u-9", caseNumber: "8 Co 60/2025", court: "Krajský soud v Brně" }], channel: "and", terms: [] }));
+    const narrowed = textOf(await MIRROR_TOOLS.justice_search({ case_number: "8 Co 60/2025", query: "sazebník", date_from: "2025-01-01", page: 0 }));
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(url.pathname).toBe("/v1/search");
+    expect(Object.fromEntries(url.searchParams)).toMatchObject({ q: "sazebník", own_case: "8 Co 60/2025", from: "2025-01-01", source: "justice" });
+    expect(url.searchParams.has("case")).toBe(false);
+    expect(narrowed).toContain("8 Co 60/2025");
+    // An ÚS ECLI with words: the same.
+    fetchMock.mockClear();
+    textOf(await MIRROR_TOOLS.us_search({ ecli: "ECLI:CZ:US:2011:Pl.US.24.10.1", query: "data retention" }));
+    expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.get("own_case")).toBe("ECLI:CZ:US:2011:Pl.US.24.10.1");
   });
 
   it("justice_search: court_codes go to the mirror, with the other filters", async () => {
@@ -389,8 +481,23 @@ describe("mirror routing", () => {
     expect(answer.content[0].text).toContain('"KSBRNO" is not a justice.cz court code.');
     expect(answer.content[0].text).toContain(`Valid codes: ${JUSTICE_COURT_CODES.join(", ")}.`);
     expect(fetchMock).not.toHaveBeenCalled();
-    // Filters the mirror lacks still go live, where the same check runs.
-    expect(await MIRROR_TOOLS.justice_search({ query: "x", court_codes: ["KSBR"], applies_act: "89/2012" })).toEqual({ fallback: 'the mirror has no "applies_act" filter' });
+    // applies_section without its act is an input error too — said here, not by the court.
+    const lone = (await MIRROR_TOOLS.justice_search({ query: "x", applies_section: "§ 2201" })) as { isError?: boolean; content: Array<{ text: string }> };
+    expect(lone.isError).toBe(true);
+    expect(lone.content[0].text).toContain("applies_section needs applies_act");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("euCelex reads the numbers the courts write: year/number, number/year before 2015, a community suffix", async () => {
+    const { euCelex } = await import("@/src/mcp/tools/mirror-route");
+    expect(euCelex("R", "2016/679")).toBe("32016R0679");
+    expect(euCelex("R", "1049/2001")).toBe("32001R1049");
+    expect(euCelex("R", "1907/2006")).toBe("32006R1907");
+    expect(euCelex("R", "2015/2283")).toBe("32015R2283");
+    expect(euCelex("L", "2004/48/ES")).toBe("32004L0048");
+    expect(euCelex("L", "95/46/ES")).toBe("31995L0046");
+    expect(euCelex("L", "12/34")).toBeNull();
+    expect(euCelex("R", "GDPR")).toBeNull();
   });
 
   it("schema defaults do not count as filters", async () => {

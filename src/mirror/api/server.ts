@@ -13,7 +13,9 @@ import {
   UnsupportedSearch,
   type SearchInput,
   MAX_LIMIT,
+  MAX_OFFSET,
 } from "./queries";
+import { REGISTRY_RE, hasMeta, type CourtClass, type MetaFilters } from "./filters";
 import { renderDecisionHtml } from "./render";
 import { CITED_BY_MAX_LIMIT, citedBySummary, decisionsByCaseNumber, factsOfDecisions, linksOfDecision } from "./citations";
 import { originalOf } from "./original";
@@ -40,6 +42,10 @@ import {
  *
  *   GET /v1/by-case?case=&source=   the decisions carrying that sp. zn. / ECLI as their own
  *   GET /v1/search?q=&source=&court=&type=&category=&from=&to=&case=&limit=   (category: NS A–E, "A,B"; source: "ns,nss")
+ *       &offset=  &match=all|any|phrase  &newest_by=decided|published  &type=nalez,stanovisko
+ *       filters outside the index (./filters.ts): &court_class= &registry= &area= &published_from= &published_to=
+ *       &own_case=  &collection=1 (ÚS: in a Sbírka)  &act=&provision= | &cite=
+ *       — without q or case, the filters list the decisions (with `total`)
  *                  &sort=relevance|newest &regional=1 (NSS with the regional courts) &per_source=N (one lane per court)
  *                  &in=vyrok (the words in výroky only)
  *                  &court_code=KSBR,KSBRJI (rozhodnuti.justice.cz court codes, any of them; with source=justice only)
@@ -223,13 +229,65 @@ export function createMirrorApi(options: {
   bm25.peek();
   const verdictBm25 = stale(() => bm25Ready(db, "decision_verdict_bm25"), 3_600_000, "verdict bm25 index");
   verdictBm25.peek();
+  // The registry's names for `cite` on a search, loaded on the first one that needs them.
+  let searchLookup: Promise<ActLookup> | null = null;
   app.get("/v1/search", async (c) => {
     const q = c.req.query();
     const courts = sources(c.req.queries("source"));
-    if (q.type && !TYPES.has(q.type as DecisionType))
+    // One form or several ("nalez,stanovisko").
+    const types = (q.type ?? "")
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean) as DecisionType[];
+    if (!types.every((t) => TYPES.has(t)))
       throw new BadRequest(
-        "type must be rozsudek, usneseni, nalez, stanovisko or jine",
+        "type must be rozsudek, usneseni, nalez, stanovisko or jine (several: nalez,stanovisko)",
       );
+    const offset = q.offset ? Number(q.offset) : undefined;
+    if (offset !== undefined && !(Number.isInteger(offset) && offset >= 0 && offset <= MAX_OFFSET))
+      throw new BadRequest(`offset must be 0–${MAX_OFFSET} — narrow the search rather than page deeper`);
+    if (q.match && q.match !== "all" && q.match !== "any" && q.match !== "phrase")
+      throw new BadRequest("match must be all, any or phrase");
+    if (q.newest_by && q.newest_by !== "decided" && q.newest_by !== "published")
+      throw new BadRequest("newest_by must be decided or published");
+    // The filters outside the BM25 index (./filters.ts).
+    const meta: MetaFilters = {};
+    if (q.court_class) {
+      if (!["nss", "rozsireny", "krajske", "karne"].includes(q.court_class))
+        throw new BadRequest("court_class must be nss, rozsireny, krajske or karne");
+      meta.courtClass = q.court_class as CourtClass;
+    }
+    if (q.registry) {
+      if (!REGISTRY_RE.test(q.registry.trim())) throw new BadRequest("registry must be a docket registry such as Afs, Azs, Cdo");
+      meta.registry = q.registry.trim();
+    }
+    if (q.area?.trim()) meta.area = q.area.trim().slice(0, 100);
+    meta.publishedFrom = date(q.published_from, "published_from");
+    meta.publishedTo = date(q.published_to, "published_to");
+    if (q.own_case?.trim()) meta.ownCase = q.own_case.trim().slice(0, 120);
+    if (q.collection === "1" || q.collection === "true") meta.inCollection = true;
+    if (q.cite?.trim()) {
+      searchLookup ??= loadActLookup(db).catch((error) => {
+        searchLookup = null;
+        throw error;
+      });
+      const parsed = parseCitation(q.cite.slice(0, 300), await searchLookup);
+      if (!parsed) throw new BadRequest("cite: no § or článek found");
+      if (!parsed.act) throw new BadRequest("cite: the act was not recognised — give its number (zákona č. 89/2012 Sb.) or use act=");
+      meta.act = parsed.act;
+      meta.provision = parsed.provision;
+    }
+    if (q.act) {
+      const act = normalizeAct(q.act);
+      if (!act) throw new BadRequest("act must be like 89/2012, zak:89/2012 or 32016R0679");
+      meta.act = act;
+    }
+    if (q.provision) {
+      const provision = normalizeProvision(q.provision);
+      if (!provision) throw new BadRequest("provision must be like par:2913/o1 or § 2913 odst. 1");
+      if (!meta.act) throw new BadRequest("provision needs act (or use cite)");
+      meta.provision = provision;
+    }
     const limit = q.limit ? Number(q.limit) : undefined;
     if (
       limit !== undefined &&
@@ -237,8 +295,11 @@ export function createMirrorApi(options: {
     ) {
       throw new BadRequest(`limit must be 1–${MAX_LIMIT}`);
     }
-    if (!q.q?.trim() && !q.case?.trim())
-      throw new BadRequest("q or case is required");
+    // Words, a značka, or at least one filter: a call with none of them would list the whole mirror.
+    const filtered =
+      Boolean(courts?.length || types.length || q.from || q.to || q.category || q.court || c.req.queries("court_code")?.length) || hasMeta(meta);
+    if (!q.q?.trim() && !q.case?.trim() && !filtered)
+      throw new BadRequest("q, case or a filter (source, dates, type, court, registry, area, act …) is required");
     if (q.sort && q.sort !== "relevance" && q.sort !== "newest")
       throw new BadRequest("sort must be relevance or newest");
     if (q.in && q.in !== "vyrok") throw new BadRequest("in must be vyrok");
@@ -254,7 +315,11 @@ export function createMirrorApi(options: {
       sources: courts,
       court: q.court || undefined,
       courtCodes: courtCodes(c.req.queries("court_code"), courts),
-      type: (q.type || undefined) as DecisionType | undefined,
+      types: types.length ? types : undefined,
+      meta: hasMeta(meta) ? meta : undefined,
+      match: (q.match || undefined) as SearchInput["match"],
+      offset,
+      newestBy: (q.newest_by || undefined) as SearchInput["newestBy"],
       from: date(q.from, "from"),
       to: date(q.to, "to"),
       caseNumber: q.case || undefined,

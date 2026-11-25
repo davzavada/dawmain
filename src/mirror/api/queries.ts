@@ -5,6 +5,7 @@ import { DOC_PAGE_CHARS, charPage } from "@/src/sources/shared/text";
 import type { Queryable } from "../db/client";
 import type { Structure } from "../structure";
 import { BooleanSyntaxError, booleanSql, hasOperators, parseBoolean, positiveText } from "./boolean";
+import { basePredicates, hasMeta, metaPredicates, resolveMetaIds, type MetaFilters } from "./filters";
 import { MIRROR_SOURCES, type DecisionType, type MirrorSource } from "../types";
 
 /**
@@ -23,6 +24,8 @@ import { MIRROR_SOURCES, type DecisionType, type MirrorSource } from "../types";
  */
 
 export const MAX_LIMIT = 50;
+/** Deepest a list may be paged: past it a query is to be narrowed, not walked. */
+export const MAX_OFFSET = 2000;
 export const EXCERPT_CHARS = 400;
 const RANK_WEIGHTS = "{0.05,0.12,0.2,1.0}";
 /** One identifier match counts like a strong lexical match. */
@@ -76,6 +79,16 @@ export interface SearchInput {
   /** rozhodnuti.justice.cz court codes, any of them (["KSBR", "KSBRJI"]); source justice only. */
   courtCodes?: string[];
   type?: DecisionType;
+  /** Several forms at once (ÚS: nález and stanovisko); with `type`, the union. */
+  types?: DecisionType[];
+  /** The filters the BM25 index does not carry — senate, registry, area, web date, a cited provision, the own značka (./filters.ts). */
+  meta?: MetaFilters;
+  /** How bare words combine: every word (default, "any word" when none has all), any word, or the words as one phrase. */
+  match?: "all" | "any" | "phrase";
+  /** Hits to skip (paging); at most MAX_OFFSET. */
+  offset?: number;
+  /** With sort "newest": by the decision date (default) or by the day the court put it on the web. */
+  newestBy?: "decided" | "published";
   from?: string;
   to?: string;
   /** A case number the decision must carry or cite ("I. ÚS 1169/26"). */
@@ -124,6 +137,34 @@ export interface SearchResult {
   channel: "and" | "or" | "ident" | null;
   terms: string[];
   identKeys: string[];
+  /** How many decisions pass the filters — given where it is counted (a listing without words). */
+  total?: number;
+}
+
+/** The forms asked for: `types`, with the single `type` among them; undefined = any. */
+function formsOf(input: SearchInput): DecisionType[] | undefined {
+  const all = [...(input.types ?? []), ...(input.type ? [input.type] : [])];
+  return all.length ? [...new Set(all)] : undefined;
+}
+
+function pageOf(input: SearchInput): { limit: number; offset: number } {
+  return {
+    limit: Math.min(Math.max(1, Math.floor(input.limit ?? 20)), MAX_LIMIT),
+    offset: Math.min(Math.max(0, Math.floor(input.offset ?? 0)), MAX_OFFSET),
+  };
+}
+
+/** How the meta filters reach one statement: the ids resolved beforehand, or (too many to list) the predicates themselves. */
+interface MetaScope {
+  ids: number[] | null;
+  meta: MetaFilters;
+}
+
+/** Conditions on the decision `d` for a statement that filters its candidates itself. */
+function metaOn(scope: MetaScope | undefined, d: string, params: unknown[]): string[] {
+  if (!scope) return [];
+  if (scope.ids) return [`${d}.id = ANY($${params.push(scope.ids)}::bigint[])`];
+  return metaPredicates(scope.meta, d, params);
 }
 
 interface ChunkRow {
@@ -158,8 +199,26 @@ async function runChannel(
   keys: string[],
   caseKeys: string[],
   within?: number[],
+  scope?: MetaScope,
 ): Promise<ChunkRow[]> {
-  const limit = Math.min(Math.max(1, Math.floor(input.limit ?? 20)), MAX_LIMIT);
+  const { limit, offset } = pageOf(input);
+  const params: unknown[] = [
+    tsquery,
+    keys,
+    input.sources?.length ? input.sources : null,
+    input.court ?? null,
+    formsOf(input) ?? null,
+    input.from ?? null,
+    input.to ?? null,
+    caseKeys,
+    limit + offset,
+    input.categories ?? [],
+    withoutRegional(input),
+    input.sort === "newest",
+    input.courtCodes?.length ? input.courtCodes : null,
+    ...(within ? [within] : []),
+  ];
+  const metaWhere = metaOn(scope, "d", params);
   const { rows } = await db.query<ChunkRow & Record<string, unknown>>(
     `WITH q AS (SELECT CASE WHEN $1::text IS NULL THEN NULL ELSE to_tsquery('simple', $1::text) END AS tsq),
      -- Two channels as UNION ALL, each on its own index: an OR of the two makes the planner read every chunk.
@@ -192,14 +251,14 @@ async function runChannel(
        JOIN mirror.decision d ON d.id = b.decision_id
        WHERE ($3::text[] IS NULL OR d.source = ANY($3))
          AND ($4::text IS NULL OR d.court ILIKE '%' || $4 || '%')
-         AND ($5::text IS NULL OR d.decision_type = $5)
+         AND ($5::text[] IS NULL OR d.decision_type = ANY($5))
          AND ($6::date IS NULL OR d.decided_on >= $6)
          AND ($7::date IS NULL OR d.decided_on <= $7)
          AND (cardinality($8::text[]) = 0 OR EXISTS (
                SELECT 1 FROM mirror.decision_chunk c2 WHERE c2.decision_id = d.id AND c2.ident_keys && $8::text[]))
          AND (cardinality($10::text[]) = 0 OR d.category = ANY($10::text[]))
          AND (NOT $11::boolean OR ${topCourtsOnly("d")})
-         AND ($13::text[] IS NULL OR ${courtCodeIn("d", "$13")})
+         AND ($13::text[] IS NULL OR ${courtCodeIn("d", "$13")})${metaWhere.map((w) => `\n         AND ${w}`).join("")}
        ORDER BY CASE WHEN $12::boolean THEN d.decided_on END DESC NULLS LAST, score DESC, d.decided_on DESC NULLS LAST
        LIMIT $9
      )
@@ -210,23 +269,9 @@ async function runChannel(
             substr(t.body, r.char_start + 1, r.char_end - r.char_start) AS chunk
      FROM top r
      JOIN mirror.decision_text t ON t.decision_id = r.id
-     ORDER BY CASE WHEN $12::boolean THEN r.decided_on END DESC NULLS LAST, r.score DESC, r.decided_on DESC NULLS LAST`,
-    [
-      tsquery,
-      keys,
-      input.sources?.length ? input.sources : null,
-      input.court ?? null,
-      input.type ?? null,
-      input.from ?? null,
-      input.to ?? null,
-      caseKeys,
-      limit,
-      input.categories ?? [],
-      withoutRegional(input),
-      input.sort === "newest",
-      input.courtCodes?.length ? input.courtCodes : null,
-      ...(within ? [within] : []),
-    ],
+     ORDER BY CASE WHEN $12::boolean THEN r.decided_on END DESC NULLS LAST, r.score DESC, r.decided_on DESC NULLS LAST
+     OFFSET ${offset}`,
+    params,
   );
   return rows;
 }
@@ -266,13 +311,17 @@ function toHit(row: ChunkRow, terms: string[], identKeys: string[]): MirrorHit {
  * seconds on common phrases. Czech stems, diacritics folded. The excerpt is the decision's best chunk
  * for the same words (ts_rank_cd), looked up for the hits kept only. `all`: every word (&&&), else any (|||).
  */
-function bm25Where(input: SearchInput, all: boolean, params: unknown[], match?: (params: unknown[]) => string): string {
+function bm25Where(input: SearchInput, all: boolean, params: unknown[], match?: (params: unknown[]) => string, ids?: number[] | null): string {
   // Filters spelled out only when given: the index takes them in, an "$n IS NULL OR …" it would not.
   // `match`: the body predicate of a query with operators (./boolean.ts) in place of "every / any word";
   // $1 stays in the statement, as a parameter nothing refers to has no type.
   const where = [match ? `$1::text IS NOT NULL AND ${match(params)}` : `t.body ${all ? "&&&" : "|||"} $1::text`];
   if (input.sources?.length) where.push(`t.source = ANY($${params.push(input.sources)}::text[])`);
-  if (input.type) where.push(`t.decision_type = $${params.push(input.type)}`);
+  const forms = formsOf(input);
+  if (forms?.length === 1) where.push(`t.decision_type = $${params.push(forms[0])}`);
+  else if (forms) where.push(`t.decision_type = ANY($${params.push(forms)}::text[])`);
+  // The decisions a selective meta filter passes, as a term set on the key field (./filters.ts).
+  if (ids) where.push(`t.decision_id = ANY($${params.push(ids)}::bigint[])`);
   if (input.from) where.push(`t.decided_on >= $${params.push(input.from)}::date`);
   if (input.to) where.push(`t.decided_on <= $${params.push(input.to)}::date`);
   if (input.categories?.length) where.push(`t.category = ANY($${params.push(input.categories)}::text[])`);
@@ -300,18 +349,22 @@ async function runBm25(
   all: boolean,
   tsquery: string | null,
   match?: (params: unknown[]) => string,
+  scope?: MetaScope,
 ): Promise<ChunkRow[]> {
-  const limit = Math.min(Math.max(1, Math.floor(input.limit ?? 20)), MAX_LIMIT);
-  const params: unknown[] = [text, tsquery, limit];
-  const where = bm25Where(input, all, params, match);
+  const { limit, offset } = pageOf(input);
+  // $3 = how many of the best are kept: the page asked for and everything before it.
+  const params: unknown[] = [text, tsquery, limit + offset];
+  const where = bm25Where(input, all, params, match, scope?.ids);
   const newest = input.sort === "newest";
   // The court is not in the index: the BM25-first candidates, then the court, then the prior, then the limit.
   const courts = [
     input.court ? `d.court ILIKE '%' || $${params.push(input.court)} || '%'` : "",
     input.courtCodes?.length ? courtCodeIn("d", `$${params.push(input.courtCodes)}`) : "",
     withoutRegional(input) ? topCourtsOnly("d") : "",
+    // A meta filter too broad to list by id: checked on the BM25 candidates, like the court's name.
+    ...(scope && !scope.ids ? metaPredicates(scope.meta, "d", params) : []),
   ].filter(Boolean);
-  const pool = newest ? "$3" : String(RERANK_CANDIDATES);
+  const pool = newest ? "$3" : String(Math.max(RERANK_CANDIDATES, limit + offset));
   const { rows } = await db.query<ChunkRow & Record<string, unknown>>(
     `WITH top AS (
        SELECT t.decision_id, pdb.score(t.decision_id) AS score
@@ -343,7 +396,8 @@ async function runBm25(
      JOIN mirror.decision d ON d.id = top.decision_id
      JOIN mirror.decision_text t ON t.decision_id = top.decision_id
      LEFT JOIN best b ON b.decision_id = top.decision_id
-     ORDER BY ${newest ? "d.decided_on DESC NULLS LAST, top.score DESC" : "top.score DESC, d.decided_on DESC NULLS LAST"}`,
+     ORDER BY ${newest ? "d.decided_on DESC NULLS LAST, top.score DESC" : "top.score DESC, d.decided_on DESC NULLS LAST"}
+     OFFSET ${offset}`,
     params,
   );
   return rows;
@@ -375,7 +429,7 @@ async function runVerdict(db: Queryable, input: SearchInput, text: string, all: 
       "$1::text IS NOT NULL",
       like,
       input.sources?.length ? `v.source = ANY($${params.push(input.sources)}::text[])` : "",
-      input.type ? `v.decision_type = $${params.push(input.type)}` : "",
+      formsOf(input) ? `v.decision_type = ANY($${params.push(formsOf(input))}::text[])` : "",
       input.from ? `v.decided_on >= $${params.push(input.from)}::date` : "",
       input.to ? `v.decided_on <= $${params.push(input.to)}::date` : "",
       input.categories?.length ? `v.category = ANY($${params.push(input.categories)}::text[])` : "",
@@ -411,9 +465,9 @@ async function courtDecisionIds(db: Queryable, input: SearchInput, limit: number
     `SELECT d.id::text AS id FROM mirror.decision d
      WHERE ${courtCodeIn("d", "$1")}
        AND ($2::date IS NULL OR d.decided_on >= $2) AND ($3::date IS NULL OR d.decided_on <= $3)
-       AND ($4::text IS NULL OR d.decision_type = $4)
+       AND ($4::text[] IS NULL OR d.decision_type = ANY($4))
      LIMIT $5`,
-    [input.courtCodes, input.from ?? null, input.to ?? null, input.type ?? null, limit],
+    [input.courtCodes, input.from ?? null, input.to ?? null, formsOf(input) ?? null, limit],
   );
   return rows.map((r) => Number(r.id));
 }
@@ -426,6 +480,66 @@ export class UnsupportedSearch extends Error {}
  * word" fallback: the reader spelled the logic out, and an empty answer is the answer. The excerpt and
  * its marks come from what the query asks to find, not from what it excludes.
  */
+/** Characters of text a listed decision is shown with. */
+const LIST_CHUNK_CHARS = 1600;
+/** How far before a cited provision its excerpt starts. */
+const LIST_BEFORE_CHARS = 150;
+
+/**
+ * A search without words: the decisions passing the filters, newest first (by
+ * the decision date, or by the day they were put on the web), with their
+ * count. What the courts' forms answer to "everything of the rozšířený senát
+ * since 2024", "what the NS published this week", "decisions applying § 82
+ * s. ř. s." — a filter-only call used to go to the live court. The excerpt
+ * is the text around the cited provision when one is asked for, else the
+ * právní věta, else the výrok (the opening of a text is its letterhead), else
+ * the opening of the text.
+ */
+async function listDecisions(db: Queryable, input: SearchInput): Promise<SearchResult> {
+  const { limit, offset } = pageOf(input);
+  const meta = input.meta ?? {};
+  const params: unknown[] = [];
+  const where = [
+    ...basePredicates({ sources: input.sources, types: formsOf(input), from: input.from, to: input.to, categories: input.categories }, "d", params),
+    ...metaPredicates(meta, "d", params),
+    input.court ? `d.court ILIKE '%' || $${params.push(input.court)} || '%'` : "",
+    input.courtCodes?.length ? courtCodeIn("d", `$${params.push(input.courtCodes)}`) : "",
+    withoutRegional(input) && !meta.courtClass ? topCourtsOnly("d") : "",
+  ].filter(Boolean);
+  const filter = where.length ? where.join(" AND ") : "true";
+  const order = input.newestBy === "published" ? "d.published_on DESC NULLS LAST, d.id DESC" : "d.decided_on DESC NULLS LAST, d.id DESC";
+  const { rows: count } = await db.query<{ n: string }>(`SELECT count(*) AS n FROM mirror.decision d WHERE ${filter}`, params);
+  const provision = meta.act
+    ? `(SELECT min(p.first_at) FROM mirror.decision_provision p WHERE p.decision_id = d.id AND p.act_id = $${params.push(meta.act)}::text${
+        meta.provision ? ` AND p.provision = $${params.push(meta.provision)}::text` : ""
+      })`
+    : "NULL::int";
+  const { rows } = await db.query<ChunkRow & Record<string, unknown>>(
+    `WITH page AS (
+       SELECT d.id, ${provision} AS at FROM mirror.decision d WHERE ${filter} ORDER BY ${order} LIMIT ${limit} OFFSET ${offset}
+     )
+     SELECT d.source, d.source_id, d.case_number, d.court, d.decision_type, d.category, d.decided_on::text, d.published_on::text, d.ecli, d.url,
+            0::float8 AS score, greatest(0, coalesce(page.at, 0) - ${LIST_BEFORE_CHARS}) AS char_start,
+            (SELECT array_agg(x.char_start ORDER BY x.ord) FROM mirror.decision_dissent x WHERE x.decision_id = d.id) AS dissent_starts,
+            CASE WHEN page.at IS NULL AND coalesce(d.legal_sentence, '') <> '' THEN d.legal_sentence
+                 WHEN page.at IS NULL AND coalesce(v.body, '') <> '' THEN v.body
+                 ELSE coalesce(substr(t.body, greatest(1, coalesce(page.at, 0) + 1 - ${LIST_BEFORE_CHARS}), ${LIST_CHUNK_CHARS}), '') END AS chunk
+     FROM page JOIN mirror.decision d ON d.id = page.id LEFT JOIN mirror.decision_text t ON t.decision_id = d.id
+     LEFT JOIN mirror.decision_verdict v ON v.decision_id = d.id
+     ORDER BY ${order}`,
+    params,
+  );
+  return { hits: rows.map((r) => toHit(r, [], [])), channel: "ident", terms: [], identKeys: [], total: Number(count[0]?.n ?? 0) };
+}
+
+/** The meta filters of a search with words, resolved once: ids when selective, the predicates otherwise; undefined without any. */
+async function scopeOf(db: Queryable, input: SearchInput): Promise<MetaScope | undefined> {
+  const meta = input.meta;
+  if (!meta || !hasMeta(meta)) return undefined;
+  const ids = await resolveMetaIds(db, meta, { sources: input.sources, types: formsOf(input), from: input.from, to: input.to, categories: input.categories });
+  return { ids, meta };
+}
+
 async function searchBoolean(db: Queryable, input: SearchInput, query: string): Promise<SearchResult> {
   if (input.in === "vyrok") throw new UnsupportedSearch("search operators are not read in výroky (in=vyrok) — plain words only");
   if (input.caseNumber) throw new UnsupportedSearch("search operators and the case filter do not combine");
@@ -441,16 +555,22 @@ async function searchBoolean(db: Queryable, input: SearchInput, query: string): 
   }
   const found = positiveText(tree);
   const ts = buildTsQuery(found, { loneStopwords: true });
-  const rows = await runBm25(db, input, found, true, ts.or ?? ts.and, (params) => booleanSql(tree, "t.body", params));
+  const scope = await scopeOf(db, input);
+  if (scope?.ids?.length === 0) return { hits: [], channel: "and", terms: ts.terms, identKeys: [] };
+  const rows = await runBm25(db, input, found, true, ts.or ?? ts.and, (params) => booleanSql(tree, "t.body", params), scope);
   return { hits: rows.map((r) => toHit(r, ts.terms, [])), channel: "and", terms: ts.terms, identKeys: [] };
 }
 
 export async function searchDecisions(db: Queryable, input: SearchInput): Promise<SearchResult> {
   const query = input.q?.trim() ?? "";
+  // Nothing to search for and nothing to cite: the filters alone list the decisions that pass them.
+  if (!query && !input.caseNumber) return listDecisions(db, input);
   if (query && hasOperators(query)) return searchBoolean(db, input, query);
   const p = plan(input);
   const keys = [...new Set([...p.keys, ...p.caseKeys])];
   if (!p.tsAnd && keys.length === 0) return { hits: [], channel: null, terms: [], identKeys: [] };
+  const scope = await scopeOf(db, input);
+  if (scope?.ids?.length === 0) return { hits: [], channel: "and", terms: p.terms, identKeys: keys };
   if (input.in === "vyrok") {
     if (keys.length) throw new UnsupportedSearch("in=vyrok takes words only, not a sp. zn., § or ECLI");
     const words = input.q ? input.q.trim() : "";
@@ -465,21 +585,23 @@ export async function searchDecisions(db: Queryable, input: SearchInput): Promis
   // BM25 for words alone (the court-name filter on its first candidates); identifiers (sp. zn., §, the case filter) keep the chunk channels.
   const words = input.q ? stripIdentifiers(input.q).trim() : "";
   if (input.bm25 && p.tsAnd && words && keys.length === 0) {
-    let rows = await runBm25(db, input, words, true, p.tsAnd);
+    // match "phrase": the words side by side in this order; "any": any of them, said as asked for (not as a fallback).
+    const phrase = input.match === "phrase" ? (params: unknown[]) => `t.body ### $${params.push(words.replace(/["„“”‟«»]/g, " ").trim())}::text` : undefined;
+    let rows = input.match === "any" ? [] : await runBm25(db, input, words, true, p.tsAnd, phrase, scope);
     let channel: SearchResult["channel"] = "and";
-    if (rows.length === 0) {
-      channel = "or";
-      rows = await runBm25(db, input, words, false, p.tsOr ?? p.tsAnd);
+    if (rows.length === 0 && !phrase) {
+      channel = input.match === "any" ? "and" : "or";
+      rows = await runBm25(db, input, words, false, p.tsOr ?? p.tsAnd, undefined, scope);
     }
     // The court code is checked on BM25's first candidates only: a small court under a common phrase
     // gets fewer hits than it has. Such a court is searched whole instead, chunk by chunk.
     const limit = Math.min(Math.max(1, Math.floor(input.limit ?? 20)), MAX_LIMIT);
     if (input.courtCodes?.length && rows.length < limit) {
       const own = await courtDecisionIds(db, input, COURT_EXACT_MAX + 1);
-      if (own.length > 0 && own.length <= COURT_EXACT_MAX) {
-        let exact = await runChannel(db, input, p.tsAnd, [], [], own);
+      if (own.length > 0 && own.length <= COURT_EXACT_MAX && !phrase && input.match !== "any") {
+        let exact = await runChannel(db, input, p.tsAnd, [], [], own, scope);
         const exactChannel: SearchResult["channel"] = exact.length || !p.tsOr ? "and" : "or";
-        if (exact.length === 0 && p.tsOr) exact = await runChannel(db, input, p.tsOr, [], [], own);
+        if (exact.length === 0 && p.tsOr) exact = await runChannel(db, input, p.tsOr, [], [], own, scope);
         if (exact.length > rows.length || (exactChannel === "and" && channel === "or" && exact.length > 0)) {
           rows = exact;
           channel = exactChannel;
@@ -493,10 +615,10 @@ export async function searchDecisions(db: Queryable, input: SearchInput): Promis
   // The case filter alone is not a search query; with nothing else, it lists that case's decisions.
   const rankKeys = p.tsAnd || p.keys.length ? p.keys : p.caseKeys;
   let channel: SearchResult["channel"] = p.tsAnd ? "and" : "ident";
-  let rows = await runChannel(db, input, p.tsAnd, rankKeys, p.caseKeys, within);
+  let rows = await runChannel(db, input, p.tsAnd, rankKeys, p.caseKeys, within, scope);
   if (rows.length === 0 && p.tsOr) {
     channel = "or";
-    rows = await runChannel(db, input, p.tsOr, rankKeys, p.caseKeys, within);
+    rows = await runChannel(db, input, p.tsOr, rankKeys, p.caseKeys, within, scope);
   }
   return { hits: rows.map((r) => toHit(r, p.terms, keys)), channel, terms: p.terms, identKeys: keys };
 }

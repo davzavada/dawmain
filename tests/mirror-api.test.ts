@@ -449,6 +449,88 @@ describe("structure and the search in výroky", () => {
   });
 });
 
+describe("filters outside the index, paging and listings (GET /v1/search)", () => {
+  const ids = async (query: string): Promise<string[]> => ((await (await get(`/v1/search?${query}`)).json()).hits as Array<{ id: string }>).map((h) => h.id);
+
+  it("without words the filters list the decisions that pass them, newest first, with their count", async () => {
+    const all = await (await get("/v1/search?source=us")).json();
+    expect(all.total).toBeGreaterThanOrEqual(2);
+    expect(all.hits.map((h: { date: string }) => h.date)).toEqual([...all.hits.map((h: { date: string }) => h.date)].sort().reverse());
+    const nalezy = await (await get("/v1/search?source=us&type=nalez")).json();
+    expect(nalezy.channel).toBe("ident");
+    expect(nalezy.total).toBe(nalezy.hits.length);
+    expect(nalezy.hits.every((h: { form: string }) => h.form === "nalez")).toBe(true);
+    const ours = nalezy.hits.find((h: { id: string }) => h.id === "4-296-24_1");
+    // The právní věta is the excerpt where the decision has one.
+    expect(ours.excerpt).toContain("Promlčení");
+    const dated = await (await get("/v1/search?source=us&from=2025-06-18&to=2025-06-18")).json();
+    expect(dated.hits.map((h: { id: string }) => h.id)).toContain("4-296-24_1");
+    expect(dated.hits.every((h: { date: string }) => h.date === "2025-06-18")).toBe(true);
+  });
+
+  it("several forms at once; a form nobody has lists nothing", async () => {
+    expect(await ids("source=us&type=nalez,usneseni&from=2025-01-01&to=2025-12-31")).toEqual(expect.arrayContaining(["4-296-24_1", "1-10-25_1"]));
+    expect((await (await get("/v1/search?source=us&type=stanovisko")).json()).total).toBe(0);
+    expect((await get("/v1/search?source=us&type=nalez,verdikt")).status).toBe(400);
+  });
+
+  it("pages with offset — a listing and a search alike", async () => {
+    const first = await ids("source=us&from=2025-01-01&to=2025-12-31&limit=1");
+    const second = await ids("source=us&from=2025-01-01&to=2025-12-31&limit=1&offset=1");
+    expect(first).toHaveLength(1);
+    expect(second).toHaveLength(1);
+    expect(second[0]).not.toBe(first[0]);
+    const words = "q=" + encodeURIComponent("promlčení");
+    const both = await ids(`${words}&source=us`);
+    expect(both.length).toBeGreaterThanOrEqual(2);
+    expect(await ids(`${words}&source=us&limit=1&offset=1`)).toEqual([both[1]]);
+    expect((await get(`/v1/search?${words}&offset=999999`)).status).toBe(400);
+  });
+
+  it("a cited provision is a filter: alone it lists the decisions citing it, with words it narrows the search", async () => {
+    const cite = "cite=" + encodeURIComponent("§ 2913 odst. 1 zákona č. 89/2012 Sb.");
+    const listed = await (await get(`/v1/search?${cite}`)).json();
+    expect(listed).toMatchObject({ total: 1 });
+    expect(listed.hits[0].id).toBe("1-10-25_1");
+    // The excerpt is the text around the citation, not the opening of the decision.
+    expect(listed.hits[0].excerpt).toContain("§ 2913 odst. 1 písm. b)");
+    expect(await ids("act=89/2012&provision=par:2913")).toEqual(["1-10-25_1"]);
+    expect(await ids("act=89/2012")).toEqual(["1-10-25_1"]);
+    // Both decisions speak of promlčení; only one cites § 2913.
+    expect(await ids(`q=${encodeURIComponent("promlčení")}&${cite}`)).toEqual(["1-10-25_1"]);
+    expect(await ids(`q=${encodeURIComponent("promlčení")}&act=89/2012&provision=par:2914`)).toEqual([]);
+    expect((await get("/v1/search?provision=par:2913")).status).toBe(400);
+    expect((await get("/v1/search?act=nonsense")).status).toBe(400);
+  });
+
+  it("own_case is THAT decision, and combines with words — case= also finds the ones citing it", async () => {
+    const own = "own_case=" + encodeURIComponent("IV. ÚS 296/24");
+    expect(await ids(own)).toEqual(["4-296-24_1"]);
+    expect(await ids(`${own}&q=${encodeURIComponent("promlčení")}`)).toEqual(["4-296-24_1"]);
+    expect(await ids(`${own}&q=${encodeURIComponent("zmeškaný dostavník")}`)).toEqual([]);
+    expect(await ids("own_case=" + encodeURIComponent("ECLI:CZ:US:2025:4.US.296.24.1"))).toEqual(["4-296-24_1"]);
+    // A značka nobody carries matches nothing — never "no filter".
+    expect((await (await get("/v1/search?own_case=" + encodeURIComponent("I. ÚS 9999/99"))).json()).total).toBe(0);
+  });
+
+  it("the registry is the letters of the spisová značka; the web date is a range", async () => {
+    expect(await ids("source=us&registry=" + encodeURIComponent("ÚS"))).toEqual(expect.arrayContaining(["4-296-24_1", "1-10-25_1"]));
+    expect((await (await get("/v1/search?source=us&registry=Cdo")).json()).total).toBe(0);
+    expect((await get("/v1/search?source=us&registry=" + encodeURIComponent("Cdo; DROP"))).status).toBe(400);
+    // Nothing in the fixture carries a publication date.
+    expect((await (await get("/v1/search?source=us&published_from=2020-01-01")).json()).total).toBe(0);
+    expect((await get("/v1/search?source=us&published_from=yesterday")).status).toBe(400);
+  });
+
+  it("refuses a call with nothing to search for and nothing to filter by, and unknown values of the new parameters", async () => {
+    expect((await get("/v1/search")).status).toBe(400);
+    expect((await get("/v1/search?limit=5")).status).toBe(400);
+    expect((await get("/v1/search?source=us&match=fuzzy")).status).toBe(400);
+    expect((await get("/v1/search?source=us&newest_by=name")).status).toBe(400);
+    expect((await get("/v1/search?source=us&court_class=okresni")).status).toBe(400);
+  });
+});
+
 describe("GET /v1/decisions/:source/:id/citations", () => {
   it("links the citing decision and the cited one, both ways", async () => {
     const citing = await (await get("/v1/decisions/us/1-10-25_1/citations")).json();
