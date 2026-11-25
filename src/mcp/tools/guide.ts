@@ -83,11 +83,18 @@ export function tailorManual(body: string, off: GatedSource[]): string {
     text = text.slice(0, start) + (next < 0 ? "" : text.slice(next));
   }
   const names = off.map((source) => GATED_SECTIONS[source].label).join(", ");
+  // What the connection DOES have, said outright: the server instructions tell the model to search
+  // exactly the own sources this note names as available, so a silent omission would read as "none".
+  const on = (Object.keys(GATED_SECTIONS) as GatedSource[]).filter((source) => !off.includes(source));
+  const available = on.length
+    ? ` **Available here: ${on.map((source) => GATED_SECTIONS[source].label).join(", ")}** — search ${on.length > 1 ? "them" : "it"} in your next turn.`
+    : "";
   const note =
     `> **Not available on this connection: ${names}.** Their sections are left out of this manual. ` +
-    "Do not call these tools in this conversation and skip every step below that names them — the first round is the official sources only" +
+    "Do not call these tools in this conversation and skip every step below that names them" +
+    (on.length ? "" : " — the research runs on the official sources only") +
     (off.includes("ukaz") ? "; the memo then has no „Další zdroje“ literature section" : "") +
-    ". If the user asks for one of them, say it is switched on per account on the Dawmain website.";
+    `.${available} If the user asks for one that is unavailable, say it is switched on per account on the Dawmain website.`;
   const titleEnd = text.indexOf("\n");
   return titleEnd < 0 ? `${note}\n\n${text}` : `${text.slice(0, titleEnd)}\n\n${note}${text.slice(titleEnd)}`;
 }

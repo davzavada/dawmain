@@ -9,7 +9,9 @@
  * not found" (measured on the day of the change, from a session that had
  * connected an hour earlier). The server is stateless and cannot tell those
  * clients the list changed, so the old call is rewritten into the new one
- * before the request reaches the handler: same decision, same answer, and the
+ * before the request is authenticated and handled (app/api/mcp/route.ts —
+ * before, because the verified caller travels on the request object and a
+ * request rebuilt after authentication would lose it): same decision, same answer, and the
  * hit lines in that answer teach the new name.
  *
  * Only tools/call is touched; tools/list shows the new tool alone.

@@ -482,6 +482,38 @@ describe("getPspDocument — attached files", () => {
     expect(converters.pdf).toHaveBeenCalledWith(expect.anything(), [61, 120]);
   });
 
+  it("find runs through the whole PDF, not the first window: the důvodová zpráva to a § sits a thousand pages in", async () => {
+    const { readPspDocument, pdfNotes } = await import("@/src/mcp/tools/psp");
+    // 200 pages; "K § 2291" is on page 150, i.e. in the third 60-page window.
+    const scan = {
+      pdf: vi.fn(async (_bytes: ArrayBuffer, range: [number, number]) => ({
+        text: `⟦s. ${range[0]}⟧ návrh zákona${range[0] <= 150 && 150 <= range[1] ? "\nK § 2291:\nVýpověď bez výpovědní doby." : ""}`,
+        pages: 200,
+        range,
+        warnings: [],
+      })),
+      docx: vi.fn(async () => ""),
+    };
+    setDocumentConverters(scan);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new TextEncoder().encode("%PDF-1.4 scan-all"))));
+    const found = await readPspDocument(71990, undefined, "K § 2291");
+    expect(found.pdf).toMatchObject({ pages: 200, range: [1, 200] });
+    expect(found.text).toContain("K § 2291:\nVýpověď bez výpovědní doby.");
+    expect(scan.pdf.mock.calls.map(([, range]) => range)).toEqual([[1, 60], [61, 120], [121, 180], [181, 200]]);
+    expect(pdfNotes(found, false, "K § 2291")).toEqual(["PDF: pages 1–200 of 200 searched."]);
+    // Without find it is one window, as before — and the note says how to go on.
+    scan.pdf.mockClear();
+    const page = await readPspDocument(71991, "61-120", undefined);
+    expect(page.pdf).toMatchObject({ range: [61, 120] });
+    expect(scan.pdf).toHaveBeenCalledTimes(1);
+    expect(pdfNotes(page, false, undefined)).toEqual(["PDF: pages 61–120 of 200 converted.", '(continue without asking the user: pdf_pages: "121-180")']);
+    // A search that ran out of time says where it stopped.
+    expect(pdfNotes({ ...page, pdf: { pages: 1144, range: [1, 540], warnings: [] } }, false, "x")[1]).toBe(
+      '(the search stopped at page 540 of 1144 — continue without asking the user: pdf_pages: "541" with the same find)',
+    );
+    setDocumentConverters();
+  });
+
   it("a legacy .doc is fetched again as the PDF rendition (psp.cz's 'Verze PDF', &pdf=1); without one the caller is sent to the file", async () => {
     const urls: string[] = [];
     vi.stubGlobal(

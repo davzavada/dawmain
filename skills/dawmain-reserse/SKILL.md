@@ -982,19 +982,16 @@ Stopping the search never shortens the reading: what you cite, you have read who
    `justice_search` to the same turn when the question is about everyday practice
    rather than doctrine ("jak to soudy běžně řeší", "co dostanu za…"), or when you
    already know the provision — `applies_act` + `applies_section` costs nothing extra
-   and needs no keywords. Always add `files_search` to the same turn — the user's own
-   books, commentaries and articles come first: read what they hold on the point
-   (`files_get_document`) and build the argument on it where it fits. An answer that
-   the account has no library ends `files_*` for the conversation, silently. When
-   `zotero_search` is among your tools, add it to the same turn as well — the works, decisions and notes the user
-   collected in Zotero (`zotero_get_item` for the ones on point); a refusal ends
-   `zotero_*` for the conversation, silently. Always
-   add `doctrine_search` too: the UKAŽ catalogue gives the works worth going through
-   next (see **Další zdroje** in the memo); when the case law is thin or the topic is
-   international law, doctrine may carry the argument itself — the Central Discovery
-   Index carries the international journals and series too. UKAŽ is switched on per
-   account: an answer that it is not enabled ends `doctrine_*` for the conversation,
-   silently, and the memo then has no **Další zdroje**.
+   and needs no keywords. **Own sources — only those this connection has** (the note
+   at the top of this manual lists the unavailable ones; never call those): `files_search`
+   — the user's own books, commentaries and articles come first: read what they hold on
+   the point (`files_get_document`) and build the argument on it where it fits;
+   `zotero_search` — the works, decisions and notes the user collected
+   (`zotero_get_item` for the ones on point); `doctrine_search` — the UKAŽ catalogue
+   gives the works worth going through next (**Další zdroje** in the memo), and where
+   case law is thin or the topic is international law, doctrine may carry the argument
+   itself. Send them with this turn when you already have the manual, else with the
+   next one, beside your reading. Without UKAŽ the memo has no **Další zdroje**.
 3. **Screen and aim.** From the hit lines and previews pick the decisions that may
    decide the issue; `find` in the doubtful ones; a court-specific search where the
    fan-out was too coarse — with that court's reference (`dawmain_guide {topics: [...]}`)

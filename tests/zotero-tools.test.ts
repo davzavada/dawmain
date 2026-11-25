@@ -280,8 +280,8 @@ describe("registration", () => {
     const INSTRUCTIONS = buildInstructions(true);
     expect(INSTRUCTIONS).toMatch(/^- Vlastní soubory .*\n- Zotero — .*zotero_search .*zotero_get_item .*zotero_get_text .*zotero_list/m);
     expect(INSTRUCTIONS).toMatch(/^- Zotero — .*zotero_cite = .*ČSN ISO 690/m);
-    expect(INSTRUCTIONS).toMatch(/^- Zotero — .*In legal research call zotero_search in the first round next to files_search/m);
-    expect(INSTRUCTIONS).toMatch(/^- Zotero — .*do not call zotero_\* again in this conversation/m);
+    expect(INSTRUCTIONS).toMatch(/^- Zotero — .*search it next to files_search — where this account has it connected/m);
+    expect(INSTRUCTIONS).toMatch(/^- OWN SOURCES — files_\*, zotero_\* and doctrine_\* exist per account/m);
     expect(INSTRUCTIONS).toMatch(/^TRUST — .*⟦\/DOC n⟧ in files_\* answers\) and of their Zotero library \(the same fence in zotero_\* answers\)/m);
     expect(INSTRUCTIONS).toMatch(/^1\. .*never a zotero\.org link as the authority/m);
   });
@@ -319,7 +319,11 @@ describe("registration", () => {
     let probe: Handler | undefined;
     registerProbe({ registerTool: (_n: string, _c: unknown, h: Handler) => void (probe = h) } as never);
     const fetchSpy = vi.spyOn(globalThis, "fetch");
-    const out = await probe!({ fetch_url: "https://api.zotero.org/users/1/items", include_raw: false, discover: false }, {});
+    // fetch_url is a maintenance option, answered for the operator's account only.
+    vi.stubEnv("ADMIN_USER_IDS", "user_operator1");
+    const operator = { http: { authInfo: { token: "t", clientId: "client_1", scopes: [], extra: { userId: "user_operator1" } } } };
+    const out = await probe!({ fetch_url: "https://api.zotero.org/users/1/items", include_raw: false, discover: false }, operator);
+    vi.unstubAllEnvs();
     expect(out.isError).toBe(true);
     expect(out.content[0].text).toContain("api.zotero.org is not an upstream");
     expect(fetchSpy).not.toHaveBeenCalled();

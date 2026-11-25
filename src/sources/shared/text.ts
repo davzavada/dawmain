@@ -105,6 +105,8 @@ const EXCERPT_CONTEXT_CHARS = 500;
 /** How far back a window may grow to reach the start of its paragraph. */
 const PARAGRAPH_REACH_CHARS = 1_200;
 export const MAX_EXCERPT_WINDOWS = 8;
+/** A matched line shorter than this is taken for a heading, and its excerpt runs on into the text below it. */
+const HEADING_LINE_CHARS = 100;
 
 function foldChar(char: string): string {
   // Astral characters (surrogate pairs) occupy TWO UTF-16 units — emit them
@@ -192,10 +194,19 @@ function findExcerptsFolded(
     const paragraphStart = text.lastIndexOf("\n", index - 1) + 1;
     const start = index - paragraphStart <= paragraphReach ? paragraphStart : Math.max(0, index - contextChars);
     const paragraphEnd = text.indexOf("\n", matchEnd);
-    const end = Math.min(
+    let end = Math.min(
       text.length,
       paragraphEnd === -1 ? matchEnd + contextChars : Math.min(paragraphEnd, matchEnd + contextChars),
     );
+    // A match in a heading ("K § 2291:", "Článek 17") is a line of its own: the excerpt was the bare
+    // heading and none of what it heads. A short line that does not end like a sentence takes the text
+    // after it, up to the context length, ended at a line break or a word.
+    if (end - start < HEADING_LINE_CHARS && end < text.length && !/[.;,!?…]\s*$/.test(text.slice(start, end))) {
+      const limit = Math.min(text.length, matchEnd + contextChars);
+      const line = text.lastIndexOf("\n", limit - 1);
+      const space = text.lastIndexOf(" ", limit - 1);
+      end = limit === text.length ? limit : line > end ? line : space > end ? space : limit;
+    }
     const last = windows[windows.length - 1];
     if (last && start <= last[1]) last[1] = Math.max(last[1], end);
     else windows.push([start, end]);

@@ -48,14 +48,14 @@
             {
               "description": "Supreme Court case law on a provision of the Civil Code",
               "prompt": "Najdi rozhodnutí Nejvyššího soudu k odpovědnosti za škodu z provozu dopravního prostředku podle § 2927 občanského zákoníku.",
-              "tools_triggered": "dawmain_guide, ns_search, caselaw_get_decision",
-              "expected_behavior": "Calls dawmain_guide, searches NS decisions, reads at least one decision and answers in Czech citing each decision by its spisová značka with a link to rozhodnuti.nsoud.cz."
+              "tools_triggered": "dawmain_guide, caselaw_search, caselaw_get_decision",
+              "expected_behavior": "Calls dawmain_guide, searches the decisions citing § 2927 (caselaw_search, possibly ns_search), reads at least one decision and answers in Czech citing each decision by its spisová značka with a link to rozhodnuti.nsoud.cz."
             },
             {
               "description": "Current wording of a statutory provision",
               "prompt": "Jak aktuálně zní § 52 zákoníku práce (zákon č. 262/2006 Sb.)?",
-              "tools_triggered": "esbirka_search, esbirka_get_text",
-              "expected_behavior": "Finds act 262/2006 Sb. in e-Sbírka, returns the current wording of § 52 and links to e-sbirka.cz."
+              "tools_triggered": "esbirka_get_text",
+              "expected_behavior": "Reads § 52 of act 262/2006 Sb. from e-Sbírka and returns its current wording, naming the version it quotes (in force from–to); the statute is cited by § and number, without a link."
             },
             {
               "description": "Constitutional Court case law",

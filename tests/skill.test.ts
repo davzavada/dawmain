@@ -110,12 +110,12 @@ describe("SKILL.md is pinned to the registered tool surface", () => {
   it("every rešerše searches the user's own documents first and closes with UKAŽ works to go through", () => {
     expect(SKILL).not.toMatch(/once per conversation/i);
     expect(SKILL).toContain("Every research question starts in the user's own documents.");
-    expect(SKILL).toContain("Always add `files_search` to the same turn");
-    // A connection without a library answers once and is left alone.
-    expect(SKILL).toContain("the account has no library ends `files_*` for the conversation");
-    expect(SKILL).toContain("add `doctrine_search` too");
-    // UKAŽ is switched on per account: a refusal ends doctrine_* for the conversation, silently.
-    expect(SKILL).toContain("an answer that it is not enabled ends `doctrine_*` for the conversation");
+    // Own sources are searched only where the connection has them: most accounts have none, and three
+    // refused calls opened every research (pre-release audit, 11/2026).
+    expect(SKILL).toContain("**Own sources — only those this connection has**");
+    expect(SKILL).toContain("never call those");
+    expect(SKILL).not.toContain("Always add `files_search`");
+    expect(SKILL).toContain("`doctrine_search` — the UKAŽ catalogue");
     expect(SKILL).toContain("**Answered \"není zapnutá\"? Stop.**");
     expect(SKILL).toMatch(/\*\*Další zdroje\*\* — "Bylo by dobré projít i tyto zdroje:"/);
     expect(SKILL).toContain("never summarise what they say from an abstract");

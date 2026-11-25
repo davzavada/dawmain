@@ -397,6 +397,11 @@ async function runSearchActs(
   } catch (error) {
     // Measured: a phrase carrying "č." and "Sb." got HTTP 500 twice while the
     // service answered everything else — the query, not an outage.
+    // A 429 is the API's rate limit, not the query: blaming punctuation sent the reader to rewrite a
+    // query that was fine ("zákoník práce" was "refused" in a burst and answered alone).
+    if (error instanceof SourceError && error.kind === "UPSTREAM_ERROR" && /\b429\b/.test(error.message)) {
+      throw new SourceError(SOURCE, "UPSTREAM_ERROR", error.message, "e-Sbírka limits how many requests it takes at once — the query is fine: call again in a few seconds, with fewer e-Sbírka calls in one turn.");
+    }
     if (error instanceof SourceError && error.kind === "UPSTREAM_ERROR") {
       throw new SourceError(
         SOURCE,

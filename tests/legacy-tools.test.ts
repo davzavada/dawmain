@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { currentCall, rewriteLegacyBody, withCurrentToolNames } from "@/src/mcp/legacy-tools";
-import { mcpHandler } from "@/src/mcp/server";
+import { withMcpAuth } from "mcp-handler";
+import { mcpHandler as bareHandler } from "@/src/mcp/server";
+
+/** As app/api/mcp/route.ts composes it: the rewrite first, then the handler. */
+const mcpHandler = async (request: Request): Promise<Response> => bareHandler(await withCurrentToolNames(request));
 
 /**
  * A client keeps the tools/list it read when it connected. After four read
@@ -105,5 +109,27 @@ describe("calls by a retired tool name", () => {
     const list = await (await mcpHandler(rpc("tools/list", {}))).text();
     expect(list).toContain('"caselaw_get_decision"');
     expect(list).not.toContain('"ns_get_decision"');
+  });
+
+  it("the caller's identity survives: the rewrite runs before authentication, so the handler sees who called", async () => {
+    // withMcpAuth puts the verified caller on the request object it was given; a request rebuilt
+    // AFTER that would reach the tools as nobody (no daily limit, no own sources).
+    const seen: unknown[] = [];
+    const inner = async (request: Request): Promise<Response> => {
+      seen.push((request as Request & { auth?: { clientId?: string } }).auth?.clientId);
+      return new Response(await request.text());
+    };
+    const authed = withMcpAuth(inner, async () => ({ token: "t", clientId: "user_1", scopes: [] }), { required: true });
+    const composed = async (request: Request): Promise<Response> => authed(await withCurrentToolNames(request));
+    const post = (name: string, args: unknown) =>
+      new Request("https://dawmain.test/api/mcp", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer t" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }),
+      });
+    const body = await (await composed(post("ns_get_decision", { unid: "AB" }))).json();
+    expect(body.params).toEqual({ name: "caselaw_get_decision", arguments: { source: "ns", id: "AB" } });
+    await composed(post("caselaw_get_decision", { source: "ns", id: "AB" }));
+    expect(seen).toEqual(["user_1", "user_1"]);
   });
 });

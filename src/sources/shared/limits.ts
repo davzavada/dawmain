@@ -34,7 +34,13 @@ import { SourceError } from "./errors";
  * e-Sbírka batches of 5), so a lone user is not slowed down. A label not
  * listed has no limit.
  */
-export const SOURCE_CONCURRENCY: Readonly<Record<string, number>> = Object.freeze({});
+export const SOURCE_CONCURRENCY: Readonly<Record<string, number>> = Object.freeze({
+  // The registered e-Sbírka API answers 429 to a burst: of 6 esbirka_search calls sent in one turn 2
+  // were lost, of 8 esbirka_get_text / get_act calls 3 ("HTTP 429 even after a retry", pre-release audit
+  // 11/2026) — and one turn of parallel reads is exactly what the manual asks of the model. Four at
+  // once: a lone read's batch of 5 waits a moment for its fifth, a burst queues instead of failing.
+  "e-Sbírka": 4,
+});
 
 /** Longest a request waits for a free slot before it is refused as busy. */
 export const MAX_QUEUE_WAIT_MS = 20_000;

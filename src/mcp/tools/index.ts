@@ -153,7 +153,8 @@ async function routed(name: string, handler: ToolHandler, args: unknown[]): Prom
   if (!viaMirror || !mirrorConfigured()) return handler(...args);
   let answer: MirrorAnswer;
   try {
-    answer = await viaMirror((args[0] ?? {}) as Record<string, unknown>);
+    // The live tool is handed along for what the mirror does not hold (the CJEU lane of caselaw_search).
+    answer = await viaMirror((args[0] ?? {}) as Record<string, unknown>, (liveArgs) => handler(liveArgs, ...args.slice(1)));
   } catch (error) {
     answer = { fallback: `the mirror failed (${error instanceof Error ? error.message : String(error)})` };
   }

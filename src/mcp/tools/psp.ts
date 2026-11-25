@@ -21,6 +21,8 @@ import {
   type PspTisk,
   type PspType,
 } from "@/src/sources/psp";
+import { callDeadline } from "@/src/sources/shared/clock";
+import type { ExtractedDocument } from "@/src/sources/shared/documents";
 import { SourceError } from "@/src/sources/shared/errors";
 import { pageOrExcerpt, snippet } from "@/src/sources/shared/text";
 
@@ -279,7 +281,7 @@ export function registerPsp(server: McpServer): void {
           .string()
           .regex(/^\d+(?:-\d+)?$/)
           .optional()
-          .describe(`PDF documents only: physical pages to convert, '61-120' or '61' (default 1-${PDF_PAGES_PER_CALL}; at most ${PDF_PAGES_PER_CALL} per call).`),
+          .describe(`PDF documents only: physical pages to convert, '61-120' or '61' (default 1-${PDF_PAGES_PER_CALL}; at most ${PDF_PAGES_PER_CALL} per call). With find, the search starts at this page and runs on through the rest of the PDF.`),
         find: z.string().optional().describe(FIND_DESCRIPTION),
         page: z.number().int().min(1).default(1),
       }),
@@ -302,17 +304,9 @@ export function registerPsp(server: McpServer): void {
           throw new SourceError(SOURCE, "INPUT_INVALID", "Neither document_id nor period + number was given.", "Pass period and number (a part of the tisk) or document_id (an attached file) from psp_get_tisk.");
         }
         if (document_id !== undefined) {
-          const range = parsePdfPages(pdf_pages);
-          const doc = await getPspDocument(document_id, range);
+          const doc = await readPspDocument(document_id, pdf_pages, find);
           const paged = pageOrExcerpt(doc.text, page, find);
-          const notes: string[] = [];
-          if (doc.pdf) {
-            const [from, to] = doc.pdf.range;
-            notes.push(`PDF: pages ${from}–${to} of ${doc.pdf.pages} converted${doc.pdf.warnings.length ? `; ${doc.pdf.warnings.join(" ")}` : ""}.`);
-            if (to < doc.pdf.pages && !paged.has_more) {
-              notes.push(`(continue without asking the user: pdf_pages: "${to + 1}-${Math.min(to + PDF_PAGES_PER_CALL, doc.pdf.pages)}")`);
-            }
-          }
+          const notes: string[] = pdfNotes(doc, paged.has_more, find);
           return {
             content: [{ type: "text", text: `${doc.url}${notes.length ? `\n${notes.join("\n")}` : ""}\n\n${paged.text}${continuationHint(paged)}` }],
             structuredContent: {
@@ -347,17 +341,9 @@ export function registerPsp(server: McpServer): void {
         if (!main?.documentId) {
           throw new SourceError(SOURCE, "NOT_FOUND", `psp.cz sets no text and links no readable file for tisk ${number}/${part} (${periodLabel(period)}).`, `Open ${result.url} yourself; psp_get_tisk lists the tisk's parts.`);
         }
-        const range = parsePdfPages(pdf_pages);
-        const doc = await getPspDocument(main.documentId, range);
+        const doc = await readPspDocument(main.documentId, pdf_pages, find);
         const paged = pageOrExcerpt(doc.text, page, find);
-        const notes: string[] = [`Read from: ${snippet(main.label, 160)} (${doc.format.toUpperCase()}) — ${doc.url}`];
-        if (doc.pdf) {
-          const [from, to] = doc.pdf.range;
-          notes.push(`PDF: pages ${from}–${to} of ${doc.pdf.pages} converted${doc.pdf.warnings.length ? `; ${doc.pdf.warnings.join(" ")}` : ""}.`);
-          if (to < doc.pdf.pages && !paged.has_more) {
-            notes.push(`(continue without asking the user: pdf_pages: "${to + 1}-${Math.min(to + PDF_PAGES_PER_CALL, doc.pdf.pages)}")`);
-          }
-        }
+        const notes: string[] = [`Read from: ${snippet(main.label, 160)} (${doc.format.toUpperCase()}) — ${doc.url}`, ...pdfNotes(doc, paged.has_more, find)];
         const head = [result.url, result.title, ...notes, paged.page === 1 && paged.mode === "page" ? files : ""].filter(Boolean).join("\n");
         return {
           content: [{ type: "text", text: `${head}\n\n${paged.text}${continuationHint(paged)}` }],
@@ -378,6 +364,63 @@ export function registerPsp(server: McpServer): void {
       }
     },
   );
+}
+
+/** How long a `find` may go on converting further windows of a PDF (the call's own ceiling is 54 s). */
+const FIND_SCAN_BUDGET_MS = 30_000;
+
+/**
+ * One document for reading: the window of `pdfPages` — and, with `find`, the
+ * windows after it too, as far as the time allows. A PDF is converted 60
+ * pages a call, and `find` used to search that one window: asked for "K §
+ * 2291" in the občanský zákoník bill it searched pages 1–60 of 1 144 and
+ * answered "no occurrences in this document" (pre-release audit, 11/2026) —
+ * the důvodová zpráva to a provision sits a thousand pages in. A search is for
+ * the document, so it runs on from the window given until the PDF ends or the
+ * budget does; the note then says how far it got and how to go on. Each
+ * window is the cached read a plain call of it makes. A window is not started
+ * unless the last one's time fits what is left.
+ */
+export async function readPspDocument(id: number, pdfPages: string | undefined, find: string | undefined): Promise<ExtractedDocument> {
+  const first = await getPspDocument(id, parsePdfPages(pdfPages));
+  if (!find?.trim() || !first.pdf) return first;
+  const deadline = callDeadline(FIND_SCAN_BUDGET_MS);
+  const pages = first.pdf.pages;
+  const texts = [first.text];
+  const warnings = new Set(first.pdf.warnings);
+  let to = first.pdf.range[1];
+  let lastMs = 0;
+  while (to < pages && Date.now() + lastMs * 1.5 < deadline) {
+    const started = Date.now();
+    let next: ExtractedDocument;
+    try {
+      next = await getPspDocument(id, [to + 1, Math.min(to + PDF_PAGES_PER_CALL, pages)]);
+    } catch {
+      break; // the part searched so far is still an answer; the note names where it ended
+    }
+    if (!next.pdf || next.pdf.range[1] <= to) break;
+    lastMs = Date.now() - started;
+    texts.push(next.text);
+    for (const warning of next.pdf.warnings) warnings.add(warning);
+    to = next.pdf.range[1];
+  }
+  return { ...first, text: texts.join("\n"), pdf: { pages, range: [first.pdf.range[0], to], warnings: [...warnings] } };
+}
+
+/** The lines that say which pages of a PDF the answer covers and how to reach the rest. Pure. */
+export function pdfNotes(doc: ExtractedDocument, hasMore: boolean, find: string | undefined): string[] {
+  if (!doc.pdf) return [];
+  const [from, to] = doc.pdf.range;
+  const searching = Boolean(find?.trim());
+  const notes = [`PDF: pages ${from}–${to} of ${doc.pdf.pages} ${searching ? "searched" : "converted"}${doc.pdf.warnings.length ? `; ${doc.pdf.warnings.join(" ")}` : ""}.`];
+  if (to < doc.pdf.pages && !hasMore) {
+    notes.push(
+      searching
+        ? `(the search stopped at page ${to} of ${doc.pdf.pages} — continue without asking the user: pdf_pages: "${to + 1}" with the same find)`
+        : `(continue without asking the user: pdf_pages: "${to + 1}-${Math.min(to + PDF_PAGES_PER_CALL, doc.pdf.pages)}")`,
+    );
+  }
+  return notes;
 }
 
 /** "61-120" / "61" → [61, 120] / [61, 61 + PDF_PAGES_PER_CALL - 1], capped at PDF_PAGES_PER_CALL pages. Pure — unit-tested. */
