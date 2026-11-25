@@ -433,6 +433,44 @@ describe("mirror routing", () => {
     expect(out).toContain("1. 26 Cdo 4249/2016 (rozsudek, 2017-01-18) → caselaw_get_decision source: ns, id: BD87C5D0B5398F19C12580FF00256234");
   });
 
+  it("caselaw_get_decision reads by spisová značka: one decision is read at once, several are listed, none goes to the court", async () => {
+    const decision = { source: "ns", id: "AB", caseNumber: "31 Cdo 2273/2022", court: "Nejvyšší soud", form: "rozsudek", date: "2023-01-11", chars: 9000, citedBy: 417 };
+    fetchMock.mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/v1/by-case") return json({ decisions: [decision] });
+      if (url.pathname === "/v1/decisions/ns/AB") {
+        return json({ source: "ns", id: "AB", caseNumbers: ["31 Cdo 2273/2022"], court: "Nejvyšší soud", form: "rozsudek", category: null, date: "2023-01-11", published: null, ecli: null, legalSentence: null, url: "https://nsoud.cz/x", goneAt: null, text: { text: "Soud moderuje smluvní pokutu.", page: 1, total_pages: 1 } });
+      }
+      return json({ error: "not found" }, 404);
+    });
+    const read = textOf(await MIRROR_TOOLS.caselaw_get_decision({ source: "ns", case_number: "31 Cdo 2273/2022", page: 1 }));
+    expect(read).toContain("Soud moderuje smluvní pokutu.");
+    const paths = fetchMock.mock.calls.map((c) => new URL(String(c[0])));
+    expect(paths[0].pathname).toBe("/v1/by-case");
+    expect(paths[0].searchParams.get("case")).toBe("31 Cdo 2273/2022");
+    expect(paths[0].searchParams.getAll("source")).toEqual(["ns"]);
+    // Two decisions under one značka: the reader chooses, with the length and the citing count of each.
+    fetchMock.mockImplementation(async () => json({ decisions: [decision, { ...decision, id: "CD", form: "usneseni", date: "2022-09-01", chars: 1500, citedBy: 0 }] }));
+    const list = textOf(await MIRROR_TOOLS.caselaw_get_decision({ source: "ns", case_number: "31 Cdo 2273/2022" }));
+    expect(list).toContain('2 NS decisions carry the spisová značka "31 Cdo 2273/2022"');
+    expect(list).toContain("· cit. 417× → caselaw_get_decision source: ns, id: AB");
+    expect(list).toContain("→ caselaw_get_decision source: ns, id: CD");
+    // None: the live tool answers (it says how to look the značka up at the court).
+    fetchMock.mockImplementation(async () => json({ decisions: [] }));
+    expect(await MIRROR_TOOLS.caselaw_get_decision({ source: "nss", case_number: "1 As 1/2099" })).toEqual({
+      fallback: 'the mirror holds no NSS decision with the spisová značka "1 As 1/2099"',
+    });
+    expect(await MIRROR_TOOLS.caselaw_get_decision({ source: "ns" })).toEqual({ fallback: "no id" });
+  });
+
+  it("a značka looked up by a search carries the length and the citing count", async () => {
+    fetchMock.mockImplementation(async () =>
+      json({ decisions: [{ source: "ns", id: "AB", caseNumber: "26 Cdo 4249/2016", court: "Nejvyšší soud", form: "rozsudek", date: "2017-01-18", chars: 5400, citedBy: 12 }] }),
+    );
+    const out = textOf(await MIRROR_TOOLS.ns_search({ case_number: "26 Cdo 4249/2016" }));
+    expect(out).toContain("1. 26 Cdo 4249/2016 (rozsudek, 2017-01-18) · 1 str. · cit. 12× → caselaw_get_decision source: ns, id: AB");
+  });
+
   it("an ÚS ecli is looked up the same way; a značka the mirror lacks, or one with other filters, goes to the court", async () => {
     fetchMock.mockImplementation(async () => json({ decisions: [{ source: "us", id: "Pl-24-10_1", caseNumber: "Pl. ÚS 24/10", court: null, form: "nalez", date: "2011-03-22" }] }));
     expect(textOf(await MIRROR_TOOLS.us_search({ ecli: "ECLI:CZ:US:2011:Pl.US.24.10.1", page: 0 }))).toContain("caselaw_get_decision source: us, id: Pl-24-10_1");

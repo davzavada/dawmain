@@ -774,8 +774,9 @@ async function byCaseNumber(court: MirrorCourt, caseNumber: string, limit: numbe
     ...shown.map((d, i) => {
       const facts = [d.form ? (FORM[d.form] ?? d.form) : null, d.date].filter(Boolean).join(", ");
       const named = courtLabel({ source: court, court: d.court });
-      return `${i + 1}. ${d.caseNumber ?? caseNumber}${facts ? ` (${facts})` : ""}${named ? ` — ${named}` : ""} → ${readCall(court, d.id)}`;
+      return `${i + 1}. ${d.caseNumber ?? caseNumber}${facts ? ` (${facts})` : ""}${named ? ` — ${named}` : ""}${factsNote(d)} → ${readCall(court, d.id)}`;
     }),
+    ...(shown.some((d) => factsNote(d)) ? ["", HIT_LEGEND] : []),
   ]);
 }
 
@@ -870,11 +871,47 @@ export function citedByLine(citedBy: MirrorCitedBySummary, court: MirrorCourt, i
   return `Citováno: ${citedBy.total}× (${citedByCourts(citedBy.bySource)}${top}) → caselaw_citations source: ${court}, id: ${id}`;
 }
 
+/**
+ * The decision a spisová značka names, for a read by `case_number`: its id
+ * when one decision of that court carries it, the list to choose from when
+ * several do (a case with more decisions), null when the mirror holds none.
+ * Looking a značka up used to be a call of its own before every read
+ * (`ns_search {case_number}` → id → read: six extra calls in three of five
+ * test researches, 11/2026).
+ */
+export async function resolveCaseNumber(court: MirrorCourt, caseNumber: string): Promise<{ id: string } | ToolText | null> {
+  const found = await mirrorDecisionsByCase(caseNumber, [court]);
+  if (!found.length) return null;
+  if (found.length === 1) return { id: found[0].id };
+  return text([
+    MIRROR_NOTE,
+    `${found.length} ${court.toUpperCase()} decisions carry the spisová značka "${caseNumber}" — read the one you mean by its id:`,
+    "",
+    ...found.map((d, i) => {
+      const facts = [d.form ? (FORM[d.form] ?? d.form) : null, d.date].filter(Boolean).join(", ");
+      const named = courtLabel({ source: court, court: d.court });
+      return `${i + 1}. ${d.caseNumber ?? caseNumber}${facts ? ` (${facts})` : ""}${named ? ` — ${named}` : ""}${factsNote(d)} → ${readCall(court, d.id)}`;
+    }),
+  ]);
+}
+
 async function getDecision(args: Args): Promise<MirrorAnswer> {
   const court = MIRROR_COURTS.find((c) => c === args.source);
-  const id = str(args.id);
-  // An unknown court or no id: the live tool says what is wrong with the call.
+  let id = str(args.id);
+  // An unknown court or nothing naming the decision: the live tool says what is wrong with the call.
   if (!court) return { fallback: "no source the mirror holds" };
+  const caseNumber = str(args.case_number);
+  if (!id && caseNumber) {
+    let resolved;
+    try {
+      resolved = await resolveCaseNumber(court, caseNumber);
+    } catch (error) {
+      return { fallback: `the mirror did not answer (${error instanceof Error ? error.message : String(error)})` };
+    }
+    if (!resolved) return { fallback: `the mirror holds no ${court.toUpperCase()} decision with the spisová značka "${caseNumber}"` };
+    if ("content" in resolved) return resolved;
+    id = resolved.id;
+  }
   if (!id) return { fallback: "no id" };
   // An ÚS decision named by ECLI: the mirror keys ÚS by sz, the court resolves the ECLI.
   if (court === "us" && /^ECLI:/i.test(id)) return { fallback: "the mirror reads ÚS decisions by sz, not by ECLI" };

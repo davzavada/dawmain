@@ -73,6 +73,15 @@ export function formatCitations(links: MirrorCitations, view: CitationsView): st
 
   if (view.direction !== "cites") {
     const { total, hits } = links.citedBy;
+    // A značka shared with another court: the mirror links citations by značka, and cannot tell whose is meant.
+    const same = links.sameCaseNumber;
+    if (same?.total) {
+      const named = same.decisions.map((d) => `${courtLabel(d) || d.source.toUpperCase()}${d.date ? ` ${d.date}` : ""}`).join("; ");
+      lines.push(
+        "",
+        `⚠ ${same.total} decision${same.total === 1 ? "" : "s"} of another court ${same.total === 1 ? "carries" : "carry"} the same spisová značka (${named}${same.total > same.decisions.length ? "; …" : ""}): some of the citing decisions below may mean ${same.total === 1 ? "that one" : "those"} — the passage under each shows which court it names.`,
+      );
+    }
     const scope = view.citedBySources?.length ? ` from ${view.citedBySources.map((s) => s.toUpperCase()).join(", ")}` : "";
     lines.push("");
     if (!total) {

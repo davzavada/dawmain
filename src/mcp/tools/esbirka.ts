@@ -97,6 +97,73 @@ function futureNote(future: string[]): string | null {
   return `⚠ A future version of this act is already published and takes effect ${future.join(", ")} — this wording may change then; to read it, call again with date: "${future[0]}".`;
 }
 
+/** How long the comparison with the future version may hold an answer back. */
+const FUTURE_COMPARE_MS = 6_000;
+
+interface FutureDiff {
+  /** The future version compared with: the last one published. */
+  date: string;
+  changed: string[];
+  same: string[];
+}
+
+/**
+ * Whether the sections just read differ in the future version already
+ * published. "A future version takes effect 2027-01-01 — this wording may
+ * change" stood over every § of the Civil Code, and a research then read the
+ * section a second time with that date to learn it was the same (two of five
+ * test researches, 11/2026). Compared with the LAST published version, so a
+ * change in any of them shows. Null when the comparison did not finish in
+ * time or failed — the general warning is then given instead.
+ */
+async function compareWithFuture(
+  future: string[],
+  collection: string,
+  year: number,
+  number: number,
+  read: Array<{ label: string; text: string }>,
+): Promise<FutureDiff | null> {
+  const date = future.at(-1);
+  if (!date || !read.length) return null;
+  const squash = (text: string): string => text.replace(/\s+/g, " ").trim();
+  const run = (async (): Promise<FutureDiff> => {
+    const version = await resolveVersionForRead(collection, year, number, date);
+    const differs = await Promise.all(
+      read.map(({ label, text }) =>
+        getSection(collection, year, number, date, label, { version }).then(
+          (then) => squash(then.text) !== squash(text),
+          (error: unknown) => {
+            // Gone from the future version: repealed or renumbered.
+            if (error instanceof SourceError && error.kind === "NOT_FOUND") return true;
+            throw error;
+          },
+        ),
+      ),
+    );
+    return { date, changed: read.filter((_, i) => differs[i]).map((r) => r.label), same: read.filter((_, i) => !differs[i]).map((r) => r.label) };
+  })();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), FUTURE_COMPARE_MS);
+  });
+  try {
+    return await Promise.race([run.catch(() => null), late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function futureDiffNote(future: string[], diff: FutureDiff | null): string | null {
+  if (!future.length) return null;
+  if (!diff) return futureNote(future);
+  const published = `A future version of this act is already published (effective ${future.join(", ")})`;
+  if (!diff.changed.length) return `${published}: ${diff.same.join(", ")} ${diff.same.length > 1 ? "read" : "reads"} the same in it — no need to read it again with that date.`;
+  return (
+    `⚠ ${published}: ${diff.changed.join(", ")} ${diff.changed.length > 1 ? "DIFFER" : "DIFFERS"} in it (changed or no longer there) — read the new wording with date: "${diff.date}".` +
+    (diff.same.length ? ` ${diff.same.join(", ")} ${diff.same.length > 1 ? "read" : "reads"} the same.` : "")
+  );
+}
+
 export function registerEsbirka(server: McpServer): void {
   server.registerTool(
     "esbirka_search",
@@ -242,7 +309,7 @@ export function registerEsbirka(server: McpServer): void {
     {
       title: "e-Sbírka: consolidated text",
       description:
-        "Consolidated text of a Czech act as of a date — one section (§), several ('§ 2288-2291', '2235, 2291'), one article (čl.), or the whole act page by page (~45k-character pages). Pass 'section' ('§ 1721', '1721', '3a') or an article ('čl. 36' — Ústava, Listina and other acts divided into articles, or 'čl. I' of an amending act); omit it to page through the act. Without 'date' you get the version in force TODAY; pass the date of the facts to read the wording that governed them; '0000-00-00' means the as-announced version. Every answer names the version it quotes (in force from–to) and warns when a future version of the act is already published.",
+        "Consolidated text of a Czech act as of a date — one section (§), several ('§ 2288-2291', '2235, 2291'), one article (čl.), or the whole act page by page (~45k-character pages). Pass 'section' ('§ 1721', '1721', '3a') or an article ('čl. 36' — Ústava, Listina and other acts divided into articles, or 'čl. I' of an amending act); omit it to page through the act. Without 'date' you get the version in force TODAY; pass the date of the facts to read the wording that governed them; '0000-00-00' means the as-announced version. Every answer names the version it quotes (in force from–to) and says whether the sections read differ in a future version already published.",
       inputSchema: z.object({
         ...actIdentity,
         date: isoDate.optional().describe("Time version in force on this date. Omit for the version in force today."),
@@ -281,6 +348,7 @@ export function registerEsbirka(server: McpServer): void {
           const version = await resolveVersionForRead(collection, year, number, date);
           const futureRun = pendingVersions(version, collection, year, number);
           const texts: string[] = [];
+          const read: Array<{ label: string; text: string }> = [];
           const missing: string[] = [];
           for (let i = 0; i < labels.length; i += 3) {
             const batch = await Promise.all(
@@ -294,7 +362,13 @@ export function registerEsbirka(server: McpServer): void {
                 ),
               ),
             );
-            batch.forEach((text, k) => (text === null ? missing.push(labels[i + k]) : texts.push(text)));
+            batch.forEach((text, k) => {
+              if (text === null) missing.push(labels[i + k]);
+              else {
+                texts.push(text);
+                read.push({ label: labels[i + k], text });
+              }
+            });
           }
           const future = await futureRun;
           if (!texts.length) {
@@ -303,7 +377,8 @@ export function registerEsbirka(server: McpServer): void {
           const staleUrl = version?.staleUrl ?? buildStaleUrl(collection, year, number, date);
           const paged = charPage(texts.join("\n\n"), page);
           const header = [`${staleUrl} ${labels.filter((label) => !missing.includes(label)).join(", ")}`, versionLabel(version)].filter(Boolean).join(" — ");
-          const note = [futureNote(future), missing.length ? `Not in this act and time version: ${missing.join(", ")}.` : ""].filter(Boolean).join("\n");
+          const diff = future.length ? await compareWithFuture(future, collection, year, number, read) : null;
+          const note = [futureDiffNote(future, diff), missing.length ? `Not in this act and time version: ${missing.join(", ")}.` : ""].filter(Boolean).join("\n");
           const locator = [`section: ${JSON.stringify(section)}`, date ? `date: "${date}"` : ""].filter(Boolean).join(", ");
           return {
             content: [
@@ -355,7 +430,8 @@ export function registerEsbirka(server: McpServer): void {
           };
           const shown = label ? (label.kind === "paragraph" ? `§ ${label.value}` : `čl. ${label.value}`) : section;
           const header = [`${staleUrl} ${shown}`, versionLabel(result.version)].filter(Boolean).join(" — ");
-          const note = futureNote(future);
+          const diff = future.length ? await compareWithFuture(future, collection, year, number, [{ label: shown, text: result.text }]) : null;
+          const note = futureDiffNote(future, diff);
           // The next window repeats the section (and the date): "page: 2" alone
           // would read page 2 of the WHOLE act — of today's version, without date.
           const locator = [`section: ${JSON.stringify(section)}`, date ? `date: "${date}"` : ""].filter(Boolean).join(", ");

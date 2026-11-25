@@ -63,14 +63,21 @@ export function registerCaselawGet(server: McpServer): void {
     "caselaw_get_decision",
     {
       title: "Case law: decision text",
-      description: `Full text and metadata of one Czech court decision: source names the court's database — ns (Nejvyšší soud), nss (Nejvyšší správní soud and the krajské soudy in its index), us (Ústavní soud) or justice (okresní, krajské, vrchní soudy) — and id is the court's own id from a search hit. The answer carries the spisová značka, ECLI, date, právní věta where there is one, who cites the decision, and the link that opens the decision itself — cite that link, never a search URL (for ns with 'find' it opens at the found passage). ${READING_DESCRIPTION}`,
+      description: `Full text and metadata of one Czech court decision: source names the court's database — ns (Nejvyšší soud), nss (Nejvyšší správní soud and the krajské soudy in its index), us (Ústavní soud) or justice (okresní, krajské, vrchní soudy) — and id is the court's own id from a search hit (or pass the spisová značka as case_number). The answer carries the spisová značka, ECLI, date, právní věta where there is one, who cites the decision, and the link that opens the decision itself — cite that link, never a search URL (for ns with 'find' it opens at the found passage). ${READING_DESCRIPTION}`,
       inputSchema: z.object({
         source: z.enum(GET_SOURCES).describe("The court's database: ns, nss, us (Ústavní soud) or justice (obecné soudy)."),
         id: z
           .string()
           .min(1)
           .max(120)
+          .optional()
           .describe("The court's own id, as a search hit gives it: ns = 32-hex unid, nss = numeric id, us = NALUS sz ('Pl-24-10_1') or the ECLI, justice = uuid."),
+        case_number: z
+          .string()
+          .min(3)
+          .max(60)
+          .optional()
+          .describe("Instead of id: the spisová značka ('31 Cdo 2273/2022', 'Pl. ÚS 24/10'). Several decisions under one značka come back as a list to choose from."),
         find: z.string().optional().describe(FIND_DESCRIPTION),
         paragraphs: paragraphsSchema,
         outline: outlineSchema,
@@ -78,7 +85,24 @@ export function registerCaselawGet(server: McpServer): void {
       }),
       annotations: READ_ONLY,
     },
-    async ({ source, id, find, paragraphs, outline, page }) => {
+    async ({ source, id, case_number, find, paragraphs, outline, page }) => {
+      // A read by spisová značka reaches this live handler only when the mirror could not resolve it
+      // (./mirror-route.ts does so first): the courts' own readers take ids, so the reader is told how to get one.
+      if (!id?.trim()) {
+        const search = source === "us" ? "us_search" : `${source}_search`;
+        return toolFailure(LABEL[source])(
+          new SourceError(
+            LABEL[source],
+            case_number?.trim() ? "NOT_FOUND" : "INPUT_INVALID",
+            case_number?.trim()
+              ? `No ${source.toUpperCase()} decision with the spisová značka "${case_number.trim()}" could be looked up (the mirror holds none, or is not answering).`
+              : "Neither id nor case_number was given.",
+            case_number?.trim()
+              ? `Check the značka and the court (source); a decision of the last day may not be mirrored yet — ${search} {case_number} asks the court and gives its id.`
+              : "Pass the id from a hit line, or the spisová značka as case_number.",
+          ),
+        );
+      }
       const key = decisionId(source, id);
       if (typeof key === "string") {
         return toolFailure(LABEL[source])(new SourceError(LABEL[source], "INPUT_INVALID", key, "Pass the id exactly as the hit line gives it, with that hit's source."));

@@ -738,3 +738,72 @@ export async function getEurlexDocument(options: {
     "Check the CELEX (e.g. 32016R0679 for GDPR, 62018CJ0311 for a judgment, 52012PC0011 for a legislative proposal) or ECLI; some documents exist only in selected languages — try 'en' or 'fr'.",
   );
 }
+
+// ---------- one article of an act ----------
+
+/**
+ * "Article" as the language versions of the Official Journal head an article.
+ * Most write the word first ("Article 6", "Článek 6"); Hungarian, Lithuanian,
+ * Latvian and Finnish the number ("6. cikk", "6 straipsnis", "6. pants", "6 artikla").
+ */
+const ARTICLE_WORDS =
+  "article|artikel|artikkel|artículo|articolo|artigo|artykuł|articolul|artikolu|airteagal|článek|článok|člen|članak|член|άρθρο|cikk|straipsnis|pants|artikla";
+const ARTICLE_HEAD_RE = new RegExp(`^(?:(?:${ARTICLE_WORDS})\\s+(\\d+[a-z]{0,2})|(\\d+[a-z]{0,2})\\.?\\s+(?:${ARTICLE_WORDS}))\\.?$`, "iu");
+/** A heading above the articles: where the last article of a chapter ends. */
+const STRUCTURE_HEAD_RE = /^(?:CHAPTER|SECTION|TITLE|PART|ANNEX|KAPITOLA|ODDÍL|HLAVA|ČÁST|PŘÍLOHA|KAPITEL|ABSCHNITT|TITEL|TEIL|ANHANG|CHAPITRE|TITRE|PARTIE|ANNEXE)\b/u;
+
+/** How many articles one call reads. */
+export const EU_ARTICLES_MAX = 10;
+
+/**
+ * "6", "Article 6", "čl. 6 a 83", "12-14" → the article numbers asked for,
+ * in order, each once. A range of whole numbers is expanded. Pure.
+ */
+export function parseEuArticles(input: string): string[] {
+  const labels: string[] = [];
+  const add = (label: string) => {
+    if (!labels.includes(label)) labels.push(label);
+  };
+  for (const m of input.matchAll(/(\d+[a-z]{0,2})(?:\s*[-–—]\s*(\d+))?/gi)) {
+    const from = m[1].toLowerCase();
+    if (m[2] && /^\d+$/.test(from) && Number(m[2]) > Number(from) && Number(m[2]) - Number(from) < 50) {
+      for (let n = Number(from); n <= Number(m[2]); n++) add(String(n));
+    } else {
+      add(from);
+      if (m[2]) add(m[2]);
+    }
+  }
+  return labels;
+}
+
+/**
+ * The text of each article asked for, from its heading line to the next
+ * article's or a chapter heading. An act's text runs to hundreds of thousands
+ * of characters (the GDPR: eight pages); reading one article meant a find for
+ * its heading and then the page it lies on (four of five test researches that
+ * touched EU law, 11/2026). The FIRST heading with the number counts: in an
+ * amending act a quoted article of the amended one may follow. Pure.
+ */
+export function extractEuArticles(text: string, labels: string[]): { found: Array<{ label: string; text: string }>; missing: string[] } {
+  const lines = text.split("\n");
+  const heads: Array<{ label: string; line: number }> = [];
+  const stops: number[] = [];
+  lines.forEach((raw, i) => {
+    const line = raw.trim();
+    const m = ARTICLE_HEAD_RE.exec(line);
+    if (m) heads.push({ label: (m[1] ?? m[2]).toLowerCase(), line: i });
+    if (m || STRUCTURE_HEAD_RE.test(line)) stops.push(i);
+  });
+  const found: Array<{ label: string; text: string }> = [];
+  const missing: string[] = [];
+  for (const label of labels) {
+    const head = heads.find((h) => h.label === label);
+    if (!head) {
+      missing.push(label);
+      continue;
+    }
+    const end = stops.find((i) => i > head.line) ?? lines.length;
+    found.push({ label, text: lines.slice(head.line, end).join("\n").trim() });
+  }
+  return { found, missing };
+}

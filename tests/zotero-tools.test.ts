@@ -526,19 +526,29 @@ describe("zotero_search", () => {
     expectValidatedHints(outside);
   });
 
-  it("an empty title search is repeated in everything mode, and says so", async () => {
+  it("an empty title search for a quoted phrase is repeated in everything mode, and says so", async () => {
     vi.mocked(searchItems).mockImplementation(async (_c, _l, q) => (q.qmode === "everything" ? page([workC], 30) : page([], 0)));
-    const r = await call("zotero_search", { query: "odpovědnost" });
+    const r = await call("zotero_search", { query: '"objektivní odpovědnost"' });
     expect(vi.mocked(searchItems).mock.calls.map((c) => c[2].qmode)).toEqual(["titleCreatorYear", "everything"]);
     const { outside } = split(r.text);
     expect(outside).toContain("repeated automatically in everything mode");
     // The next page keeps the mode that answered.
-    expect(outside).toContain('More: zotero_search {query: "odpovědnost", mode: "everything", page: 2}');
+    expect(outside).toContain('mode: "everything", page: 2}');
+  });
+
+  it("an empty title search for topic words is NOT widened: the full-text round was the slowest call of a research and returned noise", async () => {
+    vi.mocked(searchItems).mockImplementation(async (_c, _l, q) => (q.qmode === "everything" ? page([workC], 86) : page([], 0)));
+    const r = await call("zotero_search", { queries: ["zneužití práva informace", "odpovědnost"] });
+    expect(vi.mocked(searchItems).mock.calls.every((c) => c[2].qmode === "titleCreatorYear")).toBe(true);
+    expect(r.isError).toBe(false);
+    expect(r.text).toContain("The attachments' full text was not searched: for topic words it is slow");
+    expect(r.text).toContain('mode: "everything"');
+    expect(r.text).not.toContain("repeated automatically");
   });
 
   it("nothing in either mode: a plain answer with the query rules", async () => {
     vi.mocked(searchItems).mockResolvedValue(page([], 0));
-    const r = await call("zotero_search", { query: "odpovědnost-škoda" });
+    const r = await call("zotero_search", { query: '"odpovědnost-škoda"' });
     expect(r.isError).toBe(false);
     expect(r.text).toContain("still nothing");
     expect(r.text).toContain("How Zotero matches: the query is split at spaces");
@@ -1404,11 +1414,11 @@ describe("zotero_search — quotes, hints, pages, item_type, spisová značka", 
 
   it("item_type without attachments: no everything round (it could add nothing), and the answer says where the full text is", async () => {
     vi.mocked(searchItems).mockResolvedValue(page([], 0));
-    const r = await call("zotero_search", { query: "dovolatel", item_type: ["case"] });
+    const r = await call("zotero_search", { query: '"dovolatel"', item_type: ["case"] });
     expect(qs()).toEqual(["titleCreatorYear:dovolatel"]);
     expect(r.text).not.toContain("still nothing");
     expect(r.text).toContain("The attachments' full text was not searched: its matches are attachment items, which item_type leaves out");
-    expect(r.text).toContain('zotero_search {query: "dovolatel", mode: "everything"} looks into the PDFs');
+    expect(r.text).toContain('mode: "everything"} looks into the PDFs');
     for (const [args, rounds] of [
       [{ item_type: ["case", "attachment"] }, 2],
       [{ exclude_item_type: ["note"] }, 2],
@@ -1416,7 +1426,7 @@ describe("zotero_search — quotes, hints, pages, item_type, spisová značka", 
       [{ item_type: ["note"] }, 1],
     ] as const) {
       vi.mocked(searchItems).mockClear();
-      await call("zotero_search", { query: "dovolatel", ...args });
+      await call("zotero_search", { query: '"dovolatel"', ...args });
       expect(searchItems, JSON.stringify(args)).toHaveBeenCalledTimes(rounds);
     }
     // Asked for everything mode under such a filter: a warning beside the hits.

@@ -62,6 +62,19 @@ describe("formatCitations", () => {
     expect(text).toContain("More: offset: 1 (same arguments).");
   });
 
+  it("warns when a decision of another court carries the same značka", () => {
+    const text = formatCitations(
+      {
+        sameCaseNumber: { total: 4, decisions: [{ source: "justice", id: "u-1", caseNumber: "8 Co 60/2025", court: "Krajský soud v Ostravě", form: "rozsudek", date: "2025-05-02" }] },
+        cites: [],
+        citedBy: { total: 2, hits: [] },
+      },
+      { source: "justice", id: "u-9", direction: "cited_by", limit: 20, offset: 0 },
+    );
+    expect(text).toContain("⚠ 4 decisions of another court carry the same spisová značka (Krajský soud v Ostravě 2025-05-02; …): some of the citing decisions below may mean those — the passage under each shows which court it names.");
+    expect(formatCitations({ cites: [], citedBy: { total: 2, hits: [] } }, { source: "ns", id: "X", direction: "cited_by", limit: 20, offset: 0 })).not.toContain("⚠");
+  });
+
   it("says so when nobody cites it, naming the court filter", () => {
     const text = formatCitations({ cites: [], citedBy: { total: 0, hits: [] } }, { source: "us", id: "s", direction: "both", limit: 20, offset: 0, citedBySources: ["us"] });
     expect(text).toContain("Cited by: no mirrored decision from US names it.");

@@ -236,6 +236,28 @@ describe("eurlex_get_document", () => {
     expect(calls.map((call) => call.lang)).toEqual(["ces", "eng"]);
   });
 
+  it("article: just the articles asked for, each to the next heading; a missing one is named", async () => {
+    const ACT = `<html><body><p>Whereas Article 6 of the Treaty applies.</p><p>CHAPTER I</p><p>Article 5</p><p>Principles</p><p>1. Personal data shall be processed lawfully.</p><p>Article 6</p><p>Lawfulness of processing</p><p>1. Processing shall be lawful only if one of the following applies.</p><p>CHAPTER II</p><p>Article 7</p><p>Conditions for consent</p><p>1. The controller shall demonstrate consent.</p><p>Článek 83</p><p>Pokuty</p><p>1. Každý dozorový úřad.</p></body></html>`;
+    vi.stubGlobal("fetch", async () => new Response(ACT, { status: 200 }));
+    const one = await getDocument({ celex: "39999R0010", article: "Article 6" });
+    const text = one.content[0].text;
+    expect(text).toMatch(/^https:\/\/eur-lex\.europa\.eu\/legal-content\/EN\/TXT\/\?uri=CELEX:39999R0010 — article 6\n\nArticle 6\n/);
+    expect(text).toContain("Processing shall be lawful only if one of the following applies.");
+    // Not the recital that mentions it, not the next chapter, not the neighbours.
+    expect(text).not.toContain("Whereas");
+    expect(text).not.toContain("CHAPTER II");
+    expect(text).not.toContain("Conditions for consent");
+    expect(one.structuredContent).toMatchObject({ article: "6", page: 1, total_pages: 1 });
+    const several = (await getDocument({ celex: "39999R0010", article: "5-6, 83, 99" })).content[0].text;
+    expect(several).toContain("— article 5, 6, 83\nNo heading found for article 99.");
+    expect(several).toContain("Personal data shall be processed lawfully.");
+    expect(several).toContain("Každý dozorový úřad.");
+    const none = await getDocument({ celex: "39999R0010", article: "150" });
+    expect(none.isError).toBe(true);
+    expect(none.content[0].text).toContain("No heading of article 150 was found");
+    expect((await getDocument({ celex: "39999R0010", article: "the sixth" })).content[0].text).toContain("names no article number");
+  });
+
   it("does not start the ECLI path once the CELEX path spent the call's budget", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const calls: string[] = [];
