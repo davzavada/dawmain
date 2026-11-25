@@ -6,7 +6,7 @@ import { interleave } from "@/src/sources/shared/text";
 /**
  * The NALUS search and reading flows against a scripted server: which
  * requests go upstream (form GET, criteria POST, Results GET), on which
- * session, how many — and what us_search / us_get_decision print. Every test
+ * session, how many — and what us_search / caselaw_get_decision print. Every test
  * loads fresh modules, so the module-scope caches start cold.
  */
 
@@ -147,13 +147,15 @@ type Handler = (args: Record<string, unknown>) => Promise<{
 }>;
 
 async function loadTools(): Promise<Record<string, Handler>> {
-  const { registerNalus } = await import("@/src/mcp/tools/nalus");
+  const { registerNalus, readUsDecision } = await import("@/src/mcp/tools/nalus");
   const tools: Record<string, Handler> = {};
   registerNalus({
     registerTool(name: string, _config: unknown, handler: Handler) {
       tools[name] = handler;
     },
   } as never);
+  // The court's reader behind caselaw_get_decision (one read tool for the four sources).
+  tools.read_decision = readUsDecision as never;
   return tools;
 }
 
@@ -208,7 +210,7 @@ describe("paging rides the search's own session", () => {
     expect(calls[3].cookie).toBe("ASP.NET_SessionId=s0");
     expect(calls[2].cookie).toBe("ASP.NET_SessionId=s0");
     const text = second.content[0].text;
-    expect(text).toContain("21. usnesení sp. zn. I. ÚS 1020/26 ze dne 1. 1. 2026 — sz 1-1020-26_1 · zpravodaj Zpravodaj 1020");
+    expect(text).toContain("21. usnesení sp. zn. I. ÚS 1020/26 ze dne 1. 1. 2026 — id 1-1020-26_1 · zpravodaj Zpravodaj 1020");
     expect(text).toContain("30. usnesení sp. zn. I. ÚS 1029/26");
     expect(text).toContain("Last page.");
     expect(first.content[0].text).toContain("More: page 1.");
@@ -496,22 +498,22 @@ describe("a GetAbstract that does not answer", () => {
     expect(result.content[0].text).not.toContain("neither a právní věta");
   });
 
-  it("is said in us_get_decision, and the decision is not cached without its právní věta", async () => {
+  it("is said in caselaw_get_decision, and the decision is not cached without its právní věta", async () => {
     const tools = await loadTools();
-    const first = await tools.us_get_decision({ sz: "1-1169-26_1", page: 1 });
+    const first = await tools.read_decision({ sz: "1-1169-26_1", page: 1 });
     expect(first.content[0].text).toContain("could not be loaded");
     expect(first.content[0].text).toContain("Stížnost se odmítá.");
     onRequest = () => undefined;
-    const second = await tools.us_get_decision({ sz: "1-1169-26_1", page: 1 });
+    const second = await tools.read_decision({ sz: "1-1169-26_1", page: 1 });
     expect(second.content[0].text).toContain("Právní věta:\n> Právní věta k věci.");
     expect(calls.filter((call) => call.url.pathname.endsWith("/GetText.aspx"))).toHaveLength(2);
   });
 });
 
-describe("us_get_decision", () => {
+describe("caselaw_get_decision, source us", () => {
   it("prints the ECLI, no placeholder právní věta, and a text without RTF residue", async () => {
     const tools = await loadTools();
-    const result = await tools.us_get_decision({ sz: "1-1169-26_1", page: 1 });
+    const result = await tools.read_decision({ sz: "1-1169-26_1", page: 1 });
     const text = result.content[0].text;
     expect(text).toContain("ECLI:CZ:US:2026:1.US.1169.26.1");
     expect(text).toContain("Právní věta:\n> Právní věta k věci.");

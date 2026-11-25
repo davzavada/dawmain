@@ -1,6 +1,7 @@
 import type { Queryable } from "../db/client";
 import { extractProvisions, type ActLookup } from "../legal/provisions";
 import type { DecisionType, MirrorSource } from "../types";
+import { citedCount } from "./citations";
 
 /**
  * Search by cited provision (decision_provision, migration 0008): which
@@ -17,9 +18,19 @@ export interface ProvisionQuery {
   categories?: string[];
   from?: string;
   to?: string;
+  /** newest (default) or the decisions cited most first — see CITED_SORT_MAX. */
+  sort?: "newest" | "cited";
   limit: number;
   offset: number;
 }
+
+/**
+ * Most decisions a provision may have for "cited" order: the count of citing
+ * decisions is worked out for every one of them before the first is shown.
+ * § 237 o. s. ř. is cited by a six-figure number of decisions; past the cap
+ * the list comes newest first and says so (sortedBy).
+ */
+export const CITED_SORT_MAX = 3000;
 
 export interface ProvisionHit {
   source: MirrorSource;
@@ -33,6 +44,10 @@ export interface ProvisionHit {
   mentions: number;
   /** The text around the first citation. */
   excerpt: string;
+  /** How many mirrored decisions cite this one. */
+  citedBy: number;
+  /** Length of its text; null = no text. */
+  chars: number | null;
 }
 
 const EXCERPT_BEFORE = 150;
@@ -61,7 +76,10 @@ export function parseCitation(cite: string, lookup: ActLookup | null): { act: st
   return first ? { act: first.act, provision: first.provision } : null;
 }
 
-export async function decisionsByProvision(db: Queryable, q: ProvisionQuery): Promise<{ total: number; hits: ProvisionHit[] }> {
+export async function decisionsByProvision(
+  db: Queryable,
+  q: ProvisionQuery,
+): Promise<{ total: number; sortedBy: "newest" | "cited"; hits: ProvisionHit[] }> {
   const where = ["p.act_id = $1", "p.provision = $2"];
   const params: unknown[] = [q.act, q.provision];
   if (q.sources?.length) where.push(`d.source = ANY($${params.push(q.sources)}::text[])`);
@@ -73,18 +91,34 @@ export async function decisionsByProvision(db: Queryable, q: ProvisionQuery): Pr
     `SELECT count(*) AS n FROM mirror.decision_provision p JOIN mirror.decision d ON d.id = p.decision_id WHERE ${filter}`,
     params,
   );
+  const total = Number(count[0]?.n ?? 0);
+  const sortedBy = q.sort === "cited" && total <= CITED_SORT_MAX ? "cited" : "newest";
+  const limit = `LIMIT $${params.push(q.limit)} OFFSET $${params.push(q.offset)}`;
+  // Newest: the page is cut first and only its rows are counted; cited: every match is counted, then cut.
+  const page =
+    sortedBy === "cited"
+      ? `SELECT m.* FROM (
+           SELECT d.id, d.decided_on, p.mentions, p.first_at, ${citedCount("d.id")} AS cited
+           FROM mirror.decision_provision p JOIN mirror.decision d ON d.id = p.decision_id WHERE ${filter}
+         ) m ORDER BY m.cited DESC, m.decided_on DESC NULLS LAST, m.id DESC ${limit}`
+      : `SELECT m.*, ${citedCount("m.id")} AS cited FROM (
+           SELECT d.id, d.decided_on, p.mentions, p.first_at
+           FROM mirror.decision_provision p JOIN mirror.decision d ON d.id = p.decision_id WHERE ${filter}
+           ORDER BY d.decided_on DESC NULLS LAST, d.id DESC ${limit}
+         ) m`;
   const { rows } = await db.query<Record<string, unknown>>(
-    `SELECT d.source, d.source_id, d.case_number, d.court, d.decision_type, d.category, d.decided_on::text AS decided_on, d.url, p.mentions,
-            substr(t.body, greatest(1, p.first_at + 1 - ${EXCERPT_BEFORE}), ${EXCERPT_CHARS}) AS excerpt
-     FROM mirror.decision_provision p JOIN mirror.decision d ON d.id = p.decision_id
+    `WITH page AS (${page})
+     SELECT d.source, d.source_id, d.case_number, d.court, d.decision_type, d.category, d.decided_on::text AS decided_on, d.url, page.mentions, page.cited,
+            length(t.body) AS chars,
+            substr(t.body, greatest(1, page.first_at + 1 - ${EXCERPT_BEFORE}), ${EXCERPT_CHARS}) AS excerpt
+     FROM page JOIN mirror.decision d ON d.id = page.id
      LEFT JOIN mirror.decision_text t ON t.decision_id = d.id
-     WHERE ${filter}
-     ORDER BY d.decided_on DESC NULLS LAST, d.id DESC
-     LIMIT $${params.push(q.limit)} OFFSET $${params.push(q.offset)}`,
+     ORDER BY ${sortedBy === "cited" ? "page.cited DESC, " : ""}d.decided_on DESC NULLS LAST, d.id DESC`,
     params,
   );
   return {
-    total: Number(count[0]?.n ?? 0),
+    total,
+    sortedBy,
     hits: rows.map((r) => ({
       source: r.source as MirrorSource,
       id: String(r.source_id),
@@ -96,6 +130,8 @@ export async function decisionsByProvision(db: Queryable, q: ProvisionQuery): Pr
       url: String(r.url),
       mentions: Number(r.mentions),
       excerpt: String(r.excerpt ?? "").replace(/\s+/g, " ").trim(),
+      citedBy: Number(r.cited ?? 0),
+      chars: r.chars === null || r.chars === undefined ? null : Number(r.chars),
     })),
   };
 }

@@ -73,5 +73,5 @@ Limity polí podle https://claude.com/docs/connectors/building/submission.
 
 ## Tools
 
-43 nástrojů (portál je načetl živě), všechny s `title`, `annotations.title` a anotacemi; vše `readOnlyHint: true`
+40 nástrojů (portál načetl 43 před sloučením čtyř `*_get_decision` do `caselaw_get_decision`, 11/2026 — po nasazení načíst znovu), všechny s `title`, `annotations.title` a anotacemi; vše `readOnlyHint: true`
 kromě `zotero_save` (`readOnlyHint: false`, `destructiveHint: false`, jen vytváří).

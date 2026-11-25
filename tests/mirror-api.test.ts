@@ -464,6 +464,30 @@ describe("GET /v1/decisions/:source/:id/citations", () => {
     expect((await (await get("/v1/decisions/us/4-296-24_1/citations?source=ns")).json()).citedBy.total).toBe(0);
   });
 
+  it("counts the citing decisions by court, orders them on request and shows where each names the decision", async () => {
+    const target = await (await get("/v1/decisions/us/4-296-24_1/citations")).json();
+    expect(target.citedBy).toMatchObject({ total: 1, bySource: { us: 1 }, order: "newest" });
+    expect(typeof target.citedBy.top).toBe("number");
+    // The citing decision's own text, around its first mention of the cited značka.
+    expect(target.citedBy.hits[0].excerpt).toContain("296/24");
+    const byCourts = await (await get("/v1/decisions/us/4-296-24_1/citations?order=courts")).json();
+    expect(byCourts.citedBy).toMatchObject({ total: 1, order: "courts" });
+    expect(byCourts.citedBy.hits.map((h: { id: string }) => h.id)).toEqual(["1-10-25_1"]);
+    // A court filter narrows the counts with the list.
+    expect((await (await get("/v1/decisions/us/4-296-24_1/citations?source=ns")).json()).citedBy.bySource).toEqual({});
+    expect((await get("/v1/decisions/us/4-296-24_1/citations?order=oldest")).status).toBe(400);
+  });
+
+  it("the decision itself says who cites it (page 1), and a hit list its length and citing count", async () => {
+    const cited = await (await get("/v1/decisions/us/4-296-24_1")).json();
+    expect(cited.citedBy).toMatchObject({ total: 1, bySource: { us: 1 } });
+    expect((await (await get("/v1/decisions/us/1-10-25_1")).json()).citedBy).toMatchObject({ total: 0, bySource: {} });
+    const search = await (await get("/v1/search?q=" + encodeURIComponent("spravedlivého procesu promlčení"))).json();
+    expect(search.hits[0]).toMatchObject({ id: "4-296-24_1", citedBy: 1, chars: nalezBody.length });
+    const lanes = await (await get("/v1/search?per_source=2&q=" + encodeURIComponent("spravedlivého procesu promlčení"))).json();
+    expect(lanes.lanes.us.hits[0]).toMatchObject({ id: "4-296-24_1", citedBy: 1, chars: nalezBody.length });
+  });
+
   it("GET /v1/by-case names the decision carrying the značka, not the ones citing it", async () => {
     const own = await (await get(`/v1/by-case?case=${encodeURIComponent("IV. ÚS 296/24")}`)).json();
     expect(own.decisions.map((d: { id: string }) => d.id)).toEqual(["4-296-24_1"]);
@@ -494,6 +518,28 @@ describe("search by cited provision", () => {
     expect((await (await get("/v1/provisions?act=89/2012&provision=par:2914")).json()).total).toBe(0);
     expect((await (await get("/v1/provisions?act=89/2012&provision=par:2913&source=ns,nss")).json()).total).toBe(0);
     expect((await (await get("/v1/provisions?act=89/2012&provision=par:2913&source=nss,us")).json()).total).toBe(1);
+  });
+
+  it("reads an act cited by name — the way the tools send EU law and the treaties", async () => {
+    const byName = await (await get(`/v1/provisions?cite=${encodeURIComponent("čl. 36 odst. 1 Listiny")}&sort=cited`)).json();
+    expect(byName).toMatchObject({ act: "zak:2/1993", provision: "cl:36/o1", total: 1, sortedBy: "cited" });
+    // An EU act nobody in the fixture cites: resolved to its CELEX id, and an empty list rather than an error.
+    const gdpr = await (await get(`/v1/provisions?cite=${encodeURIComponent("čl. 6 odst. 1 písm. f) nařízení (EU) 2016/679")}`)).json();
+    expect(gdpr).toMatchObject({ act: "eu:32016R0679", provision: "cl:6/o1/pf", total: 0 });
+    expect((await (await get(`/v1/provisions?cite=${encodeURIComponent("čl. 267 SFEU")}`)).json()).act).toBe("eu:12016E/TXT");
+    expect((await (await get(`/v1/provisions?cite=${encodeURIComponent("čl. 8 směrnice 2004/48/ES")}`)).json()).act).toBe("eu:32004L0048");
+  });
+
+  it("orders by citations on request and gives each hit its length and citing count", async () => {
+    const newest = await (await get("/v1/provisions?act=89/2012&provision=par:2913")).json();
+    expect(newest.sortedBy).toBe("newest");
+    expect(newest.hits[0]).toMatchObject({ id: "1-10-25_1", citedBy: 0 });
+    expect(newest.hits[0].chars).toBeGreaterThan(0);
+    const cited = await (await get("/v1/provisions?act=89/2012&provision=par:2913&sort=cited")).json();
+    expect(cited).toMatchObject({ total: 1, sortedBy: "cited" });
+    expect(cited.hits[0]).toMatchObject({ id: "1-10-25_1", citedBy: 0 });
+    expect(cited.hits[0].excerpt).toContain("§ 2913 odst. 1 písm. b)");
+    expect((await get("/v1/provisions?act=89/2012&provision=par:2913&sort=oldest")).status).toBe(400);
   });
 
   it("lists what a decision cites, deepest keys with the act's title", async () => {

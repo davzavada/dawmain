@@ -17,6 +17,12 @@ export const SEARCH_TTL_MS = 5 * 60 * 1000;
 /** Decision/act texts are immutable in practice — the TTL bounds memory,
  * not staleness. Callers holding big texts should also cap maxEntries. */
 export const DOCUMENT_TTL_MS = 10 * 60 * 1000;
+/** A court's decision does not change once published, and the server is a
+ * long-lived process now (not a function that scales to zero): the text stays
+ * for the length of a research session, so page 2 an hour after page 1 is not
+ * a second request to the court. The entry caps bound the memory. Legislation
+ * stays on DOCUMENT_TTL_MS — a new version takes effect at midnight. */
+export const DECISION_TTL_MS = 3 * 60 * 60 * 1000;
 
 /** Cache key from a call's inputs. JSON drops undefined object fields, so
  * omitted and undefined criteria hash identically. */

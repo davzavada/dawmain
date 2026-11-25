@@ -2,7 +2,7 @@ import { callDeadline } from "./shared/clock";
 import { SourceError } from "./shared/errors";
 import { fetchUpstream, type UpstreamOptions } from "./shared/http";
 import { htmlToText } from "./shared/html";
-import { DOCUMENT_TTL_MS, TtlCache, memoKey } from "./shared/cache";
+import { DECISION_TTL_MS, TtlCache, memoKey } from "./shared/cache";
 
 /**
  * Cellar — the EU Publications Office dissemination API (official, keyless).
@@ -233,7 +233,7 @@ export async function fetchWithinDeadline(
 // ---------- texts ----------
 
 /** Texts are big — keep the entry count low; the TTL bounds memory, not staleness. */
-const textCache = new TtlCache<string>(DOCUMENT_TTL_MS, 24);
+const textCache = new TtlCache<string>(DECISION_TTL_MS, 24);
 /**
  * A 404/406 on the document itself: Cellar has no rendition in that language.
  * Remembered briefly so paging an English-fallback text does not ask for the

@@ -3,7 +3,7 @@ import { fetchUpstream } from "./shared/http";
 import type { CheerioAPI } from "cheerio";
 import { loadHtml } from "./shared/html";
 import { SEARCH_OPERATORS, czechToIso, parseCaseNumber } from "./shared/text";
-import { DOCUMENT_TTL_MS, SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
+import { DECISION_TTL_MS, SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
 
 /**
  * Nejvyšší soud — rozhodnuti.nsoud.cz (IBM Domino classic web).
@@ -807,7 +807,7 @@ async function runNsSearch(
     ranked = [...top.hits, ...deep.hits.filter((hit) => !shown.has(hit.unid))];
   }
   // Under relevance the banner counts at most SearchMax matches. Hit URLs
-  // stay plain: the highlighted link comes from ns_get_decision with `find`,
+  // stay plain: the highlighted link comes from caselaw_get_decision (source: ns) with `find`,
   // opening at the very passage a memo quotes — search-term highlights on
   // every hit cost ~80 characters apiece and were rarely the cited link.
   const matchedIsMinimum = top.matched !== null && top.matched >= NS_SEARCH_MAX;
@@ -815,7 +815,7 @@ async function runNsSearch(
 }
 
 const searchCache = new TtlCache<NsSearchPage>(SEARCH_TTL_MS);
-const decisionCache = new TtlCache<NsDecision>(DOCUMENT_TTL_MS, 24);
+const decisionCache = new TtlCache<NsDecision>(DECISION_TTL_MS, 24);
 
 /**
  * Every search runs exactly as the caller wrote it, across the whole

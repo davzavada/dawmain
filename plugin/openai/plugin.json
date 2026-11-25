@@ -48,7 +48,7 @@
             {
               "description": "Supreme Court case law on a provision of the Civil Code",
               "prompt": "Najdi rozhodnutí Nejvyššího soudu k odpovědnosti za škodu z provozu dopravního prostředku podle § 2927 občanského zákoníku.",
-              "tools_triggered": "dawmain_guide, ns_search, ns_get_decision",
+              "tools_triggered": "dawmain_guide, ns_search, caselaw_get_decision",
               "expected_behavior": "Calls dawmain_guide, searches NS decisions, reads at least one decision and answers in Czech citing each decision by its spisová značka with a link to rozhodnuti.nsoud.cz."
             },
             {
@@ -60,7 +60,7 @@
             {
               "description": "Constitutional Court case law",
               "prompt": "Jak Ústavní soud posuzuje právo na spravedlivý proces při nepřipuštění dovolání? Najdi nálezy.",
-              "tools_triggered": "dawmain_guide, us_search, us_get_decision",
+              "tools_triggered": "dawmain_guide, us_search, caselaw_get_decision",
               "expected_behavior": "Searches NALUS, reads relevant nálezy and summarises the court's view, citing sp. zn. with links to nalus.usoud.cz."
             },
             {

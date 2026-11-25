@@ -2,16 +2,13 @@ import { z } from "zod";
 import { callDeadline } from "@/src/sources/shared/clock";
 import type { McpServer } from "@modelcontextprotocol/server";
 import {
-  FIND_DESCRIPTION,
-  READING_DESCRIPTION,
   READ_ONLY,
   assertDateRange,
   continuationHint,
   isoDate,
   readTopSchema,
-  toolFailure,
-} from "./shared";
-import { paragraphsSchema, readDecision } from "./reading";
+  toolFailure, type ToolAnswer } from "./shared";
+import { readDecision } from "./reading";
 import { getNsDecision, nsBodyMissing, searchNs, withHighlight } from "@/src/sources/ns";
 import { interleave, maxTotal, uniqueQueries } from "@/src/sources/shared/text";
 import { PREVIEW_DEADLINE_MS, buildPreviews, renderPreviews, withDeadline, type ToolPreview } from "./previews";
@@ -87,10 +84,10 @@ async function operativePreviews(
 
 function operativeBlock(preview: ToolPreview & { kind: "výrok" | "opening" | "none" }): string {
   if (preview.kind === "none") {
-    return `— NO PREVIEW ${preview.caseNumber}: no judgment body came back from NS — its metadata via ns_get_decision.`;
+    return `— NO PREVIEW ${preview.caseNumber}: no judgment body came back from NS — its metadata via caselaw_get_decision (source: ns).`;
   }
   const what = preview.kind === "výrok" ? "VÝROK" : "OPENING";
-  return `— ${what} ${preview.caseNumber} (no query to excerpt around — ${preview.kind === "výrok" ? "the operative part" : "the start of the text"}):\n${preview.excerpt}\n(${preview.kind === "výrok" ? "výrok" : "opening"} only — the whole decision via ns_get_decision)`;
+  return `— ${what} ${preview.caseNumber} (no query to excerpt around — ${preview.kind === "výrok" ? "the operative part" : "the start of the text"}):\n${preview.excerpt}\n(${preview.kind === "výrok" ? "výrok" : "opening"} only — the whole decision via caselaw_get_decision (source: ns))`;
 }
 
 export function registerNs(server: McpServer): void {
@@ -99,7 +96,7 @@ export function registerNs(server: McpServer): void {
     {
       title: "Nejvyšší soud: search decisions",
       description:
-        "FULL-TEXT search of Czech Supreme Court decisions (civil & criminal law: dovolání, sjednocující stanoviska), with the fields the NS search form exposes: spisová značka (exact), kategorie rozhodnutí A–E, typ rozhodnutí (rozsudek/usnesení/stanovisko), soud, decision date and publication date. The database also carries decisions of LOWER courts — they are in it because they were published in the Sbírka soudních rozhodnutí a stanovisek, so they carry comparable weight; keep them unless the user asked for NS only. Czech queries. Plain words are ALL required (joined with AND, anywhere in the text); \"quoted words\" are an exact phrase; a spisová značka in the query stays one phrase. 'query' also accepts Domino operators — AND / OR / NOT, (grouping), wildcards (nájem*), proximity (NEAR, SENTENCE, PARAGRAPH) — and an expression with any of them goes upstream exactly as written. Full-text results come ordered by RELEVANCE; each hit carries its court and category (A = Sbírka … E = mostly procedural). 'queries' searches up to 3 variants IN PARALLEL and merges them round-robin, so every variant is represented; 'variant_totals' says what each found. case_number matches the značka itself, NOT decisions citing it — to find those, pass the značka as 'query'. A full-text search covers the WHOLE database. Any query addresses at most its first 900 documents — 'matched' reports the true count (under relevance order at most 1000; 'matched_at_least' then marks it as a floor), so narrow with dates, type or category rather than paging deep. Results carry a UNID for ns_get_decision (whose 'find' also returns a link that opens scrolled to the found passage — the link to cite). read_top: N also returns excerpt previews of the N best hits (without a query: their výrok).",
+        "FULL-TEXT search of Czech Supreme Court decisions (civil & criminal law: dovolání, sjednocující stanoviska), with the fields the NS search form exposes: spisová značka (exact), kategorie rozhodnutí A–E, typ rozhodnutí (rozsudek/usnesení/stanovisko), soud, decision date and publication date. The database also carries decisions of LOWER courts — they are in it because they were published in the Sbírka soudních rozhodnutí a stanovisek, so they carry comparable weight; keep them unless the user asked for NS only. Czech queries. Plain words are ALL required (joined with AND, anywhere in the text); \"quoted words\" are an exact phrase; a spisová značka in the query stays one phrase. 'query' also accepts Domino operators — AND / OR / NOT, (grouping), wildcards (nájem*), proximity (NEAR, SENTENCE, PARAGRAPH) — and an expression with any of them goes upstream exactly as written. Full-text results come ordered by RELEVANCE; each hit carries its court and category (A = Sbírka … E = mostly procedural). 'queries' searches up to 3 variants IN PARALLEL and merges them round-robin, so every variant is represented; 'variant_totals' says what each found. case_number matches the značka itself, NOT decisions citing it — to find those, pass the značka as 'query'. A full-text search covers the WHOLE database. Any query addresses at most its first 900 documents — 'matched' reports the true count (under relevance order at most 1000; 'matched_at_least' then marks it as a floor), so narrow with dates, type or category rather than paging deep. Results carry a UNID for caselaw_get_decision (source: ns) (whose 'find' also returns a link that opens scrolled to the found passage — the link to cite). read_top: N also returns excerpt previews of the N best hits (without a query: their výrok).",
       inputSchema: z.object({
         query: z
           .string()
@@ -268,7 +265,7 @@ export function registerNs(server: McpServer): void {
             },
             variants,
           );
-          previewLines = renderPreviews(previews, "ns_get_decision");
+          previewLines = renderPreviews(previews, "caselaw_get_decision (source: ns)");
         } else {
           const opened = await operativePreviews(targets, previewDeadline());
           previews = opened?.map(({ kind: _kind, ...preview }) => preview);
@@ -290,7 +287,7 @@ export function registerNs(server: McpServer): void {
         };
         const lines = page.hits.map(
           (hit, i) =>
-            `${offset + i + 1}. ${hit.caseNumbers.join("; ")}${hit.category ? ` [${hit.category}]` : ""}${hit.court && hit.court !== "Nejvyšší soud" ? ` — ${hit.court}` : ""} — unid ${hit.unid}\n   ${hit.url}`,
+            `${offset + i + 1}. ${hit.caseNumbers.join("; ")}${hit.category ? ` [${hit.category}]` : ""}${hit.court && hit.court !== "Nejvyšší soud" ? ` — ${hit.court}` : ""} — id ${hit.unid}\n   ${hit.url}`,
         );
         const variantLine = variantTotals
           ? // ✗ only for a variant that failed; "?" is a count NS did not print.
@@ -303,6 +300,7 @@ export function registerNs(server: McpServer): void {
               ...(variantLine ? [variantLine] : []),
               `${page.total ?? "?"} decision${page.total === 1 ? "" : "s"}${variants.length ? ", by relevance" : ""}${page.truncated ? ` (window-capped; ${page.matchedAtLeast ? "≥ " : ""}${page.matched} match in total — narrow by date, type or category to see the rest)` : ""}:`,
               ...lines,
+              "Full text: caselaw_get_decision {source: 'ns', id}.",
               ...previewLines,
             ].join("\n");
         return { content: [{ type: "text", text }], structuredContent: output };
@@ -311,73 +309,53 @@ export function registerNs(server: McpServer): void {
       }
     },
   );
+}
 
-  server.registerTool(
-    "ns_get_decision",
-    {
-      title: "Nejvyšší soud: decision text",
-      description:
-        `Full text and metadata (spisová značka, ECLI, právní věta, heslo, dotčené předpisy) of one Supreme Court decision, by the 32-hex UNID from ns_search. The returned url opens the decision itself (and with 'find' it opens scrolled to the term) — cite that link, never a search URL. ${READING_DESCRIPTION}`,
-      inputSchema: z.object({
-        unid: z.string().regex(/^[0-9A-Fa-f]{32}$/, "32-hex UNID from ns_search"),
-        find: z.string().optional().describe(FIND_DESCRIPTION),
-        paragraphs: paragraphsSchema,
-        page: z.number().int().min(1).default(1),
-      }),
-      outputSchema: z.object({
-        unid: z.string(),
-        url: z.string(),
-        metadata: z.record(z.string(), z.string()),
-        page: z.number(),
-        total_pages: z.number(),
-        has_more: z.boolean(),
-        matches: z.number().optional().describe("Match count when 'find' was used."),
-        text: z.string(),
-      }),
-      annotations: READ_ONLY,
-    },
-    async ({ unid, find, paragraphs, page }) => {
-      try {
-        const decision = await getNsDecision(unid);
-        const paged = readDecision(decision.text, { page, find, paragraphs });
-        // With 'find', hand back a link that opens the document scrolled to the
-        // term — a citation the reader can check in one click. Only when the
-        // term is there: a highlight of nothing would promise a passage.
-        const found = Boolean(find?.trim() && paged.matches);
-        const url = found ? withHighlight(decision.url, [find]) : decision.url;
-        // withHighlight drops terms under 3 characters ("§ 22", "čl. 6", "ÚS")
-        // and may hand back the plain url — which then opens at page one.
-        const opensAtPassage = url !== decision.url;
-        const output = {
-          unid: decision.unid,
-          url,
-          metadata: decision.metadata,
-          page: paged.page,
-          total_pages: paged.total_pages,
-          has_more: paged.has_more,
-          matches: paged.matches,
-          text: paged.text,
-        };
-        // The link to cite rides in the text: clients read nothing else.
-        const meta = [
-          ...Object.entries(decision.metadata).map(([key, value]) => `${key}: ${value}`),
-          opensAtPassage ? `${url} (opens at the found passage)` : url,
-        ].join("\n");
-        // Never hand back a silent metadata echo — say plainly that NS has
-        // no machine-readable body for this document, and claim it only when
-        // both renditions were actually read.
-        const text = !nsBodyMissing(decision.text)
-          ? `${meta}\n\n${paged.text}${continuationHint(paged)}`
-          : decision.bodyUnverified
-            ? `${meta}\n\n(WebPrint carries no judgment body and the WebSearch rendition could not be read just now — call ns_get_decision again in a minute; metadata only so far.)`
-            : `${meta}\n\n(NS did not publish a machine-readable judgment body for this document — neither the WebPrint nor the WebSearch rendition carries it. Only metadata is available; open ${url} in a browser to check for an attached PDF.)`;
-        return {
-          content: [{ type: "text", text }],
-          structuredContent: output,
-        };
-      } catch (error) {
-        return fail(error);
-      }
-    },
-  );
+/**
+ * One Nejvyšší soud decision: a page of its text, `find` excerpts, numbered
+ * paragraphs or the outline. caselaw_get_decision (./caselaw-get.ts) is the
+ * tool that calls it — one read tool for the four Czech sources.
+ */
+export async function readNsDecision({ unid, find, paragraphs, outline, page }: { unid: string; find?: string; paragraphs?: string; outline?: boolean; page: number }): Promise<ToolAnswer> {
+  try {
+    const decision = await getNsDecision(unid);
+    const paged = readDecision(decision.text, { page, find, paragraphs, outline });
+    // With 'find', hand back a link that opens the document scrolled to the
+    // term — a citation the reader can check in one click. Only when the
+    // term is there: a highlight of nothing would promise a passage.
+    const found = Boolean(find?.trim() && paged.matches);
+    const url = found ? withHighlight(decision.url, [find]) : decision.url;
+    // withHighlight drops terms under 3 characters ("§ 22", "čl. 6", "ÚS")
+    // and may hand back the plain url — which then opens at page one.
+    const opensAtPassage = url !== decision.url;
+    const output = {
+      unid: decision.unid,
+      url,
+      metadata: decision.metadata,
+      page: paged.page,
+      total_pages: paged.total_pages,
+      has_more: paged.has_more,
+      matches: paged.matches,
+      text: paged.text,
+    };
+    // The link to cite rides in the text: clients read nothing else.
+    const meta = [
+      ...Object.entries(decision.metadata).map(([key, value]) => `${key}: ${value}`),
+      opensAtPassage ? `${url} (opens at the found passage)` : url,
+    ].join("\n");
+    // Never hand back a silent metadata echo — say plainly that NS has
+    // no machine-readable body for this document, and claim it only when
+    // both renditions were actually read.
+    const text = !nsBodyMissing(decision.text)
+      ? `${meta}\n\n${paged.text}${continuationHint(paged)}`
+      : decision.bodyUnverified
+        ? `${meta}\n\n(WebPrint carries no judgment body and the WebSearch rendition could not be read just now — call caselaw_get_decision (source: ns) again in a minute; metadata only so far.)`
+        : `${meta}\n\n(NS did not publish a machine-readable judgment body for this document — neither the WebPrint nor the WebSearch rendition carries it. Only metadata is available; open ${url} in a browser to check for an attached PDF.)`;
+    return {
+      content: [{ type: "text", text }],
+      structuredContent: output,
+    };
+  } catch (error) {
+    return fail(error);
+  }
 }

@@ -23,9 +23,11 @@ const LINKS: MirrorCitations = {
 describe("formatCitations", () => {
   it("cited_by: the total, the page, each hit with its *_get_* call, and the continuation", () => {
     const text = formatCitations(LINKS, { source: "ns", id: "X1", direction: "cited_by", limit: 2, offset: 0 });
-    expect(text).toContain("Cited by 3 decisions — newest first, 1–2:");
-    expect(text).toContain("1. [NS] 31 Cdo 1/2024 (rozsudek, 2024-03-01) — Nejvyšší soud → ns_get_decision unid: AB12 · names it 4×");
-    expect(text).toContain("2. [JUSTICE] 8 Co 60/2025 (usnesení, 2025-02-02) — Krajský soud v Brně → justice_get_decision uuid: u-1");
+    expect(text).toContain("Cited by 3 decisions.");
+    expect(text).toContain("1–2 — newest first");
+    // The lane's own court goes without saying; an obecný soud is named.
+    expect(text).toContain("1. [NS] 31 Cdo 1/2024 (rozsudek, 2024-03-01) → caselaw_get_decision source: ns, id: AB12 · names it 4×");
+    expect(text).toContain("2. [JUSTICE] 8 Co 60/2025 (usnesení, 2025-02-02) — Krajský soud v Brně → caselaw_get_decision source: justice, id: u-1");
     expect(text).toContain("More: offset: 2 (same arguments).");
     expect(text).not.toContain("Cites ");
     expect(text).toContain("not proof that nobody cites it");
@@ -34,10 +36,30 @@ describe("formatCitations", () => {
   it("cites: one line per cited key — the decision, several carrying one značka, or not in the mirror", () => {
     const text = formatCitations(LINKS, { source: "ns", id: "X1", direction: "cites", limit: 20, offset: 0 });
     expect(text).toContain("Cites 3 decisions");
-    expect(text).toContain("1. IV. ÚS 296/24 · 2× — [US] IV. ÚS 296/24 (nález, 2024-05-02) — Ústavní soud → us_get_decision sz: 4-296-24_1");
+    expect(text).toContain("1. IV. ÚS 296/24 · 2× — [US] IV. ÚS 296/24 (nález, 2024-05-02) → caselaw_get_decision source: us, id: 4-296-24_1");
     expect(text).toContain("2. 19 C 264/2021 — 2 decisions carry this značka:");
     expect(text).toContain("3. C-311/18 — not in the mirror");
     expect(text).not.toContain("Cited by");
+  });
+
+  it("cited_by from the current API: counts by court, the binding ones named, the order, and each citing passage", () => {
+    const links: MirrorCitations = {
+      cites: [],
+      citedBy: {
+        total: 37,
+        bySource: { justice: 32, ns: 4, us: 1 },
+        top: 1,
+        order: "courts",
+        hits: [
+          { source: "ns", id: "AB12", caseNumber: "31 Cdo 1/2024", court: "Nejvyšší soud", form: "rozsudek", date: "2024-03-01", mentions: 2, excerpt: "  jak dovodil\nNejvyšší soud v rozsudku sp. zn. 26 Cdo 4848/2016, nezaplacení nájemného  " },
+        ],
+      },
+    };
+    const text = formatCitations(links, { source: "ns", id: "X1", direction: "cited_by", limit: 1, offset: 0 });
+    expect(text).toContain("Cited by 37 decisions (ÚS 1, NS 4, obecné soudy 32; 1 of them a stanovisko, the plenum of the ÚS, a velký senát of the NS or a rozšířený senát of the NSS).");
+    expect(text).toContain("1–1 — stanoviska, plénum and velký / rozšířený senát first");
+    expect(text).toContain("   …jak dovodil Nejvyšší soud v rozsudku sp. zn. 26 Cdo 4848/2016, nezaplacení nájemného");
+    expect(text).toContain("More: offset: 1 (same arguments).");
   });
 
   it("says so when nobody cites it, naming the court filter", () => {

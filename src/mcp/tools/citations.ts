@@ -11,24 +11,18 @@ import {
   type MirrorCourt,
   type MirrorLinkedDecision,
 } from "@/src/sources/mirror";
-import { MIRROR_NOTE } from "./mirror-route";
+import { citedByCourts, courtLabel, MIRROR_NOTE, readCall } from "./mirror-route";
 import { READ_ONLY, toolFailure } from "./shared";
 
 /**
  * caselaw_citations — the citator over the home mirror: who cites a decision
- * (later authority, newest first) and what it cites itself. The links are
+ * (later authority — counted by court, the courts that bind first, each with
+ * the passage naming it) and what it cites itself. The links are
  * extracted from the texts at sync (src/mirror/citations.ts): a spisová
  * značka or ECLI a decision names, matched to the decisions carrying it.
  * Mirror only — the courts' own sites have no such lookup, so there is no
  * live fallback; without the mirror the tool says so.
  */
-
-const DETAIL: Record<MirrorCourt, (id: string) => string> = {
-  ns: (id) => `ns_get_decision unid: ${id}`,
-  nss: (id) => `nss_get_decision document_id: ${id}`,
-  us: (id) => `us_get_decision sz: ${id}`,
-  justice: (id) => `justice_get_decision uuid: ${id}`,
-};
 
 const FORM: Record<string, string> = {
   rozsudek: "rozsudek",
@@ -44,7 +38,19 @@ const CITES_SHOWN = 40;
 
 function decisionLine(d: MirrorLinkedDecision): string {
   const facts = [d.form ? (FORM[d.form] ?? d.form) : null, d.date].filter(Boolean).join(", ");
-  return `[${d.source.toUpperCase()}] ${d.caseNumber ?? "?"}${facts ? ` (${facts})` : ""}${d.court ? ` — ${d.court}` : ""} → ${DETAIL[d.source](d.id)}`;
+  const court = courtLabel(d);
+  return `[${d.source.toUpperCase()}] ${d.caseNumber ?? "?"}${facts ? ` (${facts})` : ""}${court ? ` — ${court}` : ""} → ${readCall(d.source, d.id)}`;
+}
+
+/** Characters of a citing decision's text shown around the citation. */
+const CITING_CHARS = 300;
+
+/** The citing passage in one line, cut at a word. Pure. */
+function citingPassage(excerpt: string | undefined): string {
+  const clean = excerpt?.replace(/\s+/g, " ").trim();
+  if (!clean) return "";
+  const cut = clean.length > CITING_CHARS ? `${clean.slice(0, clean.lastIndexOf(" ", CITING_CHARS))}…` : clean;
+  return `\n   …${cut}`;
 }
 
 export interface CitationsView {
@@ -56,9 +62,14 @@ export interface CitationsView {
   citedBySources?: MirrorCourt[];
 }
 
+/** "higher courts first" / "newest first" — the order the mirror answered in (an API that predates the choice: newest). */
+function orderLabel(order: "newest" | "courts" | undefined): string {
+  return order === "courts" ? "stanoviska, plénum and velký / rozšířený senát first, then nálezy, the top courts, the rest; newest within each" : "newest first";
+}
+
 /** The answer text. Pure — unit-tested. */
 export function formatCitations(links: MirrorCitations, view: CitationsView): string {
-  const lines: string[] = [MIRROR_NOTE, `Citation links of ${view.source.toUpperCase()} decision ${view.id} (${DETAIL[view.source](view.id)})`];
+  const lines: string[] = [MIRROR_NOTE, `Citation links of ${view.source.toUpperCase()} decision ${view.id} (${readCall(view.source, view.id)})`];
 
   if (view.direction !== "cites") {
     const { total, hits } = links.citedBy;
@@ -69,9 +80,13 @@ export function formatCitations(links: MirrorCitations, view: CitationsView): st
     } else {
       const first = view.offset + 1;
       const last = view.offset + hits.length;
-      lines.push(`Cited by ${total} decision${total === 1 ? "" : "s"}${scope} — newest first, ${hits.length ? `${first}–${last}` : "none on this page"}:`);
+      const { bySource, top } = links.citedBy;
+      const courts = bySource ? citedByCourts(bySource) : "";
+      const topNote = typeof top === "number" ? (top ? `; ${top} of them a stanovisko, the plenum of the ÚS, a velký senát of the NS or a rozšířený senát of the NSS` : "; none of them a stanovisko, plenum, velký or rozšířený senát") : "";
+      lines.push(`Cited by ${total} decision${total === 1 ? "" : "s"}${scope}${courts ? ` (${courts}${topNote})` : ""}.`);
+      lines.push(`${hits.length ? `${first}–${last}` : "None on this page"} — ${orderLabel(links.citedBy.order)}; under each, its text where it first names the decision:`);
       hits.forEach((hit, i) => {
-        lines.push(`${view.offset + i + 1}. ${decisionLine(hit)}${hit.mentions > 1 ? ` · names it ${hit.mentions}×` : ""}`);
+        lines.push(`${view.offset + i + 1}. ${decisionLine(hit)}${hit.mentions > 1 ? ` · names it ${hit.mentions}×` : ""}${citingPassage(hit.excerpt)}`);
       });
       if (last < total) lines.push(`More: offset: ${last} (same arguments).`);
     }
@@ -100,7 +115,7 @@ export function formatCitations(links: MirrorCitations, view: CitationsView): st
 
   lines.push(
     "",
-    "A citing decision may follow, distinguish or overrule: read the passage (the *_get_* call with find: the cited spisová značka) before saying which. The links cover the mirrored courts only (NS, NSS, ÚS, obecné soudy from 10/2020) and what the texts spell out — a missing link is not proof that nobody cites it.",
+    "A citing decision may follow, distinguish or overrule: the line under a hit is where it first names the decision, not its verdict on it — for one the answer turns on, read the passage (the *_get_* call with find: the cited spisová značka). The links cover the mirrored courts only (NS, NSS, ÚS, obecné soudy from 10/2020) and what the texts spell out — a missing link is not proof that nobody cites it.",
   );
   return lines.join("\n");
 }
@@ -111,7 +126,7 @@ export function registerCitations(server: McpServer): void {
     {
       title: "Case law: who cites a decision, and what it cites",
       description:
-        "The citator: for ONE Czech decision, the later decisions that cite it (NS, NSS, ÚS and obecné soudy, newest first, with how often each names it) and, on request, the decisions it cites itself. Use it to check a decision is still good law — whether a velký senát, a stanovisko or the Ústavní soud took it up, and how the lower courts apply it — and to walk a line of case law from its leading decision. Identify the decision by the court's own id from a search hit (source + id: NS unid, NSS document_id, ÚS sz, justice uuid) or by source + case_number. Links are read from the decision texts in the Dawmain mirror; each citing hit names the *_get_* call that reads it — open it with find: the cited spisová značka to see what it did with the decision.",
+        "The citator: for ONE Czech decision, the later decisions that cite it (NS, NSS, ÚS and obecné soudy — counted by court, the courts that bind first, each with the passage where it names the decision) and, on request, the decisions it cites itself. Use it to check a decision is still good law — whether a velký senát, a stanovisko or the Ústavní soud took it up, and how the lower courts apply it — and to walk a line of case law from its leading decision. Identify the decision by the court's own id from a search hit (source + id: NS unid, NSS document_id, ÚS sz, justice uuid) or by source + case_number. Links are read from the decision texts in the Dawmain mirror; each citing hit names the *_get_* call that reads it — open it with find: the cited spisová značka to see what it did with the decision.",
       inputSchema: z.object({
         source: z.enum(["ns", "nss", "us", "justice"]).describe("The court of the decision: ns, nss, us (Ústavní soud) or justice (okresní, krajské, vrchní soudy)."),
         id: z
@@ -134,12 +149,16 @@ export function registerCitations(server: McpServer): void {
           .array(z.enum(["ns", "nss", "us", "justice"]))
           .optional()
           .describe("Only citing decisions of these courts, e.g. ['us'] for what the Ústavní soud said about it. Default: all."),
+        order: z
+          .enum(["courts", "newest"])
+          .default("courts")
+          .describe("courts = stanoviska, plénum ÚS, velký senát NS and rozšířený senát NSS first, then nálezy, the top courts, obecné soudy (default); newest = by decision date alone."),
         limit: z.number().int().min(1).max(CITATIONS_MAX_LIMIT).default(20).describe("Citing decisions per page."),
         offset: z.number().int().min(0).max(100_000).default(0).describe("Skip this many citing decisions (pagination)."),
       }),
       annotations: READ_ONLY,
     },
-    async ({ source, id, case_number, direction, cited_by_sources, limit, offset }) => {
+    async ({ source, id, case_number, direction, cited_by_sources, order, limit, offset }) => {
       try {
         if (!mirrorConfigured()) {
           throw new SourceError(
@@ -169,7 +188,7 @@ export function registerCitations(server: McpServer): void {
           decisionId = found[0].id;
         }
         const citedBySources = cited_by_sources?.length ? (cited_by_sources.filter((s) => MIRROR_COURTS.includes(s)) as MirrorCourt[]) : undefined;
-        const links = await getMirrorCitations(source, decisionId, { limit, offset, citedBySources });
+        const links = await getMirrorCitations(source, decisionId, { limit, offset, citedBySources, order });
         if (!links) {
           return {
             content: [{ type: "text" as const, text: `${MIRROR_NOTE}\nThe mirror does not hold ${source.toUpperCase()} decision ${decisionId} (not published yet, or the id belongs to another court). Search the citation as full text instead: the court's *_search tool with the whole spisová značka as the query.` }],

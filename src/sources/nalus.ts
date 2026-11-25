@@ -2,7 +2,7 @@ import { SourceError } from "./shared/errors";
 import { CookieSession, fetchUpstream, type UpstreamOptions } from "./shared/http";
 import { htmlToText, loadHtml } from "./shared/html";
 import { czechToIso, isoToCzech } from "./shared/text";
-import { DOCUMENT_TTL_MS, SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
+import { DECISION_TTL_MS, SEARCH_TTL_MS, TtlCache, memoKey } from "./shared/cache";
 
 /**
  * NALUS — Ústavní soud decisions (nalus.usoud.cz, ASP.NET WebForms).
@@ -233,7 +233,7 @@ export function parseNalusAbstract(html: string): NalusAbstract {
   return { abstract: read("table.abstractContent td"), legalSentence: read("table.legalSentenceContent td") };
 }
 
-const decisionCache = new TtlCache<NalusDecision & NalusAbstract & { abstractUnavailable?: true }>(DOCUMENT_TTL_MS, 24);
+const decisionCache = new TtlCache<NalusDecision & NalusAbstract & { abstractUnavailable?: true }>(DECISION_TTL_MS, 24);
 const searchCache = new TtlCache<NalusSearchPage>(SEARCH_TTL_MS);
 
 /** Options every NALUS call takes from a tool that answers within a budget. */

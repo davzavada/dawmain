@@ -128,14 +128,11 @@ const EXPECTED_TOOLS = [
   "esbirka_get_act",
   "esbirka_get_text",
   "ns_search",
-  "ns_get_decision",
   "us_search",
-  "us_get_decision",
   "nss_search",
-  "nss_get_decision",
   "caselaw_search",
+  "caselaw_get_decision",
   "justice_search",
-  "justice_get_decision",
   "sdeu_search",
   "sdeu_get_document",
   "eurlex_search",
@@ -301,13 +298,13 @@ async function checkLive(client) {
   ok("esbirka_get_act", textOf(act, "esbirka_get_act").split("\n")[0] || "(no name)");
 
   const nalus = await client.request("tools/call", {
-    name: "us_get_decision",
-    arguments: { sz: "1-709-05" },
+    name: "caselaw_get_decision",
+    arguments: { source: "us", id: "1-709-05" },
   });
-  if (nalus.isError) throw new Error(`us_get_decision failed: ${nalus.content?.[0]?.text}`);
-  const nalusText = textOf(nalus, "us_get_decision");
-  if (!nalusText.includes("https://nalus.usoud.cz/")) throw new Error("us_get_decision text carries no link to cite");
-  ok("us_get_decision", `sz=1-709-05, ${nalusText.match(/\(page 1\/(\d+)/)?.[1] ?? 1} text page(s), link present`);
+  if (nalus.isError) throw new Error(`caselaw_get_decision (us) failed: ${nalus.content?.[0]?.text}`);
+  const nalusText = textOf(nalus, "caselaw_get_decision");
+  if (!nalusText.includes("https://nalus.usoud.cz/")) throw new Error("caselaw_get_decision (us) text carries no link to cite");
+  ok("caselaw_get_decision", `us 1-709-05, ${nalusText.match(/\(page 1\/(\d+)/)?.[1] ?? 1} text page(s), link present`);
 
   const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10);
   const ns = await client.request("tools/call", {

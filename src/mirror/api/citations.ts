@@ -29,9 +29,113 @@ export interface CitedKey {
   decisions: LinkedDecision[];
 }
 
+export type CitedByOrder = "newest" | "courts";
+
+export interface CitingDecision extends LinkedDecision {
+  mentions: number;
+  /** The citing decision's text around its first mention of the cited one. */
+  excerpt?: string;
+}
+
+/** How many decisions cite one, by court; `top` = those that bind the others (see TOP_RANK). */
+export interface CitedBySummary {
+  total: number;
+  bySource: Partial<Record<MirrorSource, number>>;
+  top: number;
+}
+
 export interface DecisionLinks {
   cites: CitedKey[];
-  citedBy: { total: number; hits: Array<LinkedDecision & { mentions: number }> };
+  citedBy: CitedBySummary & { hits: CitingDecision[]; order: CitedByOrder };
+}
+
+/**
+ * The decisions citing `id` (a SQL expression of a decision's id), each once:
+ * a citing decision that names two of its keys (sp. zn. and ECLI) counts once.
+ */
+const citingOf = (id: string): string =>
+  `SELECT c.citing_id, sum(c.mentions)::int AS mentions, min(c.first_at) AS first_at
+   FROM mirror.decision_key own JOIN mirror.decision_citation c ON c.key = own.key
+   WHERE own.decision_id = ${id} AND c.citing_id <> ${id}
+   GROUP BY c.citing_id`;
+
+/** How many decisions cite the decision whose id the SQL expression `id` gives — a scalar subquery. */
+export const citedCount = (id: string): string =>
+  `(SELECT count(DISTINCT c.citing_id)::int FROM mirror.decision_key own JOIN mirror.decision_citation c ON c.key = own.key
+    WHERE own.decision_id = ${id} AND c.citing_id <> ${id})`;
+
+/**
+ * Whose citation settles more, as a rank (0 first): a stanovisko, the plenum of
+ * the Ústavní soud, the velký senát of the Nejvyšší soud (31 Cdo, 15 Tdo) and
+ * the rozšířený senát of the NSS; then nálezy; then the other decisions of the
+ * three top courts; then everyone else (obecné soudy, the krajské soudy the NSS
+ * index carries). Newest-first lists of a decision cited often open with a
+ * page of okresní soudy, and whether a velký senát took the decision up is the
+ * first thing the reader asks.
+ */
+const TOP_RANK = 0;
+const citingRank = (d: string): string =>
+  `(CASE WHEN ${d}.decision_type = 'stanovisko'
+          OR (${d}.source = 'us' AND ${d}.case_number LIKE 'Pl.%')
+          OR (${d}.source = 'ns' AND (${d}.case_number LIKE '31 Cdo %' OR ${d}.case_number LIKE '15 Tdo %'))
+          OR (${d}.source = 'nss' AND (${d}.court ILIKE '%rozšířen%' OR ${d}.court ILIKE '%RS NSS%')) THEN ${TOP_RANK}
+         WHEN ${d}.source = 'us' AND ${d}.decision_type = 'nalez' THEN 1
+         WHEN ${d}.source IN ('ns', 'us') THEN 2
+         WHEN ${d}.source = 'nss' AND coalesce(${d}.court, 'Nejvyšší správní soud') ILIKE 'Nejvyšší správní soud%' THEN 2
+         ELSE 3 END)`;
+
+/** Characters of a citing decision's text shown around the citation. */
+const CITING_BEFORE = 120;
+const CITING_CHARS = 360;
+
+function summaryOf(rows: Record<string, unknown>[]): CitedBySummary {
+  const bySource: Partial<Record<MirrorSource, number>> = {};
+  let total = 0;
+  let top = 0;
+  for (const r of rows) {
+    bySource[r.source as MirrorSource] = Number(r.n);
+    total += Number(r.n);
+    top += Number(r.top);
+  }
+  return { total, bySource, top };
+}
+
+/** Who cites a decision, counted by court — for a line in the decision's header; null = not in the mirror. */
+export async function citedBySummary(db: Queryable, source: MirrorSource, id: string): Promise<CitedBySummary | null> {
+  const found = await db.query<{ id: string }>("SELECT id::text FROM mirror.decision WHERE source = $1 AND source_id = $2", [source, id]);
+  const decisionId = found.rows[0]?.id;
+  if (decisionId === undefined) return null;
+  const { rows } = await db.query<Record<string, unknown>>(
+    `WITH citing AS (${citingOf("$1")})
+     SELECT d.source, count(*)::int AS n, (count(*) FILTER (WHERE ${citingRank("d")} = ${TOP_RANK}))::int AS top
+     FROM citing JOIN mirror.decision d ON d.id = citing.citing_id GROUP BY d.source`,
+    [decisionId],
+  );
+  return summaryOf(rows);
+}
+
+/**
+ * What a hit list says of each decision beside its match: how long the text is
+ * (so every page can be asked for at once) and how many decisions cite it (so
+ * the leading one stands out). Keyed "source:id"; a decision not found is absent.
+ */
+export async function factsOfDecisions(
+  db: Queryable,
+  refs: Array<{ source: MirrorSource; id: string }>,
+): Promise<Map<string, { chars: number | null; citedBy: number }>> {
+  const out = new Map<string, { chars: number | null; citedBy: number }>();
+  if (!refs.length) return out;
+  const { rows } = await db.query<Record<string, unknown>>(
+    `SELECT d.source, d.source_id, length(t.body) AS chars, ${citedCount("d.id")} AS cited
+     FROM unnest($1::text[], $2::text[]) AS ref(source, source_id)
+     JOIN mirror.decision d ON d.source = ref.source AND d.source_id = ref.source_id
+     LEFT JOIN mirror.decision_text t ON t.decision_id = d.id`,
+    [refs.map((r) => r.source), refs.map((r) => r.id)],
+  );
+  for (const r of rows) {
+    out.set(`${String(r.source)}:${String(r.source_id)}`, { chars: r.chars === null || r.chars === undefined ? null : Number(r.chars), citedBy: Number(r.cited) });
+  }
+  return out;
 }
 
 function displayOf(key: string): string {
@@ -52,7 +156,7 @@ export async function linksOfDecision(
   db: Queryable,
   source: MirrorSource,
   id: string,
-  options: { limit?: number; offset?: number; citedBySource?: MirrorSource[] } = {},
+  options: { limit?: number; offset?: number; citedBySource?: MirrorSource[]; order?: CitedByOrder } = {},
 ): Promise<DecisionLinks | null> {
   const found = await db.query<{ id: string }>("SELECT id::text FROM mirror.decision WHERE source = $1 AND source_id = $2", [source, id]);
   const decisionId = found.rows[0]?.id;
@@ -75,20 +179,31 @@ export async function linksOfDecision(
   const limit = Math.min(Math.max(1, Math.floor(options.limit ?? 20)), CITED_BY_MAX_LIMIT);
   const offset = Math.max(0, Math.floor(options.offset ?? 0));
   const sources = options.citedBySource?.length ? options.citedBySource : null;
+  const order: CitedByOrder = options.order ?? "newest";
+  // The page first, its texts after: the excerpt is cut from the citing decisions shown only.
   const citedBy = await db.query<Record<string, unknown>>(
-    `WITH citing AS (
-       SELECT c.citing_id, sum(c.mentions)::int AS mentions
-       FROM mirror.decision_key own JOIN mirror.decision_citation c ON c.key = own.key
-       WHERE own.decision_id = $1 AND c.citing_id <> $1
-       GROUP BY c.citing_id
+    `WITH citing AS (${citingOf("$1")}),
+     page AS (
+       SELECT d.id, d.source, d.source_id, d.case_number, d.court, d.decision_type, d.decided_on, citing.mentions, citing.first_at,
+              ${citingRank("d")} AS rank
+       FROM citing JOIN mirror.decision d ON d.id = citing.citing_id
+       WHERE ($4::text[] IS NULL OR d.source = ANY($4))
+       ORDER BY ${order === "courts" ? "rank, " : ""}d.decided_on DESC NULLS LAST, d.id DESC
+       LIMIT $2 OFFSET $3
      )
-     SELECT d.source, d.source_id, d.case_number, d.court, d.decision_type, d.decided_on::text AS decided_on, citing.mentions,
-            count(*) OVER () AS total
-     FROM citing JOIN mirror.decision d ON d.id = citing.citing_id
-     WHERE ($4::text[] IS NULL OR d.source = ANY($4))
-     ORDER BY d.decided_on DESC NULLS LAST, d.id DESC
-     LIMIT $2 OFFSET $3`,
+     SELECT page.source, page.source_id, page.case_number, page.court, page.decision_type, page.decided_on::text AS decided_on, page.mentions,
+            substr(t.body, greatest(1, page.first_at + 1 - ${CITING_BEFORE}), ${CITING_CHARS}) AS excerpt
+     FROM page LEFT JOIN mirror.decision_text t ON t.decision_id = page.id
+     ORDER BY ${order === "courts" ? "page.rank, " : ""}page.decided_on DESC NULLS LAST, page.id DESC`,
     [decisionId, limit, offset, sources],
+  );
+  const counts = await db.query<Record<string, unknown>>(
+    `WITH citing AS (${citingOf("$1")})
+     SELECT d.source, count(*)::int AS n, (count(*) FILTER (WHERE ${citingRank("d")} = ${TOP_RANK}))::int AS top
+     FROM citing JOIN mirror.decision d ON d.id = citing.citing_id
+     WHERE ($2::text[] IS NULL OR d.source = ANY($2))
+     GROUP BY d.source`,
+    [decisionId, sources],
   );
 
   return {
@@ -103,8 +218,12 @@ export async function linksOfDecision(
       };
     }),
     citedBy: {
-      total: citedBy.rows.length ? Number(citedBy.rows[0].total) : 0,
-      hits: citedBy.rows.map((r) => ({ ...linked(r), mentions: Number(r.mentions) })),
+      ...summaryOf(counts.rows),
+      order,
+      hits: citedBy.rows.map((r) => {
+        const excerpt = String(r.excerpt ?? "").replace(/\s+/g, " ").trim();
+        return { ...linked(r), mentions: Number(r.mentions), ...(excerpt ? { excerpt } : {}) };
+      }),
     },
   };
 }

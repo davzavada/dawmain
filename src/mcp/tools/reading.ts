@@ -58,8 +58,92 @@ export function readParagraphs(text: string, spec: string): DocumentView {
   return note(`${body}\n\n(${range} of 1–${last} — a part of the decision; the whole text: ${whole}.${more})`, text.length);
 }
 
-/** One entry point of the Czech *_get_decision tools: `paragraphs` first, then `find`, then the page. */
-export function readDecision(text: string, opts: { page: number; find?: string; paragraphs?: string }): DocumentView {
+export const OUTLINE_DESCRIPTION =
+  "Return the outline instead of the text: the výrok, then the headings of the reasoning with their paragraph (bod) ranges and sizes.";
+
+export const outlineSchema = z.boolean().optional().describe(OUTLINE_DESCRIPTION);
+
+const SECTION_NAMES: Record<string, string> = {
+  zahlavi: "záhlaví",
+  vyrok: "výrok",
+  oduvodneni: "odůvodnění",
+  pouceni: "poučení",
+  stanovisko: "odlišné stanovisko",
+};
+
+/** Most of a výrok an outline quotes; a longer one is cut and its paragraphs named. */
+const OUTLINE_VERDICT_CHARS = 2_500;
+/** Most headings an outline lists. */
+const OUTLINE_HEADINGS = 40;
+
+function size(chars: number): string {
+  return chars < 1_000 ? `${chars} znaků` : `${(chars / 1_000).toFixed(chars < 10_000 ? 1 : 0)}k znaků`;
+}
+
+/** "body 12–19" of the paragraphs starting inside [from, to); "" when none do. */
+function bodyRange(paragraphs: Array<{ num: string; start: number }>, from: number, to: number): string {
+  const inside = paragraphs.filter((p) => p.start >= from && p.start < to);
+  if (!inside.length) return "";
+  const first = inside[0].num;
+  const last = inside[inside.length - 1].num;
+  return first === last ? `bod ${first}` : `body ${first}–${last}`;
+}
+
+/**
+ * The outline of a decision: its parts with their sizes, the výrok in full,
+ * and under the reasoning its headings with the body they cover. A long
+ * decision is half procedural history and the parties' submissions; the
+ * outline shows where the court's own assessment starts ("IV. Posouzení
+ * věci — body 23–41"), so going back, or screening a 100k-character nález,
+ * does not start with page 1. Read from the text (deriveStructure). Pure.
+ */
+export function readOutline(text: string): DocumentView {
+  const { sections, paragraphs, headings } = deriveStructure(text);
+  const pages = pageStarts(text).length;
+  const whole = `page 1${pages > 1 ? `–${pages}` : ""}`;
+  if (!sections.length && !headings.length && !paragraphs.length) {
+    return note(`No parts the tool can tell apart in this decision (${size(text.length)}, ${pages} ${pages === 1 ? "page" : "pages"}) — locate a passage with find: "term", or read ${whole}.`, text.length);
+  }
+  const lines: string[] = [`Osnova — the whole text: ${size(text.length)}, ${pages} ${pages === 1 ? "page" : "pages"}.`];
+  for (const section of sections) {
+    const name = SECTION_NAMES[section.kind] ?? section.kind;
+    const range = section.kind === "oduvodneni" ? bodyRange(paragraphs, section.start, section.end) : "";
+    lines.push(`■ ${name} — ${size(section.end - section.start)}${range ? `, ${range}` : ""}`);
+    if (section.kind === "vyrok") {
+      const verdict = text.slice(section.start, section.end).trim();
+      lines.push(verdict.length > OUTLINE_VERDICT_CHARS ? `${verdict.slice(0, OUTLINE_VERDICT_CHARS)}… (cut — the výrok whole is on page 1)` : verdict);
+    }
+    if (section.kind === "oduvodneni") lines.push(...headingLines(headings, paragraphs, section.end));
+  }
+  // No odůvodnění found: the headings and numbering were read from the whole main text.
+  if (!sections.some((s) => s.kind === "oduvodneni")) {
+    const range = paragraphs.length ? bodyRange(paragraphs, 0, text.length) : "";
+    if (range) lines.push(`■ numbered paragraphs: ${range}`);
+    lines.push(...headingLines(headings, paragraphs, text.length));
+  }
+  const how = paragraphs.length ? `paragraphs: "from-to" reads a part, ` : `find: "term" locates a passage, `;
+  lines.push("", `(An outline, not a reading: ${how}${whole} the whole decision.)`);
+  return note(lines.join("\n"), text.length);
+}
+
+function headingLines(
+  headings: Array<{ text: string; start: number }>,
+  paragraphs: Array<{ num: string; start: number }>,
+  end: number,
+): string[] {
+  const shown = headings.slice(0, OUTLINE_HEADINGS);
+  const out = shown.map((heading, i) => {
+    const to = headings[i + 1]?.start ?? end;
+    const range = bodyRange(paragraphs, heading.start, to);
+    return `  · ${heading.text} — ${range ? `${range}, ` : ""}${size(to - heading.start)}`;
+  });
+  if (headings.length > shown.length) out.push(`  · … and ${headings.length - shown.length} more headings`);
+  return out;
+}
+
+/** One entry point of the Czech *_get_decision tools: `outline` first, then `paragraphs`, then `find`, then the page. */
+export function readDecision(text: string, opts: { page: number; find?: string; paragraphs?: string; outline?: boolean }): DocumentView {
+  if (opts.outline) return readOutline(text);
   if (opts.paragraphs?.trim()) return readParagraphs(text, opts.paragraphs);
   return pageOrExcerpt(text, opts.page, opts.find);
 }
