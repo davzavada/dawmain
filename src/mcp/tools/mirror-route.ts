@@ -213,6 +213,31 @@ function countNote(shown: number, limit: number, perVariant: Array<VariantCount 
   return `${full}${allAnyWord ? " ⚠ no decision holds ALL the words — these hold SOME; use fewer, more distinctive words or a \"phrase\"" : ""}`;
 }
 
+/**
+ * A query no court could be asked either: its operators do not parse (an
+ * unclosed bracket, a NOT with nothing to find). The mirror says what is wrong;
+ * that goes back to the caller as the answer — sent on to the live court, the
+ * NS box guessed at the expression and answered something the reader never
+ * asked (measured 11/2026: `nájem AND (výpověď` → "≥1000 matches").
+ */
+export class QuerySyntaxError extends Error {}
+const UNREADABLE = "the query could not be read: ";
+
+/** The mirror's reason when it refused the query's own syntax, else null. */
+function syntaxReason(error: unknown): string | null {
+  return error instanceof MirrorRefusal && error.status === 400 && error.reason.startsWith(UNREADABLE) ? error.reason.slice(UNREADABLE.length) : null;
+}
+
+function syntaxAnswer(error: QuerySyntaxError): ToolText {
+  return text(
+    [
+      `The query could not be read — ${error.message}.`,
+      'Operators are AND, OR, NOT, NEAR, SENTENCE, PARAGRAPH in capitals, brackets in pairs, a prefix as word* (three letters or more), a "phrase" in quotation marks; NOT needs something to find beside it. Correct the expression and call again.',
+    ],
+    true,
+  );
+}
+
 /** Every variant searched, merged round-robin (as the live tools do). */
 async function searchVariants(
   variants: string[],
@@ -233,7 +258,16 @@ async function searchVariants(
       failures.push(runs[i] ? `variant "${runs[i]}": ${reason}` : reason);
     }
   });
-  if (!lists.length) throw new Error(failures.join("; ") || "the mirror did not answer");
+  if (!lists.length) {
+    // Nothing answered, and at least one variant because its expression does not parse: that is the
+    // reader's to correct, not a reason to ask the court.
+    const unreadable = settled.flatMap((result, i) => {
+      const reason = result.status === "rejected" ? syntaxReason(result.reason) : null;
+      return reason ? [`${runs.length > 1 ? `variant "${runs[i]}": ` : ""}${reason}`] : [];
+    });
+    if (unreadable.length) throw new QuerySyntaxError(unreadable.join("; "));
+    throw new Error(failures.join("; ") || "the mirror did not answer");
+  }
   return { hits: interleave(lists, (hit) => `${hit.source}:${hit.id}`), failures, perVariant };
 }
 
@@ -476,10 +510,13 @@ async function caselawSearch(args: Args, live?: LiveCall): Promise<MirrorAnswer>
         });
         return { lane, ok: true as const, ...run, hits: run.hits.slice(0, limit) };
       } catch (error) {
-        return { lane, ok: false as const, error: error instanceof Error ? error.message : String(error) };
+        return { lane, ok: false as const, error: error instanceof Error ? error.message : String(error), syntax: error instanceof QuerySyntaxError ? error : undefined };
       }
     }),
   );
+  // The same expression failed to parse in every lane: one answer saying what is wrong with it.
+  const unreadable = settled.find((lane) => !lane.ok && lane.syntax);
+  if (unreadable && !unreadable.ok && unreadable.syntax && settled.every((lane) => !lane.ok)) return syntaxAnswer(unreadable.syntax);
   if (settled.every((lane) => !lane.ok)) {
     return { fallback: `the mirror did not answer (${settled.map((lane) => (lane.ok ? "" : lane.error)).join("; ")})` };
   }
@@ -671,6 +708,7 @@ async function courtSearch(name: string, args: Args): Promise<MirrorAnswer> {
       ...extra,
     });
   } catch (error) {
+    if (error instanceof QuerySyntaxError) return syntaxAnswer(error);
     return { fallback: `the mirror did not answer (${error instanceof Error ? error.message : String(error)})` };
   }
   const hits = run.hits.slice(0, limit);
