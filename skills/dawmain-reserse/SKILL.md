@@ -172,9 +172,12 @@ is what the judgments quote. One extra call buys every later query its vocabular
 **One legal issue per query variant.** Never paste a fact pattern into `query`. Three
 issues = three searches (batched in one turn), not one long sentence.
 
-**Plain words are all required; quotes make a phrase.** In the Czech courts' full text
-every word of a query must occur in the decision (the NS tool joins them with AND
-itself); `"přesná fráze"` in quotes asks for the exact wording.
+**Plain words are all required; quotes make a phrase; operators work in every Czech
+case-law search.** Every word of a query must occur in the decision; `"přesná fráze"`
+asks for the words in that order. `caselaw_search` and `ns_`/`nss_`/`us_`/`justice_search`
+also read `AND`, `OR`, `NOT` (capitals), brackets, a prefix (`promlč*`) and proximity
+(`újma NEAR pozůstalý`, within ten words): `"smluvní pokuta" NOT nájem`,
+`nájem AND (výpověď OR odstoupení)`. One exact expression beats three vague variants.
 
 **Use all three variants — Czech inflects.** `queries` runs up to 3 formulations
 against every court in parallel. Vary the stem, add the term of art, add the synonym the
@@ -351,21 +354,23 @@ an otherwise good result set, drop it: most decisions are not in the Sbírka.
 itself reads bare words as one exact phrase (`nájemce výpověď`: 1 decision as a phrase,
 1 501 with AND). Quote a phrase when you want the exact wording.
 
-**Operators inside `query`** — the same Domino syntax the NS form uses; an expression
-with any of them goes upstream exactly as you wrote it:
+**Operators inside `query`** — the syntax of the NS form, read the same way in every
+Czech case-law search (the Dawmain mirror answers them):
 
-- `AND`, `OR`, `NOT` — `nájem AND výpověď NOT podnájem`
+- `AND`, `OR`, `NOT` in capitals — `nájem AND výpověď NOT podnájem`
 - `"přesná fráze"` — `"zvlášť závažné porušení"`
 - `(závorky)` for grouping — `("dobré mravy" OR ekvita) AND nájem`
-- wildcards — `nájem*` catches nájemce, nájemné, nájemní; `?` stands for one character
-- proximity — `A NEAR B`, `A SENTENCE B`, `A PARAGRAPH B`. The sharpest instrument the
-  index has: two ordinary words required to meet in one sentence beat one rare word.
-- `TERMWEIGHT 80 term` pushes documents with that term up the list.
+- a prefix — `nájem*` catches nájemce, nájemné, nájemní (only `*` at the end of a word;
+  at least three letters)
+- proximity — `A NEAR B` (within 10 words), `A SENTENCE B` (25), `A PARAGRAPH B` (120),
+  in either order; a side may be a word, a `"phrase"` or a `prefix*`. The sharpest
+  instrument the index has: two ordinary words required to meet beat one rare word.
 
-If a proximity or weighting expression comes back empty where the plain `AND` version
-returns hits, the box did not take the operator — fall back, don't fight it. Field
-selectors (`[pole]=hodnota`) do not belong in `query`: the parameters above build them,
-and anything in square brackets is stripped.
+`NOT` needs something to find beside it, and cannot stand alone on one side of `OR`.
+An expression that cannot be read is refused with the reason — correct it rather than
+drop the operators. An empty answer to an exact expression is an answer: there is no
+"some of the words" second try. Field selectors (`[pole]=hodnota`) do not belong in
+`query`: the parameters above build them.
 
 **The 900-document ceiling.** Any query addresses at most its first 900 documents; the
 count line says how many really match (under relevance NS counts at most 1000, shown

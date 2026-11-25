@@ -1,6 +1,6 @@
 import { SourceError, toToolError } from "@/src/sources/shared/errors";
 import { justiceCourtCode } from "@/src/sources/justice";
-import { DOC_PAGE_CHARS, SEARCH_OPERATORS, interleave, uniqueQueries } from "@/src/sources/shared/text";
+import { DOC_PAGE_CHARS, interleave, uniqueQueries } from "@/src/sources/shared/text";
 import {
   getMirrorDecision,
   markedExcerpt,
@@ -28,6 +28,9 @@ import { readDecision } from "./reading";
  * registration wrapper (./index.ts) then runs the live tool, telling the
  * model why. Falls back on what the mirror cannot do: filters it does not
  * index, pages past the first, a decision it does not hold (yet), CJEU.
+ * Search operators (AND / OR / NOT, NEAR, prefix*, brackets) are NOT among
+ * those: the mirror reads them itself (src/mirror/api/boolean.ts) — the
+ * Czech courts are answered from the mirror whenever it can answer.
  *
  * Answers are text only (the wrapper strips structuredContent anyway), in
  * the live tools' line format, and every hit names the same *_get_* call —
@@ -40,19 +43,6 @@ type Args = Record<string, unknown>;
 /** The live tool of the same name, for the part of a call the mirror does not hold (the CJEU lane). */
 export type LiveCall = (args: Args) => Promise<Record<string, unknown>>;
 
-/**
- * Whether a query speaks the courts' search syntax: AND / OR / NOT / NEAR …
- * in capitals, a wildcard, or brackets. The mirror reads words and "phrases"
- * only — it took `"smluvní pokuta" NOT nájem` for three words to find and
- * answered with a decision on nájemné, without a word (pre-release audit,
- * 11/2026). Such a query goes to the court, which reads it as written. Pure.
- */
-export function hasSearchOperators(variants: string[]): boolean {
-  return variants.some(
-    (variant) => /[*?()]/.test(variant.replace(/"[^"]*"/g, " ")) || variant.split(/\s+/).some((token) => SEARCH_OPERATORS.has(token.replace(/[()]/g, ""))),
-  );
-}
-const OPERATORS_FALLBACK = "the mirror reads words and \"phrases\" only, not search operators (AND, OR, NOT, NEAR, *, brackets)";
 
 /** One short line: it heads every answer from the mirror, a dozen times in one research. */
 export const MIRROR_NOTE = "[Dawmain mirror: nightly copy of NS, NSS, ÚS and justice.cz — the last day may be missing.]";
@@ -460,7 +450,6 @@ async function caselawSearch(args: Args, live?: LiveCall): Promise<MirrorAnswer>
   if (act || provision) return caselawByProvision(args, act, provision);
   const variants = uniqueQueries(str(args.query), args.queries as string[] | undefined);
   if (!variants.length) return { fallback: "no query" };
-  if (hasSearchOperators(variants)) return { fallback: OPERATORS_FALLBACK };
   const from = str(args.date_from);
   const to = str(args.date_to);
   if (dateRangeError(from, to)) return { fallback: "inverted date range" };
@@ -660,7 +649,6 @@ async function courtSearch(name: string, args: Args): Promise<MirrorAnswer> {
   if (refused) return { fallback: refused };
   if (spec.laterPage(args)) return { fallback: "the mirror answers the first page only" };
   const variants = uniqueQueries(str(args.query), args.queries as string[] | undefined);
-  if (hasSearchOperators(variants)) return { fallback: OPERATORS_FALLBACK };
   const caseNumber = str(args.case_number);
   const extra = spec.extra?.(args) ?? {};
   if (typeof extra === "string") return { fallback: extra };

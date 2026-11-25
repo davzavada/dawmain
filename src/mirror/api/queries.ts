@@ -4,6 +4,7 @@ import { buildTsQuery } from "@/src/files/text/analyze";
 import { DOC_PAGE_CHARS, charPage } from "@/src/sources/shared/text";
 import type { Queryable } from "../db/client";
 import type { Structure } from "../structure";
+import { BooleanSyntaxError, booleanSql, hasOperators, parseBoolean, positiveText } from "./boolean";
 import { MIRROR_SOURCES, type DecisionType, type MirrorSource } from "../types";
 
 /**
@@ -265,9 +266,11 @@ function toHit(row: ChunkRow, terms: string[], identKeys: string[]): MirrorHit {
  * seconds on common phrases. Czech stems, diacritics folded. The excerpt is the decision's best chunk
  * for the same words (ts_rank_cd), looked up for the hits kept only. `all`: every word (&&&), else any (|||).
  */
-function bm25Where(input: SearchInput, all: boolean, params: unknown[]): string {
+function bm25Where(input: SearchInput, all: boolean, params: unknown[], match?: (params: unknown[]) => string): string {
   // Filters spelled out only when given: the index takes them in, an "$n IS NULL OR …" it would not.
-  const where = [`t.body ${all ? "&&&" : "|||"} $1::text`];
+  // `match`: the body predicate of a query with operators (./boolean.ts) in place of "every / any word";
+  // $1 stays in the statement, as a parameter nothing refers to has no type.
+  const where = [match ? `$1::text IS NOT NULL AND ${match(params)}` : `t.body ${all ? "&&&" : "|||"} $1::text`];
   if (input.sources?.length) where.push(`t.source = ANY($${params.push(input.sources)}::text[])`);
   if (input.type) where.push(`t.decision_type = $${params.push(input.type)}`);
   if (input.from) where.push(`t.decided_on >= $${params.push(input.from)}::date`);
@@ -290,10 +293,17 @@ async function bm25Candidates(db: Queryable, input: SearchInput, text: string, l
   return [];
 }
 
-async function runBm25(db: Queryable, input: SearchInput, text: string, all: boolean, tsquery: string | null): Promise<ChunkRow[]> {
+async function runBm25(
+  db: Queryable,
+  input: SearchInput,
+  text: string,
+  all: boolean,
+  tsquery: string | null,
+  match?: (params: unknown[]) => string,
+): Promise<ChunkRow[]> {
   const limit = Math.min(Math.max(1, Math.floor(input.limit ?? 20)), MAX_LIMIT);
   const params: unknown[] = [text, tsquery, limit];
-  const where = bm25Where(input, all, params);
+  const where = bm25Where(input, all, params, match);
   const newest = input.sort === "newest";
   // The court is not in the index: the BM25-first candidates, then the court, then the prior, then the limit.
   const courts = [
@@ -410,7 +420,34 @@ async function courtDecisionIds(db: Queryable, input: SearchInput, limit: number
 
 export class UnsupportedSearch extends Error {}
 
+/**
+ * A query with search operators (AND / OR / NOT, NEAR, `prefix*`, brackets — ./boolean.ts): one BM25
+ * query over the whole decisions, the filters and the importance prior as for plain words. No "any
+ * word" fallback: the reader spelled the logic out, and an empty answer is the answer. The excerpt and
+ * its marks come from what the query asks to find, not from what it excludes.
+ */
+async function searchBoolean(db: Queryable, input: SearchInput, query: string): Promise<SearchResult> {
+  if (input.in === "vyrok") throw new UnsupportedSearch("search operators are not read in výroky (in=vyrok) — plain words only");
+  if (input.caseNumber) throw new UnsupportedSearch("search operators and the case filter do not combine");
+  if (!input.bm25) throw new UnsupportedSearch("search operators need the BM25 index, which this mirror does not have");
+  let tree;
+  try {
+    tree = parseBoolean(query);
+    // Built once here, so a query that cannot be put to the index is refused before any statement runs.
+    booleanSql(tree, "t.body", []);
+  } catch (error) {
+    if (error instanceof BooleanSyntaxError) throw new UnsupportedSearch(`the query could not be read: ${error.message}`);
+    throw error;
+  }
+  const found = positiveText(tree);
+  const ts = buildTsQuery(found, { loneStopwords: true });
+  const rows = await runBm25(db, input, found, true, ts.or ?? ts.and, (params) => booleanSql(tree, "t.body", params));
+  return { hits: rows.map((r) => toHit(r, ts.terms, [])), channel: "and", terms: ts.terms, identKeys: [] };
+}
+
 export async function searchDecisions(db: Queryable, input: SearchInput): Promise<SearchResult> {
+  const query = input.q?.trim() ?? "";
+  if (query && hasOperators(query)) return searchBoolean(db, input, query);
   const p = plan(input);
   const keys = [...new Set([...p.keys, ...p.caseKeys])];
   if (!p.tsAnd && keys.length === 0) return { hits: [], channel: null, terms: [], identKeys: [] };
