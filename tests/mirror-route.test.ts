@@ -143,6 +143,18 @@ describe("mirror routing", () => {
     expect(textOf(await MIRROR_TOOLS.ns_search({ query: "újma" }))).toContain("(usnesení, 2017-12-13) → caselaw_get_decision source: ns");
   });
 
+  it("a hit whose excerpt holds none of the words is listed without it — the opening of a text is its letterhead", async () => {
+    const letterhead = { ...HIT, id: "AA", caseNumber: "3 As 11/2011", excerpt: "ČESKÁ REPUBLIKA ROZSUDEK JMÉNEM REPUBLIKY", highlights: [] };
+    fetchMock.mockImplementation(async () => json({ hits: [letterhead, HIT], channel: "and", terms: [] }));
+    const out = textOf(await MIRROR_TOOLS.ns_search({ query: "náhrada újmy", read_top: 1 }));
+    expect(out).toContain("1. 3 As 11/2011");
+    expect(out).not.toContain("JMÉNEM REPUBLIKY");
+    expect(out).toContain("o «náhradě» újmy");
+    // A list without words shows what the mirror sends for it (právní věta, výrok), which carries no marks.
+    fetchMock.mockImplementation(async () => json({ hits: [{ ...letterhead, excerpt: "Dovolání se odmítá." }], channel: "ident", terms: [], total: 1 }));
+    expect(textOf(await MIRROR_TOOLS.ns_search({ category: "A" }))).toContain("Dovolání se odmítá.");
+  });
+
   it("says when no decision held all the words of any variant, and when the list is full", async () => {
     fetchMock.mockImplementation(async () => json({ hits: [HIT], channel: "or", terms: [] }));
     const loose = textOf(await MIRROR_TOOLS.caselaw_search({ query: "výpověď z nájmu bytu neplacení nájemného", per_source_limit: 1 }));
@@ -641,6 +653,46 @@ describe("breaker", () => {
     const answer = await MIRROR_TOOLS.ns_search({ query: "x" });
     expect((answer as { fallback: string }).fallback).toContain("paused");
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("a request that fails while the mirror answers another does not pause it", async () => {
+    // Two searches open at once: the quick one is answered, the slow one then fails (a timeout, a reset).
+    let failSlow: (error: Error) => void = () => undefined;
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.includes("q=slow")) return new Promise<Response>((_, reject) => (failSlow = reject));
+      return json({ hits: [HIT], channel: "and", terms: [] });
+    });
+    const slow = searchMirror({ q: "slow" }).catch((error: unknown) => error);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await searchMirror({ q: "quick" });
+    failSlow(new Error("The operation was aborted due to timeout"));
+    expect(await slow).toBeInstanceOf(Error);
+    // The mirror is still asked: it answered in the meantime, so only that one request failed.
+    await searchMirror({ q: "next" });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("a mirror that keeps running out of time on searches is paused; a search that answers in between starts the count again", async () => {
+    const slow = () => json({ error: "query timed out" }, 504);
+    const fine = () => json({ hits: [], channel: null, terms: [] });
+    const refused = () => searchMirror({ q: "x" }).catch((error: unknown) => error);
+    // Four in a row, then one that answers: the mirror is still asked.
+    for (let i = 0; i < 4; i++) fetchMock.mockResolvedValueOnce(slow());
+    for (let i = 0; i < 4; i++) expect(await refused()).toBeInstanceOf(MirrorRefusal);
+    fetchMock.mockResolvedValueOnce(fine());
+    await searchMirror({ q: "x" });
+    // Five in a row: paused, the sixth is not sent.
+    for (let i = 0; i < 5; i++) fetchMock.mockResolvedValueOnce(slow());
+    for (let i = 0; i < 5; i++) expect(await refused()).toBeInstanceOf(MirrorRefusal);
+    expect(fetchMock).toHaveBeenCalledTimes(10);
+    await expect(searchMirror({ q: "x" })).rejects.toThrow("paused after a failure (5 searches in a row ran out of time)");
+    expect(fetchMock).toHaveBeenCalledTimes(10);
+  });
+
+  it("a search tells the mirror how long it may run, less than this client waits", async () => {
+    fetchMock.mockImplementation(async () => json({ hits: [], channel: null, terms: [] }));
+    await searchMirror({ q: "újma" });
+    expect(new URL(fetchMock.mock.calls[0][0] as string).searchParams.get("timeout_ms")).toBe("6000");
   });
 });
 

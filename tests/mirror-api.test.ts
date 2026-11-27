@@ -174,6 +174,11 @@ describe("GET /v1/search", () => {
     expect((await get("/v1/search?q=x&source=ns,eu")).status).toBe(400);
     expect((await get("/v1/search?q=x&from=2025-13-40")).status).toBe(400);
     expect((await get("/v1/search?q=x&limit=500")).status).toBe(400);
+    // timeout_ms: a caller that waits less than the API's 12 s says how long its search may run.
+    expect((await get("/v1/search?q=x&timeout_ms=6000")).status).toBe(200);
+    expect((await get("/v1/search?q=x&timeout_ms=500")).status).toBe(400);
+    expect((await get("/v1/search?q=x&timeout_ms=60000")).status).toBe(400);
+    expect((await get("/v1/search?q=x&timeout_ms=abc")).status).toBe(400);
   });
 });
 

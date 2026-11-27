@@ -43,6 +43,7 @@ import {
  *   GET /v1/by-case?case=&source=   the decisions carrying that sp. zn. / ECLI as their own
  *   GET /v1/search?q=&source=&court=&type=&category=&from=&to=&case=&limit=   (category: NS A–E, "A,B"; source: "ns,nss")
  *       &offset=  &match=all|any|phrase  &newest_by=decided|published  &type=nalez,stanovisko
+ *       &timeout_ms=  (1000–12000: the statement timeout of this search; default 12 s)
  *       filters outside the index (./filters.ts): &court_class= &registry= &area= &published_from= &published_to=
  *       &own_case=  &collection=1 (ÚS: in a Sbírka)  &act=&provision= | &cite=
  *       — without q or case, the filters list the decisions (with `total`)
@@ -141,8 +142,13 @@ function date(value: string | undefined, name: string): string | undefined {
 const STATUS_TTL_MS = 5 * 60_000;
 const CITATIONS_TTL_MS = 24 * 3_600_000;
 const SLOW_TIMEOUT_MS = 5 * 60_000;
-/** The search alone gets 12 s (Glass waits 15) and 64 MB to sort in: without BM25 (index missing) it ranks chunks. */
+/**
+ * The search alone gets 12 s (Glass waits 15) and 64 MB to sort in: without BM25 (index missing) it ranks chunks.
+ * A caller that waits less says so (timeout_ms, at least SEARCH_TIMEOUT_MIN_MS): its statements then end
+ * before it stops listening, and it reads a 504 about this query instead of a dead connection.
+ */
 const SEARCH_TIMEOUT_MS = 12_000;
+const SEARCH_TIMEOUT_MIN_MS = 1_000;
 const SEARCH_WORK_MEM = "64MB";
 
 /** Run `fn` on one pooled connection with its own statement timeout (and work_mem); anything but pg's Pool runs it as is. */
@@ -303,6 +309,9 @@ export function createMirrorApi(options: {
     if (q.sort && q.sort !== "relevance" && q.sort !== "newest")
       throw new BadRequest("sort must be relevance or newest");
     if (q.in && q.in !== "vyrok") throw new BadRequest("in must be vyrok");
+    const timeoutMs = q.timeout_ms ? Number(q.timeout_ms) : SEARCH_TIMEOUT_MS;
+    if (!(Number.isInteger(timeoutMs) && timeoutMs >= SEARCH_TIMEOUT_MIN_MS && timeoutMs <= SEARCH_TIMEOUT_MS))
+      throw new BadRequest(`timeout_ms must be ${SEARCH_TIMEOUT_MIN_MS}–${SEARCH_TIMEOUT_MS}`);
     const perSource = q.per_source ? Number(q.per_source) : undefined;
     if (
       perSource !== undefined &&
@@ -332,7 +341,7 @@ export function createMirrorApi(options: {
       bm25: bm25.peek()?.data === true,
     };
     const run = (one: SearchInput) =>
-      slow(db, (conn) => searchDecisions(conn, one), SEARCH_TIMEOUT_MS, SEARCH_WORK_MEM);
+      slow(db, (conn) => searchDecisions(conn, one), timeoutMs, SEARCH_WORK_MEM);
     // Length and citing count of the hits shown — one more query, and a failure leaves the hits as they are.
     const withFacts = async <T extends { source: MirrorSource; id: string }>(hits: T[]): Promise<T[]> => {
       try {

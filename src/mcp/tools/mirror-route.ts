@@ -169,21 +169,36 @@ function factsNote(hit: { chars?: number | null; citedBy?: number }): string {
 }
 
 /**
- * One hit; `brief` adds its passage (the hits without a read_top preview below
- * the list). No link: the *_get_* call that reads the decision returns it, and
- * a decision is cited only after that call — fifteen links a list were a
- * quarter of its characters.
+ * Whether a hit of a search by words has a passage worth showing: one with a
+ * query word marked in it. Where the mirror found no passage for the words
+ * (the index matched another word form than the excerpt marks) it sends the
+ * opening of the text — "3 As 11/2011-69 [OBRÁZEK] ČESKÁ REPUBLIKA ROZSUDEK
+ * JMÉNEM REPUBLIKY, Nejvyšší správní soud rozhodl v senátě složeném z…":
+ * 220 characters a hit that say nothing of what the decision is about (8 of
+ * 30 hits in a test call, 11/2026).
  */
-function hitLine(hit: MirrorHit, index: number, withSource: boolean, brief = false): string {
+function hasPassage(hit: Pick<MirrorHit, "excerpt" | "highlights">): boolean {
+  return Boolean(hit.excerpt) && (hit.highlights?.length ?? 0) > 0;
+}
+
+/**
+ * One hit; `brief` adds its passage (the hits without a read_top preview below
+ * the list) — of a search by words only a passage that holds one of them
+ * (hasPassage); `listed` = a list without words, whose excerpt is the právní
+ * věta or the výrok and carries no marks. No link: the *_get_* call that reads
+ * the decision returns it, and a decision is cited only after that call —
+ * fifteen links a list were a quarter of its characters.
+ */
+function hitLine(hit: MirrorHit, index: number, withSource: boolean, brief = false, listed = false): string {
   const facts = [hit.form ? (FORM[hit.form] ?? hit.form) : null, hit.date].filter(Boolean).join(", ");
   const tag = withSource ? `[${hit.source.toUpperCase()}] ` : "";
   const court = courtLabel(hit);
-  const passage = brief && hit.excerpt ? `\n   ${hit.inDissent ? "(odlišné stanovisko) " : ""}${briefExcerpt(hit)}` : "";
+  const passage = brief && (listed ? Boolean(hit.excerpt) : hasPassage(hit)) ? `\n   ${hit.inDissent ? "(odlišné stanovisko) " : ""}${briefExcerpt(hit)}` : "";
   return `${index + 1}. ${tag}${hit.caseNumber ?? "?"}${hit.category ? ` [${hit.category}]` : ""}${facts ? ` (${facts})` : ""}${court ? ` — ${court}` : ""}${factsNote(hit)} → ${readCall(hit.source, hit.id)}${passage}`;
 }
 
 function previewLines(hits: MirrorHit[], readTop: number, withSource: boolean): string[] {
-  const shown = hits.slice(0, readTop).filter((hit) => hit.excerpt);
+  const shown = hits.slice(0, readTop).filter(hasPassage);
   if (!shown.length) return [];
   return [
     "",
@@ -836,7 +851,7 @@ async function courtSearch(name: string, args: Args): Promise<MirrorAnswer> {
     `${head}${run.failures.length ? ` ⚠ ${run.failures.join("; ")}` : ""}`,
     "",
     ...(hits.length
-      ? hits.map((hit, i) => hitLine(hit, page.offset + i, false, i >= readTop || listing))
+      ? hits.map((hit, i) => hitLine(hit, page.offset + i, false, i >= readTop || listing, listing))
       : [page.offset ? "No further hits — the list ends before this page." : listing ? "No decision in the mirror passes these filters." : "No hits in the mirror — broaden the query or add variants."]),
     ...previewLines(hits, listing ? 0 : readTop, false),
     ...(more && hits.length ? [`More: ${page.next(hits.length)} (same arguments).`] : []),
