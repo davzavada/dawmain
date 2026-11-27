@@ -165,6 +165,37 @@ async function routed(name: string, handler: ToolHandler, args: unknown[]): Prom
   return { ...live, content: [note, ...content] };
 }
 
+/** Characters of a reason the service log keeps. */
+const LOG_NOTE_CHARS = 160;
+
+/**
+ * What the service log says about a call beside its duration: that the live
+ * court answered in the mirror's place and why, and the first line of an
+ * error. The line used to end with the bare word "error" — a call that
+ * failed could be counted from the journal, never explained. Whatever stands
+ * in quotation marks is left out: that is where an answer repeats the
+ * caller's words (a query variant, a spisová značka), and the content of a
+ * research is not kept (/soukromi). Pure — exported for the tests.
+ */
+export function logNote(result: ToolResult): string {
+  const parts = Array.isArray(result.content) ? (result.content as Array<{ type?: string; text?: string }>) : [];
+  const texts = parts.map((part) => (part.type === "text" && typeof part.text === "string" ? part.text : "")).filter(Boolean);
+  const clean = (text: string): string =>
+    text
+      .replace(/"[^"\n]*"|„[^“”\n]*[“”]|«[^»\n]*»/g, "…")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, LOG_NOTE_CHARS);
+  const notes: string[] = [];
+  const fallback = /^\[Mirror not used: ([\s\S]*?) — answered live from the court\.\]$/.exec(texts[0] ?? "");
+  if (fallback) notes.push(`live (${clean(fallback[1])})`);
+  if (result.isError) {
+    const first = (fallback ? texts[1] : texts[0])?.split("\n").find((line) => line.trim()) ?? "";
+    notes.push(first ? `error: ${clean(first)}` : "error");
+  }
+  return notes.length ? ` ${notes.join("; ")}` : "";
+}
+
 /**
  * The tool's title repeated as annotations.title. The spec allows the title
  * in both places; the Claude connector directory reads the annotation one
@@ -194,12 +225,13 @@ function textOnly(server: McpServer, style: DescriptionStyle): McpServer {
           // Counted once per call that runs, whatever its outcome.
           void trackToolCall(name, args[1]);
           // One line per call in the service log: how long the request waited before the tool started
-          // (auth, the transport's handshake) and how long the tool took. "It is slow" could not be
-          // placed without it — the sources answer in under a second, yet a call takes seconds end to end.
+          // (auth, the transport's handshake), how long the tool took, and — where it went wrong — why
+          // (logNote). "It is slow" could not be placed without it — the sources answer in under a second,
+          // yet a call takes seconds end to end.
           const startedAt = Date.now();
           const waited = startedAt - callStartedAt();
           const { structuredContent: _dropped, ...result } = await withinBudget(name, () => routed(name, handler, args));
-          console.info(`mcp tool ${name}: ${Date.now() - startedAt} ms (waited ${waited} ms before it)${result.isError ? " error" : ""}`);
+          console.info(`mcp tool ${name}: ${Date.now() - startedAt} ms (waited ${waited} ms before it)${logNote(result)}`);
           return result;
         },
       );

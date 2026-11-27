@@ -19,6 +19,9 @@ const run = (hoursAgo: number, error: string | null = null) => ({ mode: "daily",
 const status = (sources: Array<{ source: string; lastRun: unknown }>) => ({ asOf: new Date(NOW).toISOString(), sources });
 
 beforeEach(() => {
+  // GET reads the clock itself: without a fixed one, the "last night" runs above age past
+  // SYNC_MAX_AGE_HOURS a day and a half after NOW and the route answers 503.
+  vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
   resetHealthCache();
   vi.mocked(withScope).mockResolvedValue({ rows: [] } as never);
   vi.mocked(mirrorConfigured).mockReturnValue(true);
@@ -26,6 +29,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.clearAllMocks();
 });
 
