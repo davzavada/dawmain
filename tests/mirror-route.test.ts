@@ -242,6 +242,11 @@ describe("mirror routing", () => {
     expect(url.searchParams.has("act")).toBe(false);
     expect(out).toContain("Decisions citing čl. 6 GDPR (CELEX 32016R0679):");
     expect(out).toContain("caselaw_get_decision source: nss, id: 7");
+    // include_eu beside a provision: the CJEU is not in the index — said, not dropped silently.
+    expect(out).not.toContain("SDEU");
+    expect(textOf(await MIRROR_TOOLS.caselaw_search({ applies_act: "GDPR", applies_provision: "čl. 6", sources: ["nss", "sdeu"] }))).toContain(
+      "SDEU: not searched by provision",
+    );
     fetchMock.mockClear();
     const refused = (await MIRROR_TOOLS.caselaw_search({ applies_act: "2016/1148", applies_provision: "čl. 14" })) as { isError?: boolean; content: Array<{ text: string }> };
     expect(refused.isError).toBe(true);
