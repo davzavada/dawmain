@@ -113,3 +113,102 @@ export const readTopSchema = z
 
 /** What a tool's reader hands back: the text every client reads, and the structured half the registration boundary strips (./index.ts). */
 export type ToolAnswer = { content: Array<{ type: "text"; text: string }>; isError?: boolean; structuredContent?: unknown };
+
+/*
+ * Lenient inputs. Every refused input is an isError answer, and Claude.ai
+ * shows the user nothing of it but "This tool could not complete its
+ * request" — for a call whose meaning was plain: per_source_limit: 20,
+ * a fourth query variant, read_top: "2", queries or sources sent as one
+ * string (a client holding an older schema, or a model writing the array
+ * as JSON text). These preprocessors read such values as they were meant;
+ * the JSON Schema the client sees is the inner schema's, unchanged.
+ */
+
+/** A number sent as a string ("5") or outside [min, max] (20 where 10 is the most) → the integer, clamped. Anything else as it is. Pure. */
+export function clampedInt(min: number, max: number): (value: unknown) => unknown {
+  return (value) => {
+    const n = typeof value === "string" && value.trim() !== "" ? Number(value.trim()) : value;
+    if (typeof n !== "number" || !Number.isFinite(n)) return value;
+    return Math.min(max, Math.max(min, Math.round(n)));
+  };
+}
+
+/** An integer parameter in [min, max] with a default, read leniently (clampedInt). */
+export function lenientInt(min: number, max: number, fallback: number) {
+  return z.preprocess(clampedInt(min, max), z.number().int().min(min).max(max).default(fallback));
+}
+
+/** "true" / "false" (any case) → the boolean; anything else as it is. Pure. */
+export function booleanFromString(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const text = value.trim().toLowerCase();
+  return text === "true" ? true : text === "false" ? false : value;
+}
+
+/** A boolean parameter with a default, read leniently (booleanFromString). */
+export function lenientBool(fallback: boolean) {
+  return z.preprocess(booleanFromString, z.boolean().default(fallback));
+}
+
+/**
+ * Query variants as sent: a JSON array written as text ('["a", "b"]'), or a
+ * single string, become an array; entries that are not strings or are
+ * shorter than 2 characters are dropped, and only the first `cap` are kept
+ * (the caller asked for more variants than are searched — the answer lists
+ * the ones that were). An empty result is undefined (as if not sent). Pure.
+ */
+export function queriesFromInput(cap: number): (value: unknown) => unknown {
+  return (value) => {
+    let list = value;
+    if (typeof list === "string") {
+      const text = list.trim();
+      list = [text];
+      if (text.startsWith("[")) {
+        try {
+          const parsed: unknown = JSON.parse(text);
+          if (Array.isArray(parsed)) list = parsed;
+        } catch {
+          /* one variant after all */
+        }
+      }
+    }
+    if (!Array.isArray(list)) return value;
+    const kept = list
+      .filter((item): item is string => typeof item === "string")
+      .map((item) => item.trim())
+      .filter((item) => item.length >= 2)
+      .slice(0, cap);
+    return kept.length ? kept : undefined;
+  };
+}
+
+/**
+ * Source names as sent: a string ('ns, us', '["ns","us"]') becomes a list;
+ * every name is lowercased and stripped of diacritics ("ÚS" → "us"), and the
+ * aliases map to the ids ("cjeu", "curia", "sd eu"…). Unknown names stay, so
+ * the enum still refuses them by name. An empty list is undefined. Pure.
+ */
+export function sourcesFromInput(aliases: Record<string, string>): (value: unknown) => unknown {
+  return (value) => {
+    let list = value;
+    if (typeof list === "string") {
+      const text = list.trim();
+      let parsed: unknown = null;
+      if (text.startsWith("[")) {
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          /* split below */
+        }
+      }
+      list = Array.isArray(parsed) ? parsed : text.replace(/[[\]"']/g, " ").split(/[\s,;]+/);
+    }
+    if (!Array.isArray(list)) return value;
+    const ids = list
+      .map((item) => (typeof item === "string" ? item.normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase() : item))
+      .filter((item) => item !== "")
+      .map((item) => (typeof item === "string" ? (aliases[item] ?? item) : item));
+    const unique = [...new Set(ids)];
+    return unique.length ? unique : undefined;
+  };
+}

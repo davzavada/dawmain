@@ -8,7 +8,7 @@ import { callDeadline } from "@/src/sources/shared/clock";
 import { SourceError } from "@/src/sources/shared/errors";
 import { interleave, maxTotal, uniqueQueries } from "@/src/sources/shared/text";
 import { PREVIEW_DEADLINE_MS, buildPreviews, previewBlock, withDeadline } from "./previews";
-import { READ_ONLY, dateRangeError, isoDate } from "./shared";
+import { READ_ONLY, dateRangeError, isoDate, lenientBool, lenientInt, queriesFromInput, sourcesFromInput } from "./shared";
 import { runVariants } from "./variants";
 
 /**
@@ -37,6 +37,16 @@ import { runVariants } from "./variants";
 const SOURCES = ["nss", "ns", "us", "sdeu"] as const;
 type SourceId = (typeof SOURCES)[number];
 const CZ_SOURCES: SourceId[] = ["nss", "ns", "us"];
+/** Other names a caller gives the courts (after lowercasing and stripping diacritics: "ÚS" → "us"). */
+const SOURCE_ALIASES: Record<string, SourceId> = {
+  cjeu: "sdeu",
+  curia: "sdeu",
+  infocuria: "sdeu",
+  eu: "sdeu",
+  sdeu: "sdeu",
+  nalus: "us",
+  ustavni: "us",
+};
 const PER_VARIANT_DEADLINE_MS = 20_000;
 /** NSS answers a full-text POST within its own 25 s timeout or not at all;
  * on a cold instance the handshake (GET /) comes first. */
@@ -173,10 +183,9 @@ export function registerCzCaselaw(server: McpServer): void {
         "FULL-TEXT search across NSS (administrative), NS (civil/criminal) and Ústavní soud (constitutional) in parallel — optionally also the CJEU (include_eu). Takes up to 3 query variants at once ('queries' — Czech inflects, so pass stems/synonyms: [\"bezpečný přístav\", \"bezpečného přístavu\", \"safe harbour\"]); each court's variants are merged round-robin, so every variant is represented, and each court reports what every variant found (variant_totals). Plain words are all required; \"quotes\" make a phrase. Operators are read as the courts read them: AND, OR, NOT, NEAR, a prefix* and brackets. NS and ÚS hits come by relevance, NSS hits newest first; CJEU hits one per case (its judgment, else its best document). The NSS lane holds NSS decisions only (incl. the grand chamber) unless include_regional adds the regional administrative courts; every hit names its court where that is not obvious. With read_top: N the response ALSO carries excerpt previews of the N leading hits — search + first reading in one call. A court or a variant that fails or times out is reported by name while the rest still answer. Every court is searched across its whole archive — pass date_from/date_to only when the question has a time frame. Case law on ONE provision, Czech or EU: applies_act + applies_provision ('89/2012' + '§ 2291', 'GDPR' + 'čl. 6') return the decisions citing it, the most cited first — and with a query beside them, the search runs among those decisions. For deeper digging use nss_search/ns_search/us_search/sdeu_search; fetch full texts with the *_get_* tool named in each hit.",
       inputSchema: z.object({
         query: z.string().min(2).optional().describe("Czech full-text query."),
+        // Read leniently (./shared.ts): a fourth variant is dropped, not the whole call refused.
         queries: z
-          .array(z.string().min(2))
-          .max(3)
-          .optional()
+          .preprocess(queriesFromInput(3), z.array(z.string().min(2)).max(3).optional())
           .describe("Up to 3 query variants searched in parallel (inflections, synonyms, EN term)."),
         applies_act: z
           .string()
@@ -194,34 +203,20 @@ export function registerCzCaselaw(server: McpServer): void {
           ),
         date_from: isoDate.optional(),
         date_to: isoDate.optional(),
-        per_source_limit: z.number().int().min(1).max(10).default(5),
+        per_source_limit: lenientInt(1, 10, 5),
         sources: z
-          .array(z.enum(SOURCES))
-          .optional()
+          .preprocess(sourcesFromInput(SOURCE_ALIASES), z.array(z.enum(SOURCES)).optional())
           .describe("Restrict to these courts (us = Ústavní soud, sdeu = CJEU). Default: the three Czech courts (plus sdeu with include_eu)."),
-        include_eu: z
-          .boolean()
-          .default(false)
-          .describe("Also search the CJEU (InfoCuria) in the same parallel fan-out."),
+        include_eu: lenientBool(false).describe("Also search the CJEU (InfoCuria) in the same parallel fan-out."),
         eu_court: z
-          .enum(["C", "T"])
-          .optional()
+          .preprocess((value) => (typeof value === "string" ? value.trim().toUpperCase() : value), z.enum(["C", "T"]).optional())
           .describe(
             "Only with the CJEU lane: C = Court of Justice only (leaves out the General Court / Tribunál), T = General Court only. Default: both.",
           ),
-        include_regional: z
-          .boolean()
-          .default(false)
-          .describe(
+        include_regional: lenientBool(false).describe(
             "Also let the regional administrative courts (krajské soudy) into the NSS lane — first-instance administrative practice. Default: NSS decisions only.",
           ),
-        read_top: z
-          .number()
-          .int()
-          .min(0)
-          .max(3)
-          .default(0)
-          .describe(
+        read_top: lenientInt(0, 3, 0).describe(
             "Fetch the texts of the N leading hits in parallel and return excerpt previews around the query terms — saves a whole round trip.",
           ),
       }),

@@ -437,6 +437,10 @@ async function caselawByProvision(args: Args, act: string | undefined, provision
     MIRROR_NOTE,
     `Decisions citing ${provisionName(request, settled.find((lane) => lane.ok)?.result)}${from || to ? ` (decided ${from ?? "…"} – ${to ?? "…"})` : ""}:`,
     ...statusLines,
+    // The CJEU is not in the index of cited provisions: say so rather than leave its lane out unmentioned.
+    ...((requested ? requested.includes("sdeu") : args.include_eu === true)
+      ? ["– SDEU: not searched by provision — the CJEU's own case law: sdeu_search with the words of the provision."]
+      : []),
     "",
     ...(items.length ? items.map((hit, i) => provisionLine(hit, i, true)) : ["No mirrored decision of these courts cites it — check the act and the provision, or search the provision as a phrase in the query."]),
     ...(items.length ? ["", HIT_LEGEND] : []),
