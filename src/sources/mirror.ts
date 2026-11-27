@@ -37,6 +37,14 @@ const READ_TIMEOUT_MS = 8_000;
 export const SEARCH_DEADLINE_MS = 6_000;
 /** After a failure the mirror is skipped for this long (every account goes straight live). */
 export const MIRROR_PAUSE_MS = 60_000;
+/**
+ * Searches in a row the mirror gave up on (504) before it is paused like a
+ * mirror that is down. One heavy query, or the three variants of one call,
+ * stay below it; a mirror that runs out of time on everything (the database
+ * busy with something else) would otherwise cost every search its
+ * SEARCH_DEADLINE_MS before the live court is asked.
+ */
+export const SLOW_SEARCH_STREAK = 5;
 
 /**
  * The breaker, per instance: a mirror that failed (home connection down,
@@ -54,6 +62,8 @@ let pausedUntil = 0;
 let pauseReason = "";
 /** When the mirror last answered anything (a result, a 404, a refusal). */
 let lastAnswerAt = 0;
+/** Searches refused for running out of time (504) since the last one that answered. */
+let slowSearches = 0;
 
 /**
  * The mirror answered and refused this one call: HTTP 400 (a parameter it
@@ -81,6 +91,7 @@ export function resetMirrorBreaker(): void {
   pausedUntil = 0;
   pauseReason = "";
   lastAnswerAt = 0;
+  slowSearches = 0;
 }
 
 export interface MirrorConfig {
@@ -113,7 +124,7 @@ function headers(config: MirrorConfig): Record<string, string> {
   };
 }
 
-async function getJson<T>(path: string, timeoutMs: number, opts: { probe?: boolean } = {}): Promise<T | null> {
+async function getJson<T>(path: string, timeoutMs: number, opts: { probe?: boolean; search?: boolean } = {}): Promise<T | null> {
   if (!opts.probe && Date.now() < pausedUntil) {
     throw new SourceError(
       MIRROR_SOURCE_LABEL,
@@ -126,12 +137,19 @@ async function getJson<T>(path: string, timeoutMs: number, opts: { probe?: boole
   try {
     const result = await fetchJson<T>(path, timeoutMs);
     lastAnswerAt = Date.now();
+    if (opts.search) slowSearches = 0;
     // A probe that got through ends a pause early.
     if (opts.probe) pausedUntil = 0;
     return result;
   } catch (error) {
     if (error instanceof MirrorRefusal) {
       lastAnswerAt = Date.now();
+      // Up, but not answering searches in time: after a few in a row the live courts are quicker.
+      if (opts.search && error.status === 504 && ++slowSearches >= SLOW_SEARCH_STREAK) {
+        slowSearches = 0;
+        pausedUntil = Date.now() + MIRROR_PAUSE_MS;
+        pauseReason = `${SLOW_SEARCH_STREAK} searches in a row ran out of time`;
+      }
       throw error;
     }
     // The mirror answered another request while this one was open: it is up, this request failed alone.
@@ -289,7 +307,7 @@ function searchQuery(params: MirrorSearchParams): URLSearchParams {
 export async function searchMirror(params: MirrorSearchParams): Promise<MirrorSearchResult> {
   const qs = searchQuery(params);
   qs.set("timeout_ms", String(SEARCH_DEADLINE_MS));
-  const result = await getJson<MirrorSearchResult>(`/v1/search?${qs}`, SEARCH_TIMEOUT_MS);
+  const result = await getJson<MirrorSearchResult>(`/v1/search?${qs}`, SEARCH_TIMEOUT_MS, { search: true });
   return result ?? { hits: [], channel: null, terms: [] };
 }
 
@@ -443,7 +461,7 @@ export async function mirrorProvisions(
   if (params.sort) qs.set("sort", params.sort);
   qs.set("limit", String(Math.min(50, Math.max(1, params.limit ?? 20))));
   if (params.offset) qs.set("offset", String(Math.max(0, params.offset)));
-  const result = await getJson<MirrorProvisionResult>(`/v1/provisions?${qs}`, SEARCH_TIMEOUT_MS);
+  const result = await getJson<MirrorProvisionResult>(`/v1/provisions?${qs}`, SEARCH_TIMEOUT_MS, { search: true });
   return result ?? { act: "act" in params ? params.act : "", provision: "provision" in params ? params.provision : "", total: 0, hits: [] };
 }
 

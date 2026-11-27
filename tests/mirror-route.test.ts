@@ -672,6 +672,23 @@ describe("breaker", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  it("a mirror that keeps running out of time on searches is paused; a search that answers in between starts the count again", async () => {
+    const slow = () => json({ error: "query timed out" }, 504);
+    const fine = () => json({ hits: [], channel: null, terms: [] });
+    const refused = () => searchMirror({ q: "x" }).catch((error: unknown) => error);
+    // Four in a row, then one that answers: the mirror is still asked.
+    for (let i = 0; i < 4; i++) fetchMock.mockResolvedValueOnce(slow());
+    for (let i = 0; i < 4; i++) expect(await refused()).toBeInstanceOf(MirrorRefusal);
+    fetchMock.mockResolvedValueOnce(fine());
+    await searchMirror({ q: "x" });
+    // Five in a row: paused, the sixth is not sent.
+    for (let i = 0; i < 5; i++) fetchMock.mockResolvedValueOnce(slow());
+    for (let i = 0; i < 5; i++) expect(await refused()).toBeInstanceOf(MirrorRefusal);
+    expect(fetchMock).toHaveBeenCalledTimes(10);
+    await expect(searchMirror({ q: "x" })).rejects.toThrow("paused after a failure (5 searches in a row ran out of time)");
+    expect(fetchMock).toHaveBeenCalledTimes(10);
+  });
+
   it("a search tells the mirror how long it may run, less than this client waits", async () => {
     fetchMock.mockImplementation(async () => json({ hits: [], channel: null, terms: [] }));
     await searchMirror({ q: "újma" });
