@@ -392,7 +392,7 @@ describe("GET /api/cron/files", () => {
         "SELECT purge_after, pro_revoked_at, purged_at FROM libraries WHERE id = $1",
         [id],
       )).rows[0];
-    expect((await lib("user_due")).purged_at).toBeInstanceOf(Date);
+    expect(await lib("user_due")).toBeUndefined(); // purged: the row is gone too
     expect(await statusOf(dueDoc[0].id)).toBeUndefined();
     expect((await lib("user_gone")).purge_after).toBeInstanceOf(Date);
     expect((await lib("org_lost")).pro_revoked_at).toBeInstanceOf(Date);

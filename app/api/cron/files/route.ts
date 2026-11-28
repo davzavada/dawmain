@@ -67,8 +67,8 @@ const DAY_MS = 86_400_000;
  *      the snapshot (system_state "guards") — the automatic read-only mode
  *      itself is applied live by effectiveMode();
  *   2. purge libraries whose purge date passed (Clerk deletion + 6 days,
- *      or Pro revoked for 6 days) — with their counters and their audit
- *      rows but the purge record;
+ *      or Pro revoked for 6 days) — with their counters, their audit rows
+ *      and the library row itself: nothing is left (/soukromi);
  *   3. owners and Pro: ≤ 50 Clerk lookups, rotating through the libraries —
  *      a deleted owner (missed webhook) schedules a purge and, for a user,
  *      drops their terms acceptance and read counters as the webhook would;
@@ -85,7 +85,7 @@ const DAY_MS = 86_400_000;
  *      documents (a takedown or a crash never leaves them drifting);
  *   8. retention (/soukromi): usage counters after 12 months (per-document
  *      read counters after 2 days), compute-activity minutes after 62 days,
- *      audit rows of purged libraries.
+ *      what is left of purged libraries (audit rows, the library row).
  *
  * Returns a JSON summary of counts (no ids, no content).
  */
@@ -192,7 +192,6 @@ async function runMaintenance(started: number): Promise<Summary> {
           if (!(await lockDuePurge(db, lib.id))) return null;
           const n = await purgeLibraryContent(db, lib.id);
           await forgetLibraryUsage(db, lib.id);
-          await audit(db, { libraryId: lib.id, actor: "cron", action: "library.purged", detail: { documents: n } });
           summary.auditForgotten += await forgetPurgedAudit(db);
           return n;
         },

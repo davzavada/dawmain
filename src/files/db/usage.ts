@@ -311,9 +311,9 @@ export async function forgetLibraryUsage(db: Queryable, libraryId: string): Prom
 }
 
 /**
- * The audit rows of purged libraries ("dokud knihovna trvá"), except the
- * purge record itself — files_forget_purged_audit, as the app role cannot
- * delete from the log. Returns how many.
+ * What is left of purged libraries: their audit rows and the library rows
+ * themselves, so nothing remains (migration 0009) — files_forget_purged_audit,
+ * as the app role cannot delete from the log. Returns how many audit rows.
  */
 export async function forgetPurgedAudit(db: Queryable): Promise<number> {
   const { rows } = await db.query("SELECT files_forget_purged_audit() AS n");

@@ -152,6 +152,8 @@ describe("migration 0003_ops", () => {
   it("applies again without error (idempotent)", async () => {
     const sql = readFileSync(path.join(__dirname, "..", "src", "files", "db", "migrations", "0003_ops.sql"), "utf8");
     await t.db.exec(sql);
+    // 0009 redefines files_forget_purged_audit: put the later definition back, as the runner never re-applies 0003.
+    await t.db.exec(readFileSync(path.join(__dirname, "..", "src", "files", "db", "migrations", "0009_purge_leaves_nothing.sql"), "utf8"));
     const cols = await t.owner.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'usage_daily' AND column_name = 'reindexes'");
     expect(cols.rows).toHaveLength(1);
   });
@@ -426,7 +428,7 @@ describe("retention (/soukromi)", () => {
     ]);
   });
 
-  it("a purged library keeps no audit rows but the purge record; its own counters go too", async () => {
+  it("a purged library leaves nothing: no audit rows, no purge record, no library row, no counters", async () => {
     await t.owner.query("INSERT INTO libraries (id, purge_after) VALUES ('org_gone', now() - interval '1 day'), ('org_live', NULL)");
     await t.runner([], async (db) => {
       await audit(db, { libraryId: "org_gone", actor: "user_x", action: "document.delete", detail: { pages: 3 } });
@@ -436,7 +438,8 @@ describe("retention (/soukromi)", () => {
     const summary = await cron();
     expect(summary).toMatchObject({ purged: 1, auditForgotten: 1 });
     const rows = await t.owner.query<{ library_id: string; action: string }>("SELECT library_id, action FROM audit_log ORDER BY id");
-    expect(rows.rows.filter((r) => r.library_id === "org_gone")).toEqual([{ library_id: "org_gone", action: "library.purged" }]);
+    expect(rows.rows.filter((r) => r.library_id === "org_gone")).toEqual([]);
+    expect((await t.owner.query("SELECT id FROM libraries ORDER BY id")).rows).toEqual([{ id: "org_live" }]);
     expect(rows.rows).toContainEqual({ library_id: "org_live", action: "document.delete" });
     expect((await t.owner.query("SELECT 1 FROM usage_daily WHERE scope = 'org_gone'")).rows).toHaveLength(0);
   });

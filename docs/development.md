@@ -480,6 +480,7 @@ co čeká. Už aplikovaný soubor se nemění — oprava = nový soubor.
 | `0006_always_enabled.sql` | přepínač zapnuto/vypnuto u dokumentu zmizel z webu i API: zapne zpět všechny dříve vypnuté dokumenty (sloupec `enabled` zůstává) |
 | `0007_drop_ai_usage.sql` | odstraní sloupce `usage_daily.ai_calls` a `ai_microusd`, zbylé po zrušeném AI návrhu metadat |
 | `0008_originals_folders.sql` | původní soubory (`doc_originals` po částech, `documents.original_status`), složky (`folders`, `documents.folder_id`), RLS a granty pro obě nové tabulky, `files_library_bytes()` pro Správu |
+| `0009_purge_leaves_nothing.sql` | `files_forget_purged_audit()` maže u vymazané knihovny všechny auditní záznamy (i `library.purged`) a nakonec i řádek knihovny — po výmazu nezůstane nic |
 
 **Tahle verze potřebuje `0003` až `0006`** — pusť `--dry-run`, pak
 migraci, a teprve potom nasazuj. `0003`–`0005` přidávají jen sloupce `IF NOT
@@ -658,8 +659,8 @@ strop `FILES_GLOBAL_MAX_PAGES` a denní stropy.
   rezervou CPU); úklid textu neúspěšných nahrání po 7 dnech; noční přepočet
   `page_count`/`doc_count`/`pages_reserved` všech knihoven z jejich dokumentů;
   retence — `usage_daily` 12 měsíců, počítadla čtení dokumentů 2 dny,
-  `db_activity` 62 dní, auditní záznamy vymazaných knihoven kromě
-  `library.purged`.
+  `db_activity` 62 dní, auditní záznamy i řádky vymazaných knihoven
+  (po výmazu nezůstane nic, ani záznam o něm — migrace `0009`).
 
 ### Kapacita
 
@@ -757,13 +758,15 @@ ty, které jdou přečíst z kódu.
 - výmaz knihovny 6 dní po smazání účtu nebo po odebrání Pro (+ nejvýš den do
   cronu → text říká „do týdne“; platí jen, dokud `dawmain-cron.timer` běží
   denně), žádná pravidelná záloha, jen snímek před údržbou; po výmazu
-  zůstane řádek knihovny bez jména a auditní záznam `library.purged`;
+  nezůstane nic — ani řádek knihovny, ani záznam o výmazu (ID knihovny je
+  Clerk ID, tedy osobní údaj);
 - retence v cronu: text neúspěšného nahrání 7 dní, počítadla čtení a stažení
   2 dny, ostatní počítadla 12 měsíců, audit do výmazu knihovny;
 - export textu („Exportovat text“) — i po odebrání Pro;
 - kontaktní místo DSA (čl. 11 a 12): `CONTACT`, česky a anglicky;
-- provozní záznamy serveru bez pevné lhůty („jen po dobu potřebnou k řešení
-  chyb“) — pevná lhůta by potřebovala nastavit retenci journald;
+- provozní záznamy serveru 30 dní (journald `MaxRetentionSec=30day` v CT
+  `pg`, `mirror` i `web`, `/etc/systemd/journald.conf.d/retence.conf`); obsahují
+  Clerk ID účtů, IP adresy ne (ty vidí jen Cloudflare a Clerk);
 - kopie judikatury českých soudů (zrcadlo): veřejná rozhodnutí, anonymizovaná
   soudy, kopírovaná tak, jak jsou zveřejněná;
 - cookies Clerku;
